@@ -3865,9 +3865,9 @@ class W40KEngine(gym.Env):
         # etape ; (4) reste une selection 12.04 (ou un New Foe 12.08) du bot -> politique.
         if current_phase == "fight":
             from engine.phase_handlers.fight_handlers import (
-                _fight_v11_consolidation_new_foes_remaining,
                 fight_v11_client_pool,
                 fight_v11_grouped_next,
+                fight_v11_new_foes_pool,
                 fight_v11_pending_selection_squad,
             )
             fight_subphase = self.game_state.get("fight_subphase")
@@ -3886,7 +3886,7 @@ class W40KEngine(gym.Env):
                 fight_v11_pending_selection_squad(self.game_state) is None
                 and require_key(self.game_state, "fight_subphase") == "consolidate"
                 and fight_v11_grouped_next(self.game_state, "consolidate") is None
-                and not _fight_v11_consolidation_new_foes_remaining(self.game_state)
+                and not fight_v11_new_foes_pool(self.game_state)
             ):
                 return self._process_semantic_action({"action": "advance_phase", "from": "fight"})
 
@@ -7999,7 +7999,8 @@ class W40KEngine(gym.Env):
         return details
 
     def _gym_commit_fight_move(
-        self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int, int]], kind: str
+        self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int, int]], kind: str,
+        *, consolidation_mode: Optional[str] = None,
     ) -> None:
         """Commit gym d'un move fight groupé (pile-in/consolidation) + log par-figurine.
 
@@ -8008,6 +8009,10 @@ class W40KEngine(gym.Env):
         être émis ICI, via la helper partagée ``_append_fight_move_log`` — sinon le training ne
         produit AUCUNE ligne pile-in/consolidation. Miroir strict du chemin manuel : capture des
         positions par-figurine + ancre AVANT le commit, arrivée relue APRÈS.
+
+        ``consolidation_mode`` (obligatoire pour ``kind == "consolidation"``) est le mode 12.08
+        constaté par l'appelant AVANT le move : relu après, `fight_v11_consolidation_mode` rendrait
+        « ongoing » pour toute consolidation engaging réussie (elle finit engagée par construction).
         """
         from engine.phase_handlers.shared_utils import commit_move
         from engine.phase_handlers.fight_handlers import _append_fight_move_log
@@ -8046,19 +8051,20 @@ class W40KEngine(gym.Env):
             }
             for m in alive
         ]
-        # L17 — cibles pile-in (12.03) / mode consolidation (12.08). Calculés APRÈS le commit
-        # (les positions finales sont stables) mais l'unité est toujours présente en game_state.
+        # L17 — cibles pile-in (12.03), calculées APRÈS le commit (les positions finales sont
+        # stables) mais l'unité est toujours présente en game_state.
         _l17_pile_in_tids: Optional[List[str]] = None
-        _l17_conso_mode: Optional[str] = None
         if kind in ("pile_in", "overrun_pile_in"):
             from engine.phase_handlers.fight_handlers import pile_in_select_targets_12_03
             try:
                 _l17_pile_in_tids = pile_in_select_targets_12_03(gs, unit)
             except (ValueError, KeyError):
                 pass  # unité entièrement détruite ou cas dégénéré : on loggue sans targets
-        elif kind == "consolidation":
-            from engine.phase_handlers.fight_handlers import fight_v11_consolidation_mode
-            _l17_conso_mode = fight_v11_consolidation_mode(gs, unit)
+        elif kind == "consolidation" and consolidation_mode is None:
+            raise ValueError(
+                f"_gym_commit_fight_move: consolidation de {uid!r} sans `consolidation_mode` — "
+                f"le mode 12.08 se constate AVANT le move, l'appelant doit le fournir"
+            )
         _append_fight_move_log(
             gs, unit, kind=kind,
             from_col=from_col, from_row=from_row,
@@ -8066,7 +8072,7 @@ class W40KEngine(gym.Env):
             move_details=move_details,
             models_segment=captured_seg,
             pile_in_target_ids=_l17_pile_in_tids,
-            consolidation_mode=_l17_conso_mode,
+            consolidation_mode=consolidation_mode,
         )
 
     def _fight_v11_gym_settle(self) -> None:
@@ -8086,6 +8092,15 @@ class W40KEngine(gym.Env):
         les deux etapes groupees de bout en bout et rend la main a l agent exactement quand la
         machine attend une selection FIGHT.
 
+        Exception dans l etape CONSOLIDATE : une consolidation ENGAGING qui finit engagee avec des
+        ennemis non encore « selected to fight » (12.08 AFTER, New Foes to Face) impose a
+        l adversaire de les selectionner un par un, et chacun combat aussitot (in-place, §8.C).
+        C est une selection au sens de 12.04 : le driver gele la liste
+        (`fight_v11_consolidation_freeze_new_foes`), rend la main au siege adverse — le masque
+        derive son joueur du pool `fight_v11_current_pool`, qui expose ces New Foes — et reprend
+        la consolidation (I4 : le joueur actif finit ses consos avant l adversaire, via
+        `fight_v11_grouped_next`) quand la liste est epuisee.
+
         Consequence — et c est l objet du fix : le snapshot `engaged_at_fight_step_start` (12.04
         « was engaged at the start of this step », et sa negation pour l overrun 12.06) est pris
         par `fight_v11_enter_fight_step` APRES que TOUS les pile-in des DEUX joueurs sont
@@ -8099,13 +8114,13 @@ class W40KEngine(gym.Env):
         Chemin `_process_squad_action` (gym + bot PvE) : le siege humain (PvP hot-seat, siege
         humain du PvE) conduit la meme machine pas a pas via `fight_handlers`.
 
-        New Foes to Face (12.08 AFTER MOVING, engaging) — HORS GYM seulement : apres chaque
-        consolidation engaging d une unite du bot, les ennemis engages non encore selectionnes
-        sont armes pour l adversaire (`_fight_v11_consolidation_resolve_new_foes`), qui les fait
-        combattre un par un ; tant qu il en reste, le driver rend la main (au siege humain via la
-        machine manuelle, au bot via la politique : `fight_v11_current_pool` expose alors ces New
-        Foes et `_process_squad_action` accepte `squad_fight` en sous-phase consolidate). En gym
-        les New Foes ne sont pas armes — contrat d entrainement inchange (cf. tour_de_jeu.md).
+        New Foes to Face (12.08 AFTER MOVING, engaging), tous sieges : apres chaque consolidation
+        engaging d une unite programmatique, les ennemis engages non encore selectionnes sont
+        geles pour l adversaire (`fight_v11_consolidation_freeze_new_foes`, cf. l exception
+        ci-dessous), qui les fait combattre un par un ; tant qu il en reste, le driver rend la
+        main — au siege humain via la machine manuelle, au siege programmatique via la politique
+        (`fight_v11_current_pool` expose alors ces New Foes et `_process_squad_action` accepte
+        `squad_fight` en sous-phase consolidate).
 
         Ne termine PAS la phase : le gym transitionne par l action systeme `advance_phase` quand
         le masque se vide (`fight_phase_end`), jamais par une cascade depuis une action d unite.
@@ -8116,12 +8131,13 @@ class W40KEngine(gym.Env):
         """
         from engine.phase_handlers.fight_handlers import (
             _fight_v11_consolidation_clear_new_foes,
-            _fight_v11_consolidation_new_foes_remaining,
-            _fight_v11_consolidation_resolve_new_foes,
             fight_v11_advance_selection,
+            fight_v11_consolidation_freeze_new_foes,
+            fight_v11_consolidation_mode,
             fight_v11_enter_consolidate,
             fight_v11_enter_fight_step,
             fight_v11_grouped_next,
+            fight_v11_new_foes_pool,
         )
         from engine.phase_handlers.shared_utils import (
             fight_pile_in_plan,
@@ -8166,26 +8182,27 @@ class W40KEngine(gym.Env):
                 return  # une selection est possible : la main revient a l agent
 
             if sub == "consolidate":
-                if "consolidation_new_foes_pending" in gs:
-                    if _fight_v11_consolidation_new_foes_remaining(gs):
-                        return  # New Foes a faire combattre : machine manuelle ou politique
-                    _fight_v11_consolidation_clear_new_foes(gs)
+                if fight_v11_new_foes_pool(gs):
+                    return  # New Foes 12.08 : la main revient au siege adverse (humain : machine manuelle ; bot : politique)
+                _fight_v11_consolidation_clear_new_foes(gs)
                 nxt = fight_v11_grouped_next(gs, "consolidate")
                 if nxt is None:
                     return  # 12.07 drainee : pool vide -> masque vide -> `advance_phase`
                 if not is_programmatic_owner(gs, nxt[0]):
                     return  # groupe d un siege humain : consolidation par-figurine, clic par clic
                 for uid in nxt[1]:
+                    unit = require_unit_by_id(gs, str(uid))
+                    # Mode 12.08 constate AVANT le move : apres, une engaging reussie est engagee.
+                    mode = fight_v11_consolidation_mode(gs, unit)
                     plan = squad_consolidate_plan(gs, str(uid))
                     if plan is not None:
-                        self._gym_commit_fight_move(gs, str(uid), plan, "consolidation")
-                    require_key(gs, "consolidation_done").add(str(uid))
-                    if not gym and plan is not None:
-                        armed = _fight_v11_consolidation_resolve_new_foes(
-                            gs, require_unit_by_id(gs, str(uid)), self.config
+                        self._gym_commit_fight_move(
+                            gs, str(uid), plan, "consolidation", consolidation_mode=mode
                         )
-                        if armed is not None:
-                            return  # l adversaire fait combattre les New Foes (12.08)
+                    require_key(gs, "consolidation_done").add(str(uid))
+                    if plan is not None and mode == "engaging":
+                        if fight_v11_consolidation_freeze_new_foes(gs, unit):
+                            break  # les New Foes combattent AVANT la conso suivante (§8.C)
                 continue
 
             raise ValueError(f"fight_subphase inattendu dans le chemin gym: {sub!r}")
@@ -8988,35 +9005,28 @@ class W40KEngine(gym.Env):
             # premier combat, et 12.04 date son snapshot d eligibilite du debut de l etape FIGHT.
             # L ancien code resolvait pile-in + fight + consolidation par escouade, en une passe,
             # sans jamais avancer la machine V11 : l ordre etait faux ET aucun etat n etait pose.
-            from engine.phase_handlers.fight_handlers import (
-                _fight_v11_consolidation_new_foes_remaining,
-                _fight_v11_register_selection,
-                fight_v11_current_pool,
-            )
+            # Une selection existe en sous-phase FIGHT (machine 12.04) et, en sous-phase
+            # CONSOLIDATE, pour les New Foes to Face (12.08 AFTER) — nulle part ailleurs.
             sub = require_key(self.game_state, "fight_subphase")
-            # New Foes to Face (12.08, hors gym) : l escouade du bot tiree au combat par une
-            # consolidation engaging de l humain est « selected to fight (12.04) » depuis la
-            # sous-phase consolidate — c est la seule autre sous-phase ou une selection existe.
-            if sub == "consolidate" and squad_id not in _fight_v11_consolidation_new_foes_remaining(
-                self.game_state
-            ):
-                raise RuntimeError(
-                    f"squad_fight recu en sous-phase consolidate pour {squad_id}, qui n est pas "
-                    f"un New Foe en attente"
-                )
             if sub not in ("fight", "consolidate"):
                 raise RuntimeError(
                     f"squad_fight recu en sous-phase {sub!r} : la machine V11 n a pas ete "
                     f"deroulee jusqu a l etape FIGHT — `_fight_v11_gym_settle` manque sur le "
                     f"chemin d entree en phase fight"
                 )
-            # Parite masque/commit : le masque gym derive du MEME pool 12.04 (action_decoder ->
-            # fight_v11_current_pool). Un squad hors pool est une rupture, pas un cas a absorber.
-            pool = fight_v11_current_pool(self.game_state)
+
+            from engine.phase_handlers.fight_handlers import (
+                _fight_v11_register_selection,
+                fight_v11_fight_selection_pool,
+            )
+            # Parite masque/commit : le masque gym derive du MEME pool (build_squad_action_mask ->
+            # fight_v11_fight_selection_pool). Un squad hors pool est une rupture, pas un cas a
+            # absorber — y compris en consolidate sans New Foes (pool vide).
+            pool = fight_v11_fight_selection_pool(self.game_state)
             if squad_id not in pool:
                 raise ValueError(
-                    f"squad_fight: squad {squad_id} hors du pool de selection 12.04 {pool} "
-                    f"(rupture masque/commit)"
+                    f"squad_fight: squad {squad_id} hors du pool de selection "
+                    f"(12.04 / New Foes 12.08) {pool} en sous-phase {sub!r} (rupture masque/commit)"
                 )
             unit = require_unit_by_id(self.game_state, squad_id)
 

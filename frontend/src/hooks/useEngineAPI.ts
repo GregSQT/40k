@@ -793,6 +793,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     engagedModels: string[];
     /** Cibles pile-in (focus) → cercle violet + hit-test. */
     pileInTargets: string[];
+    /** Pile-in ADDITIONNEL de l'overrun 12.06 (étape FIGHT) : le commit / l'abandon rendent la
+     * main au combat de l'unité (toujours active), pas au pool de pile-in 12.02. */
+    overrun: boolean;
   } | null>(null);
   const pileInMovePlanRef = useRef<typeof pileInMovePlan>(null);
   pileInMovePlanRef.current = pileInMovePlan;
@@ -905,6 +908,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ref miroir de squadFightPlan pour accès synchrone dans les callbacks. */
   const squadFightPlanRef = useRef<typeof squadFightPlan>(null);
   squadFightPlanRef.current = squadFightPlan;
+  /** Overrun 12.06 : l'unité fight active peut ENCORE faire son pile-in additionnel
+   * (``overrun_eligible`` de l'état d'attente FIGHT du moteur) → bouton « Overrun ». */
+  const [fightOverrunEligible, setFightOverrunEligible] = useState(false);
   /** Nombre de figs ASSIGNABLES (engagées) de l'unité fight active, remonté par BoardPvp
    * (qui a la géométrie + boardConfig). Sert de dénominateur au décompte de la barre. */
   const [fightAssignableCount, setFightAssignableCount] = useState(0);
@@ -1700,6 +1706,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return { unitIds: [], blinkTimer: null, attackerId: null };
     });
     setAttackPreview(null);
+    setFightOverrunEligible(false);
     moveDestPoolRef.current = new Set();
     footprintZoneRef.current = new Set();
     footprintMaskLoopsRef.current = null;
@@ -3140,6 +3147,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const unitId = parseInt(data.result.unitId || data.game_state.active_fight_unit, 10);
             setSelectedUnitId(unitId);
             setMode("attackPreview");
+            setFightOverrunEligible(data.result.overrun_eligible === true);
 
             // L'EZ rouge du combat dépend du MODE "attackPreview", pas de l'OBJET attackPreview
             // (concept TIR : tireur à sa position de preview). En fight l'unité n'a pas bougé et a
@@ -3194,6 +3202,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(parseInt(String(data.game_state.active_fight_unit), 10));
             setMode("attackPreview");
             setAttackPreview(null);
+            setFightOverrunEligible(data.result.overrun_eligible === true);
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
             }
@@ -3837,6 +3846,31 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const startDeploySquadRef = useRef<((unitId: number | string) => void) | null>(null);
 
   // Event handlers aligned with backend
+  /** Pose le plan fight local (menu cible-d'abord + barre Cancel/Fight) de l'unité fight active.
+   * Figs lues depuis le cache. Appelé à l'activation en étape FIGHT et au retour du pile-in
+   * additionnel de l'overrun (le plan est purgé pendant ce move, sinon le handler capture fight
+   * intercepterait les clics de pose). */
+  const openSquadFightPlan = useCallback(
+    (unitId: number) => {
+      const gsModels = (latestGameStateRef.current ?? gameState) as {
+        units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
+      };
+      const fightModels = Object.keys(
+        gsModels.units_cache?.[String(unitId)]?.occupied_hexes_by_model ?? {}
+      );
+      setSquadFightPlan({
+        unitId,
+        models: fightModels,
+        targets: {},
+        declarations: [],
+        activeModelId: null,
+        activeWeaponIndex: null,
+        canValidate: false,
+      });
+    },
+    [gameState]
+  );
+
   const handleSelectUnit = useCallback(
     async (unitId: number | string | null) => {
       // [SEL-DEBUG] Entrée du hook de sélection : joueur de l'unité vs current_player frontend.
@@ -3983,24 +4017,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
               // Flux manuel par arme/figurine : initialise le plan local UNIQUEMENT en étape FIGHT.
               // En pile_in / consolidate (move par-figurine), ne PAS poser squadFightPlan — sinon le
-              // handler capture fight intercepterait les clics de pose. Figs lues depuis le cache.
-              const gsModels = (latestGameStateRef.current ?? gameState) as {
-                fight_subphase?: string | null;
-                units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
-              };
-              if (gsModels.fight_subphase === "fight") {
-                const fightModels = Object.keys(
-                  gsModels.units_cache?.[String(numericUnitId)]?.occupied_hexes_by_model ?? {}
-                );
-                setSquadFightPlan({
-                  unitId: numericUnitId,
-                  models: fightModels,
-                  targets: {},
-                  declarations: [],
-                  activeModelId: null,
-                  activeWeaponIndex: null,
-                  canValidate: false,
-                });
+              // handler capture fight intercepterait les clics de pose.
+              if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
+                openSquadFightPlan(numericUnitId);
               }
             } finally {
               activationInProgressRef.current = false;
@@ -4117,6 +4136,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       handleFightPhaseClick,
       currentLevelRef,
       noteActionOutcome,
+      openSquadFightPlan,
     ]
   );
 
@@ -7360,6 +7380,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const keptEngagements = result.kept_engagements === true;
     const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
     const pileInTargets = ((result.pile_in_targets ?? []) as unknown[]).map((m) => String(m));
+    const overrun = result.overrun_pile_in === true;
     setPileInMovePlan((prev) => {
       const base = prev ?? {
         unitId: parseInt(String(result.unitId), 10),
@@ -7378,6 +7399,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         keptEngagements: false,
         engagedModels: [] as string[],
         pileInTargets: [] as string[],
+        overrun,
       };
       // Fig active = celle échoée par le backend si encore éligible, sinon l'ancienne si toujours
       // éligible, sinon aucune. Le pool ne vaut que pour elle (calcul ciblé backend).
@@ -7408,6 +7430,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         keptEngagements,
         engagedModels,
         pileInTargets,
+        overrun,
       };
     });
   }, []);
@@ -7539,16 +7562,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPileInFocusMode(null);
       setPileInFocusTargetId(null);
       setPileInMovePlan(null);
+      if (plan.overrun) {
+        // Overrun 12.06 : « one additional pile-in move, THEN fights » — la réponse est l'état
+        // d'attente FIGHT de la même unité (mode attackPreview posé à la réception, cibles
+        // recalculées à sa nouvelle position) ; on rouvre son plan fight au lieu de désélectionner.
+        openSquadFightPlan(plan.unitId);
+        return;
+      }
       setSelectedUnitId(null);
       setMode("select");
     } catch (e) {
       console.error("[PILE-IN] commit FAILED", e);
       setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction, currentLevelRef, noteActionOutcome]);
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan]);
 
-  /** Bouton Annuler : renonce à piler l'unité active (skip, la consomme), nettoie le plan local. */
+  /** Bouton Annuler : renonce à piler l'unité active (skip), nettoie le plan local. Pile-in
+   * groupé : skip la consomme (12.02). Overrun : skip renonce seulement au move additionnel,
+   * l'unité reste active et combat depuis sa position → on rouvre son plan fight. */
   const handleCancelPileInModelMove = useCallback(async () => {
+    const overrunUnitId = pileInMovePlanRef.current?.overrun
+      ? pileInMovePlanRef.current.unitId
+      : null;
     pileInModelPoolRef.current = new Set();
     pileInModelMaskLoopsRef.current = null;
     setPileInFocusMode(null);
@@ -7559,9 +7594,36 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     } catch (e) {
       console.error("Cancel pile-in model move (skip) failed:", e);
     }
+    if (overrunUnitId != null) {
+      openSquadFightPlan(overrunUnitId);
+      return;
+    }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction, noteActionOutcome]);
+  }, [executeAction, noteActionOutcome, openSquadFightPlan]);
+
+  /** Bouton Overrun (12.06) : ouvre le pile-in ADDITIONNEL par-figurine de l'unité fight active.
+   * Le plan fight local est purgé le temps du move (le handler capture fight intercepterait les
+   * clics de pose) ; la réponse ``pile_in_model_move`` + ``overrun_pile_in`` pose le mode. */
+  const handleOverrunPileIn = useCallback(async () => {
+    const plan = squadFightPlanRef.current;
+    if (!plan) return;
+    setSquadFightPlan(null);
+    try {
+      const data = await executeAction({
+        action: "overrun_pile_in",
+        unitId: String(plan.unitId),
+        level: currentLevelRef?.current ?? 0,
+      });
+      if (noteActionOutcome(data, "Overrun").kind !== "ok") {
+        openSquadFightPlan(plan.unitId);
+      }
+    } catch (e) {
+      console.error("[OVERRUN] overrun_pile_in FAILED", e);
+      setError(`Overrun failed: ${formatApiConnectionError(e)}`);
+      openSquadFightPlan(plan.unitId);
+    }
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). active_fight_unit posée
@@ -8392,6 +8454,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelSquadShoot: async () => {},
       onSquadShootTypeSelect: async () => {},
       squadFightPlan: null,
+      fightOverrunEligible: false,
+      onOverrunPileIn: async () => {},
       onSelectModelForFight: () => {},
       onAssignFightTarget: async () => {},
       onAssignFightWeapon: async () => {},
@@ -8849,6 +8913,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelSquadShoot: handleCancelSquadShoot,
     onSquadShootTypeSelect: handleSquadShootTypeSelect,
     squadFightPlan,
+    fightOverrunEligible,
+    onOverrunPileIn: handleOverrunPileIn,
     onSelectModelForFight: handleSelectModelForFight,
     onAssignFightTarget: handleAssignFightTarget,
     onAssignFightWeapon: handleAssignFightWeapon,

@@ -25,7 +25,7 @@ avalées — cf. mémoire « execute_ai_turn masque toute exception ») :
   - le bot termine la phase quand il vide la dernière étape (12.09), comme la machine manuelle
     le fait pour l'humain ;
   - New Foes to Face (12.08) : sélecteur = adversaire du PROPRIÉTAIRE du consolidant ; les New
-    Foes de l'humain sont armés par la consolidation engaging du bot, ceux du bot sont joués par
+    Foes de l'humain sont gelés par la consolidation engaging du bot, ceux du bot sont joués par
     la politique (`squad_fight` accepté en sous-phase consolidate).
 """
 from __future__ import annotations
@@ -357,5 +357,5 @@ def test_squad_fight_en_consolidate_hors_new_foe_est_une_rupture():
     gs = _fight_step(eng)
     gs["units_selected_to_fight"] = {"1"}
     fight_v11_enter_consolidate(gs)
-    with pytest.raises(RuntimeError, match="n est pas un New Foe"):
+    with pytest.raises(ValueError, match="hors du pool de selection"):
         eng._process_squad_action({"action": "squad_fight", "squad_id": "2", "target_slot": 0})

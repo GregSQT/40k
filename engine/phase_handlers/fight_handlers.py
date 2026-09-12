@@ -1390,6 +1390,8 @@ def fight_ensure_v11_state(game_state: Dict[str, Any]) -> None:
         game_state["pile_in_done"] = set()
     if "consolidation_done" not in game_state:
         game_state["consolidation_done"] = set()
+    if OVERRUN_PILE_IN_DONE_KEY not in game_state:
+        game_state[OVERRUN_PILE_IN_DONE_KEY] = set()
 
 
 def fight_compute_engaged_snapshot(game_state: Dict[str, Any]) -> Dict[str, bool]:
@@ -1571,6 +1573,22 @@ def fight_v11_is_overrun_eligible(game_state: Dict[str, Any], unit: Dict[str, An
     snapshot = require_key(game_state, "engaged_at_fight_step_start")
     was_engaged_at_start = bool(snapshot.get(str(require_key(unit, "id")), False))
     return (not was_engaged_at_start) and engaged_now
+
+
+# Overrun 12.06 en flux manuel : unité dont le pile-in ADDITIONNEL par-figurine est en cours de
+# planification (posée par `overrun_pile_in`, levée au commit / à l'abandon), et unités qui ont
+# DÉJÀ fait ce pile-in cette phase (« one additional pile-in move » : un seul par sélection).
+OVERRUN_PILE_IN_UNIT_KEY = "overrun_pile_in_unit"
+OVERRUN_PILE_IN_DONE_KEY = "overrun_pile_in_done"
+
+
+def fight_v11_can_overrun_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """True si l'unité peut ENCORE faire le pile-in additionnel de l'overrun 12.06 : éligible
+    overrun (`fight_v11_is_overrun_eligible`) et pas déjà fait cette phase."""
+    if not fight_v11_is_overrun_eligible(game_state, unit):
+        return False
+    done = {str(x) for x in game_state.get(OVERRUN_PILE_IN_DONE_KEY, set())}
+    return str(require_key(unit, "id")) not in done
 
 
 def fight_v11_is_normal_fight_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
@@ -1898,6 +1916,12 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state["fight_exhortation_done"] = set()
     game_state["pile_in_done"] = set()
     game_state["consolidation_done"] = set()
+    game_state[OVERRUN_PILE_IN_DONE_KEY] = set()
+    game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+    # New Foes to Face (12.08 AFTER) : liste gelée propre à la phase. Une phase peut se clore avec
+    # une liste non vidée (New Foe sans action possible → masque vide → `advance_phase`) ; sans
+    # cette purge, `units_selected_to_fight` remis à zéro la ferait ressortir à la phase suivante.
+    _fight_v11_consolidation_clear_new_foes(game_state)
     # « until end of phase » : purgé à chaque nouvelle fight phase pour que
     # DEVASTATING WOUNDS ne persiste pas au-delà de la phase d'activation.
     game_state["finest_hour_active_this_phase"] = set()
@@ -1996,46 +2020,73 @@ def fight_v11_grouped_next(
     return None
 
 
+def fight_v11_new_foes_pool(game_state: Dict[str, Any]) -> List[str]:
+    """New Foes to Face (12.08 AFTER) restant à sélectionner par l'adversaire — non-mutant.
+
+    ``[]`` hors de cette attente : pas en sous-phase consolidate, aucune liste gelée, ou liste
+    épuisée (morts / déjà « selected to fight »).
+    """
+    if game_state.get("fight_subphase") != "consolidate":
+        return []
+    return _fight_v11_consolidation_new_foes_remaining(game_state)
+
+
+def fight_v11_fight_selection_pool(game_state: Dict[str, Any]) -> List[str]:
+    """Unités qu'une sélection « to fight » peut viser MAINTENANT — non-mutant.
+
+    Machine 12.04 en sous-phase fight ; New Foes 12.08 en sous-phase consolidate (« your
+    opponent must select each of those units, one at a time; when each is selected, it becomes
+    eligible to fight and is selected to fight ») ; ``[]`` sinon. SOURCE UNIQUE du masque FIGHT
+    (`build_squad_action_mask`) et du commit `squad_fight` (`_process_squad_action`) : la garde
+    de sous-phase vit ici, pas chez les appelants.
+    """
+    sub = game_state.get("fight_subphase")
+    if sub == "consolidate":
+        return fight_v11_new_foes_pool(game_state)
+    if sub != "fight":
+        return []
+    active = int(require_key(game_state, "current_player"))
+    step = game_state.get("fight_step") or "fights_first"
+    selector = int(game_state.get("fight_selector") or active)
+    if step == "remaining" and (
+        fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
+        or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
+    ):
+        step, selector = "fights_first", active
+    for _ in range(8):
+        ff = step == "fights_first"
+        mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
+        if mine:
+            return mine
+        theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
+        if theirs:
+            selector = 3 - selector
+            continue
+        if ff:
+            step = "remaining"
+            continue
+        return []
+    return []
+
+
 def fight_v11_current_pool(game_state: Dict[str, Any]) -> List[str]:
     """
     Liste NON-MUTANTE des unités actionnables dans la sous-phase FIGHT V11 courante
     (pour observation_builder / action_decoder / masking). Miroir lecture-seule des
     drivers : grouped_next pour pile_in/consolidate, machine de sélection 12.04 pour fight.
+    En consolidate, les New Foes (12.08 AFTER) priment sur la reprise de la consolidation,
+    comme dans `_fight_v11_manual_state` et `_fight_v11_gym_settle`.
     """
     sub = game_state.get("fight_subphase")
+    if sub == "fight":
+        return fight_v11_fight_selection_pool(game_state)
     if sub == "consolidate":
-        # New Foes to Face (12.08 AFTER MOVING, engaging) : tant qu'il en reste, la machine attend
-        # que l'adversaire les fasse combattre — ils SONT le pool actionnable (clic humain ou
-        # `squad_fight` de la politique), avant la reprise de la consolidation groupée.
-        new_foes = _fight_v11_consolidation_new_foes_remaining(game_state)
+        new_foes = fight_v11_new_foes_pool(game_state)
         if new_foes:
             return new_foes
     if sub in ("pile_in", "consolidate"):
         nxt = fight_v11_grouped_next(game_state, sub)
         return list(nxt[1]) if nxt else []
-    if sub == "fight":
-        active = int(require_key(game_state, "current_player"))
-        step = game_state.get("fight_step") or "fights_first"
-        selector = int(game_state.get("fight_selector") or active)
-        if step == "remaining" and (
-            fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
-            or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
-        ):
-            step, selector = "fights_first", active
-        for _ in range(8):
-            ff = step == "fights_first"
-            mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
-            if mine:
-                return mine
-            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
-            if theirs:
-                selector = 3 - selector
-                continue
-            if ff:
-                step = "remaining"
-                continue
-            return []
-        return []
     return []
 
 
@@ -2117,6 +2168,7 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["fight_selector"] = None
     game_state["fight_eligible_units"] = []
     game_state["active_fight_unit"] = None
+    game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
     if "pending_squad_fight_intents" in game_state:
         game_state["pending_squad_fight_intents"] = {}
     add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
@@ -2606,6 +2658,7 @@ def _fight_pile_in_model_plan_state(
     provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
     selected_model: Optional[str] = None,
     view_level: int = 0,
+    overrun: bool = False,
 ) -> Dict[str, Any]:
     """État du plan pile-in par-figurine exposé au front (miroir simplifié de ``charge_model_plan_state``).
 
@@ -2614,6 +2667,8 @@ def _fight_pile_in_model_plan_state(
     les autres restent à leur position/niveau d'origine. ``selected_model`` non-None → calcule SON pool +
     empreinte lissée. ``view_level`` (étages, §13.06) = niveau de VUE UI ; le pool proposé et le niveau de
     destination des figs posées suivent ce niveau (miroir move par-figurine).
+    ``overrun`` : pile-in ADDITIONNEL de l'overrun 12.06 (étape FIGHT, même plan, mêmes cibles 12.03) ;
+    le front en déduit que le commit rend la main au combat de l'unité et non au pool de pile-in.
     """
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
     from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
@@ -2692,8 +2747,9 @@ def _fight_pile_in_model_plan_state(
 
     return {
         "phase": "fight",
-        "fight_subphase": "pile_in",
+        "fight_subphase": require_key(game_state, "fight_subphase"),
         "pile_in_model_move": True,
+        "overrun_pile_in": bool(overrun),
         "engaged_models": engaged_models,
         "pile_in_targets": [str(t) for t in targets],
         "unitId": squad_id,
@@ -4148,9 +4204,7 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     if not remaining:
         _fight_v11_consolidation_clear_new_foes(game_state)
         return None
-    selector = int(
-        game_state.get("consolidation_new_foes_selector", 3 - int(require_key(game_state, "current_player")))
-    )
+    selector = int(require_key(game_state, "consolidation_new_foes_selector"))
     for_unit = game_state.get("consolidation_new_foes_for_unit")
     game_state["fight_eligible_units"] = list(remaining)
     active = game_state.get("active_fight_unit")
@@ -4182,26 +4236,40 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     }
 
 
+def fight_v11_consolidation_freeze_new_foes(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> List[str]:
+    """Gèle les New Foes (12.08 AFTER) d'une consolidation engaging de ``unit`` qui vient d'être
+    commitée : ennemis engagés avec elle non encore « selected to fight ». Pose les trois clés
+    ``consolidation_new_foes_*`` et retourne la liste gelée ; ``[]`` (aucune clé posée) sans New Foe.
+
+    Sélecteur = ADVERSAIRE DU PROPRIÉTAIRE de ``unit``, pas ``3 - current_player`` : en seconde
+    moitié de 12.07 c'est l'unité du joueur NON actif qui consolide, et son adversaire EST le
+    joueur courant. Source unique des chemins PvP (`_fight_v11_consolidation_resolve_new_foes`)
+    et gym (`W40KEngine._fight_v11_gym_settle`).
+    """
+    new_foes = [str(x) for x in fight_v11_engaging_triggered_unit_ids(game_state, unit)]
+    if not new_foes:
+        return []
+    selector = 3 - int(require_key(unit, "player"))
+    game_state["consolidation_new_foes_pending"] = list(new_foes)
+    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
+    game_state["consolidation_new_foes_selector"] = selector
+    _fight_v11_log(
+        game_state,
+        f"CONSOLIDATE engaging : New Foes to Face = {new_foes} (sélecteur P{selector}, in-place)",
+    )
+    return new_foes
+
+
 def _fight_v11_consolidation_resolve_new_foes(
     game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """Au commit engaging : gèle les New Foes (ennemis engagés non sélectionnés) et présente le
     premier choix au sélecteur (adversaire). ``None`` si aucun New Foe (reprise immédiate)."""
-    new_foes = fight_v11_engaging_triggered_unit_ids(game_state, unit)
-    if not new_foes:
+    if not fight_v11_consolidation_freeze_new_foes(game_state, unit):
         return None
-    game_state["consolidation_new_foes_pending"] = [str(x) for x in new_foes]
-    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
-    # 12.08 AFTER MOVING (engaging) : « your opponent must select each of those units » — l'adversaire
-    # du PROPRIÉTAIRE de l'unité qui consolide, pas du joueur actif : à l'étape 12.07 les deux
-    # joueurs consolident (l'actif d'abord), donc l'unité peut appartenir au joueur non actif.
-    game_state["consolidation_new_foes_selector"] = 3 - int(require_key(unit, "player"))
     game_state["active_fight_unit"] = None
-    _fight_v11_log(
-        game_state,
-        f"CONSOLIDATE engaging : New Foes to Face = {list(new_foes)} "
-        f"(sélecteur P{game_state['consolidation_new_foes_selector']}, in-place)",
-    )
     return _fight_v11_consolidation_new_foes_state(game_state)
 
 
@@ -4379,7 +4447,7 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                               "fight_eligible_units": list(pool),
                               "active_fight_unit": active, "valid_targets": valid_targets,
                               "declarations": fight_decls,
-                              "overrun_eligible": bool(u and fight_v11_is_overrun_eligible(game_state, u)),
+                              "overrun_eligible": fight_v11_can_overrun_pile_in(game_state, u),
                               "waiting_for_player": True, "action": "wait"}
             # Aucune unité active → le joueur doit choisir (cercle vert sur le pool).
             game_state["active_fight_unit"] = None
@@ -4847,7 +4915,7 @@ def fight_v11_expected_seat(game_state: Dict[str, Any]) -> Optional[int]:
     if pending_squad is not None:
         return int(require_key(require_key(game_state, "units_cache")[pending_squad], "player"))
     sub = game_state.get("fight_subphase")
-    if sub == "consolidate" and _fight_v11_consolidation_new_foes_remaining(game_state):
+    if fight_v11_new_foes_pool(game_state):
         return int(require_key(game_state, "consolidation_new_foes_selector"))
     if sub in ("pile_in", "consolidate"):
         nxt = fight_v11_grouped_next(game_state, sub)
@@ -4873,6 +4941,112 @@ def fight_v11_client_pool(game_state: Dict[str, Any]) -> List[str]:
     pool = [pending_squad] if pending_squad is not None else fight_v11_current_pool(game_state)
     game_state["fight_eligible_units"] = list(pool)
     return list(pool)
+
+
+# Actions du plan pile-in par-figurine (mode fin type charge) — partagées entre le pile-in
+# groupé (sous-phase pile_in, 12.02) et le pile-in ADDITIONNEL de l'overrun (étape FIGHT, 12.06).
+PILE_IN_MODEL_PLAN_ACTIONS = ("pile_in_plan_state", "pile_in_autoplace", "commit_pile_in_plan")
+
+
+def _fight_v11_pile_in_model_plan_step(
+    game_state: Dict[str, Any], act_uid: str, action: Dict[str, Any], kind: str
+) -> Tuple[bool, Optional[Tuple[bool, Dict[str, Any]]]]:
+    """Traite UNE action de `PILE_IN_MODEL_PLAN_ACTIONS` pour l'unité active ``act_uid`` — SOURCE
+    UNIQUE du pile-in par-figurine manuel : le pile-in groupé (12.02) et le pile-in additionnel de
+    l'overrun (12.06) sont le MÊME pile-in move 12.03 (cibles `_fight_v11_pile_in_targets` : engagées
+    si engagée, sinon ≤5" ; WHILE/AFTER `_fight_pile_in_preview_plan`). Seul diffère ``kind``
+    (``"pile_in"`` / ``"overrun_pile_in"``) : verbe du log et marquage fait par l'APPELANT.
+
+    Retour ``(committed, response)`` : ``response`` est la réponse à renvoyer telle quelle (aperçu,
+    autoplace, plan refusé) ; ``committed`` True signifie que le plan a été POSÉ et loggé, et que
+    l'appelant fait son marquage puis renvoie l'état manuel suivant.
+    """
+    atype = action.get("action")
+    _view_level = int(action.get("level") or 0)
+    u = require_unit_by_id(game_state, act_uid)
+
+    def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
+        # Le niveau d'étage capturé au drop de chaque fig est OBLIGATOIRE : une fig posée sur
+        # un étage y reste (§13.06, miroir move par-figurine).
+        return parse_model_plan_as_map(
+            action.get("plan") or [], action_name="pile_in plan"
+        )
+
+    overrun = kind == "overrun_pile_in"
+    label = "OVERRUN PILE IN" if overrun else "PILE IN"
+
+    if atype == "pile_in_plan_state":
+        # Refresh de l'aperçu par-figurine (plan provisoire + figurine sélectionnée).
+        sel = action.get("selected_model")
+        return False, (True, _fight_pile_in_model_plan_state(
+            game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
+            view_level=_view_level, overrun=overrun,
+        ))
+
+    if atype == "pile_in_autoplace":
+        # Focus : auto-placement optimal (ILP) des figs pour maximiser celles frappant la cible.
+        focus = action.get("targetId")
+        if focus is None:
+            return False, (False, {"error": "pile_in_autoplace requires targetId", "action": action})
+        mode = str(action.get("mode", "defensive"))
+        out = pile_in_autoplace_plan(game_state, act_uid, str(focus), mode=mode)
+        return False, (True, {"action": "pile_in_autoplace", "unitId": act_uid, **out})
+
+    if atype != "commit_pile_in_plan":
+        raise ValueError(f"_fight_v11_pile_in_model_plan_step: action inattendue {atype!r}")
+
+    # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
+    prov = _prov_from_action()
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
+    origin = {
+        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
+            int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
+        for m in alive
+    }
+    full_plan: List[Tuple[str, int, int, int]] = [
+        (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
+        else (m, origin[m][0], origin[m][1], origin[m][2])
+        for m in alive
+    ]
+    targets = _fight_v11_pile_in_targets(game_state, u)
+    closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
+    prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest)
+    if not prev["can_validate"]:
+        _fight_v11_log(game_state, f"{label} unit {act_uid} → plan invalide {prev}")
+        return False, (True, _fight_pile_in_model_plan_state(
+            game_state, u, prov, None, view_level=_view_level, overrun=overrun
+        ))
+    _uc_before = require_key(game_state, "units_cache")[act_uid]
+    _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
+    _fight_pile_in_commit_plan(game_state, u, full_plan)
+    # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
+    _uc_after = require_key(game_state, "units_cache")[act_uid]
+    _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
+    _move_details = [
+        {
+            "modelId": m,
+            "fromCol": origin[m][0],
+            "fromRow": origin[m][1],
+            "toCol": int(nc),
+            "toRow": int(nr),
+            "toLevel": int(nlv),
+        }
+        for m, nc, nr, nlv in full_plan
+    ]
+    _append_fight_move_log(
+        game_state, u, kind=kind,
+        from_col=_from_col, from_row=_from_row,
+        to_col=_to_col, to_row=_to_row,
+        move_details=_move_details,
+        # L17 — cibles sélectionnées (= targets calculé juste avant commit).
+        pile_in_target_ids=[str(t) for t in targets],
+    )
+    _fight_v11_log(
+        game_state, f"{label} unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
+    )
+    return True, None
 
 
 def _fight_v11_manual_step(
@@ -5082,13 +5256,6 @@ def _fight_v11_manual_step(
 
         _view_level = int(action.get("level") or 0)
 
-        def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
-            # Le niveau d'étage capturé au drop de chaque fig est OBLIGATOIRE : une fig posée sur
-            # un étage y reste (§13.06, miroir move par-figurine).
-            return parse_model_plan_as_map(
-                action.get("plan") or [], action_name="pile_in plan"
-            )
-
         if skip:
             # Le joueur renonce à piler l'unité active → marquée traitée sans déplacement.
             if act_uid is not None and act_uid in eligible:
@@ -5096,84 +5263,16 @@ def _fight_v11_manual_step(
                 _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (joueur)")
             return _fight_v11_manual_state(game_state)
 
-        if atype == "pile_in_plan_state":
-            # Refresh de l'aperçu par-figurine (plan provisoire + figurine sélectionnée).
+        if atype in PILE_IN_MODEL_PLAN_ACTIONS:
             if act_uid is None or act_uid not in eligible:
                 return _fight_v11_manual_state(game_state)
-            u = require_unit_by_id(game_state, act_uid)
-            sel = action.get("selected_model")
-            return True, _fight_pile_in_model_plan_state(
-                game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
-                view_level=_view_level,
+            committed, response = _fight_v11_pile_in_model_plan_step(
+                game_state, act_uid, action, kind="pile_in"
             )
-
-        if atype == "pile_in_autoplace":
-            # Focus : auto-placement optimal (ILP) des figs pour maximiser celles frappant la cible.
-            if act_uid is None or act_uid not in eligible:
-                return _fight_v11_manual_state(game_state)
-            focus = action.get("targetId")
-            if focus is None:
-                return False, {"error": "pile_in_autoplace requires targetId", "action": action}
-            mode = str(action.get("mode", "defensive"))
-            out = pile_in_autoplace_plan(game_state, act_uid, str(focus), mode=mode)
-            return True, {"action": "pile_in_autoplace", "unitId": act_uid, **out}
-
-        if atype == "commit_pile_in_plan":
-            # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
-            if act_uid is None or act_uid not in eligible:
-                return _fight_v11_manual_state(game_state)
-            u = require_unit_by_id(game_state, act_uid)
-            prov = _prov_from_action()
-            models_cache = require_key(game_state, "models_cache")
-            squad_models = require_key(game_state, "squad_models")
-            alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
-            origin = {
-                m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
-                    int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
-                for m in alive
-            }
-            full_plan: List[Tuple[str, int, int, int]] = [
-                (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
-                else (m, origin[m][0], origin[m][1], origin[m][2])
-                for m in alive
-            ]
-            targets = _fight_v11_pile_in_targets(game_state, u)
-            closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
-            prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest)
-            if not prev["can_validate"]:
-                _fight_v11_log(game_state, f"PILE IN unit {act_uid} → plan invalide {prev}")
-                return True, _fight_pile_in_model_plan_state(
-                    game_state, u, prov, None, view_level=_view_level
-                )
-            _uc_before = require_key(game_state, "units_cache")[act_uid]
-            _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
-            _fight_pile_in_commit_plan(game_state, u, full_plan)
+            if not committed:
+                assert response is not None
+                return response
             game_state["pile_in_done"].add(act_uid)
-            # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
-            _uc_after = require_key(game_state, "units_cache")[act_uid]
-            _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
-            _move_details = [
-                {
-                    "modelId": m,
-                    "fromCol": origin[m][0],
-                    "fromRow": origin[m][1],
-                    "toCol": int(nc),
-                    "toRow": int(nr),
-                    "toLevel": int(nlv),
-                }
-                for m, nc, nr, nlv in full_plan
-            ]
-            _append_fight_move_log(
-                game_state, u, kind="pile_in",
-                from_col=_from_col, from_row=_from_row,
-                to_col=_to_col, to_row=_to_row,
-                move_details=_move_details,
-                # L17 — cibles sélectionnées (= targets calculé juste avant commit).
-                pile_in_target_ids=[str(t) for t in targets],
-            )
-            _fight_v11_log(
-                game_state, f"PILE IN unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
-            )
             return _fight_v11_manual_state(game_state)
 
         if atype == "activate_unit" and uid in eligible:
@@ -5204,6 +5303,63 @@ def _fight_v11_manual_step(
             f"FIGHT dispatch: pool={pool} active={active} uid_recu={uid} action={atype!r} "
             f"step={game_state.get('fight_step')} fought={sorted(game_state.get('units_fought', set()))}"
         )
+
+        # OVERRUN FIGHT 12.06 — pile-in ADDITIONNEL par-figurine de l'unité active (« Your unit
+        # can make one additional pile-in move, then fights »). Action séparée, AVANT le choix de
+        # cible : c'est précisément quand l'unité n'a AUCUNE cible avant ce move qu'il sert. Le
+        # plan est le même pile-in move 12.03 que l'étape 2 (cibles engagées si engagée, sinon
+        # ≤5" ; l'unité DOIT finir engagée) ; le commit rend la main au combat de l'unité, dont le
+        # pool de cibles est recalculé à sa nouvelle position.
+        overrun_uid = game_state.get(OVERRUN_PILE_IN_UNIT_KEY)
+        overrun_uid = str(overrun_uid) if overrun_uid is not None else None
+        if overrun_uid is not None and (active is None or overrun_uid != active):
+            # Drapeau orphelin (l'unité active a changé sous le plan) → levé, on dispatch normalement.
+            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+            overrun_uid = None
+        if overrun_uid is not None:
+            if skip:
+                # Le joueur renonce au pile-in additionnel : l'unité reste ACTIVE et combat depuis
+                # sa position (ce n'est PAS le « passer » d'une unité sans cible, traité plus bas).
+                game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+                _fight_v11_log(game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (joueur)")
+                return _fight_v11_manual_state(game_state)
+            if atype in PILE_IN_MODEL_PLAN_ACTIONS:
+                committed, response = _fight_v11_pile_in_model_plan_step(
+                    game_state, overrun_uid, action, kind="overrun_pile_in"
+                )
+                if not committed:
+                    assert response is not None
+                    return response
+                game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+                game_state[OVERRUN_PILE_IN_DONE_KEY].add(overrun_uid)
+                return _fight_v11_manual_state(game_state)
+            # Toute autre action abandonne le plan en cours et est traitée normalement.
+            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+            _fight_v11_log(
+                game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (action {atype!r})"
+            )
+
+        if atype == "overrun_pile_in":
+            if active is None or active not in pool:
+                return False, {"error": "no_active_fight_unit", "action": atype}
+            u = require_unit_by_id(game_state, active)
+            if not fight_v11_can_overrun_pile_in(game_state, u):
+                _fight_v11_log(game_state, f"OVERRUN PILE IN unit {active} REFUSÉ : non éligible 12.06")
+                return False, {"error": "overrun_not_eligible", "unitId": active}
+            # Les déclarations d'attaque faites AVANT le move sont caduques : les figurines
+            # bougent, leur éligibilité par-figurine (04.02) change, et le front repart de zéro.
+            from .shared_utils import clear_pending_fight_intent
+            clear_pending_fight_intent(game_state, active)
+            game_state[OVERRUN_PILE_IN_UNIT_KEY] = active
+            state = _fight_pile_in_model_plan_state(
+                game_state, u, view_level=int(action.get("level") or 0), overrun=True
+            )
+            _fight_v11_log(
+                game_state,
+                f"OVERRUN PILE IN : unit {active} (par-figurine, "
+                f"{len(state['eligible_models'])} figs déplaçables, cibles={state['pile_in_targets']})",
+            )
+            return True, state
 
         if skip:
             # « Passer » une unité en étape fight = clic droit (right_click → skip, calculé
@@ -5292,13 +5448,9 @@ def _fight_v11_manual_step(
             sel = active
             u = require_unit_by_id(game_state, sel)
             _fight_v11_register_selection(game_state, sel)
-            ftype = "normal"
-            if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
-                ftype = "overrun"
-                from .shared_utils import _fight_overrun_pile_in_plan, commit_move
-                _ov_plan = _fight_overrun_pile_in_plan(game_state, sel)
-                if _ov_plan is not None:
-                    commit_move(_ov_plan, game_state, "pile_in")
+            # Type de fight 12.04/12.06 (journal) : le pile-in additionnel de l'overrun, s'il a eu
+            # lieu, a été posé AVANT ce clic par l'action `overrun_pile_in`.
+            ftype = "overrun" if sel in game_state[OVERRUN_PILE_IN_DONE_KEY] else "normal"
             valid = _fight_build_valid_target_pool(game_state, u)
             _fight_v11_log(game_state, f"FIGHT unit {sel} (type={ftype}) : pool cibles = {valid}")
             if valid:

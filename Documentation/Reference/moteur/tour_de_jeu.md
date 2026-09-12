@@ -1511,11 +1511,12 @@ of their eligible units **they choose to move** »), 12.04 (« players alternate
   siège attendu ; une action humaine pendant le tour d'un siège programmatique est refusée
   (`programmatic_seat_turn`), l'allocation du défenseur humain exceptée.
 - **New Foes to Face** (12.08 AFTER MOVING, engaging) : sélecteur = adversaire du PROPRIÉTAIRE de
-  l'unité qui consolide (pas du joueur actif — à 12.07 les deux joueurs consolident). Hors gym,
-  la consolidation engaging du bot arme les New Foes de l'humain ; les New Foes du bot sont joués
-  par la politique (`squad_fight` accepté en sous-phase `consolidate`, `fight_v11_current_pool`
-  les expose). **En gym, les New Foes ne sont pas armés** (contrat d'entraînement inchangé : le
-  driver consolide sans les lever) — écart 12.08 connu, hors chantier.
+  l'unité qui consolide (pas du joueur actif — à 12.07 les deux joueurs consolident), source
+  unique `fight_v11_consolidation_freeze_new_foes`. La consolidation engaging d'un siège
+  programmatique (driver) comme d'un siège humain (commit par-figurine) gèle les New Foes de
+  l'adversaire ; un New Foe humain combat par la machine manuelle, un New Foe programmatique par
+  la politique (`squad_fight` accepté en sous-phase `consolidate`, `fight_v11_current_pool` les
+  expose) — en gym comme en PvE.
 - L'ancien chemin **auto** (`_is_fight_auto_execution_allowed` → `_fight_v11_auto_step`, actif
   pour `pve/pve_test/endless_duty`) est supprimé : il résolvait l'activation À LA PLACE du siège
   humain (pile-in imposé, cible par heuristique, pertes allouées par la machine) et n'avait aucun
@@ -1617,9 +1618,9 @@ riposte possible).
 | 12.03 | Pile-in move (3″ ; éligible si engaged / a chargé / overrun ; fin engaged ; modèles en base-contact non déplaçables) | 🟡 | 3″ via `3 * scale` ; base-contact = adjacence hex ; branche overrun ✅ depuis la refonte 12.04 (`fight_v11_is_overrun_eligible`, `_fight_overrun_pile_in_plan` — re-vérifié 2026-08-27) ; WHILE « each model that is moved must end its move closer to the closest pile-in target » : PvP (`_fight_pile_in_build_model_pool`, `start_min`) ET gym (`_assign_cells_toward_enemies`, filtre `admissible` par-figurine — 2026-09-12) ; AFTER « each model that started this move engaged […] must still be engaged with that enemy unit » : PvP (`_fight_pile_in_preview_plan`, `kept_engagements`) ET gym (`_assign_cells_toward_enemies`, filtre par-figurine des candidats bord-à-bord et de repli — 2026-09-12) |
 | 12.04 | Fight : alterné, **Fights First** puis **Remaining** ; éligible si engaged ou a chargé | ✅ (re-vérifié 2026-08-27) | machine `fight_step` ∈ {fights_first, remaining} + `fight_selector`, initialisée par `fight_v11_enter_fight_step` avec **sélecteur = joueur actif** (conforme « the player whose turn it is ») ; alternance et handoff par `fight_v11_advance_selection` ; FF = `units_charged` OU ability (`is_fights_first`) ; retour FF pendant Remaining implémenté (inatteignable tant que FF = charge seule) |
 | 12.05 | Normal fight (engaged) | ✅ | |
-| 12.06 | Overrun fight (unengaged devenu engaged → pile-in additionnel) | ✅ (re-vérifié 2026-08-27) | `fight_v11_is_overrun_eligible` (« was unengaged at the start of the Fight step » = négation du snapshot) → pile-in additionnel `_fight_overrun_pile_in_plan` |
+| 12.06 | Overrun fight (unengaged devenu engaged → pile-in additionnel) | ✅ (re-vérifié 2026-09-12) | `fight_v11_is_overrun_eligible` (« was unengaged at the start of the Fight step » = négation du snapshot). AUTO/gym : pile-in additionnel automatique `_fight_overrun_pile_in_plan` (unité non engagée → cibles ≤5"). PvP humain (2026-09-12) : action `overrun_pile_in` sur l'unité active (bouton « Overrun », `fight_v11_can_overrun_pile_in` = éligible et pas déjà fait), AVANT le choix de cible → même plan par-figurine que le pile-in 12.02 (`_fight_v11_pile_in_model_plan_step`, cibles `_fight_v11_pile_in_targets` : engagées si engagée, sinon ≤5" ; AFTER : l'unité finit engagée) ; le commit (log `overrun_pile_in`) rend la main au combat de l'unité, cibles recalculées ; `skip` sous plan = renoncer au move sans passer l'unité |
 | 12.07 | Consolidate (les deux joueurs) | ✅ | étape groupée `consolidate` (`fight_v11_enter_consolidate`) |
-| 12.08 | Consolidation move (3″ ; 3 modes : Ongoing / Engaging / Objective ; Engaging peut tirer de nouvelles unités au combat) | ✅ (re-vérifié 2026-08-27) | cascade `fight_v11_consolidation_mode` : `ongoing` (engagée) → `engaging` (ennemi dans `consolidation_trigger_range`, 3″) → `objective` (objectif dans 3″) ; « engaging → nouvelles unités éligibles » via `fight_v11_engaging_triggered_unit_ids` ; AFTER Ongoing (engagements de départ conservés par figurine) : même filtre gym que 12.03 (`_assign_cells_toward_enemies`, 2026-09-12) |
+| 12.08 | Consolidation move (3″ ; 3 modes : Ongoing / Engaging / Objective ; Engaging peut tirer de nouvelles unités au combat) | ✅ (re-vérifié 2026-08-27) | cascade `fight_v11_consolidation_mode` : `ongoing` (engagée) → `engaging` (ennemi dans `consolidation_trigger_range`, 3″) → `objective` (objectif dans 3″) ; AFTER Engaging « New Foes to Face » : ennemis engagés non sélectionnés gelés par `fight_v11_consolidation_freeze_new_foes` (sélecteur = adversaire du propriétaire de l'unité), combattus in-place sur pool restreint (`fight_v11_fight_selection_pool`, source du masque FIGHT et du commit `squad_fight`) sur les trois chemins — PvP (`_fight_v11_consolidation_new_foes_step`), gym (`_fight_v11_gym_settle` rend la main au siège adverse), auto PvE (`_fight_v11_auto_step`) — 2026-09-12 ; AFTER Ongoing (engagements de départ conservés par figurine) : même filtre gym que 12.03 (`_assign_cells_toward_enemies`, 2026-09-12) |
 | 12.09 | End of Fight phase | ✅ | fin de phase → transition `next_phase: "command"` du joueur suivant (et `turn += 1` après le joueur 2) |
 
 **Abilities mêlée (24) :** EXTRA ATTACKS 24.11 (registry ✅, application ⚠️ à vérifier) ;
