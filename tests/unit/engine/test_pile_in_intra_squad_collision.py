@@ -267,3 +267,80 @@ class TestPileInTargetRestriction12_03:
         })
         plan = fight_pile_in_plan(gs, "S")
         assert plan is None, "aucun ennemi dans 5\" → pas de pile-in (12.03)"
+
+
+class TestPileInKeepsStartingEngagements12_03_AFTER:
+    """12.03 AFTER / 12.08 AFTER (Ongoing) : « Each model that started this move engaged with an
+    enemy unit must still be engaged with that enemy unit ».
+
+    S#0 en (10,8) est engagée avec A (10,10) ET B (10,6) (EZ = 2, x1). Toute case bord-à-bord
+    avec l'une des deux la fait sortir de la zone d'engagement de l'autre. Le chemin gym
+    rendait (9,5) — engagée avec B, plus avec A — là où le PvP (`_fight_pile_in_preview_plan`)
+    refuse ce même plan (`kept_engagements=False`). Verrou : chaque figurine engagée au départ
+    reste engagée avec CHAQUE unité ennemie de départ, pour le pile-in ET la consolidation.
+    """
+
+    @staticmethod
+    def _engaged_units(gs: Dict[str, Any], mid: str, col: int, row: int) -> set:
+        from engine.phase_handlers.shared_utils import (
+            _synth_model_entry, get_engagement_zone,
+        )
+        from engine.spatial_relations import (
+            enemy_entries_on_battlefield, unit_entries_within_engagement_zone,
+        )
+        m = gs["models_cache"][mid]
+        synth = _synth_model_entry(gs, m["squad_id"], m, col, row, level=int(m["level"]))
+        ez = get_engagement_zone(gs)
+        return {
+            eid for eid, ee in enemy_entries_on_battlefield(
+                gs["units_cache"], int(m["player"]), exclude_id=m["squad_id"]
+            )
+            if unit_entries_within_engagement_zone(synth, ee, ez, game_state=gs)
+        }
+
+    def _check(self, plan: Any, gs: Dict[str, Any]) -> None:
+        assert plan is not None, "le plan doit exister (rester sur place est légal)"
+        for mid, c, r, _lv in plan:
+            m = gs["models_cache"][mid]
+            start = self._engaged_units(gs, mid, int(m["col"]), int(m["row"]))
+            assert start == {"A", "B"}, f"fixture : {mid} doit partir engagée avec A et B, pas {start}"
+            end = self._engaged_units(gs, mid, c, r)
+            assert start <= end, (
+                f"{mid} → ({c},{r}) perd un engagement de départ : {start - end} ; plan={plan}"
+            )
+
+    def test_pile_in_keeps_both_engagements(self):
+        gs = _make_gs({"S": (1, [(10, 8)]), "A": (2, [(10, 10)]), "B": (2, [(10, 6)])})
+        self._check(fight_pile_in_plan(gs, "S"), gs)
+
+    def test_ongoing_consolidation_keeps_both_engagements(self):
+        gs = _make_gs({"S": (1, [(10, 8)]), "A": (2, [(10, 10)]), "B": (2, [(10, 6)])})
+        self._check(squad_consolidate_plan(gs, "S"), gs)
+
+
+    def test_fallback_branch_keeps_engagements_euclidean(self):
+        """Branche (b) « plus proche à défaut de bord-à-bord » : même obligation AFTER.
+
+        À x1 cette branche ne déplace jamais rien (toute case strictement plus proche EST une
+        case bord-à-bord, donc déjà servie par le couplage) : un scénario x1 serait un vert
+        vacant. À x10 (euclidien, socles de 6 cases) les voisins-hex du centre ennemi sont DANS
+        son socle, donc illégaux → aucun couplage, seul le repli joue. S (30,30) part engagée
+        avec A (30,50) et B (30,8), B à la limite exacte de la zone : le repli rendait (29,31),
+        un cran vers A et hors de la zone de B.
+        """
+        from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+        ish = 10
+
+        def _unit(uid: str, player: int, col: int, row: int) -> Dict[str, Any]:
+            return synthetic_unit(uid, player, [{"col": col, "row": row}], BASE_SIZE=6)
+
+        gs = synthetic_state(
+            [_unit("S", 1, 30, 30), _unit("A", 2, 30, 50), _unit("B", 2, 30, 8)],
+            phase="fight",
+            game_rules={"engagement_zone": 2 * ish, "engagement_zone_vertical": 5.0},
+            inches_to_subhex=ish,
+        )
+        from engine.spatial_relations import geometry_is_hex
+        assert not geometry_is_hex(gs), "prémisse : géométrie euclidienne attendue à x10"
+        self._check(fight_pile_in_plan(gs, "S"), gs)
