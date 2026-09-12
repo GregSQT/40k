@@ -10,8 +10,9 @@ Deux consommateurs dans `shared_utils` :
     contrainte, chacune levant sa propre ValueError ;
   - `_auto_declared_order` (defenseur programmatique) : produit directement un ordre conforme.
 
-Chaque ordre invalide de ce fichier viole EXACTEMENT UNE contrainte : retirer une boucle de
-validation rougit le test correspondant et lui seul.
+Chaque ordre invalide de la section 05.03 viole EXACTEMENT UNE contrainte : retirer une boucle
+de validation rougit le test correspondant et lui seul. La precondition « permutation des
+groupes vivants » (groupe mort exclu, aucun doublon) a sa propre section.
 """
 
 from __future__ import annotations
@@ -121,6 +122,32 @@ def test_double_declaration_refuse(monkeypatch):
     assert batch["declared_order"] == [NW, NH, CW, CH]
     assert batch["current_group_index"] == 0
     assert stepped == [(gs, SHOOT_CTX)]
+
+
+# ── Precondition : permutation des groupes vivants ────────────────────────────
+
+
+def test_groupe_mort_exclu_de_la_permutation(monkeypatch):
+    """Un groupe dont toutes les figurines sont mortes ne fait plus partie des groupes vivants :
+    le declarer est refuse, l ordre sans lui est accepte."""
+    gs = _gs()
+    del gs["models_cache"]["ch"]
+    monkeypatch.setattr(su, "_manual_allocation_step", lambda g, ctx: {"ok": True})
+
+    with pytest.raises(ValueError, match="n est pas une permutation"):
+        _declare(gs, [NW, NH, CW, CH])
+    assert gs[SHOOT_CTX.alloc_key]["batches"][0]["declared_order"] is None
+
+    _declare(gs, [NW, NH, CW])
+    assert gs[SHOOT_CTX.alloc_key]["batches"][0]["declared_order"] == [NW, NH, CW]
+
+
+def test_identifiant_duplique_refuse():
+    """Un ID repete (et un autre absent) n est pas une permutation des groupes vivants."""
+    gs = _gs()
+    with pytest.raises(ValueError, match="n est pas une permutation"):
+        _declare(gs, [NW, NW, CW, CH])
+    assert gs[SHOOT_CTX.alloc_key]["batches"][0]["declared_order"] is None
 
 
 # ── Defenseur programmatique : _auto_declared_order ───────────────────────────
