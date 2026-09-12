@@ -508,6 +508,8 @@ def test_ligne_step_log_des_blessures_mortelles(monkeypatch):
     entry = mw_logs[0]
     assert entry["hazardousMortalWounds"] == 5
     assert entry["mortalWoundDice"] == [5]
+    # Meme grammaire que la ligne step.log : `MW:` gouverne par `mortalWoundDice`, sans `Trigger:`.
+    assert "SUFFERS 5 Mortal Wounds [HOLD STILL AND SAY AARGH] MW:5 [FROM:PAIN]" in entry["message"], entry["message"]
     assert entry["hazardContext"] == HAZARD_CONTEXT_HOLD_STILL
     assert entry["unitId"] == "TGT", "la ligne SUFFERS nomme la VICTIME"
     assert entry["mortalWoundSourceId"] == "PAIN", "la source doit être créditée"

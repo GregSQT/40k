@@ -475,11 +475,15 @@ interface RuleChoicePrompt {
   options: RuleChoiceOption[];
 }
 
+/** Familles d'allocation manuelle (05.03/05.04, 06.02), préfixe d'action `squad_<famille>_…` :
+ * "shoot" = pertes du tir (défaut) ; "fight" = pertes du combat ; "hazard" = mortal wounds. */
+const MANUAL_PROMPT_KINDS = ["fight", "hazard", "shoot"] as const;
+type ManualPromptKind = (typeof MANUAL_PROMPT_KINDS)[number];
+
 /** Allocation manuelle des pertes au tir (defenseur humain) : le backend renvoie ce
  * payload tant qu'une figurine doit etre choisie pour encaisser (regle 05.04). */
 export interface ManualAllocation {
-  /** "shoot" = pertes du tir (défaut) ; "fight" = pertes du combat ; "hazard" = mortal wounds Desperate Escape (06.02). */
-  kind?: "shoot" | "fight" | "hazard";
+  kind?: ManualPromptKind;
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
@@ -500,24 +504,26 @@ export interface ManualOrderGroup {
   has_wounded: boolean;
 }
 
-/** Familles d'allocation manuelle (05.03/05.04, 06.02), préfixe d'action `squad_<famille>_…`. */
-const MANUAL_PROMPT_KINDS = ["fight", "hazard", "shoot"] as const;
-type ManualPromptKind = (typeof MANUAL_PROMPT_KINDS)[number];
+/** Attentes du défenseur humain : suffixe d'action `squad_<famille>_<suffixe>` → clé du payload. */
+const MANUAL_PROMPT_PAYLOAD_KEY = {
+  manual_alloc: "allocation",
+  declare_order: "order_request",
+} as const;
 
 /**
  * Payload d'ATTENTE du défenseur humain tel que le moteur le rend sur `/game/action` comme sur
- * `/game/ai-turn` (attaquant bot en PvE) : `{ action: squad_<famille>_<suffix>,
- * waiting_for_player: true, [payloadKey]: … }`. Rend le payload typé avec sa famille, ou `null`
- * si le résultat n'en est pas un. Lecteur UNIQUE des deux attentes (allocation, ordre).
+ * `/game/ai-turn` (attaquant bot en PvE) : `{ action: squad_<famille>_<suffixe>,
+ * waiting_for_player: true, [MANUAL_PROMPT_PAYLOAD_KEY[suffixe]]: … }`. Rend le payload typé
+ * avec sa famille, ou `null` si le résultat n'en est pas un. Lecteur UNIQUE des deux attentes
+ * (allocation, ordre).
  */
-function readManualPrompt<T extends { kind?: ManualPromptKind }>(
+function readManualPrompt<T>(
   result: unknown,
-  suffix: "manual_alloc" | "declare_order",
-  payloadKey: "allocation" | "order_request"
-): T | null {
+  suffix: keyof typeof MANUAL_PROMPT_PAYLOAD_KEY
+): (T & { kind: ManualPromptKind }) | null {
   if (!result || typeof result !== "object") return null;
   const r = result as { action?: unknown; waiting_for_player?: unknown } & Record<string, unknown>;
-  const payload = r[payloadKey];
+  const payload = r[MANUAL_PROMPT_PAYLOAD_KEY[suffix]];
   if (r.waiting_for_player !== true || !payload || typeof payload !== "object") return null;
   const kind = MANUAL_PROMPT_KINDS.find((k) => r.action === `squad_${k}_${suffix}`);
   if (kind === undefined) return null;
@@ -526,7 +532,7 @@ function readManualPrompt<T extends { kind?: ManualPromptKind }>(
 
 /** Attente d'allocation manuelle des pertes : `{ action: squad_*_manual_alloc, allocation }`. */
 export function readManualAllocationPrompt(result: unknown): ManualAllocation | null {
-  return readManualPrompt<ManualAllocation>(result, "manual_alloc", "allocation");
+  return readManualPrompt<ManualAllocation>(result, "manual_alloc");
 }
 
 /**
@@ -534,12 +540,11 @@ export function readManualAllocationPrompt(result: unknown): ManualAllocation | 
  * CHARACTER) : `{ action: squad_*_declare_order, order_request }`.
  */
 export function readManualOrderPrompt(result: unknown): ManualOrderRequest | null {
-  return readManualPrompt<ManualOrderRequest>(result, "declare_order", "order_request");
+  return readManualPrompt<ManualOrderRequest>(result, "declare_order");
 }
 
 export interface ManualOrderRequest {
-  /** "shoot" = ordre d'allocation du tir (défaut) ; "fight" = du combat ; "hazard" = mortal wounds Desperate Escape. */
-  kind?: "shoot" | "fight" | "hazard";
+  kind?: ManualPromptKind;
   attacker_unit_id: string;
   target_unit_id: string;
   defender_player: number;
@@ -3854,7 +3859,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         fight_subphase?: string;
         units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
       };
-      if (gsModels?.fight_subphase !== "fight") return;
+      if (gsModels.fight_subphase !== "fight") return;
       const fightModels = Object.keys(
         gsModels.units_cache?.[String(unitId)]?.occupied_hexes_by_model ?? {}
       );

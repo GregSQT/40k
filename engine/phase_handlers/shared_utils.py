@@ -6917,16 +6917,14 @@ def _synth_model_entry(
 
 
 def _fight_model_start_engaged_entries(
-    game_state: Dict[str, Any], squad_id: str, model: Dict[str, Any]
+    game_state: Dict[str, Any], squad_id: str, model: Dict[str, Any], *, ez: int, metric: str
 ) -> List[Dict[str, Any]]:
     """Entrées ennemies avec lesquelles ``model`` est engagée à SON départ (position et étage
     courants du ``models_cache``). Base des clauses AFTER « must still be engaged with that
     enemy unit » (12.03 / 12.08 Ongoing). SOURCE UNIQUE du validateur PvP, de l'auto-placement
-    ILP et du plan gym (`_assign_cells_toward_enemies`). Lecture pure."""
-    from engine.spatial_relations import engagement_distance_metric
-
-    ez = int(get_engagement_zone(game_state))
-    metric = engagement_distance_metric(game_state)
+    ILP et du plan gym (`_assign_cells_toward_enemies`). ``ez``/``metric`` : mesure d'engagement
+    (`get_engagement_zone`, `engagement_distance_metric`) dérivée UNE fois par plan par l'appelant,
+    pas par figurine. Lecture pure."""
     units_cache = require_key(game_state, "units_cache")
     player = int(model["player"])
     synth_start = _synth_model_entry(
@@ -6947,16 +6945,16 @@ def _fight_model_keeps_engagements(
     row: int,
     level: int,
     start_engaged: List[Dict[str, Any]],
+    *,
+    ez: int,
+    metric: str,
 ) -> bool:
     """AFTER 12.03 / 12.08 Ongoing : ``model`` posée en (col, row) au niveau ``level`` reste
     engagée avec CHAQUE entrée de ``start_engaged`` (`_fight_model_start_engaged_entries`).
-    Vide → rien à conserver, sans mesure. SOURCE UNIQUE de la mesure (validateur, ILP, gym)."""
+    Vide → rien à conserver, sans mesure. SOURCE UNIQUE de la mesure (validateur, ILP, gym) ;
+    ``ez``/``metric`` dérivés UNE fois par plan par l'appelant (appelée par case candidate)."""
     if not start_engaged:
         return True
-    from engine.spatial_relations import engagement_distance_metric
-
-    ez = int(get_engagement_zone(game_state))
-    metric = engagement_distance_metric(game_state)
     synth_end = _synth_model_entry(
         game_state, str(squad_id), model, int(col), int(row), level=int(level)
     )
@@ -12456,38 +12454,41 @@ def mortal_wounds_ability_log_entry(
     - ``dice`` (`mortalWoundDice`) : des qui se SOMMENT pour donner le compte. Cle DISTINCTE de
       `hazardousDiceRolls` (des de HASARD 24.15, 1-2 = echec) : deux sens sous une meme cle
       auraient fait sommer les seconds par le controle de validite de l analyzer.
-    - ``trigger_roll`` (`abilityTriggerRoll`) : de de DECLENCHEMENT compare a un seuil, rendu
-      `Trigger:<n>` dans le message avec `MW:<d3>` pour les des. Cle DISTINCTE de
-      `mortalWoundDice`, sinon l analyzer additionnerait un jet de seuil a une quantite.
+    - ``trigger_roll`` (`abilityTriggerRoll`) : de de DECLENCHEMENT compare a un seuil. Cle
+      DISTINCTE de `mortalWoundDice`, sinon l analyzer additionnerait un jet de seuil a une
+      quantite.
     - ``details`` : la liste `hazardDetails`, completee PAR REFERENCE pendant l attribution.
+
+    Le message porte les MEMES segments que la ligne step.log (`_format_replay_style_message`),
+    chacun gouverne par SA cle : `Trigger:<n>` ssi ``trigger_roll``, `MW:<d1,d2,...>` ssi
+    ``dice`` — le Game Log et le journal disent la meme chose du meme jet.
     """
     col, row = require_unit_position(target_sid, game_state)
-    roll_seg = ""
+    segs = ""
     if trigger_roll is not None:
-        roll_seg = f" Trigger:{trigger_roll}" + (f" MW:{dice[0]}" if dice else "")
+        segs += f" Trigger:{trigger_roll}"
+    if dice:
+        segs += f" MW:{','.join(str(d) for d in dice)}"
     entry: Dict[str, Any] = {
         "type": "mortal_wounds_ability",
         "message": (
             f"Unit {target_sid}({col},{row}) SUFFERS {total} Mortal Wounds "
-            f"{HAZARD_CONTEXT_TAGS[ability]}{roll_seg} [FROM:{source_sid}]{message_suffix}"
+            f"{HAZARD_CONTEXT_TAGS[ability]}{segs} [FROM:{source_sid}]{message_suffix}"
         ),
         "turn": require_key(game_state, "turn"),
         "phase": require_key(game_state, "phase"),
         "unitId": target_sid,
-        "player": int(require_key(
-            require_key(game_state, "units_cache")[target_sid], "player")),
+        "player": _squad_owner_player(game_state, target_sid),
         "col": col,
         "row": row,
         "hazardousMortalWounds": total,
-    }
-    if trigger_roll is not None:
-        entry["abilityTriggerRoll"] = trigger_roll
-    entry.update({
         "mortalWoundSourceId": str(source_sid),
         "hazardContext": ability,
         "hazardDetails": details,
         "result": f"{total} MW",
-    })
+    }
+    if trigger_roll is not None:
+        entry["abilityTriggerRoll"] = trigger_roll
     if dice is not None:
         entry["mortalWoundDice"] = dice
     return entry
@@ -13306,8 +13307,14 @@ def _assign_cells_toward_enemies(
     # COURANT de la figurine, depart et arrivee, contre TOUTES les unites ennemies posees — pas
     # seulement les cibles. Sans ce filtre, une figurine engagee avec A et B finissait bord-a-bord
     # avec B et hors de la zone de A, plan que le PvP refuse (`kept_engagements=False`).
+    from engine.spatial_relations import engagement_distance_metric
+
+    _ez = int(get_engagement_zone(game_state))
+    _metric = engagement_distance_metric(game_state)
     _start_engaged: Dict[str, List[Dict[str, Any]]] = {
-        mid: _fight_model_start_engaged_entries(game_state, str(squad_id), models_cache[mid])
+        mid: _fight_model_start_engaged_entries(
+            game_state, str(squad_id), models_cache[mid], ez=_ez, metric=_metric
+        )
         for mid in movers
     }
 
@@ -13316,6 +13323,7 @@ def _assign_cells_toward_enemies(
         return _fight_model_keeps_engagements(
             game_state, str(squad_id), models_cache[mid], col, row,
             int(require_key(models_cache[mid], "level")), _start_engaged[mid],
+            ez=_ez, metric=_metric,
         )
 
     # 2. Cellules bord-a-bord atteignables (legalite hors-plan uniquement).
@@ -13947,8 +13955,7 @@ def squad_consolidate_plan(
     our_entry = require_unit_from_cache(squad_id, game_state, "squad_consolidate_plan")
     # `player` requis par `unit_within_engagement_zone_footprints` (via `fight_v11_consolidation_mode`).
     unit_ref: Dict[str, Any] = {"id": squad_id, "player": int(require_key(our_entry, "player"))}
-    if mode is None:
-        mode = fight_v11_consolidation_mode(game_state, unit_ref)
+    mode = mode if mode is not None else fight_v11_consolidation_mode(game_state, unit_ref)
     if mode is None:
         return None
 
@@ -15421,12 +15428,8 @@ def build_squad_action_mask(
             if ov_plan is None:
                 fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
             else:
-                from engine.spatial_relations import (
-                    get_engagement_zone as _gez,
-                    unit_entries_within_engagement_zone as _uiez,
-                )
                 models_cache = game_state.get("models_cache", {})  # get allowed
-                ez = _gez(game_state)
+                ez = int(get_engagement_zone(game_state))
                 # Entrees synthetiques des figurines a leur position d'ARRIVEE, une fois pour
                 # tous les slots (elles ne dependent pas de la cible testee).
                 plan_synths = [
@@ -15441,7 +15444,10 @@ def build_squad_action_mask(
                     target_entry = units_cache.get(str(esid))
                     if target_entry is None or not entry_is_on_battlefield(target_entry):
                         continue
-                    if any(_uiez(synth, target_entry, ez) for synth in plan_synths):
+                    if any(
+                        unit_entries_within_engagement_zone(synth, target_entry, ez)
+                        for synth in plan_synths
+                    ):
                         fight_targets.add(str(esid))
             opened = 0
             for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):

@@ -5,8 +5,8 @@ L'ILP ne pose que des figurines qui engagent le FOCUS ; les autres passent par l
 choisissait la case la plus proche du focus parmi les cases « closer » : une figurine qui pouvait
 finir engagée avec le palier le plus proche pouvait s'arrêter une case avant — plan que le
 validateur refuse maintenant. Le repli prend donc une case engagée-avec-le-palier FAISABLE
-(cohésion + engagements de départ, `_fight_model_destination_feasible`, même prédicat que le
-validateur) quand il en existe une, puis un point fixe remonte les figurines repliées « closer »
+(cohésion + engagements de départ, même prédicat que le validateur
+`_fight_model_legal_destinations`) quand il en existe une, puis un point fixe remonte les figurines repliées « closer »
 qu'une pose ultérieure a rendues « possibles » — le validateur juge la configuration FINALE.
 
 Géométries MESURÉES (règles réelles : EZ = 2, cohésion 2, ``inches_to_subhex`` = 1) :
@@ -124,10 +124,10 @@ def _keeps_start_engagements(gs: Dict[str, Any], mid: str, cell: Cell) -> bool:
     """La figurine ``mid`` posée en ``cell`` reste ≤ EZ de CHAQUE ennemi avec lequel elle est
     engagée au départ (mesure du validateur, ``kept_engagements``)."""
     m = gs["models_cache"][mid]
-    start = _fight_model_start_engaged_entries(gs, "1", m)
-    assert start, f"précondition : {mid} est engagée au départ"
     ez = int(get_engagement_zone(gs))
     metric = engagement_distance_metric(gs)
+    start = _fight_model_start_engaged_entries(gs, "1", m, ez=ez, metric=metric)
+    assert start, f"précondition : {mid} est engagée au départ"
     synth = _synth_model_entry(gs, "1", m, cell[0], cell[1], level=int(m["level"]))
     return all(unit_entries_within_engagement_zone(synth, ce, ez, metric=metric) for ce in start)
 
