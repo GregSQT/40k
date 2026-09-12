@@ -54,6 +54,8 @@ from engine.constants import (
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
+# `hex_utils` est une FEUILLE (heapq/math/numpy) : import au niveau module, pas dans chaque appel.
+from engine.hex_utils import dilate_hex_set
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
 from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED, decision_option_cont_row
@@ -869,6 +871,19 @@ def recompute_unit_rules_in_effect(game_state: Dict[str, Any], unit_id: str) -> 
         native_alive=native_alive or grace_native,
         alive_attached_sources=alive_sources | grace_sources,
     )
+
+
+def model_datasheet_name(model: Mapping[str, Any], squad_unit_type: str) -> str:
+    """DATASHEET d une figurine de `models_cache` : son `unitType` propre, sinon celui de
+    l escouade.
+
+    LECTURE UNIQUE des deux emetteurs de `[MODEL_TYPES:]` — l entete d episode
+    (`W40KEngine._model_types_segment_for_unit`) et la ligne `RETURNED` d un socle rendu
+    (`apply_returned_models_placement`). La cle est `unitType`, camelCase : c est celle que
+    `_build_models_for_unit` ecrit (« "unitType": spec.get("unit_type") or … »), et une figurine
+    sans type propre (spec de scenario sans `unit_type`) porte explicitement celui de l escouade.
+    """
+    return str(model.get("unitType") or squad_unit_type)  # get allowed : figurine sans type propre
 
 
 def _build_models_for_unit(
@@ -2118,7 +2133,7 @@ def build_enemy_adjacent_hexes(
 
 
 def engagement_zone_from_cells(
-    cells: AbstractSet[Tuple[int, int]],
+    cells: Set[Tuple[int, int]],
     engagement_zone: int,
     board_cols: int,
     board_rows: int,
@@ -2155,9 +2170,9 @@ def engagement_zone_from_cells(
     producteurs, et une zone `old` plus étroite que celle qui a servi à les poser lève
     `KeyError: Delta update missing old zone hex`.
     """
-    source = set(cells)
-    from engine.hex_utils import dilate_hex_set
-    return dilate_hex_set(source, engagement_zone, board_cols, board_rows) | source
+    zone = dilate_hex_set(cells, engagement_zone, board_cols, board_rows)
+    zone.update(cells)
+    return zone
 
 
 def _compute_enemy_adjacent_cache_for_player_from_units_cache(
@@ -10919,7 +10934,7 @@ def _declare_order_payload(
         "wounds_to_save": len(batch["pool"]),
         "groups": groups,
     }
-    if ctx.mortal or batch.get("mortal_ability") is not None:  # get allowed : lot d attaques
+    if _batch_is_mortal(ctx, batch):
         # Mortal wounds (hazard 06.03, ou capacite 06.02 portee par un lot mortel) : pas
         # d arme, pas de save (armure ET invul ignorees, 10e).
         order_request["damage_type"] = "mortal"
@@ -11752,7 +11767,7 @@ def _manual_waiting_payload(
         "current_group_id": cur_gid,
         "wounds_remaining": len(batch["pool"]) - batch["pool_index"],
     }
-    if ctx.mortal or batch.get("mortal_ability") is not None:  # get allowed : lot d attaques
+    if _batch_is_mortal(ctx, batch):
         # Meme marqueur que la declaration d ordre : le client sait qu il alloue des blessures
         # MORTELLES (1 PV, sans sauvegarde), pas les blessures d une arme.
         allocation["damage_type"] = "mortal"
@@ -12186,8 +12201,9 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                     return _manual_waiting_payload(game_state, batch, alive_grp, ctx)  # choix libre
             # Lot MORTEL de capacite (06.02, defenseur humain) : 1 PV par blessure, aucune
             # sauvegarde, FNP « mortal » — jamais le profil d arme du ctx.
-            if batch.get("mortal_ability") is not None:  # get allowed : absent sur un lot d attaques
-                _resolve_one_ability_mortal_wound(game_state, alloc, batch)
+            _mortal_details = batch.get("mortal_details")  # get allowed : absent sur un lot d attaques
+            if _mortal_details is not None:
+                _resolve_one_mortal_wound(game_state, alloc, batch, _mortal_details)
             else:
                 (ctx.resolve_wound_fn or _resolve_one_manual_wound)(game_state, alloc, batch, ctx)
         if not advanced_batch:
@@ -12279,21 +12295,54 @@ def _apply_batch_mortal_wounds(
     if ctx.auto_decider is None or not ctx.auto_decider(game_state, target_sid):
         # Defenseur humain : le lot mortel prend la suite du lot courant. Les items n ont
         # aucun `rec` d attaque — `_mark_manual_overkill_wasted` n a rien a y marquer, et
-        # `_resolve_one_ability_mortal_wound` ecrit dans `details` (la ligne deja emise).
-        alloc["batches"].insert(alloc["current_batch_index"] + 1, {
-            "target_sid": target_sid,
-            "weapon_group_idx": None,
-            "defender_player": int(batch["defender_player"]),
-            "alloc_groups": None,
-            "declared_order": None, "current_group_index": 0,
-            "current_model_id": None,
-            "pool": [{"rec": {}} for _ in range(total)], "pool_index": 0,
-            "pending_mortal_wounds": None,
-            "mortal_ability": {"ability": ability, "details": details},
-        })
+        # `_resolve_one_mortal_wound` ecrit dans `details` (la ligne deja emise).
+        alloc["batches"].insert(
+            alloc["current_batch_index"] + 1,
+            _new_mortal_batch(target_sid, int(batch["defender_player"]), total, mortal_details=details),
+        )
         return
     allocate_mortal_wounds(game_state, target_sid, total, True, details)
     _count_mortal_details_in_summary(alloc["summary"], details)
+
+
+def _batch_is_mortal(ctx: ManualAllocCtx, batch: Dict[str, Any]) -> bool:
+    """Le lot alloue des blessures MORTELLES (1 PV, sans sauvegarde), pas celles d une arme.
+
+    Deux sources : le contexte entier est mortel (HAZARD_CTX — Desperate Escape, [HAZARDOUS],
+    Exhortation), ou le lot porte son propre puits de details (`mortal_details`, lot mortel de
+    capacite insere par `_apply_batch_mortal_wounds` dans une allocation de tir/combat)."""
+    return ctx.mortal or batch.get("mortal_details") is not None  # get allowed : lot d attaques
+
+
+def _new_mortal_batch(
+    target_sid: str, defender_player: int, n_wounds: int,
+    *, mortal_details: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Lot d allocation manuelle de `n_wounds` blessures MORTELLES sur `target_sid`.
+
+    Meme forme pour les deux producteurs — `build_manual_hazard_allocation` (lot unique d une
+    allocation HAZARD_CTX) et `_apply_batch_mortal_wounds` (lot insere dans l allocation de tir
+    ou de combat courante). Pas d arme ni de groupes d avance ; items minimaux avec un `rec`
+    vide pour `_mark_manual_overkill_wasted` (blessures perdues sur cible aneantie) ;
+    `pending_mortal_wounds` a None : un lot mortel n en produit pas d autres.
+
+    `mortal_details` : la liste `hazardDetails` de la ligne DEJA emise, que
+    `_resolve_one_mortal_wound` complete figurine par figurine. Absent sur le lot HAZARD_CTX,
+    dont le contexte porte le puits (`alloc["hazard_details"]`, cf. `_resolve_one_hazard_wound`).
+    """
+    batch: Dict[str, Any] = {
+        "target_sid": str(target_sid),
+        "weapon_group_idx": None,
+        "defender_player": int(defender_player),
+        "alloc_groups": None,
+        "declared_order": None, "current_group_index": 0,
+        "current_model_id": None,
+        "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
+        "pending_mortal_wounds": None,
+    }
+    if mortal_details is not None:
+        batch["mortal_details"] = mortal_details
+    return batch
 
 
 def _count_mortal_details_in_summary(summary: Dict[str, Any], details: List[Dict[str, Any]]) -> None:
@@ -12306,38 +12355,47 @@ def _count_mortal_details_in_summary(summary: Dict[str, Any], details: List[Dict
             summary["models_killed"] += 1
 
 
-def _resolve_one_ability_mortal_wound(
-    game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any]
-) -> None:
-    """Resout 1 blessure mortelle d un LOT MORTEL de capacite (06.02) sur `current_model_id`.
+def _resolve_one_mortal_wound(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any],
+    details: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Resout 1 blessure mortelle sur `batch["current_model_id"]` et rend son record.
 
-    Jumeau de `_resolve_one_hazard_wound` (24.15 / 09.07) et de `allocate_mortal_wounds` (regime
-    AUTO) : 1 PV, aucune sauvegarde, FNP « mortal » (24.12), `destroy_model(reason="hazard")` a
-    0 PV. Le record `{modelId, col, row, died[, fnpSaved]}` va dans la liste que la ligne
-    `SUFFERS N Mortal Wounds` deja emise porte par reference — meme forme que le regime AUTO,
-    donc meme journal, meme analyzer.
+    RESOLVEUR UNIQUE du chemin manuel, pour les deux puits : `alloc["hazard_details"]`
+    (HAZARD_CTX — 24.15, 09.07, Exhortation) et `batch["mortal_details"]` (lot mortel de
+    capacite 06.02). Meme regle que `allocate_mortal_wounds` (regime AUTO) : 1 PV, AUCUNE
+    sauvegarde (armure ET invulnerable ignorees, 10e), FNP « mortal » (24.12),
+    `destroy_model(reason="hazard")` a 0 PV. Le record `{modelId, col, row, died[, fnpSaved]}`
+    va dans `details` — la liste que la ligne `SUFFERS N Mortal Wounds` deja emise porte par
+    reference — donc meme journal, meme analyzer. Position capturee AVANT destroy, mais REQUISE :
+    elle alimente `hazardDetails`, donc l analyse et le replay.
+
+    Une figurine tuee n a pas a etre retiree de `current_model_id` ici : la boucle
+    d allocation re-selectionne des qu elle n est plus dans `models_cache`.
     """
     models_cache = require_key(game_state, "models_cache")
-    details: List[Dict[str, Any]] = batch["mortal_ability"]["details"]
     cur = batch["current_model_id"]
     m = models_cache[cur]
     col = int(require_key(m, "col"))
     row = int(require_key(m, "row"))
+    rec: Dict[str, Any] = {"modelId": str(cur), "col": col, "row": row, "died": False}
+    # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
+    # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent ici.
     _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
     _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False)
     if _fnp_ths and _roll_fnp_sequential(1, _fnp_ths) == 0:
-        details.append({"modelId": str(cur), "col": col, "row": row, "died": False, "fnpSaved": True})
-        batch["pool_index"] += 1
-        return
-    new_hp = int(m["HP_CUR"]) - 1
-    died = new_hp <= 0
-    if died:
-        destroy_model(game_state, cur, reason="hazard")
+        rec["fnpSaved"] = True  # L12 — FNP mortal wounds : journaliser la sauvegarde.
     else:
-        update_model_hp(game_state, cur, new_hp)
-    details.append({"modelId": str(cur), "col": col, "row": row, "died": died})
-    _count_mortal_details_in_summary(alloc["summary"], [details[-1]])
+        new_hp = int(m["HP_CUR"]) - 1
+        rec["died"] = new_hp <= 0
+        if rec["died"]:
+            destroy_model(game_state, cur, reason="hazard")
+        else:
+            update_model_hp(game_state, cur, new_hp)
+    details.append(rec)
+    _count_mortal_details_in_summary(alloc["summary"], [rec])
     batch["pool_index"] += 1
+    return rec
 
 
 def _count_selected_hazardous_weapons(
@@ -12679,46 +12737,15 @@ def build_manual_shoot_allocation(game_state: Dict[str, Any], attacker_squad_id:
 def _resolve_one_hazard_wound(
     game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any], ctx: ManualAllocCtx
 ) -> None:
-    """Resout 1 mortal wound (hazard 06.03) sur batch["current_model_id"].
+    """Resout 1 mortal wound (hazard 06.03) sur batch["current_model_id"] — HAZARD_CTX.
 
-    Mortal wound : AUCUNE sauvegarde (armure ET invulnerable ignorees, 10e) et 1 point de
-    degat. destroy_model (reason='hazard') si HP<=0, sinon update_model_hp. Remplit
-    ``alloc["hazard_details"]`` (forme {modelId,col,row,died}) pour le log differe. Remet
-    current_model_id a None si la fig meurt (declenche un nouveau choix)."""
-    models_cache = require_key(game_state, "models_cache")
-    summary = alloc["summary"]
-    cur = batch["current_model_id"]
-    m = models_cache[cur]
-    # Meme regle que le tir : position capturee AVANT destroy, mais REQUISE (elle alimente
-    # `hazardDetails` du log, donc l analyse et le replay).
-    col = int(require_key(m, "col"))
-    row = int(require_key(m, "row"))
-    # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
-    # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent (blessures auto-infligées
-    # par [HAZARDOUS] — pas des attaques ennemies).
-    _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
-    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False)
-    if _fnp_ths and _roll_fnp_sequential(1, _fnp_ths) == 0:
-        # L12 — FNP mortal wounds : journaliser la sauvegarde.
-        alloc["hazard_details"].append({"modelId": str(cur), "col": col, "row": row, "died": False, "fnpSaved": True})
-        batch["pool_index"] += 1
-        return
-    hp_before = int(m["HP_CUR"])
-    new_hp = hp_before - 1
-    destroyed = new_hp <= 0
-    summary["failed_saves"] += 1
-    summary["damage_total"] += 1
-    if destroyed:
-        destroy_model(game_state, cur, reason="hazard")
-        summary["models_killed"] += 1
-    else:
-        update_model_hp(game_state, cur, new_hp)
-    alloc["hazard_details"].append(
-        {"modelId": str(cur), "col": col, "row": row, "died": destroyed}
-    )
-    batch["pool_index"] += 1
-    if destroyed:
-        batch["current_model_id"] = None
+    Adaptateur `resolve_wound_fn` du resolveur unique `_resolve_one_mortal_wound`, puits
+    ``alloc["hazard_details"]`` (le log differe). Le resume HAZARD compte en plus chaque
+    blessure passee comme sauvegarde ratee : `wounds` y vaut le nombre de MW jetees, et
+    `failed_saves` celles que le FNP n a pas arretees."""
+    rec = _resolve_one_mortal_wound(game_state, alloc, batch, alloc["hazard_details"])
+    if not rec.get("fnpSaved"):  # get allowed : absent = blessure non sauvee
+        alloc["summary"]["failed_saves"] += 1
 
 
 def _finalize_hazard_alloc_log(
@@ -12773,23 +12800,10 @@ def build_manual_hazard_allocation(
         "damage_total": 0, "models_killed": 0, "events": [],
         "targets_meta": {sid: {"player": defender_player}},
     }
-    batch = {
-        "target_sid": sid,
-        "weapon_group_idx": None,
-        "defender_player": defender_player,
-        "alloc_groups": None,
-        "declared_order": None, "current_group_index": 0,
-        "current_model_id": None,
-        # Items minimaux : "rec" present pour _mark_manual_overkill_wasted (overkill MW perdues).
-        "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
-        # 06.02 : lu a la fermeture du lot par `_apply_batch_mortal_wounds`. Un jet de hasard
-        # n en produit aucune en plus des siennes : ecrit `None`, meme regime que le lot de tir.
-        "pending_mortal_wounds": None,
-    }
     game_state[HAZARD_CTX.alloc_key] = {
         "attacker_squad_id": sid,
         "weapon_groups": [],
-        "batches": [batch],
+        "batches": [_new_mortal_batch(sid, defender_player, n_wounds)],
         "current_batch_index": 0,
         "summary": summary,
         "hazard_details": [],

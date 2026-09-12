@@ -167,13 +167,14 @@ def living_datasheets(
     if not declared:
         return {unit_type}
     model_types = state.model_types
-    vivants = [
-        mid for mid in state.unit_model_hp.get(unit_id, {})  # get allowed : unité jamais vue
-        if mid not in exclude_mids
-    ]
-    if any(mid not in model_types for mid in vivants):
-        return None
-    present = {model_types[mid] for mid in vivants}
+    present: Set[str] = set()
+    for mid in state.unit_model_hp.get(unit_id, {}):  # get allowed : unité jamais vue
+        if mid in exclude_mids:
+            continue
+        mtype = model_types.get(mid)  # get allowed : socle vivant sans datasheet = abstention
+        if mtype is None:
+            return None
+        present.add(mtype)
     return present or None
 
 
@@ -227,52 +228,70 @@ _MW_DICE_RE = re.compile(r'\bMW:([0-9,]+)')
 _MW_TRIGGER_RE = re.compile(r'\bTrigger:(\d+)')
 
 
+def _mw_dice_error_sum_of_d6(brut: int, dice: Optional[List[int]], trigger: Optional[int]) -> Optional[str]:
+    """Hold Still and Say Aargh (`mortal_wounds_on_critical_wound`) : « inflicts D6 mortal
+    wounds » par blessure critique — `MW:` porte un D6 par critique, et N est leur somme."""
+    if dice is None:
+        return "segment MW: absent (un D6 par blessure critique attendu)"
+    if any(d < 1 or d > 6 for d in dice):
+        return f"MW:{dice} hors 1-6"
+    if sum(dice) != brut:
+        return f"compte {brut} ≠ somme des dés MW:{dice} = {sum(dice)}"
+    return None
+
+
+def _mw_dice_error_threshold_d3(brut: int, dice: Optional[List[int]], trigger: Optional[int]) -> Optional[str]:
+    """Exhortation of Rage (`mortal_wounds_on_fight_activation`) : « roll one D6 … 4-5: D3
+    mortal wounds. 6: 3 mortal wounds » — `Trigger:` porte le D6 ; sur 1-3 le compte est 0 et
+    `MW:` absent, sur 4-5 `MW:` porte le D3 dont N est la valeur, sur 6 N vaut 3 sans dé."""
+    if trigger is None:
+        return "segment Trigger: absent (D6 de déclenchement attendu)"
+    if trigger < 1 or trigger > 6:
+        return f"Trigger:{trigger} hors 1-6"
+    if trigger <= 3:
+        if brut != 0 or dice is not None:
+            return f"Trigger:{trigger} (1-3) mais compte {brut} / MW:{dice} — aucune blessure attendue"
+        return None
+    if trigger == 6:
+        if brut != 3 or dice is not None:
+            return f"Trigger:6 mais compte {brut} / MW:{dice} — 3 blessures sans dé attendues"
+        return None
+    if dice is None or len(dice) != 1 or dice[0] < 1 or dice[0] > 3:
+        return f"Trigger:{trigger} (4-5) mais MW:{dice} — un seul D3 attendu"
+    if brut != dice[0]:
+        return f"Trigger:{trigger} (4-5) : compte {brut} ≠ D3 MW:{dice[0]}"
+    return None
+
+
+#: Contrôle des dés PAR capacité 06.02 (`rule_id` de datasheet → prédicat de cohérence). C'est
+#: l'INVENTAIRE des capacités dont l'analyzer sait lire les dés ; `analyzer_core` le confronte à
+#: l'import à sa propre table tag → `rule_id` (`_MW_ABILITY_RULE_IDS`), si bien qu'une capacité
+#: ajoutée d'un côté sans l'autre lève au chargement du module, pas à la première ligne lue.
+MW_ABILITY_DICE_CHECKS: Dict[str, Any] = {
+    "mortal_wounds_on_critical_wound": _mw_dice_error_sum_of_d6,
+    "mortal_wounds_on_fight_activation": _mw_dice_error_threshold_d3,
+}
+
+
 def mw_ability_dice_error(rule_id: str, brut: int, action_desc: str) -> Optional[str]:
     """Le compte BRUT d'une ligne `SUFFERS N Mortal Wounds` de capacité suit-il ses dés ?
 
     Grammaire 9 : la ligne porte les dés qui ont produit son compte, et c'est ce qui rend le
-    compte CONTRÔLABLE au lieu d'être cru. Deux capacités, deux formes :
-      - `mortal_wounds_on_critical_wound` (Hold Still and Say Aargh) : « inflicts D6 mortal
-        wounds » par blessure critique — `MW:` porte un D6 par critique, et N est leur somme ;
-      - `mortal_wounds_on_fight_activation` (Exhortation of Rage) : « roll one D6 … 4-5: D3
-        mortal wounds. 6: 3 mortal wounds » — `Trigger:` porte le D6 ; sur 1-3 le compte est 0
-        et `MW:` absent, sur 4-5 `MW:` porte le D3 dont N est la valeur, sur 6 N vaut 3 sans dé.
+    compte CONTRÔLABLE au lieu d'être cru. Une forme par capacité — cf. `MW_ABILITY_DICE_CHECKS`
+    (dés qui se SOMMENT, ou D6 de déclenchement à seuil puis D3).
 
     Rend le libellé de la faute, ou ``None`` si la ligne est cohérente. Le compte comparé est
     le BRUT du journal (avant `[FNP:n]`) : les dés disent ce qui a été infligé, le FNP ce qui a
     été sauvé ensuite.
     """
+    check = MW_ABILITY_DICE_CHECKS.get(rule_id)  # get allowed : absence = erreur explicite ci-dessous
+    if check is None:
+        raise KeyError(f"mw_ability_dice_error: capacité 06.02 inconnue {rule_id!r}")
     dice_match = _MW_DICE_RE.search(action_desc)
     dice = [int(d) for d in dice_match.group(1).split(',') if d] if dice_match else None
     trigger_match = _MW_TRIGGER_RE.search(action_desc)
-    if rule_id == "mortal_wounds_on_critical_wound":
-        if dice is None:
-            return "segment MW: absent (un D6 par blessure critique attendu)"
-        if any(d < 1 or d > 6 for d in dice):
-            return f"MW:{dice} hors 1-6"
-        if sum(dice) != brut:
-            return f"compte {brut} ≠ somme des dés MW:{dice} = {sum(dice)}"
-        return None
-    if rule_id == "mortal_wounds_on_fight_activation":
-        if trigger_match is None:
-            return "segment Trigger: absent (D6 de déclenchement attendu)"
-        trigger = int(trigger_match.group(1))
-        if trigger < 1 or trigger > 6:
-            return f"Trigger:{trigger} hors 1-6"
-        if trigger <= 3:
-            if brut != 0 or dice is not None:
-                return f"Trigger:{trigger} (1-3) mais compte {brut} / MW:{dice} — aucune blessure attendue"
-            return None
-        if trigger == 6:
-            if brut != 3 or dice is not None:
-                return f"Trigger:6 mais compte {brut} / MW:{dice} — 3 blessures sans dé attendues"
-            return None
-        if dice is None or len(dice) != 1 or dice[0] < 1 or dice[0] > 3:
-            return f"Trigger:{trigger} (4-5) mais MW:{dice} — un seul D3 attendu"
-        if brut != dice[0]:
-            return f"Trigger:{trigger} (4-5) : compte {brut} ≠ D3 MW:{dice[0]}"
-        return None
-    raise KeyError(f"mw_ability_dice_error: capacité 06.02 inconnue {rule_id!r}")
+    trigger = int(trigger_match.group(1)) if trigger_match else None
+    return check(brut, dice, trigger)
 
 
 def check_anti_x_threshold(
