@@ -169,7 +169,7 @@ def test_squad_fight_outside_selection_pool_is_rejected(melee_scenario_file):
     outsiders = [str(sid) for sid in gs["units_cache"] if str(sid) not in pool]
     assert outsiders, "le scénario doit comporter une escouade non sélectionnable"
 
-    with pytest.raises(ValueError, match="hors du pool de selection 12.04"):
+    with pytest.raises(ValueError, match="hors du pool de selection"):
         eng._process_squad_action({"action": "squad_fight", "squad_id": outsiders[0]})
 
 
@@ -340,3 +340,166 @@ def test_combat_a_vide_ne_pose_pas_pending_fight_weapon_select(melee_scenario_fi
     assert result.get("waiting_for_weapon_select") is not True, (
         "combat à vide : waiting_for_weapon_select ne doit pas être True"
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# 12.08 AFTER — Engaging consolidation → « New Foes to Face » sur le chemin gym.
+# « If one or more enemy units engaged with your unit have not been selected to fight this
+# phase, your opponent must select each of those units, one at a time; when each is selected,
+# it becomes eligible to fight and is selected to fight (12.04). »
+# ---------------------------------------------------------------------------------------------
+
+# Position de l'ennemi E (unité 4, P2) pour le scénario : à ≤ 3" (consolidation_trigger_range)
+# de l'unité 1 (P1) SANS être engagé avec elle, et atteignable par une consolidation engaging
+# (`squad_consolidate_plan` rend un plan qui finit engagé). Mesuré sur le scénario mêlée :
+# rows 212-220 = déjà engagé (mode ongoing), 222-225 = engaging mais plan None (hors d'atteinte).
+_NEW_FOE_COL, _NEW_FOE_ROW = 59, 221
+
+
+def _engine_at_new_foes(scenario_file: str):
+    """Moteur gym arrêté par `_fight_v11_gym_settle` sur les New Foes de l'unité 1.
+
+    Construit l'état « U a été sélectionnée et a détruit sa cible » sans jets : la cible (unité 2)
+    est retirée, l'unité 1 enregistrée « selected to fight », l'ennemi E (unité 4, jamais éligible
+    12.04 : ni engagé au début de l'étape, ni chargeur) posé à ≤ 3" hors engagement. Puis le
+    settle — la fonction de production appelée après chaque `squad_fight` — déroule : fin de
+    l'étape FIGHT (plus aucune unité éligible), CONSOLIDATE, conso engaging de 1 vers 4.
+    """
+    from engine.phase_handlers.fight_handlers import _fight_v11_register_selection
+    from engine.phase_handlers.shared_utils import destroy_model, place_model_at_effective_level
+
+    eng = _engine_in_fight_phase(scenario_file)
+    gs = eng.game_state
+    assert gs["current_player"] == 1 and gs["fight_subphase"] == "fight"
+    destroy_model(gs, "2#0", "combat")
+    _fight_v11_register_selection(gs, "1")
+    place_model_at_effective_level(
+        gs, "4#0", _NEW_FOE_COL, _NEW_FOE_ROW, int(gs["models_cache"]["4#0"]["level"])
+    )
+    assert "4" not in {str(x) for x in gs["units_selected_to_fight"]}
+    eng._fight_v11_gym_settle()
+    return eng
+
+
+def test_engaging_consolidation_hands_new_foes_to_opponent(melee_scenario_file):
+    """12.08 AFTER : la conso engaging de 1 finit engagée avec 4, jamais sélectionnée → le settle
+    s'arrête, et le pool (source du masque et du siège qui agit) ne contient QUE ce New Foe.
+
+    Échoue sur l'ancien code : le settle drainait toute la consolidation sans rien poser — pool
+    vide, 4 jamais sélectionnée, phase terminée sans son combat.
+    """
+    from engine.phase_handlers.fight_handlers import (
+        fight_v11_current_pool,
+        fight_v11_fight_selection_pool,
+    )
+
+    eng = _engine_at_new_foes(melee_scenario_file)
+    gs = eng.game_state
+    assert gs["fight_subphase"] == "consolidate"
+    assert "1" in gs["consolidation_done"], "U a consolidé (I1)"
+    assert gs["consolidation_new_foes_pending"] == ["4"]
+    assert gs["consolidation_new_foes_for_unit"] == "1"
+    # Sélecteur = adversaire du propriétaire de U (P1) → P2.
+    assert gs["consolidation_new_foes_selector"] == 2
+    assert [str(x) for x in fight_v11_current_pool(gs)] == ["4"]
+    assert [str(x) for x in fight_v11_fight_selection_pool(gs)] == ["4"]
+    assert "4" not in gs["consolidation_done"], "E n'a pas encore combattu : pas de conso (I5)"
+
+
+def test_new_foe_mask_opens_fight_slot_in_consolidate(melee_scenario_file):
+    """Parité masque/commit (face masque) : en sous-phase consolidate, le New Foe obtient un slot
+    FIGHT vers l'unité qui l'a engagé. L'ancienne garde `fight_subphase == "fight"` le masquait
+    entièrement : masque vide → `advance_phase` → combat perdu.
+    """
+    from engine.phase_handlers.shared_utils import (
+        SQUAD_ACTION_FIGHT_SLOT_BASE,
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+        build_squad_action_mask,
+        get_enemy_slot_mapping,
+    )
+
+    eng = _engine_at_new_foes(melee_scenario_file)
+    gs = eng.game_state
+    enemy_slot_ids = get_enemy_slot_mapping(gs, 2)
+    mask = build_squad_action_mask(gs, "4", enemy_slot_ids)
+    opened = [
+        str(enemy_slot_ids[i])
+        for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)
+        if mask[SQUAD_ACTION_FIGHT_SLOT_BASE + i]
+    ]
+    assert opened == ["1"], f"slots FIGHT ouverts pour le New Foe : {opened}"
+
+
+def test_new_foe_fights_then_consolidation_resumes(melee_scenario_file):
+    """Le New Foe est « selected to fight » par le commit `squad_fight` en sous-phase consolidate,
+    combat (normal fight, in-place), puis la consolidation reprend : liste purgée, E consolide à
+    son tour (I5), la sous-phase se draine (I2 : E combat une seule fois).
+    """
+    from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
+    from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+
+    eng = _engine_at_new_foes(melee_scenario_file)
+    gs = eng.game_state
+    ok, result = eng._process_squad_action(_fight_action(gs, "4"))
+    assert ok is True
+    assert "4" in {str(x) for x in gs["units_selected_to_fight"]}
+    if result.get("waiting_for_weapon_select"):
+        slot = min(gs[PENDING_FIGHT_WEAPON_KEY]["slot_to_code"])
+        ok, result = eng._process_squad_action(
+            {"action": "squad_fight_weapon", "squad_id": "4", "weapon_slot": slot}
+        )
+        assert ok is True
+    assert result["action"] == "squad_fight" and result["squad_id"] == "4"
+    assert "fight_result" in result, "le combat du New Foe est résolu (reward porté)"
+    # Reprise de la consolidation par le settle : liste épuisée → purgée ; E consolide (12.08
+    # « was eligible to fight this phase ») ; plus rien à faire → pool vide (→ advance_phase).
+    assert "consolidation_new_foes_pending" not in gs
+    assert "consolidation_new_foes_selector" not in gs
+    assert "consolidation_new_foes_for_unit" not in gs
+    assert gs["fight_subphase"] == "consolidate"
+    assert "4" in gs["consolidation_done"]
+    assert fight_v11_current_pool(gs) == []
+
+
+def test_squad_fight_in_consolidate_restricted_to_new_foes(melee_scenario_file):
+    """Parité masque/commit (face commit) : en consolidate, `squad_fight` n'accepte QUE les New
+    Foes — pas l'alternance 12.04 entière (§8.C). L'unité 3 (P1, jamais sélectionnée) est refusée.
+    """
+    eng = _engine_at_new_foes(melee_scenario_file)
+    with pytest.raises(ValueError, match="hors du pool de selection"):
+        eng._process_squad_action({"action": "squad_fight", "squad_id": "3"})
+
+
+def test_gym_consolidation_log_carries_pre_move_mode(melee_scenario_file):
+    """L17 : le mode 12.08 loggué est celui constaté AVANT le move. Relu après, une conso engaging
+    réussie (engagée par construction) était logguée `ongoing` — faux tag dans step.log.
+    """
+    eng = _engine_at_new_foes(melee_scenario_file)
+    entries = [
+        e for e in eng.game_state["action_logs"]
+        if e.get("type") == "consolidation" and str(e.get("unitId")) == "1"
+    ]
+    assert len(entries) == 1, entries
+    assert entries[0]["consolidationMode"] == "engaging"
+
+
+def test_auto_step_resolves_new_foes_before_consolidation(melee_scenario_file):
+    """Siège auto (PvE : `_is_fight_auto_execution_allowed`) : un New Foe gelé par le settle du
+    bot doit combattre AVANT toute reprise de la consolidation — même priorité que le flux
+    manuel. L'ancien auto-step ignorait la liste et sautait droit à `fight_v11_grouped_next`.
+    """
+    from engine.phase_handlers.fight_handlers import _fight_v11_auto_step
+
+    eng = _engine_at_new_foes(melee_scenario_file)
+    gs = eng.game_state
+    ok, result = _fight_v11_auto_step(gs, eng.config)
+    assert ok is True
+    assert result["action"] == "combat" and result["unitId"] == "4"
+    assert result["fight_type"] == "normal", "New Foe engagé : normal fight in-place, pas d'overrun"
+    assert "4" in {str(x) for x in gs["units_selected_to_fight"]}
+    assert "4" not in gs["consolidation_done"], "le combat précède la conso, il ne la remplace pas"
+    # Appel suivant : liste épuisée → purge → la consolidation reprend (E, désormais éligible).
+    ok, result = _fight_v11_auto_step(gs, eng.config)
+    assert ok is True
+    assert "consolidation_new_foes_pending" not in gs
+    assert result["action"] == "consolidation" and result["unitId"] == "4"

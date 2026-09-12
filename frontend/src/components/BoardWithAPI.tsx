@@ -4037,6 +4037,29 @@ export const BoardWithAPI: React.FC = () => {
           >
             Cancel
           </button>
+          {/* Overrun 12.06 : l'unité peut faire UN pile-in additionnel avant de combattre —
+              ouvre le plan par-figurine (même barre que le pile-in 12.02), puis revient ici. */}
+          {apiProps.fightOverrunEligible && (
+            <button
+              type="button"
+              title="Overrun (12.06) : pile-in additionnel de 3&quot; avant de combattre"
+              onClick={() => {
+                if (!isGameOver) apiProps.onOverrunPileIn?.();
+              }}
+              style={{
+                border: "1px solid rgba(0,0,0,0.35)",
+                borderRadius: 6,
+                background: "#7c3aed",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "8px 14px",
+              }}
+            >
+              Overrun
+            </button>
+          )}
           <button
             type="button"
             disabled={!apiProps.squadFightPlan.canValidate}
