@@ -2054,11 +2054,25 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
     explicitement s'il manque — le seul artefact reprenable etait le `_interrupted` du Ctrl-C.
     `save_vecnormalize=True` de SB3 ne convient pas : il ecrit
     `<prefix>_vecnormalize_<n>_steps.pkl`, un nom que `get_vec_normalize_path` ne resout pas.
+
+    L'instance tient la liste des zips qu'elle a ELLE-MEME ecrits (`written_checkpoints`, ordre
+    d'ecriture) : c'est sur cette liste — jamais sur un balayage du dossier — que portent la
+    rotation (`RotatingCheckpointCallback`) et le retrait de fin de run reussi
+    (`discard_written_checkpoints`). Un balayage `<prefix>_*_steps.zip` frappait les checkpoints
+    des runs precedents, qui sont l'historique et restent en place (cf. le contrat des artefacts
+    canoniques et `test_scored_and_checkpoint_models_are_NOT_archived`). L'ordre d'ecriture est
+    l'ordre en pas : `num_timesteps` est monotone dans un processus, et l'instance survit aux
+    tranches `learn()` successives (`n_calls` n'est pas remis a zero par `init_callback`).
     """
 
     #: Compteur d'episodes GLOBAL, pose apres construction — le tracker de metriques n'existe pas
     #: encore quand les callbacks sont crees. Meme convention que `BotEvaluationCallback`.
     metrics_tracker: Any = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        #: Chemins des zips ecrits par cette instance, du plus ancien au plus recent.
+        self.written_checkpoints: List[str] = []
 
     def _on_step(self) -> bool:
         continue_training = super()._on_step()
@@ -2071,46 +2085,47 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
             checkpoint_path = self._checkpoint_path(extension="zip")
             save_vec_normalize(self.model.get_env(), checkpoint_path)
             save_run_state(checkpoint_path, int(self.metrics_tracker.episode_count))
+            # Un chemin reecrit (meme nombre de pas) redevient le plus recent, sans doublon.
+            if checkpoint_path in self.written_checkpoints:
+                self.written_checkpoints.remove(checkpoint_path)
+            self.written_checkpoints.append(checkpoint_path)
         return continue_training
+
+    def discard_written_checkpoints(self) -> List[str]:
+        """Retire les checkpoints de CE run, compagnons compris, et rend les chemins retires.
+
+        Appele apres un entrainement REUSSI : le modele canonique est publie, les checkpoints
+        periodiques du run n'ont plus d'usage. Ceux des runs precedents ne sont pas touches.
+        """
+        discarded = list(self.written_checkpoints)
+        for checkpoint_path in discarded:
+            # Les compagnons partent AVEC leur zip : un orphelin serait relu par un futur
+            # checkpoint de meme nom (cf. ai/model_artifacts.py).
+            remove_model_with_companions(checkpoint_path)
+        self.written_checkpoints.clear()
+        return discarded
 
 
 class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
     """Checkpoint periodique qui ne garde que les N derniers checkpoints ecrits par CE callback.
 
-    La rotation porte sur la liste des chemins que l'instance a elle-meme ecrits, dans l'ordre
-    d'ecriture — PAS sur le contenu du dossier. Un balayage `<prefix>_*_steps.zip` trie par nombre
-    de pas supprimait les checkpoints du run courant : un run `--new` repart de 0, ses checkpoints
-    sont toujours les plus « anciens en pas » face a ceux d'un run precedent a plusieurs millions
-    de pas, et seuls les perimes survivaient (aucun checkpoint conserve du 2026-09-05 au
-    2026-09-12). Les checkpoints d'un run precedent restent en place : leur nom est unique, ils
-    sont l'historique (cf. le contrat des artefacts canoniques et
-    `test_scored_and_checkpoint_models_are_NOT_archived`).
-
-    L'ordre d'ecriture est l'ordre en pas : `num_timesteps` est monotone dans un processus, et
-    l'instance survit aux tranches `learn()` successives de `train_model` (`n_calls` n'est pas
-    remis a zero par `init_callback`).
+    La rotation porte sur `written_checkpoints` — PAS sur le contenu du dossier. Un balayage
+    `<prefix>_*_steps.zip` trie par nombre de pas supprimait les checkpoints du run courant : un
+    run `--new` repart de 0, ses checkpoints sont toujours les plus « anciens en pas » face a
+    ceux d'un run precedent a plusieurs millions de pas, et seuls les perimes survivaient (aucun
+    checkpoint conserve du 2026-09-05 au 2026-09-12).
     """
 
     def __init__(self, max_checkpoints: int, **kwargs):
         super().__init__(**kwargs)
         self.max_checkpoints = max_checkpoints
-        #: Chemins des zips ecrits par cette instance, du plus ancien au plus recent.
-        self._written_checkpoints: List[str] = []
-
-    def _rotate_own_checkpoints(self, checkpoint_path: str) -> None:
-        # Un chemin reecrit (meme nombre de pas) redevient le plus recent, sans doublon.
-        if checkpoint_path in self._written_checkpoints:
-            self._written_checkpoints.remove(checkpoint_path)
-        self._written_checkpoints.append(checkpoint_path)
-        while len(self._written_checkpoints) > self.max_checkpoints:
-            # Les compagnons partent AVEC leur zip : un orphelin serait relu par un futur
-            # checkpoint de meme nom (cf. ai/model_artifacts.py).
-            remove_model_with_companions(self._written_checkpoints.pop(0))
 
     def _on_step(self) -> bool:
         continue_training = super()._on_step()
-        if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
-            self._rotate_own_checkpoints(self._checkpoint_path(extension="zip"))
+        while len(self.written_checkpoints) > self.max_checkpoints:
+            # Les compagnons partent AVEC leur zip : un orphelin serait relu par un futur
+            # checkpoint de meme nom (cf. ai/model_artifacts.py).
+            remove_model_with_companions(self.written_checkpoints.pop(0))
         return continue_training
 
 
@@ -4899,37 +4914,24 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
             publish_canonical_model(model, model_path, int(metrics_tracker.episode_count))
         
-        # Clean up checkpoint files after successful training
-        model_dir = os.path.dirname(model_path)
-        checkpoint_pattern = os.path.join(model_dir, "ppo_*_steps.zip")
-        checkpoint_files = glob.glob(checkpoint_pattern)
+        # Le run reussi retire SES checkpoints periodiques, compagnons compris (zip, stats
+        # VecNormalize, compte d'episodes) : le modele canonique est publie, ils n'ont plus
+        # d'usage. Ceux des runs precedents restent en place — un balayage `ppo_*_steps.zip` du
+        # dossier les effacait avec, et laissait orphelin le compte d'episodes de chacun.
+        discarded_checkpoints = [
+            path
+            for callback in callbacks
+            if isinstance(callback, VecNormalizeCheckpointCallback)
+            for path in callback.discard_written_checkpoints()
+        ]
+        if discarded_checkpoints:
+            print(f"\n🧹 {len(discarded_checkpoints)} checkpoint(s) de ce run retire(s)")
         
-        if checkpoint_files:
-            print(f"\n🧹 Cleaning up {len(checkpoint_files)} checkpoint files...")
-            for checkpoint_file in checkpoint_files:
-                try:
-                    os.remove(checkpoint_file)
-                    checkpoint_vec_path = get_vec_normalize_path(checkpoint_file)
-                    if os.path.exists(checkpoint_vec_path):
-                        os.remove(checkpoint_vec_path)
-                    if verbose := 0:  # Only log if verbose
-                        print(f"   Removed: {os.path.basename(checkpoint_file)}")
-                except Exception as e:
-                    print(f"   ⚠️  Could not remove {os.path.basename(checkpoint_file)}: {e}")
-            print(f"✅ Checkpoint cleanup complete")
-        
-        # Also remove interrupted file if it exists — WITH its per-model VecNormalize stats
-        # (V11 §0.35) : supprimer le zip en laissant le pkl fabrique un artefact orphelin.
+        # Le `_interrupted` d'un Ctrl-C precedent part avec ses compagnons, meme regle.
         interrupted_path = _interrupted_model_path(model_path)
         if os.path.exists(interrupted_path):
-            try:
-                os.remove(interrupted_path)
-                interrupted_vec_path = get_vec_normalize_path(interrupted_path)
-                if os.path.exists(interrupted_vec_path):
-                    os.remove(interrupted_vec_path)
-                print(f"🧹 Removed old interrupted file")
-            except Exception as e:
-                print(f"   ⚠️  Could not remove interrupted file: {e}")
+            remove_model_with_companions(interrupted_path)
+            print(f"🧹 Removed old interrupted file")
         
         return True
         

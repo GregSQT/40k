@@ -305,6 +305,60 @@ def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(mod
     assert not any(p.startswith("ppo_checkpoint_10000_steps") for p in os.listdir(save_path))
 
 
+def _write_stale_checkpoint(save_path, steps: str) -> None:
+    (save_path / f"ppo_checkpoint_{steps}_steps.zip").write_bytes(b"stale")
+    (save_path / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"stale")
+    (save_path / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text('{"episodes_trained": 1}')
+
+
+def test_discard_written_checkpoints_removes_only_this_runs_checkpoints_with_companions(
+    models_root, tmp_path
+):
+    """Fin de run réussi : les checkpoints de CE run partent avec leurs trois artefacts, ceux d'un
+    run précédent restent. Le balayage `ppo_*_steps.zip` du dossier effaçait aussi le périmé, et
+    laissait son `_run_state.json` orphelin. Mode SANS rotation : la liste vit dans la classe mère."""
+    save_path = tmp_path / "ckpts"
+    save_path.mkdir()
+    _write_stale_checkpoint(save_path, "24789576")
+    callback = VecNormalizeCheckpointCallback(
+        save_freq=1, save_path=str(save_path), name_prefix="ppo_checkpoint"
+    )
+    callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
+    model = _make_vec_normalize_model()
+    callback.init_callback(cast(Any, model))
+    for steps in (10000, 20000):
+        _run_checkpoint(callback, model, steps)
+    assert callback.written_checkpoints == [
+        os.path.join(str(save_path), "ppo_checkpoint_10000_steps.zip"),
+        os.path.join(str(save_path), "ppo_checkpoint_20000_steps.zip"),
+    ]
+
+    discarded = callback.discard_written_checkpoints()
+
+    assert [os.path.basename(p) for p in discarded] == [
+        "ppo_checkpoint_10000_steps.zip", "ppo_checkpoint_20000_steps.zip"
+    ]
+    assert sorted(os.listdir(save_path)) == [
+        "ppo_checkpoint_24789576_steps.zip",
+        "ppo_checkpoint_24789576_steps_run_state.json",
+        "ppo_checkpoint_24789576_steps_vec_normalize.pkl",
+    ]
+    # Idempotent : un second appel ne retire rien.
+    assert callback.discard_written_checkpoints() == []
+
+
+def test_train_model_discards_the_checkpoints_of_the_run_through_the_callbacks():
+    """`train_model` ne balaie plus le dossier : il retire par les callbacks, et le `_interrupted`
+    part avec ses compagnons. Vérifié sur la source, comme `test_the_training_paths_share_the_prologue` :
+    le jouer demanderait un `learn()` réel et la publication du modèle canonique."""
+    import inspect
+
+    source = inspect.getsource(ai.train.train_model)
+    assert "discard_written_checkpoints()" in source
+    assert "remove_model_with_companions(interrupted_path)" in source
+    assert "glob.glob(" not in source
+
+
 def _write_previous_canonical_model(models_root, run_dir: str = "/tb/run_20260101-000000"):
     """Un modele canonique complet : poids, deux compagnons, et son sidecar TensorBoard."""
     previous = models_root / "TestAgent" / "model_TestAgent.zip"
