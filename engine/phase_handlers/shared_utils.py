@@ -5635,13 +5635,20 @@ def ascent_field_for_model(
     if cached is not None and cached[0] >= budget:
         return cached[1]
     unit = require_unit_by_id(game_state, str(squad_id))
+    start = (int(model["col"]), int(model["row"]))
     # Obstacles de SOL = la definition PARTAGEE du trajet legal, la meme que celle du champ
-    # geodesique de plain-pied : les deux doivent contourner exactement les memes cases.
+    # geodesique de plain-pied : les deux doivent contourner exactement les memes cases. La case
+    # de DEPART en est retiree comme partout ailleurs (`_euclidean_move_field_for_model`, pool
+    # par-figurine) : le Dijkstra multi-source IGNORE une source qui est un obstacle, donc une
+    # figurine dont la case est dans la bande d'engagement ennemie (bande infranchissable par
+    # config) n'avait aucun champ de montee alors que son champ de plain-pied sortait de sa case.
     _pairs, _bm = move_transit_blocked_forms(game_state, str(squad_id), int(player), 0)
+    _ground = set(_pairs)
+    _ground.discard(start)
     field = _model_multilevel_reachable_field(
         game_state, unit, str(squad_id), model,
-        (int(model["col"]), int(model["row"])), budget, {int(level)},
-        set(_pairs), game_state.get("terrain_areas", []),  # get allowed (scenario sans terrain)
+        start, budget, {int(level)},
+        _ground, game_state.get("terrain_areas", []),  # get allowed (scenario sans terrain)
         start_level=int(require_key(model, "level")),
     ).get(int(level), {})  # get allowed (niveau inatteignable = aucune case)
     fields[fkey] = (budget, field)
