@@ -148,7 +148,7 @@ python3 -m ai.training_contract --init --agent <agent_key>
 ### Reprendre depuis un checkpoint périodique
 ```bash
 python ai/train.py --agent <agent_key> --training-config default --scenario bot \
-  --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip
+  --resume-from ai/models/<agent_key>/ppo_checkpoint_20260912-143000_640000_steps.zip
 ```
 `--resume-from` installe le checkpoint **et ses stats VecNormalize** (`<stem>_vec_normalize.pkl`,
 écrit par le callback de checkpoint) au chemin canonique du modèle, écarte les artefacts canoniques
@@ -169,8 +169,11 @@ explicitement plutôt que de servir les stats d'un autre modèle (V11 §0.35).
 d'entraînement ne les retire en fin de run réussi, et `--new` ne les archive pas. Ils sont le seul
 point de reprise d'un run terminé dont la politique s'avère mauvaise, et sous `save_best_robust` la
 seule trace des poids de fin de run (le canonique est l'instantané robuste). Ceux d'un run précédent
-restent donc en place : les distinguer par leur nombre de pas et leur date avant un `--resume-from`
-est à la charge de l'opérateur — la promotion repose le contrat courant sur le checkpoint promu sans
+restent donc en place, et **le nom porte l'horodatage du run** :
+`<checkpoint_name_prefix>_<AAAAMMJJ-HHMMSS>_<pas>_steps.zip`. Nommé par le seul nombre de pas, un
+`--new` (qui repart de 0) comme un `--resume-from` (qui continue au compte du checkpoint promu)
+écrasait en silence ceux du run précédent à chaque compte atteint. Le dossier dit donc à quel run
+appartient chaque checkpoint ; la promotion repose le contrat courant sur le checkpoint promu sans
 vérifier sa lignée.
 
 ### Key Paths
@@ -1148,7 +1151,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1       --scenari
 # Reprise sur un modèle EXISTANT
 python3 ai/train.py --agent ArmageddonAgent --training-config x1 --scenario bot --resolution 1 --append
 python3 ai/train.py --agent ArmageddonAgent --scenario bot --resolution 1 \
-    --resume-from ai/models/ArmageddonAgent/ppo_checkpoint_640000_steps.zip
+    --resume-from ai/models/ArmageddonAgent/ppo_checkpoint_20260912-143000_640000_steps.zip
 
 # Evaluation (no training)
 python3 ai/train.py --agent ArmageddonAgent --training-config x1 --resolution 1 --test-only --step

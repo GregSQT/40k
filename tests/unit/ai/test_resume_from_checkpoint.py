@@ -217,10 +217,14 @@ def _run_checkpoint(callback, model, timesteps: int):
     callback.on_step()
 
 
+#: Horodatage de run fige : le nom d'un checkpoint le porte (`<prefix>_<run>_<pas>_steps.zip`).
+RUN = "20260912-120000"
+
+
 def test_checkpoint_callback_writes_vec_normalize_stats(models_root, tmp_path):
     save_path = str(tmp_path / "ckpts")
     callback = VecNormalizeCheckpointCallback(
-        save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
+        run_stamp=RUN, save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
     )
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=4242))
     model = _make_vec_normalize_model()
@@ -228,7 +232,7 @@ def test_checkpoint_callback_writes_vec_normalize_stats(models_root, tmp_path):
 
     _run_checkpoint(callback, model, 640000)
 
-    zip_path = os.path.join(save_path, "ppo_checkpoint_640000_steps.zip")
+    zip_path = os.path.join(save_path, f"ppo_checkpoint_{RUN}_640000_steps.zip")
     assert os.path.exists(zip_path)
     # Le pkl doit porter EXACTEMENT le nom attendu par la reprise.
     assert os.path.exists(get_vec_normalize_path(zip_path))
@@ -239,7 +243,7 @@ def test_checkpoint_callback_writes_vec_normalize_stats(models_root, tmp_path):
 def test_checkpoint_callback_refuses_to_save_without_an_episode_counter(models_root, tmp_path):
     """Compteur non branche = checkpoint irreprenable : on leve au lieu d'ecrire un zip inutile."""
     callback = VecNormalizeCheckpointCallback(
-        save_freq=1, save_path=str(tmp_path / "ckpts"), name_prefix="ppo_checkpoint"
+        run_stamp=RUN, save_freq=1, save_path=str(tmp_path / "ckpts"), name_prefix="ppo_checkpoint"
     )
     model = _make_vec_normalize_model()
     callback.init_callback(cast(Any, model))
@@ -248,10 +252,55 @@ def test_checkpoint_callback_refuses_to_save_without_an_episode_counter(models_r
         _run_checkpoint(callback, model, 640000)
 
 
+@pytest.mark.parametrize("run_stamp", ["", None, 20260912])
+def test_checkpoint_callback_refuses_an_empty_run_stamp(tmp_path, run_stamp):
+    """Sans horodatage de run, deux runs ecrivent les memes noms : refuse a la construction."""
+    with pytest.raises(ValueError, match="run_stamp"):
+        VecNormalizeCheckpointCallback(
+            run_stamp=cast(Any, run_stamp), save_freq=1, save_path=str(tmp_path),
+            name_prefix="ppo_checkpoint",
+        )
+
+
+def test_two_runs_at_the_same_step_count_never_overwrite_each_other(models_root, tmp_path):
+    """Un `--new` repart de 0, un `--resume-from` continue au compte du checkpoint promu : les
+    deux atteignent les comptes du run precedent. Nomme par le seul nombre de pas, le checkpoint
+    du run entrant ECRASAIT celui du run sortant — et son compte d'episodes avec (V11 §0.58)."""
+    save_path = str(tmp_path / "ckpts")
+    model = _make_vec_normalize_model()
+
+    first = VecNormalizeCheckpointCallback(
+        run_stamp="20260912-100000", save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
+    )
+    first.metrics_tracker = cast(Any, SimpleNamespace(episode_count=111))
+    first.init_callback(cast(Any, model))
+    _run_checkpoint(first, model, 50000)
+
+    second = VecNormalizeCheckpointCallback(
+        run_stamp="20260912-110000", save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
+    )
+    second.metrics_tracker = cast(Any, SimpleNamespace(episode_count=222))
+    second.init_callback(cast(Any, model))
+    _run_checkpoint(second, model, 50000)
+
+    zips = sorted(p for p in os.listdir(save_path) if p.endswith(".zip"))
+    assert zips == [
+        "ppo_checkpoint_20260912-100000_50000_steps.zip",
+        "ppo_checkpoint_20260912-110000_50000_steps.zip",
+    ]
+    # Le checkpoint du premier run est intact, compte d'episodes compris.
+    assert load_run_state(os.path.join(save_path, zips[0])) == 111
+    assert load_run_state(os.path.join(save_path, zips[1])) == 222
+    # Et chaque instance ne tient que le sien : la rotation de l'un ne touchera jamais l'autre.
+    assert first.written_checkpoints == [os.path.join(save_path, zips[0])]
+    assert second.written_checkpoints == [os.path.join(save_path, zips[1])]
+
+
 def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
     save_path = str(tmp_path / "ckpts")
     callback = RotatingCheckpointCallback(
-        max_checkpoints=2, save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
+        max_checkpoints=2, run_stamp=RUN, save_freq=1, save_path=save_path,
+        name_prefix="ppo_checkpoint",
     )
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
     model = _make_vec_normalize_model()
@@ -264,12 +313,12 @@ def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
     # Les TROIS artefacts d'un checkpoint partent ensemble : un orphelin serait relu par un
     # futur checkpoint de meme nom.
     assert remaining == [
-        "ppo_checkpoint_200_steps.zip",
-        "ppo_checkpoint_200_steps_run_state.json",
-        "ppo_checkpoint_200_steps_vec_normalize.pkl",
-        "ppo_checkpoint_300_steps.zip",
-        "ppo_checkpoint_300_steps_run_state.json",
-        "ppo_checkpoint_300_steps_vec_normalize.pkl",
+        f"ppo_checkpoint_{RUN}_200_steps.zip",
+        f"ppo_checkpoint_{RUN}_200_steps_run_state.json",
+        f"ppo_checkpoint_{RUN}_200_steps_vec_normalize.pkl",
+        f"ppo_checkpoint_{RUN}_300_steps.zip",
+        f"ppo_checkpoint_{RUN}_300_steps_run_state.json",
+        f"ppo_checkpoint_{RUN}_300_steps_vec_normalize.pkl",
     ]
 
 
@@ -289,7 +338,8 @@ def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(mod
     for steps in ("24309576", "24549576", "24789576"):
         _write_stale_checkpoint(save_path, steps)
     callback = RotatingCheckpointCallback(
-        max_checkpoints=3, save_freq=1, save_path=str(save_path), name_prefix="ppo_checkpoint"
+        max_checkpoints=3, run_stamp=RUN, save_freq=1, save_path=str(save_path),
+        name_prefix="ppo_checkpoint",
     )
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
     model = _make_vec_normalize_model()
@@ -302,15 +352,15 @@ def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(mod
     # Le périmé reste en place (contrat `test_scored_and_checkpoint_models_are_NOT_archived`) ;
     # la rotation ne porte que sur ce que CE callback a écrit : 10000 part, les trois derniers restent.
     assert remaining == [
-        "ppo_checkpoint_20000_steps.zip",
+        f"ppo_checkpoint_{RUN}_20000_steps.zip",
+        f"ppo_checkpoint_{RUN}_30000_steps.zip",
+        f"ppo_checkpoint_{RUN}_40000_steps.zip",
         "ppo_checkpoint_24309576_steps.zip",
         "ppo_checkpoint_24549576_steps.zip",
         "ppo_checkpoint_24789576_steps.zip",
-        "ppo_checkpoint_30000_steps.zip",
-        "ppo_checkpoint_40000_steps.zip",
     ]
     # Et les compagnons du checkpoint tourné partent avec lui.
-    assert not any(p.startswith("ppo_checkpoint_10000_steps") for p in os.listdir(save_path))
+    assert not any(p.startswith(f"ppo_checkpoint_{RUN}_10000_steps") for p in os.listdir(save_path))
 
 
 def test_train_model_keeps_the_checkpoints_of_the_run_after_publishing(
@@ -352,7 +402,7 @@ def test_train_model_keeps_the_checkpoints_of_the_run_after_publishing(
     model = _make_vec_normalize_model()
     model.logger = SimpleNamespace(get_dir=lambda: str(tmp_path / "tb"))
     callback = VecNormalizeCheckpointCallback(
-        save_freq=1, save_path=str(model_dir), name_prefix="ppo_checkpoint"
+        run_stamp=RUN, save_freq=1, save_path=str(model_dir), name_prefix="ppo_checkpoint"
     )
     callback.init_callback(cast(Any, model))
     # Le tracker n'est pose par `train_model` qu'AVANT `learn()` : pour ecrire les checkpoints
@@ -368,12 +418,12 @@ def test_train_model_keeps_the_checkpoints_of_the_run_after_publishing(
         "model_TestAgent.zip",
         "model_TestAgent_run_state.json",
         "model_TestAgent_vec_normalize.pkl",
-        "ppo_checkpoint_10000_steps.zip",
-        "ppo_checkpoint_10000_steps_run_state.json",
-        "ppo_checkpoint_10000_steps_vec_normalize.pkl",
-        "ppo_checkpoint_20000_steps.zip",
-        "ppo_checkpoint_20000_steps_run_state.json",
-        "ppo_checkpoint_20000_steps_vec_normalize.pkl",
+        f"ppo_checkpoint_{RUN}_10000_steps.zip",
+        f"ppo_checkpoint_{RUN}_10000_steps_run_state.json",
+        f"ppo_checkpoint_{RUN}_10000_steps_vec_normalize.pkl",
+        f"ppo_checkpoint_{RUN}_20000_steps.zip",
+        f"ppo_checkpoint_{RUN}_20000_steps_run_state.json",
+        f"ppo_checkpoint_{RUN}_20000_steps_vec_normalize.pkl",
         "ppo_checkpoint_24789576_steps.zip",
         "ppo_checkpoint_24789576_steps_run_state.json",
         "ppo_checkpoint_24789576_steps_vec_normalize.pkl",
