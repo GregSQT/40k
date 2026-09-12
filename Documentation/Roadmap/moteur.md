@@ -110,8 +110,8 @@ alternée figée au reset, et toute la liste restait inerte sauf la ligne interr
 **Décision utilisateur (2026-09-10)**, après arbitrage à trois options : déclaration par joueur à
 écran ouvert, un seul mécanisme pour tous les modes. Alternance avec pass irréversible écartée (ne
 restaure pas le secret, invente une punition absente de 20.01) ; masquage avec passation d'écran
-écarté (contrat social jugé irréaliste). Aux joueurs de s'organiser pour le secret. Mémoire :
-`project_reserves_20_01_hotseat.md`.
+écarté (contrat social jugé irréaliste). Aux joueurs de s'organiser pour le secret. Mémoire
+agent : `project_reserves_20_01_hotseat` (hors dépôt).
 
 **Ce que dit la règle, relu avant d'écrire** (`20 Strategic reserves.pdf` §20.01) : « you can select
 one or more friendly units (excluding FORTIFICATIONS) to place in strategic reserves. Instead of
