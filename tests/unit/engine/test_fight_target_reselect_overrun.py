@@ -79,6 +79,10 @@ def _gs() -> Dict[str, Any]:
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,
+        # `fight_v11_can_overrun_pile_in` : snapshot 12.04 (lu si l'unité est engagée
+        # maintenant) + garde « one additional pile-in move » (alimentée par le commit gym).
+        "engaged_at_fight_step_start": {_SQUAD: True},
+        "overrun_pile_in_done": set(),
     }
 
 
@@ -91,7 +95,7 @@ def _patch_overrun(
     rapprochement (`_model_can_fight_target` → True), ce qui reproduit la branche `_did_overrun`.
     """
     monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: False)
-    monkeypatch.setattr(su, "_fight_overrun_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
+    monkeypatch.setattr(su, "fight_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
     monkeypatch.setattr(su, "get_enemy_slot_mapping", lambda gs, player: list(slots))
     monkeypatch.setattr(fh, "_model_can_fight_target", lambda gs, m, uid, eid: True)
     monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
@@ -172,7 +176,7 @@ def test_designated_target_alive_non_adjacent_after_overrun_no_valueerror(monkey
     gs["units_cache"]["target_B"] = {"player": 2}
 
     monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: False)
-    monkeypatch.setattr(su, "_fight_overrun_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
+    monkeypatch.setattr(su, "fight_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
     monkeypatch.setattr(
         su, "get_enemy_slot_mapping",
         lambda gs, player: ["target_A", "target_B"],

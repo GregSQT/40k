@@ -335,8 +335,9 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
     """OVERRUN 12.06 : une escouade non engagée au moment de son fight tente le pile-in par-figurine.
 
     État forcé (miroir de test_charged_squad_without_target_fights_empty) : tous les ennemis
-    supprimés, escouade chargée mais non engagée. Verrou : _fight_overrun_pile_in_plan est
-    invoquée car la condition «not _fight_v11_engaged_now» est vraie (aucun ennemi vivant).
+    supprimés, escouade chargée mais non engagée. Verrou : fight_pile_in_plan (même plan que le
+    pile-in 12.02, cibles 12.03) est invoquée car `fight_v11_can_overrun_pile_in` est vrai
+    (non engagée, pas encore de pile-in overrun cette phase).
     """
     import engine.phase_handlers.shared_utils as su_module
 
@@ -351,17 +352,17 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
     _setup_fight_phase_charged(gs, squad_id, our_player, with_settle_keys=True)
 
     calls: List[str] = []
-    orig = su_module._fight_overrun_pile_in_plan
+    orig = su_module.fight_pile_in_plan
 
     def _spy(game_state, sid):
         calls.append(str(sid))
         return None  # bloque le move effectif — le verrou porte sur l'APPEL, pas l'effet
 
-    su_module._fight_overrun_pile_in_plan = _spy
+    su_module.fight_pile_in_plan = _spy
     try:
         eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
     finally:
-        su_module._fight_overrun_pile_in_plan = orig
+        su_module.fight_pile_in_plan = orig
 
     assert squad_id in calls, "overrun pile-in doit être tenté pour une escouade non engagée"
 
@@ -418,50 +419,6 @@ def test_overrun_mask_opens_fight_slot_not_no_target():
     assert mask[ACTION_FIGHT_NO_TARGET] == 0, (
         "FIGHT_NO_TARGET ne doit pas être ouvert quand une cible est atteignable post-pile-in"
     )
-
-
-def test_overrun_pile_in_plan_returns_none_when_no_enemy_in_range(melee_scenario_file):
-    """_fight_overrun_pile_in_plan retourne None si aucun ennemi à ≤5" (12.03 BEFORE MOVING).
-
-    Test direct de la fonction (pas via le moteur) : ennemi à 8", hors portée → plan None.
-    """
-    from engine.phase_handlers.shared_utils import _fight_overrun_pile_in_plan
-
-    eng = _engine(melee_scenario_file, seed=1)
-    gs = eng.game_state
-    ish = int(gs["inches_to_subhex"])
-
-    all_ids = list(gs["units_cache"])
-    our_id = all_ids[0]
-    our_player = int(gs["units_cache"][our_id]["player"])
-    foe_ids = [s for s in all_ids if int(gs["units_cache"][s]["player"]) != our_player]
-    assert foe_ids
-    foe_id = foe_ids[0]
-
-    # Positionne l'ennemi à 8" (> 5" pile_in_target_range)
-    for mid in gs["squad_models"].get(our_id, []):
-        gs["models_cache"][mid]["col"] = 10
-        gs["models_cache"][mid]["row"] = 10
-    gs["units_cache"][our_id]["col"] = 10
-    gs["units_cache"][our_id]["row"] = 10
-    for mid in gs["squad_models"].get(foe_id, []):
-        gs["models_cache"][mid]["col"] = 10
-        gs["models_cache"][mid]["row"] = 10 + 8 * ish
-    gs["units_cache"][foe_id]["col"] = 10
-    gs["units_cache"][foe_id]["row"] = 10 + 8 * ish
-
-    gs["phase"] = "fight"
-    gs["fight_subphase"] = "fight"
-    gs["current_player"] = our_player
-    gs["engaged_at_fight_step_start"] = {}
-    gs["units_charged"] = {our_id}
-    gs["units_selected_to_fight"] = set()
-    gs["units_fought"] = set()
-    gs["pile_in_done"] = set()
-    gs["consolidation_done"] = set()
-
-    plan = _fight_overrun_pile_in_plan(gs, our_id)
-    assert plan is None, "ennemi a 8\" hors portee overrun : aucun plan attendu"
 
 
 def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
@@ -611,6 +568,10 @@ def test_fight_no_target_not_opened_when_all_slots_exhausted_by_out_of_ez(melee_
     (_process_squad_action) trouvait ces cibles et levait 'combat a vide' → rupture masque/commit.
 
     Fix : FIGHT_NO_TARGET n'est ouvert que si fight_targets est vide (pool vraiment vide).
+
+    Un pool 12.05 non vide = escouade engagée ; le scénario est un NORMAL fight, pas un overrun
+    12.06 (sinon le masque reflète le pool post-pile-in, pas celui-ci) : l'éligibilité overrun
+    est fermée explicitement, l'état minimal du helper ne posant pas l'engagement réel.
     """
     from unittest.mock import patch
     from engine.phase_handlers.shared_utils import (
@@ -632,6 +593,9 @@ def test_fight_no_target_not_opened_when_all_slots_exhausted_by_out_of_ez(melee_
     with patch(
         "engine.phase_handlers.fight_handlers._fight_build_valid_target_pool",
         return_value=["ez-only"],
+    ), patch(
+        "engine.phase_handlers.fight_handlers.fight_v11_can_overrun_pile_in",
+        return_value=False,
     ):
         mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=out_of_ez_slots)
 

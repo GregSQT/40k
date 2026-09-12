@@ -284,7 +284,7 @@ La phase de combat est pilotée par `fight_subphase` ([fight_handlers.py](../../
 - une figurine déjà en base-contact ne bouge pas (12.03 WHILE MOVING — verdict par `model_in_base_contact`, section 2) ;
 - ordre par index, tie-break déterministe ; placement par `_assign_cells_toward_enemies` (horizontal : chaque figurine reste à son étage) ;
 - validation finale : cohésion + au moins une figurine dans l'ER ennemi ; échec → None, aucune figurine ne bouge ;
-- variante overrun : `_fight_overrun_pile_in_plan` (commit `move_type="overrun_pile_in"`).
+- overrun 12.06 (pile-in additionnel, 2026-09-12) : MÊME plan `fight_pile_in_plan` (cibles 12.03 BEFORE MOVING : engagée → ses ennemis engagés, sinon ≤ `pile_in_target_range`), commit `move_type="overrun_pile_in"` ; condition = `fight_v11_can_overrun_pile_in` (les deux cas 12.06 + garde `overrun_pile_in_done`), identique au siège manuel. `_fight_overrun_pile_in_plan` (copie à cibles ≤5" fixes) est supprimé.
 
 ### Quelles figurines peuvent frapper — 04.02
 
