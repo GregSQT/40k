@@ -44,6 +44,8 @@ from engine.phase_handlers.fight_handlers import (
     ExhortationRegime,
     exhortation_regime_of,
     fight_exhortation_engaged_targets,
+    fight_v11_client_pool,
+    fight_v11_pending_selection_squad,
 )
 
 # units_cache helpers (single source of truth for position/HP of living units)
@@ -3864,10 +3866,6 @@ class W40KEngine(gym.Env):
         # `_fight_v11_manual_state` faisant de meme quand c est l humain qui vide la derniere
         # etape ; (4) reste une selection 12.04 (ou un New Foe 12.08) du bot -> politique.
         if current_phase == "fight":
-            from engine.phase_handlers.fight_handlers import (
-                fight_v11_client_pool,
-                fight_v11_pending_selection_squad,
-            )
             fight_subphase = self.game_state.get("fight_subphase")
             if fight_subphase is None:
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": None, "reason": "fight_machine_off"}
@@ -3938,7 +3936,6 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.fight_handlers import (
             fight_v11_grouped_next,
             fight_v11_new_foes_pool,
-            fight_v11_pending_selection_squad,
         )
         gs = self.game_state
         if gs.get("phase") != "fight" or gs.get("fight_subphase") != "consolidate":
