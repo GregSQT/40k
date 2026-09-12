@@ -9,6 +9,7 @@ from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage, note_special_rule_usage, check_anti_x_threshold
 from ai.analyzer_phases import PHASE_ORDER
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
+from ai.analyzer_state import ShootAllocGroup
 from ai.analyzer_perfig import (
     additive_rule_extra_dice,
     parse_shooter_models_segment,
@@ -52,13 +53,14 @@ class RangedEngagementVerdict(NamedTuple):
         )
 
 
-#: Segment de sauvegarde d'une attaque ALLOUÉE à une figurine (05 Allocate Attack) : un jet
-#: chiffré, ou la sauvegarde sautée de [DEVASTATING WOUNDS] 24.10 — dans les deux cas une
-#: figurine a été désignée. `Save [NOT ALLOCATED]` est l'autre état : aucune figurine, parce que
-#: la cible était déjà anéantie quand le lot est arrivé (`_mark_manual_overkill_wasted`, seul
-#: chemin du moteur qui laisse une blessure sans allocataire).
-_SAVE_ALLOCATED_RE = re.compile(r'Save\s+(?:\d+\(|\[DEVASTATING WOUNDS\])')
-_SAVE_NOT_ALLOCATED_RE = re.compile(r'Save\s+\[NOT ALLOCATED\]')
+#: Les trois états du segment de sauvegarde (`step_logger._save_segments`). Attaque ALLOUÉE à
+#: une figurine (05 Allocate Attack) : un jet chiffré, ou la sauvegarde sautée de
+#: [DEVASTATING WOUNDS] 24.10 — dans les deux cas une figurine a été désignée.
+#: `Save [NOT ALLOCATED]` est l'autre état : aucune figurine, parce que la cible était déjà
+#: anéantie quand le lot est arrivé (`_mark_manual_overkill_wasted`, seul chemin du moteur qui
+#: laisse une blessure sans allocataire).
+_SAVE_NOT_ALLOCATED = '[NOT ALLOCATED]'
+_SAVE_RE = re.compile(r'Save\s+(\d+\(|\[DEVASTATING WOUNDS\]|\[NOT ALLOCATED\])')
 #: Ce qui, SUR LA LIGNE, distingue deux lots du moteur portant le même nom d'arme. Le moteur
 #: groupe par « attaques identiques » (`gkey` de `_build_manual_allocation` : BS, PA, D,
 #: seuils, règles, dés additifs, cible), pas par nom : une même arme portée par un personnage
@@ -67,13 +69,16 @@ _SAVE_NOT_ALLOCATED_RE = re.compile(r'Save\s+\[NOT ALLOCATED\]')
 #: blessure `display_wth`, tags de tir posés « comme [RAPID FIRE:X] et [BLAST:X] » sur le
 #: GROUPE — donc affiner la clé ne peut pas couper un lot moteur en deux (aucun faux positif),
 #: seulement séparer ce que le moteur sépare. Le `[REROLLED:n]` qui SUIT la parenthèse est
-#: par ligne : il reste hors capture.
+#: par ligne : il reste hors capture. Les tags de tir viennent de la regex cible de
+#: `handle_shoot` (groupe `tags`), qui les a déjà parcourus : pas de second passage.
+#: Plus lâches que `HIT_SEGMENT_RE` / `WOUND_SEGMENT_RE` (analyzer_hit, analyzer_wound), qui
+#: exigent un jet chiffré : `Hit None(None+)` (torrent) et `Wound None(4+)` (lethal hits) ont
+#: aussi un seuil à comparer.
 _HIT_THRESHOLD_RE = re.compile(r'\bHit\s+\S+\(([^)]*)\)')
 _WOUND_THRESHOLD_RE = re.compile(r'\bWound\s+\S+\(([^)]*)\)')
-_SHOT_TAGS_RE = re.compile(r'\bSHOT((?:\s+\[[^\]]+\])*)\s+(?:at\s+)?Unit\b')
 
 
-def shoot_group_signature(action_desc: str) -> Tuple[str, str, str]:
+def shoot_group_signature(action_desc: str, shot_tags: str) -> Tuple[str, str, str]:
     """(tags de tir, seuil de touche, seuil de blessure) d'une ligne SHOT à segment `Save`.
 
     Une ligne qui porte une sauvegarde a forcément touché et blessé : les deux seuils y sont.
@@ -81,13 +86,12 @@ def shoot_group_signature(action_desc: str) -> Tuple[str, str, str]:
     """
     hit = _HIT_THRESHOLD_RE.search(action_desc)
     wound = _WOUND_THRESHOLD_RE.search(action_desc)
-    tags = _SHOT_TAGS_RE.search(action_desc)
-    if hit is None or wound is None or tags is None:
+    if hit is None or wound is None:
         raise ValueError(
             "ligne SHOT à segment Save sans seuil de touche/blessure lisible : "
             f"{action_desc.strip()}"
         )
-    return (" ".join(tags.group(1).split()), hit.group(1), wound.group(1))
+    return (" ".join(shot_tags.split()), hit.group(1), wound.group(1))
 
 
 def note_shoot_allocation(
@@ -95,6 +99,7 @@ def note_shoot_allocation(
     *,
     line: str,
     action_desc: str,
+    shot_tags: str,
     turn: int,
     shooter_id: str,
     target_id: str,
@@ -110,25 +115,23 @@ def note_shoot_allocation(
     `if weapon_name`), et un groupe anonyme ne peut être ni distingué du tueur ni compté —
     l'ignorer en silence ferait un compteur borné par ce que le journal veut bien nommer.
     """
-    not_allocated = bool(_SAVE_NOT_ALLOCATED_RE.search(action_desc))
-    allocated = bool(_SAVE_ALLOCATED_RE.search(action_desc))
-    if not (not_allocated or allocated):
+    save = _SAVE_RE.search(action_desc)
+    if save is None:
         return
     if weapon_display_name is None:
         raise ValueError(
             "ligne SHOT avec segment Save mais sans ` with [arme]` : le groupe d'allocation "
             f"est inidentifiable — E{state.current_episode_num} T{turn} : {line.strip()}"
         )
-    from ai.analyzer_state import ShootAllocGroup
     key = (
         state.current_episode_num, turn, shooter_id, weapon_display_name, target_id,
-        shoot_group_signature(action_desc),
+        shoot_group_signature(action_desc, shot_tags),
     )
     group = state.shoot_alloc_groups.get(key)  # get allowed : première ligne du groupe
     if group is None:
         group = ShootAllocGroup(player=player)
         state.shoot_alloc_groups[key] = group
-    if not_allocated:
+    if save.group(1) == _SAVE_NOT_ALLOCATED:
         group.not_allocated += 1
         if group.first_not_allocated_line is None:
             group.first_not_allocated_line = line.strip()
@@ -137,7 +140,11 @@ def note_shoot_allocation(
 
 
 def flush_cross_weapon_lost(state: "AnalyzerState", stats: Dict[str, Any]) -> None:
-    """Rend le verdict des groupes accumulés et vide l'accumulateur (frontière d'épisode).
+    """Rend le verdict de tous les groupes du journal — une fois, en fin de lecture.
+
+    La clé de groupe porte l'épisode : deux épisodes ne se mélangent jamais, et un groupe est
+    complet dès que le journal est lu jusqu'au bout — la seule frontière qui compte, y compris
+    pour un dernier épisode sans `EPISODE END` (journal tronqué ou lu pendant un entraînement).
 
     Un groupe dont TOUTES les lignes à segment `Save` sont `[NOT ALLOCATED]` est un lot arrivé
     sur une cible déjà anéantie : un lot n'existe que s'il a des blessures à allouer
@@ -153,16 +160,15 @@ def flush_cross_weapon_lost(state: "AnalyzerState", stats: Dict[str, Any]) -> No
     espérance et perdues sur un jet chaud de la première comptent aussi. Métrique de qualité de
     l'agent, hors total d'erreurs `shooting`.
     """
-    for group in state.shoot_alloc_groups.values():
+    for key, group in state.shoot_alloc_groups.items():
         if group.allocated == 0 and group.not_allocated > 0:
             stats['shoot_cross_weapon_attacks_lost'][group.player] += group.not_allocated
             stats['shoot_cross_weapon_lost_groups'][group.player] += 1
             if stats['shoot_cross_weapon_lost_sample'][group.player] is None:
                 stats['shoot_cross_weapon_lost_sample'][group.player] = {
-                    'episode': state.current_episode_num,
+                    'episode': key[0],
                     'line': group.first_not_allocated_line,
                 }
-    state.shoot_alloc_groups = {}
 
 
 def ranged_engagement_verdict(
@@ -282,8 +288,9 @@ def handle_shoot(
     stats = state.stats
     shooter_match = re.search(r'Unit (\d+)\s*\((\d+),\s*(\d+)\)', action_desc)
     target_match = re.search(
-        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-        r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?',
+        r'\bSHOT(?P<tags>(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*)'
+        r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit (?P<target>\d+)'
+        r'(?:\s*\((?P<col>\d+),\s*(?P<row>\d+)\))?',
         action_desc,
         re.IGNORECASE
     )
@@ -299,7 +306,7 @@ def handle_shoot(
     shooter_id = shooter_match.group(1)
     shooter_col = int(shooter_match.group(2))
     shooter_row = int(shooter_match.group(3))
-    target_id = target_match.group(2)
+    target_id = target_match.group('target')
     state.units_shot.add(shooter_id)
     stats['shoot_invalid'][player]['total'] += 1
     _track_action_phase_accuracy(stats, "shoot", phase, state.current_episode_num, line)
@@ -316,9 +323,9 @@ def handle_shoot(
     else:
         _position_cache_set(state.unit_positions, shooter_id, shooter_col, shooter_row)
 
-    if target_match.group(3) and target_match.group(4):
-        target_col = int(target_match.group(3))
-        target_row = int(target_match.group(4))
+    if target_match.group('col') and target_match.group('row'):
+        target_col = int(target_match.group('col'))
+        target_row = int(target_match.group('row'))
         target_pos = (target_col, target_row)
         if target_id in state.unit_hp and require_key(state.unit_hp, target_id) > 0:
             _position_cache_set(state.unit_positions, target_id, target_col, target_row)
@@ -453,19 +460,18 @@ def handle_shoot(
     shooter_unit_type = require_key(state.unit_types, shooter_id)
     shooter_player_from_types = require_key(state.unit_player, shooter_id)
     weapon_info_matched = None
-    weapon_display_name = None
+    weapon_display_name = weapon_match.group(1) if weapon_match else None
     # Datasheet SOUS LAQUELLE l'usage des règles de l'arme est compté. Le type d'escouade quand
     # il déclare l'arme, la figurine porteuse sinon : `Smite (focused witchfire) (Librarian)` et
     # non `(Intercessor)`, qui ne porte pas cette arme et sous laquelle rien n'était compté.
     weapon_carrier_type = None
 
     note_shoot_allocation(
-        state, line=line, action_desc=action_desc, turn=turn, shooter_id=shooter_id,
-        target_id=target_id, weapon_display_name=weapon_match.group(1) if weapon_match else None,
-        player=player,
+        state, line=line, action_desc=action_desc, shot_tags=target_match.group('tags'),
+        turn=turn, shooter_id=shooter_id, target_id=target_id,
+        weapon_display_name=weapon_display_name, player=player,
     )
-    if weapon_match:
-        weapon_display_name = weapon_match.group(1)
+    if weapon_display_name is not None:
         _parsed_shooter_models = parse_shooter_models_segment(action_desc)
         # Résultat de touche 05.01 : la ligne dit le jet et le seuil, le verdict se lit à la
         # présence du segment `Wound`. Cf. ai/analyzer_hit.py.

@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.unit.ai._fabriques import entete_step_log
+import ai.analyzer as an
+from tests.unit.ai._fabriques import EPISODE_TAIL, entete_step_log
 
 S = "(50,50)"
 T = "(80,50)"
@@ -35,21 +36,15 @@ _HEADER = entete_step_log(
     ez_vertical_inches=None,
 )
 
-_END = (
-    "[10:00:08] T1 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
-    "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "
-    "Total=0, Duration=1.000s\n"
-)
-
 A = "Sternguard Bolt Rifle"   # arme du slot 0
 B = "Bolt Pistol"             # arme du slot 1
 
 
-def _shot(weapon: str, target: str, target_pos: str, save: str) -> str:
+def _shot(weapon: str, target: str, target_pos: str, save: str, hit: str = "3+") -> str:
     """Une ligne SHOT de l'unité 1 ; `save` est le segment de sauvegarde complet."""
     return (
         f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit {target}{target_pos} with [{weapon}]"
-        f" - Hit 4(3+) - Wound 5(4+) - {save} [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+        f" - Hit 4({hit}) - Wound 5(4+) - {save} [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
     )
 
 
@@ -64,11 +59,9 @@ def _lost(weapon: str, target: str = "102", target_pos: str = T) -> str:
 _DEAD_102 = "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
 
 
-def _stats(tmp_path, body: str):
-    import ai.analyzer as an
-
+def _stats(tmp_path, body: str, end: str = EPISODE_TAIL):
     log = tmp_path / "step.log"
-    log.write_text(_HEADER + body + _END)
+    log.write_text(_HEADER + body + end)
     return an.parse_step_log(str(log))
 
 
@@ -136,16 +129,11 @@ def test_deux_lots_de_meme_nom_a_seuils_differents_sont_deux_groupes(tmp_path):
     rang. Ordre : BP 2+ alloue sans tuer, le Plasma tue, BP 3+ arrive sur un cadavre. Une clé
     au seul nom fusionnerait les deux BP en un groupe mixte → 0 ; attendu : 2 attaques perdues,
     1 groupe."""
-    def _bp(save: str, bs: str) -> str:
-        return (
-            f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 102{T} with [{B}]"
-            f" - Hit 4({bs}) - Wound 5(4+) - {save} [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
-        )
     body = (
         _DEAD_102
-        + _bp("→ 102#0 - Save 2(3+) - Dmg:1HP", "2+")
+        + _shot(B, "102", T, "→ 102#0 - Save 2(3+) - Dmg:1HP", hit="2+")
         + _dmg("Plasma Pistol")
-        + _bp("Save [NOT ALLOCATED]", "3+") + _bp("Save [NOT ALLOCATED]", "3+")
+        + _lost(B) + _lost(B)
     )
     stats = _stats(tmp_path, body)
     assert stats["shoot_cross_weapon_attacks_lost"][1] == 2
@@ -153,22 +141,16 @@ def test_deux_lots_de_meme_nom_a_seuils_differents_sont_deux_groupes(tmp_path):
 
 
 def test_le_dernier_episode_sans_episode_end_est_juge_aussi(tmp_path):
-    """Journal lu pendant un entraînement ou tronqué : la frontière de fin de fichier rend le
-    verdict comme les deux autres (`EPISODE END`, début d'épisode suivant)."""
-    import ai.analyzer as an
-
+    """Journal lu pendant un entraînement ou tronqué : le verdict se rend en fin de lecture,
+    `EPISODE END` ou pas."""
     body = _DEAD_102 + _dmg(A) + _dmg(A) + _lost(B) + _lost(B)
-    log = tmp_path / "step.log"
-    log.write_text(_HEADER + body)  # pas de _END
-    stats = an.parse_step_log(str(log))
+    stats = _stats(tmp_path, body, end="")
     assert stats["episodes_without_end"], "le scénario doit bien être un épisode sans fin"
     assert stats["shoot_cross_weapon_attacks_lost"][1] == 2
 
 
 def test_le_compteur_reste_hors_du_total_d_erreurs_shooting(tmp_path):
     """Perte observée, pas faute de règle : le total `shooting` n'en bouge pas."""
-    import ai.analyzer as an
-
     body = _DEAD_102 + _dmg(A) + _dmg(A) + _lost(B)
     stats = _stats(tmp_path, body)
     assert stats["shoot_cross_weapon_attacks_lost"][1] == 1
