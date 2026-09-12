@@ -5467,6 +5467,9 @@ class W40KEngine(gym.Env):
 
         - ``shoot`` / ``fight`` : [HAZARDOUS] 24.15, déclenché APRÈS que l'unité a résolu
           toutes ses attaques. Il n'y a plus rien à reprendre : l'activation est terminée.
+        - ``exhortation`` : Exhortation of Rage (06.02), infligée à la SÉLECTION de l'attaquant
+          sur une cible dont le défenseur est humain — le combat de l'attaquant reprend là où
+          le régime AUTO l'aurait repris (`_continue_fight_after_exhortation`).
         - ``move`` (défaut historique) : Desperate Escape 09.07, déclenché AVANT le fall back —
           unité morte → fin d'activation sans move ; sinon → pool Fall Back + preview.
         """
@@ -5474,6 +5477,17 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers import movement_handlers as _mh
         sid = str(uid)
         hazard_origin = self.game_state.pop("hazard_origin", "move")
+        if hazard_origin == "exhortation":
+            pending_exhort = self.game_state.pop("_pending_exhortation_resume", None)
+            if pending_exhort is None:
+                raise RuntimeError(
+                    "_resume_after_hazard: origine `exhortation` sans _pending_exhortation_resume "
+                    "— l etat de reprise a ete efface pendant l attribution."
+                )
+            return self._continue_fight_after_exhortation(
+                str(require_key(pending_exhort, "squad_id")),
+                pending_exhort.get("target_slot"),  # get allowed : None = combat a vide
+            )
         if hazard_origin in ("shoot", "fight"):
             return True, {
                 "action": f"squad_{hazard_origin}_manual_alloc",
@@ -6655,7 +6669,7 @@ class W40KEngine(gym.Env):
         donne le compte (`mortalWoundDice`), si bien que l'analyzer peut controler le compte
         contre les des au lieu de le croire.
         """
-        from engine.phase_handlers.shared_utils import allocate_mortal_wounds
+        from engine.phase_handlers.shared_utils import allocate_mortal_wounds, is_programmatic_defender
         from engine.action_log_utils import append_action_log
         units_cache = require_key(self.game_state, "units_cache")
         d6 = random.randint(1, 6)
@@ -6711,7 +6725,40 @@ class W40KEngine(gym.Env):
             log_entry["mortalWoundDice"] = mw_dice
         append_action_log(self.game_state, log_entry)
         if mw_count > 0:
-            allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+            if is_programmatic_defender(self.game_state, target_eid):
+                # Defenseur pilote par la machine : attribution AUTO (`eligibles[0]`), regime
+                # d entrainement inchange.
+                allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+            else:
+                # Defenseur HUMAIN : 06.02, « its controlling player must … select one of those
+                # models » — le choix lui appartient, comme pour Desperate Escape et [HAZARDOUS].
+                # Aucune allocation de combat n est encore ouverte (l Exhortation tombe a la
+                # SELECTION, avant les attaques), donc HAZARD_CTX est libre. Le combat de
+                # l attaquant reprend a la fin de l attribution (`_resume_after_hazard`,
+                # origine `exhortation`), avec la meme queue que le regime AUTO.
+                from engine.phase_handlers.shared_utils import build_manual_hazard_allocation
+                self.game_state["_pending_exhortation_resume"] = {
+                    "squad_id": squad_id, "target_slot": target_slot,
+                }
+                self.game_state["hazard_origin"] = "exhortation"
+                alloc_result = build_manual_hazard_allocation(
+                    self.game_state, target_eid, mw_count, log_entry
+                )
+                if alloc_result.get("waiting_for_player"):
+                    return True, alloc_result
+                # Figurines forcees (une seule candidate a chaque blessure) : attribution
+                # terminee sans rendre la main — rien a reprendre plus tard.
+                self.game_state.pop("hazard_origin", None)
+                self.game_state.pop("_pending_exhortation_resume", None)
+        return self._continue_fight_after_exhortation(squad_id, target_slot)
+
+    def _continue_fight_after_exhortation(
+        self, squad_id: str, target_slot: Optional[int]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Reprise du combat de l attaquant une fois les blessures mortelles d Exhortation
+        attribuees — tout de suite (regime AUTO, figurines forcees) ou apres le dernier clic du
+        defenseur humain (`_resume_after_hazard`, origine `exhortation`)."""
+        units_cache = require_key(self.game_state, "units_cache")
         # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
         # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
         if squad_id not in units_cache:
@@ -8073,6 +8120,19 @@ class W40KEngine(gym.Env):
                 "unitId": require_key(active_prompt, "unit_id"),
                 "player": int(require_key(self.game_state, "current_player")),
             }
+
+        # Attribution de pertes en attente d un DEFENSEUR HUMAIN (05.03/05.04, 06.02) : aucune
+        # action de politique ne passe tant qu il n a pas fini — jumeau des trois gardes du
+        # chemin API (`_process_semantic_action`). Sans lui, en PvE, le client relance un tour
+        # IA des qu un autre socle IA est eligible, et `_build_manual_allocation` ECRASE
+        # l allocation en cours (une seule vit dans `game_state`) : le defenseur cliquait dans
+        # une allocation qui n existait plus. Atteignable des l Exhortation sur un defenseur
+        # humain, qui suspend le tour IA au milieu d une selection de combat.
+        from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, HAZARD_CTX, SHOOT_CTX
+        from engine.phase_handlers.fight_handlers import FIGHT_CTX
+        for _pending_ctx in (HAZARD_CTX, SHOOT_CTX, FIGHT_CTX):
+            if self.game_state.get(_pending_ctx.alloc_key) is not None:
+                return True, manual_allocation_waiting_payload(self.game_state, _pending_ctx)
 
         current_phase = self.game_state["phase"]
         success = True

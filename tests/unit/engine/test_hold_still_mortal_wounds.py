@@ -327,6 +327,140 @@ def test_degats_normaux_avant_blessures_mortelles(monkeypatch):
     assert order[-1] == "MW:2", f"2 BM attendues (deux crits, D6=1 chacun), got {order[-1]}"
 
 
+# ---------------------------------------------------------------------------
+# DÉFENSEUR HUMAIN : les blessures mortelles se choisissent (06.02), lot mortel manuel
+# ---------------------------------------------------------------------------
+
+def _human_defender_gs():
+    """Cible de TROIS figurines à 3 PV, défenseur HUMAIN (siège 2), attaquant machine.
+
+    Trois blessures normales tuent exactement une figurine (3 × 1 PV) ; les blessures mortelles
+    tombent ensuite sur deux survivantes INTACTES — c'est le seul état où 06.02 laisse un choix
+    (« Otherwise … you must select one of those models »), une figurine entamée étant forcée.
+    """
+    gs = _e2e_gs(target_hp=3)
+    for i in (1, 2):
+        gs["models_cache"][f"TGT#{i}"] = {**_target_model(hp=3), "col": 5 + i, "row": 5}
+        gs["squad_models"]["TGT"].append(f"TGT#{i}")
+    gs["squad_cache"]["TGT"] = {"model_count_at_start": 3}
+    gs["units_cache"]["TGT"]["HP_CUR"] = 9
+    gs["player_types"] = {"0": "ai", "1": "ai", "2": "human"}
+    return gs
+
+
+def _drive_human_allocation(gs, first_result, choose):
+    """Joue le défenseur humain : ordre des groupes tel quel, figurine par `choose(payload)`.
+
+    Rend la trace des payloads reçus (action, damage_type, choix) et le résultat final."""
+    trace = []
+    result = first_result
+    guard = 0
+    while result.get("waiting_for_player") and guard < 20:
+        guard += 1
+        if result["action"] == fh.FIGHT_CTX.declare_order_action:
+            req = result["order_request"]
+            trace.append(("order", req.get("damage_type"), [g["group_id"] for g in req["groups"]]))
+            result = su.apply_manual_shoot_declare_order(
+                gs, [g["group_id"] for g in req["groups"]], fh.FIGHT_CTX
+            )
+        else:
+            alloc = result["allocation"]
+            picked = choose(alloc)
+            trace.append(("alloc", alloc.get("damage_type"), [c["model_id"] for c in alloc["choices"]], picked))
+            result = su.apply_manual_shoot_allocation(gs, picked, fh.FIGHT_CTX)
+    return trace, result
+
+
+def test_defenseur_humain_choisit_la_figurine_qui_encaisse_les_bm(monkeypatch):
+    """ROUGE avant le fix : à la fermeture du lot, `allocate_mortal_wounds(…, True, …)` prenait
+    `eligibles[0]` d'office, même pour un défenseur humain — alors que Desperate Escape et
+    [HAZARDOUS] lui laissaient le choix. 06.02 : « its controlling player must resolve the
+    following sequence … you must select one of those models ».
+
+    Ici : 3 blessures normales (clic TGT#0, puis forcées sur la figurine entamée) tuent TGT#0 ;
+    puis un LOT MORTEL de 2 BM (deux crits, D6=1 chacun) rend la main avec `damage_type:
+    mortal` et deux candidates intactes ; le défenseur clique TGT#2, la seconde BM y est forcée
+    (figurine entamée). TGT#1 reste intacte : le choix a été respecté.
+    """
+    gs = _human_defender_gs()
+    _patch_fight_harness(monkeypatch, _multi_crit_rolled())
+    monkeypatch.setattr(
+        su, "_emit_squad_shoot_log",
+        lambda g_s, g, ctx: su.append_action_log(
+            g_s, {"type": "combat", "phase": "fight", "message": "FIGHT_LOG_STUB"}),
+    )
+    # La mort d'une figurine recalcule les caches d'escouade (OC, empreinte…) que ce fixture
+    # minimal ne porte pas : on ne garde de `destroy_model` que le retrait du cache, ce qui est
+    # tout ce que la couche d'allocation observe (`_group_alive`, candidats vivants).
+    monkeypatch.setattr(
+        su, "destroy_model",
+        lambda g_s, mid, reason=None: g_s["models_cache"].pop(mid, None),
+    )
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+    auto_calls: list = []
+    monkeypatch.setattr(
+        su, "allocate_mortal_wounds",
+        lambda *a, **kw: auto_calls.append(a) or 0,
+    )
+
+    first = fh.build_manual_fight_allocation(gs, "PAIN")
+    assert first.get("waiting_for_player"), "défenseur humain : la main doit lui être rendue"
+
+    def _choose(alloc):
+        choices = [c["model_id"] for c in alloc["choices"]]
+        if alloc.get("damage_type") == "mortal":
+            assert choices == ["TGT#1", "TGT#2"], f"deux survivantes intactes attendues, got {choices}"
+            return "TGT#2"
+        return "TGT#0"
+
+    trace, final = _drive_human_allocation(gs, first, _choose)
+
+    assert final.get("done") is True, final
+    assert auto_calls == [], "le régime AUTO ne doit pas s'appliquer à un défenseur humain"
+    mortal_payloads = [t for t in trace if t[1] == "mortal"]
+    assert mortal_payloads, f"aucun payload mortel rendu au défenseur : {trace}"
+    # Les BM viennent APRÈS toutes les blessures normales (06.02).
+    first_mortal = trace.index(mortal_payloads[0])
+    assert all(t[1] != "mortal" for t in trace[:first_mortal]) and first_mortal > 0, trace
+    # Effets : TGT#0 morte des dégâts normaux, TGT#2 choisie (2 BM), TGT#1 intacte.
+    assert "TGT#0" not in gs["models_cache"], "TGT#0 aurait dû mourir des 3 blessures normales"
+    assert gs["models_cache"]["TGT#1"]["HP_CUR"] == 3, "TGT#1 n'a pas été choisie"
+    assert gs["models_cache"]["TGT#2"]["HP_CUR"] == 1, "TGT#2 devait encaisser les 2 BM"
+    # La ligne SUFFERS déjà émise porte les deux records d'attribution, sur TGT#2.
+    mw_logs = [e for e in gs["action_logs"] if e["type"] == "mortal_wounds_ability"]
+    assert len(mw_logs) == 1, mw_logs
+    assert [d["modelId"] for d in mw_logs[0]["hazardDetails"]] == ["TGT#2", "TGT#2"]
+    assert mw_logs[0]["hazardousMortalWounds"] == 2
+    assert final["shoot_result"]["damage_total"] == 5, final["shoot_result"]
+
+
+def test_defenseur_machine_garde_le_regime_auto(monkeypatch):
+    """VERT VACANT du test ci-dessus : avec un défenseur programmatique, aucun lot mortel n'est
+    inséré et `allocate_mortal_wounds` reste l'attributaire — le régime d'entraînement ne bouge
+    pas."""
+    gs = _human_defender_gs()
+    gs["player_types"]["2"] = "ai"
+    _patch_fight_harness(monkeypatch, _multi_crit_rolled())
+    monkeypatch.setattr(
+        su, "destroy_model",
+        lambda g_s, mid, reason=None: g_s["models_cache"].pop(mid, None),
+    )
+    monkeypatch.setattr(
+        su, "_emit_squad_shoot_log",
+        lambda g_s, g, ctx: su.append_action_log(
+            g_s, {"type": "combat", "phase": "fight", "message": "FIGHT_LOG_STUB"}),
+    )
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+    auto_calls: list = []
+    monkeypatch.setattr(
+        su, "allocate_mortal_wounds",
+        lambda g_s, sid, n, auto, sink, **kw: auto_calls.append((sid, n, auto)) or 0,
+    )
+    result = fh.build_manual_fight_allocation(gs, "PAIN")
+    assert result.get("done") is True, result
+    assert auto_calls == [("TGT", 2, True)], auto_calls
+
+
 def _fake_batch():
     """Lot minimal portant une dette de blessures mortelles, tel que le construit
     `_build_manual_allocation`."""
@@ -352,8 +486,8 @@ def test_bm_appliquees_une_seule_fois(monkeypatch):
     )
 
     gs, alloc, batch = _gs(), _fake_alloc(), _fake_batch()
-    su._apply_batch_mortal_wounds(gs, alloc, batch)
-    su._apply_batch_mortal_wounds(gs, alloc, batch)
+    su._apply_batch_mortal_wounds(gs, alloc, batch, fh.FIGHT_CTX)
+    su._apply_batch_mortal_wounds(gs, alloc, batch, fh.FIGHT_CTX)
 
     assert calls == [("TGT", 6)], f"une seule application attendue, got {calls}"
     assert len([e for e in gs["action_logs"] if e["type"] == "mortal_wounds_ability"]) == 1
@@ -395,7 +529,7 @@ def test_cible_detruite_aucune_ligne(monkeypatch):
     gs["squad_models"]["TGT"] = []
     gs["units_cache"].pop("TGT")
 
-    su._apply_batch_mortal_wounds(gs, _fake_alloc(), _fake_batch())
+    su._apply_batch_mortal_wounds(gs, _fake_alloc(), _fake_batch(), fh.FIGHT_CTX)
 
     assert not calls, f"aucune blessure mortelle à infliger, got {calls}"
     assert not [e for e in gs["action_logs"] if e["type"] == "mortal_wounds_ability"]

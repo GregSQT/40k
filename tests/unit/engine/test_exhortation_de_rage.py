@@ -82,6 +82,9 @@ def _gs():
         "action_log_seq": 0,
         "turn": 1,
         "pending_agent_decision": None,
+        # Defenseur PROGRAMMATIQUE (joueur 0 = les cibles) : attribution AUTO des blessures
+        # mortelles. Le siege humain a son propre test (`test_defenseur_humain_…`).
+        "player_types": {"0": "ai", "1": "ai"},
     }
 
 
@@ -89,6 +92,7 @@ class _FakeEngine:
     """Stub minimal de W40KEngine pour tester _check_and_trigger_exhortation_de_rage."""
     _check_and_trigger_exhortation_de_rage = wcore.W40KEngine._check_and_trigger_exhortation_de_rage
     _apply_exhortation_de_rage = wcore.W40KEngine._apply_exhortation_de_rage
+    _continue_fight_after_exhortation = wcore.W40KEngine._continue_fight_after_exhortation
     _continue_squad_fight_after_selection: Any = wcore.W40KEngine._continue_squad_fight_after_selection
     _fight_v11_gym_settle = wcore.W40KEngine._fight_v11_gym_settle
     _mortal_wounds_target_metrics = wcore.W40KEngine._mortal_wounds_target_metrics
