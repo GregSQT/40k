@@ -13168,12 +13168,65 @@ def _assign_cells_toward_enemies(
         for mid in movers
     }
 
+    # 12.03 / 12.08 AFTER MOVING (Ongoing) : « Each model that started this move engaged with an
+    # enemy unit must still be engaged with that enemy unit ». Contrainte PAR FIGURINE et purement
+    # positionnelle (les ennemis ne bougent pas pendant le plan) : la filtrer sur les candidats de
+    # CHAQUE figurine est exact — le couplage maximum reste maximum SOUS la regle — la ou une
+    # validation du plan entier aurait rejete tout le pile-in pour une seule figurine. MEME mesure
+    # que le PvP (`_fight_pile_in_preview_plan`, `kept_engagements`) : entree synthetique au niveau
+    # COURANT de la figurine, depart et arrivee, contre TOUTES les unites ennemies posees — pas
+    # seulement les cibles. Sans ce filtre, une figurine engagee avec A et B finissait bord-a-bord
+    # avec B et hors de la zone de A, plan que le PvP refuse (`kept_engagements=False`).
+    from engine.spatial_relations import engagement_distance_metric
+
+    _ez = int(get_engagement_zone(game_state))
+    _metric = engagement_distance_metric(game_state)
+    _enemy_entries = [
+        ce for _eid, ce in enemy_entries_on_battlefield(
+            units_cache, _pile_player, exclude_id=str(squad_id)
+        )
+    ]
+    _start_engaged: Dict[str, List[Dict[str, Any]]] = {}
+    for mid in movers:
+        _synth_start = _synth_model_entry(
+            game_state, str(squad_id), models_cache[mid], origins[mid][0], origins[mid][1],
+            level=int(require_key(models_cache[mid], "level")),
+        )
+        _start_engaged[mid] = [
+            ce for ce in _enemy_entries
+            if unit_entries_within_engagement_zone(_synth_start, ce, _ez, metric=_metric)
+        ]
+
+    def _keeps_start_engagements(mid: str, col: int, row: int) -> bool:
+        """True si la figurine placee en (col,row) reste engagee avec CHAQUE unite de depart."""
+        kept = _start_engaged[mid]
+        if not kept:
+            return True
+        _synth_end = _synth_model_entry(
+            game_state, str(squad_id), models_cache[mid], col, row,
+            level=int(require_key(models_cache[mid], "level")),
+        )
+        return all(
+            unit_entries_within_engagement_zone(_synth_end, ce, _ez, metric=_metric)
+            for ce in kept
+        )
+
     # 2. Cellules bord-a-bord atteignables (legalite hors-plan uniquement).
     b2b_cells: Set[Tuple[int, int]] = set()
     for ec, er in enemy_positions:
         for nc, nr in get_hex_neighbors(ec, er):
             if _cell_base_legal(nc, nr):
                 b2b_cells.add((nc, nr))
+    # Admissibilite PAR FIGURINE, independante du plan (trajet + AFTER) : calculee UNE fois, le
+    # point fixe ci-dessous ne fait varier que `blocked`.
+    admissible: Dict[str, List[Tuple[int, int]]] = {
+        mid: sorted(
+            cell for cell in b2b_cells
+            if _reach_by_mid[mid](cell[0], cell[1])
+            and _keeps_start_engagements(mid, cell[0], cell[1])
+        )
+        for mid in movers
+    }
 
     # 3. Couplage maximum figurine -> cellule B2B (12.03 « engaged with it if possible » +
     #    « maximise the number of models that are engaged »). Une cellule qui est l'origine
@@ -13185,10 +13238,7 @@ def _assign_cells_toward_enemies(
     matching: Dict[str, Tuple[int, int]] = {}
     while True:
         candidates = {
-            mid: sorted(
-                cell for cell in b2b_cells
-                if cell not in blocked and _reach_by_mid[mid](cell[0], cell[1])
-            )
+            mid: [cell for cell in admissible[mid] if cell not in blocked]
             for mid in movers
         }
         matching = _max_b2b_matching(candidates)
@@ -13227,6 +13277,10 @@ def _assign_cells_toward_enemies(
                         continue
                     cand_d = calculate_hex_distance(nc, nr, tc, tr)
                     if cand_d >= orig_dist:
+                        continue
+                    # AFTER avant le test de proximite : la mesure d'engagement est la plus
+                    # couteuse des trois, ne la payer que sur une case deja plus proche.
+                    if not _keeps_start_engagements(mid, nc, nr):
                         continue
                     if best is None or cand_d < best[0]:
                         best = (cand_d, nc, nr)
