@@ -75,7 +75,8 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       l entete le fait pour la composition de depart. Sur un journal log_grammar>=10, un id
 #:       `<escouade>#r<n>` vu dans un `[MODELS:]` sans avoir ete declare est une panne du
 #:       producteur, jamais un socle « de datasheet inconnue » sur lequel s abstenir. Verrou :
-#:       test_step_log_returned_models.py et test_analyzer_returned_models.py.
+#:       tests/unit/engine/test_returned_models_placement.py (ligne formatee) et
+#:       tests/unit/ai/test_analyzer_returned_models.py (lecteur).
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.

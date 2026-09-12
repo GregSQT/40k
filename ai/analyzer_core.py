@@ -2191,9 +2191,18 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             stats['returned_models'][player] += _ret_count
                             _ret_type = state.unit_types.get(_ret_uid)  # get allowed
                             if _ret_type:
+                                # Jugé sur la composition d'AVANT la restitution : les socles
+                                # que cette ligne rend sont déjà recalés vivants (le `[MODELS:]`
+                                # de la ligne a été absorbé plus haut), et un PainBoy mort qui se
+                                # rendrait lui-même ressortirait VALIDE — le seul usage illégal
+                                # que la ligne doit rendre jugeable.
+                                _ret_mids = frozenset(
+                                    _pair.partition("=")[0]
+                                    for _pair in (_ret_types.group(1).split() if _ret_types else ())
+                                )
                                 note_special_rule_usage(
                                     stats, state, config, "return_destroyed_models",
-                                    _ret_uid, _ret_type, player,
+                                    _ret_uid, _ret_type, player, exclude_mids=_ret_mids,
                                 )
                 elif " RESERVES TIMEOUT " in action_desc:
                         # 20.04 — destruction en fin de 3e round des unités restées en réserves

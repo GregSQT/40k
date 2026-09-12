@@ -74,12 +74,24 @@ def _parse(tmp_path, monkeypatch, body: str, *, log_grammar=10):
 
 
 def test_la_ligne_est_lue_et_l_usage_releve(tmp_path, monkeypatch):
-    """ROUGE avant le fix : la ligne tombait dans `other`, rien n'était compté."""
-    stats = _parse(tmp_path, monkeypatch, _PAINBOY_MORT + _returned("1#r0=PainBoy", "1#0@(20,20,z0) 1#r0@(20,21,z0)"))
+    """ROUGE avant le fix : la ligne tombait dans `other`, rien n'était compté. PainBoy vivant
+    (1#1), un Boy rendu : usage VALIDE."""
+    stats = _parse(tmp_path, monkeypatch, _returned("1#r0=Boyz", "1#0@(20,20,z0) 1#1@(20,21,z0) 1#r0@(20,22,z0)"))
     assert not stats["parse_errors"], stats["parse_errors"]
     assert stats["returned_models"][1] == 1
     assert stats["actions_by_type"]["returned_models"] == 1
     assert stats["special_rule_usage"][("return_destroyed_models", "Boyz")][1] == 1
+    assert stats["special_rule_usage_invalid"][("return_destroyed_models", "Boyz")][1] == 0
+
+
+def test_la_restitution_est_jugee_sur_la_composition_d_avant(tmp_path, monkeypatch):
+    """Un PainBoy MORT qui se rend lui-même : Grot Orderly est SA capacité, éteinte avec lui
+    (19.04). La ligne recale le socle rendu comme vivant AVANT que l'usage soit jugé — jugé sur
+    l'après, l'usage ressortirait VALIDE et le seul cas illégal serait invisible."""
+    stats = _parse(tmp_path, monkeypatch, _PAINBOY_MORT + _returned("1#r0=PainBoy", "1#0@(20,20,z0) 1#r0@(20,21,z0)"))
+    assert not stats["parse_errors"], stats["parse_errors"]
+    assert stats["special_rule_usage"][("return_destroyed_models", "Boyz")][1] == 1
+    assert stats["special_rule_usage_invalid"][("return_destroyed_models", "Boyz")][1] == 1
 
 
 def test_le_socle_rendu_entre_a_ses_pv_pleins_de_datasheet(tmp_path, monkeypatch):

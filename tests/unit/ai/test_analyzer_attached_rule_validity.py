@@ -253,8 +253,13 @@ def test_socle_rendu_declare_par_sa_ligne_rend_le_verdict(tmp_path, monkeypatch)
     assert not stats["parse_errors"], stats["parse_errors"]
     assert stats["returned_models"][1] == 1, "la ligne RETURNED n'est pas lue"
     assert stats["special_rule_usage"][("mortal_wounds_on_critical_wound", "Boyz")][1] == 1
-    assert an.error_totals(stats)["special_rules_invalid"] == 0, (
+    assert stats["special_rule_usage_invalid"][("mortal_wounds_on_critical_wound", "Boyz")][1] == 0, (
         "le PainBoy est revenu : sa capacité s'applique de nouveau (19.04)"
+    )
+    # Mais la RESTITUTION elle-même est jugée sur la composition d'AVANT : le PainBoy mort ne
+    # peut pas se rendre lui-même (Grot Orderly est SA capacité, éteinte avec lui, 19.04).
+    assert stats["special_rule_usage_invalid"][("return_destroyed_models", "Boyz")][1] == 1, (
+        "un PainBoy mort qui se rend lui-même doit ressortir INVALID"
     )
 
     stats = _parse(
