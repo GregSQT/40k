@@ -78,7 +78,7 @@ def test_ordre_conforme_accepte_et_enregistre(monkeypatch):
     batch = gs[SHOOT_CTX.alloc_key]["batches"][0]
     assert batch["declared_order"] == [NW, NH, CW, CH]
     assert batch["current_group_index"] == 0
-    assert stepped == [(gs, SHOOT_CTX)]
+    assert len(stepped) == 1 and stepped[0][0] is gs and stepped[0][1] is SHOOT_CTX
     assert result == {"ok": True}
 
 
@@ -120,7 +120,7 @@ def test_double_declaration_refuse(monkeypatch):
     batch = gs[SHOOT_CTX.alloc_key]["batches"][0]
     assert batch["declared_order"] == [NW, NH, CW, CH]
     assert batch["current_group_index"] == 0
-    assert stepped == [(gs, SHOOT_CTX)]
+    assert len(stepped) == 1 and stepped[0][0] is gs and stepped[0][1] is SHOOT_CTX
 
 
 def test_lot_epuise_refuse(monkeypatch):
