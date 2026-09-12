@@ -2104,8 +2104,7 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
         super().__init__(**kwargs)
         if not isinstance(run_stamp, str) or not run_stamp:
             raise ValueError(
-                f"VecNormalizeCheckpointCallback.run_stamp doit etre une chaine non vide "
-                f"(recu {run_stamp!r}) : sans lui, deux runs ecrivent les memes noms de checkpoint."
+                f"VecNormalizeCheckpointCallback.run_stamp doit etre une chaine non vide (recu {run_stamp!r})"
             )
         self.name_prefix = f"{self.name_prefix}_{run_stamp}"
         if not run_contract_path:
@@ -4602,6 +4601,14 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     if "checkpoint_name_prefix" not in callback_params:
         raise KeyError("callback_params missing required 'checkpoint_name_prefix' field")
 
+    checkpoint_kwargs = dict(
+        # Un horodatage par RUN (une construction de callbacks par run, cf. `VecNormalizeCheckpointCallback`).
+        run_stamp=time.strftime("%Y%m%d-%H%M%S"),
+        run_contract_path=contract_path(model_path),
+        save_freq=callback_params["checkpoint_save_freq"],
+        save_path=os.path.dirname(model_path),
+        name_prefix=callback_params["checkpoint_name_prefix"],
+    )
     max_checkpoints = callback_params.get("max_checkpoints")
     if max_checkpoints is not None:
         if not isinstance(max_checkpoints, int) or isinstance(max_checkpoints, bool):
@@ -4613,26 +4620,11 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             raise ValueError(
                 f"callback_params.max_checkpoints must be > 0 when provided (got {max_checkpoints})"
             )
-
-    # Un horodatage par RUN (une construction de callbacks par run, cf. `VecNormalizeCheckpointCallback`).
-    checkpoint_run_stamp = time.strftime("%Y%m%d-%H%M%S")
-    if max_checkpoints is not None:
         checkpoint_callback = RotatingCheckpointCallback(
-            max_checkpoints=max_checkpoints,
-            run_stamp=checkpoint_run_stamp,
-            run_contract_path=contract_path(model_path),
-            save_freq=callback_params["checkpoint_save_freq"],
-            save_path=os.path.dirname(model_path),
-            name_prefix=callback_params["checkpoint_name_prefix"],
+            max_checkpoints=max_checkpoints, **checkpoint_kwargs
         )
     else:
-        checkpoint_callback = VecNormalizeCheckpointCallback(
-            run_stamp=checkpoint_run_stamp,
-            run_contract_path=contract_path(model_path),
-            save_freq=callback_params["checkpoint_save_freq"],
-            save_path=os.path.dirname(model_path),
-            name_prefix=callback_params["checkpoint_name_prefix"],
-        )
+        checkpoint_callback = VecNormalizeCheckpointCallback(**checkpoint_kwargs)
     # Hors rotation, le tracker est cree plus tard (dans `train_model`, qui pose l'attribut).
     if metrics_tracker is not None:
         checkpoint_callback.metrics_tracker = metrics_tracker

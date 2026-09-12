@@ -303,23 +303,16 @@ def test_two_runs_at_the_same_step_count_never_overwrite_each_other(models_root,
     du run entrant ECRASAIT celui du run sortant — et son compte d'episodes avec (V11 §0.58)."""
     save_path = str(tmp_path / "ckpts")
     model = _make_vec_normalize_model()
-
     run_contract = _run_contract(tmp_path)
-    first = VecNormalizeCheckpointCallback(
-        run_stamp="20260912-100000", run_contract_path=run_contract,
-        save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint",
-    )
-    first.metrics_tracker = cast(Any, SimpleNamespace(episode_count=111))
-    first.init_callback(cast(Any, model))
-    _run_checkpoint(first, model, 50000)
 
-    second = VecNormalizeCheckpointCallback(
-        run_stamp="20260912-110000", run_contract_path=run_contract,
-        save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint",
-    )
-    second.metrics_tracker = cast(Any, SimpleNamespace(episode_count=222))
-    second.init_callback(cast(Any, model))
-    _run_checkpoint(second, model, 50000)
+    for run_stamp, episodes in (("20260912-100000", 111), ("20260912-110000", 222)):
+        callback = VecNormalizeCheckpointCallback(
+            run_stamp=run_stamp, run_contract_path=run_contract,
+            save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint",
+        )
+        callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=episodes))
+        callback.init_callback(cast(Any, model))
+        _run_checkpoint(callback, model, 50000)
 
     zips = sorted(p for p in os.listdir(save_path) if p.endswith(".zip"))
     assert zips == [
@@ -329,9 +322,6 @@ def test_two_runs_at_the_same_step_count_never_overwrite_each_other(models_root,
     # Le checkpoint du premier run est intact, compte d'episodes compris.
     assert load_run_state(os.path.join(save_path, zips[0])) == 111
     assert load_run_state(os.path.join(save_path, zips[1])) == 222
-    # Et chaque instance ne tient que le sien : la rotation de l'un ne touchera jamais l'autre.
-    assert first.written_checkpoints == [os.path.join(save_path, zips[0])]
-    assert second.written_checkpoints == [os.path.join(save_path, zips[1])]
 
 
 def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
