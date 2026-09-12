@@ -1033,6 +1033,31 @@ def test_promotion_copies_the_model_and_its_companions(tmp_path) -> None:
         assert open(path, "rb").read() in (b"poids", b"compagnon")
 
 
+def test_promotion_refuses_a_canonical_model_without_its_contract(tmp_path) -> None:
+    """Un modele d'etape sans contrat n'est pas reprenable : l'etape suivante le refuserait.
+
+    `--resume-from` installe le contrat DU modele promu ; le copier « s'il existe » aurait
+    produit un `model_<agent>_<etape>.zip` muet, decouvert seulement a l'etape suivante.
+    """
+    from ai.training_contract import contract_path
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
+    canonical = tmp_path / "model_TestAgent.zip"
+    canonical.write_bytes(b"poids")
+    with open(get_vec_normalize_path(str(canonical)), "wb") as handle:
+        handle.write(b"stats")
+
+    with pytest.raises(FileNotFoundError, match="aucun contrat"):
+        promote_stage_model(str(canonical), "P4")
+
+    # Refus AVANT toute copie : une etape a moitie promue passerait pour « deja promue » a la
+    # relance de `--close-stage`.
+    target = stage_model_path(str(canonical), "P4")
+    assert not os.path.exists(target)
+    assert not os.path.exists(get_vec_normalize_path(target))
+    assert not os.path.exists(contract_path(target))
+
+
 def test_promotion_without_a_model_is_refused(tmp_path) -> None:
     with pytest.raises(FileNotFoundError, match="modele canonique est absent"):
         promote_stage_model(str(tmp_path / "model_TestAgent.zip"), "P4")

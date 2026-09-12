@@ -3,10 +3,11 @@
 
 Verrouille les deux moities du contrat :
 - le callback de checkpoint ecrit les stats VecNormalize A LA CONVENTION du projet
-  (`<stem>_vec_normalize.pkl`), faute de quoi le zip est inexploitable pour reprendre ;
-- `--resume-from` installe checkpoint + stats au chemin canonique, ecarte (sans ecraser)
-  le modele precedent, et refuse un checkpoint sans stats plutot que de servir celles
-  d'un autre modele (V11 §0.35) ;
+  (`<stem>_vec_normalize.pkl`), faute de quoi le zip est inexploitable pour reprendre, et une
+  copie du contrat d'entrainement du run (`<stem>_training_contract.json`) ;
+- `--resume-from` installe checkpoint + stats + contrat DU CHECKPOINT au chemin canonique,
+  ecarte (sans ecraser) le modele precedent, et refuse un checkpoint sans stats plutot que de
+  servir celles d'un autre modele (V11 §0.35) — meme refus sans contrat (test_training_contract) ;
 - la promotion est TRANSACTIONNELLE : tant que l'entrainement n'a pas demarre, tout echec
   (checkpoint illisible, environnement inconstruisible, Ctrl-C) remet le modele precedent a
   sa place. Sans cela, un `--resume-from` rate laissait l'inexploitable au chemin canonique
@@ -30,6 +31,7 @@ from ai.train import (
     _rollback_resume_promotion_if_pending,
 )
 from ai.run_state import get_run_state_path, load_run_state
+from ai.training_contract import contract_path
 from ai.vec_normalize_utils import get_vec_normalize_path
 
 
@@ -73,6 +75,11 @@ def models_root(tmp_path, monkeypatch):
 def _write_checkpoint(models_root, steps: int, with_stats: bool = True, with_run_state: bool = True):
     ckpt = models_root / "TestAgent" / f"ppo_checkpoint_{steps}_steps.zip"
     ckpt.write_bytes(b"CHECKPOINT")
+    # Troisieme jumeau : le contrat sous lequel CE checkpoint a appris, celui que la promotion
+    # installe (jamais celui du canonique ecarte).
+    (models_root / "TestAgent" / f"ppo_checkpoint_{steps}_steps_training_contract.json").write_bytes(
+        b"CHECKPOINT_CONTRACT"
+    )
     if with_stats:
         # Le pkl jumeau porte le nom du zip : c'est ce chemin que la reprise exige.
         (models_root / "TestAgent" / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"STATS")
@@ -94,6 +101,9 @@ def test_promote_installs_checkpoint_and_its_stats(models_root):
     assert open(model_path, "rb").read() == b"CHECKPOINT"
     assert open(get_vec_normalize_path(model_path), "rb").read() == b"STATS"
     assert load_run_state(model_path) == 12345, "l'etat de run suit le checkpoint promu"
+    assert open(contract_path(model_path), "rb").read() == b"CHECKPOINT_CONTRACT", (
+        "le contrat installe n'est pas celui du checkpoint promu"
+    )
     # Le checkpoint source reste en place (copie, pas deplacement).
     assert os.path.exists(ckpt)
 
@@ -217,10 +227,18 @@ def _run_checkpoint(callback, model, timesteps: int):
     callback.on_step()
 
 
+def _run_contract(tmp_path) -> str:
+    """Le contrat du run, tel que le prologue le laisse a cote du modele canonique."""
+    path = tmp_path / "model_TestAgent_training_contract.json"
+    path.write_bytes(b"RUN_CONTRACT")
+    return str(path)
+
+
 def test_checkpoint_callback_writes_vec_normalize_stats(models_root, tmp_path):
     save_path = str(tmp_path / "ckpts")
     callback = VecNormalizeCheckpointCallback(
-        save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
+        run_contract_path=_run_contract(tmp_path),
+        save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint",
     )
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=4242))
     model = _make_vec_normalize_model()
@@ -234,12 +252,29 @@ def test_checkpoint_callback_writes_vec_normalize_stats(models_root, tmp_path):
     assert os.path.exists(get_vec_normalize_path(zip_path))
     # Et le compte d'episodes, sans quoi le zip n'est pas reprenable (V11 §0.58).
     assert load_run_state(zip_path) == 4242
+    # Et le contrat du run, sans quoi `--resume-from` ne saurait pas sur quoi il a appris.
+    assert open(contract_path(zip_path), "rb").read() == b"RUN_CONTRACT"
+
+
+def test_checkpoint_callback_refuses_to_save_without_the_run_contract(models_root, tmp_path):
+    """Contrat du run absent = checkpoint irreprenable : on leve, on n'ecrit pas un zip muet."""
+    callback = VecNormalizeCheckpointCallback(
+        run_contract_path=str(tmp_path / "absent_training_contract.json"),
+        save_freq=1, save_path=str(tmp_path / "ckpts"), name_prefix="ppo_checkpoint",
+    )
+    callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=1))
+    model = _make_vec_normalize_model()
+    callback.init_callback(cast(Any, model))
+
+    with pytest.raises(FileNotFoundError, match="Contrat du run absent"):
+        _run_checkpoint(callback, model, 640000)
 
 
 def test_checkpoint_callback_refuses_to_save_without_an_episode_counter(models_root, tmp_path):
     """Compteur non branche = checkpoint irreprenable : on leve au lieu d'ecrire un zip inutile."""
     callback = VecNormalizeCheckpointCallback(
-        save_freq=1, save_path=str(tmp_path / "ckpts"), name_prefix="ppo_checkpoint"
+        run_contract_path=_run_contract(tmp_path),
+        save_freq=1, save_path=str(tmp_path / "ckpts"), name_prefix="ppo_checkpoint",
     )
     model = _make_vec_normalize_model()
     callback.init_callback(cast(Any, model))
@@ -251,7 +286,8 @@ def test_checkpoint_callback_refuses_to_save_without_an_episode_counter(models_r
 def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
     save_path = str(tmp_path / "ckpts")
     callback = RotatingCheckpointCallback(
-        max_checkpoints=2, save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint"
+        max_checkpoints=2, run_contract_path=_run_contract(tmp_path),
+        save_freq=1, save_path=save_path, name_prefix="ppo_checkpoint",
     )
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
     model = _make_vec_normalize_model()
@@ -261,14 +297,16 @@ def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
         _run_checkpoint(callback, model, steps)
 
     remaining = sorted(os.path.basename(p) for p in os.listdir(save_path))
-    # Les TROIS artefacts d'un checkpoint partent ensemble : un orphelin serait relu par un
+    # Les QUATRE artefacts d'un checkpoint partent ensemble : un orphelin serait relu par un
     # futur checkpoint de meme nom.
     assert remaining == [
         "ppo_checkpoint_200_steps.zip",
         "ppo_checkpoint_200_steps_run_state.json",
+        "ppo_checkpoint_200_steps_training_contract.json",
         "ppo_checkpoint_200_steps_vec_normalize.pkl",
         "ppo_checkpoint_300_steps.zip",
         "ppo_checkpoint_300_steps_run_state.json",
+        "ppo_checkpoint_300_steps_training_contract.json",
         "ppo_checkpoint_300_steps_vec_normalize.pkl",
     ]
 
@@ -277,6 +315,7 @@ def _write_stale_checkpoint(save_path, steps: str) -> None:
     (save_path / f"ppo_checkpoint_{steps}_steps.zip").write_bytes(b"stale")
     (save_path / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"stale")
     (save_path / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text('{"episodes_trained": 1}')
+    (save_path / f"ppo_checkpoint_{steps}_steps_training_contract.json").write_bytes(b"stale")
 
 
 def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(models_root, tmp_path):
@@ -289,7 +328,8 @@ def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(mod
     for steps in ("24309576", "24549576", "24789576"):
         _write_stale_checkpoint(save_path, steps)
     callback = RotatingCheckpointCallback(
-        max_checkpoints=3, save_freq=1, save_path=str(save_path), name_prefix="ppo_checkpoint"
+        max_checkpoints=3, run_contract_path=_run_contract(tmp_path),
+        save_freq=1, save_path=str(save_path), name_prefix="ppo_checkpoint",
     )
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
     model = _make_vec_normalize_model()
@@ -352,7 +392,8 @@ def test_train_model_keeps_the_checkpoints_of_the_run_after_publishing(
     model = _make_vec_normalize_model()
     model.logger = SimpleNamespace(get_dir=lambda: str(tmp_path / "tb"))
     callback = VecNormalizeCheckpointCallback(
-        save_freq=1, save_path=str(model_dir), name_prefix="ppo_checkpoint"
+        run_contract_path=_run_contract(model_dir),
+        save_freq=1, save_path=str(model_dir), name_prefix="ppo_checkpoint",
     )
     callback.init_callback(cast(Any, model))
     # Le tracker n'est pose par `train_model` qu'AVANT `learn()` : pour ecrire les checkpoints
@@ -367,24 +408,76 @@ def test_train_model_keeps_the_checkpoints_of_the_run_after_publishing(
     assert sorted(os.listdir(model_dir)) == [
         "model_TestAgent.zip",
         "model_TestAgent_run_state.json",
+        "model_TestAgent_training_contract.json",
         "model_TestAgent_vec_normalize.pkl",
         "ppo_checkpoint_10000_steps.zip",
         "ppo_checkpoint_10000_steps_run_state.json",
+        "ppo_checkpoint_10000_steps_training_contract.json",
         "ppo_checkpoint_10000_steps_vec_normalize.pkl",
         "ppo_checkpoint_20000_steps.zip",
         "ppo_checkpoint_20000_steps_run_state.json",
+        "ppo_checkpoint_20000_steps_training_contract.json",
         "ppo_checkpoint_20000_steps_vec_normalize.pkl",
         "ppo_checkpoint_24789576_steps.zip",
         "ppo_checkpoint_24789576_steps_run_state.json",
+        "ppo_checkpoint_24789576_steps_training_contract.json",
         "ppo_checkpoint_24789576_steps_vec_normalize.pkl",
     ]
 
 
+def test_train_model_saves_the_interrupted_model_with_the_run_contract(
+    models_root, tmp_path, monkeypatch
+):
+    """Le `_interrupted` du Ctrl-C est reprenable par `--resume-from` : il emporte le contrat.
+
+    Sans lui, la promotion de cette sauvegarde d'urgence — le seul artefact d'un run interrompu —
+    s'arreterait sur « contrat absent », ou reposerait celui du canonique en le supposant.
+    """
+    import ai.metrics_tracker as metrics_tracker_module
+
+    model_dir = models_root / "TestAgent"
+    model_path = str(model_dir / "model_TestAgent.zip")
+    run_contract = _run_contract(model_dir)
+
+    class _FakeTracker:
+        def __init__(self, agent_name, tensorboard_dir, **kwargs):
+            self.episode_count = 7
+
+        def truncation_summary_lines(self):
+            return []
+
+    class _NoLearnCallback:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _InterruptedModel(_FakeModel):
+        def learn(self, **kwargs):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(metrics_tracker_module, "W40KMetricsTracker", _FakeTracker)
+    monkeypatch.setattr(metrics_tracker_module, "resolve_perf_windows", lambda cfg: (100, 10))
+    monkeypatch.setattr(ai.train, "MetricsCollectionCallback", _NoLearnCallback)
+
+    base = _make_vec_normalize_model()
+    model = _InterruptedModel(base.env, SimpleNamespace(get_dir=lambda: str(tmp_path / "tb")))
+    training_config = {"total_timesteps": 1, "callback_params": {"save_best_robust": False}}
+
+    assert ai.train.train_model(model, training_config, [], model_path, "x1", "TestAgent") is False
+
+    interrupted = ai.train._interrupted_model_path(model_path)
+    assert open(interrupted, "rb").read() == b"MODEL"
+    assert load_run_state(interrupted) == 7
+    assert open(contract_path(interrupted), "rb").read() == open(run_contract, "rb").read(), (
+        "la sauvegarde d'urgence n'emporte pas le contrat du run : elle n'est pas reprenable"
+    )
+
+
 def _write_previous_canonical_model(models_root, run_dir: str = "/tb/run_20260101-000000"):
-    """Un modele canonique complet : poids, deux compagnons, et son sidecar TensorBoard."""
+    """Un modele canonique complet : poids, trois compagnons, et son sidecar TensorBoard."""
     previous = models_root / "TestAgent" / "model_TestAgent.zip"
     previous.write_bytes(b"PREVIOUS")
     (models_root / "TestAgent" / "model_TestAgent_vec_normalize.pkl").write_bytes(b"PREVIOUS_STATS")
+    (models_root / "TestAgent" / "model_TestAgent_training_contract.json").write_bytes(b"PREVIOUS_CONTRACT")
     (models_root / "TestAgent" / "model_TestAgent_run_state.json").write_text(
         json.dumps({"episodes_trained": 999}), encoding="utf-8"
     )
@@ -447,6 +540,7 @@ def test_rollback_removes_the_installed_checkpoint_when_there_was_no_previous_mo
     assert sorted(os.listdir(models_root / "TestAgent")) == [
         "ppo_checkpoint_640000_steps.zip",
         "ppo_checkpoint_640000_steps_run_state.json",
+        "ppo_checkpoint_640000_steps_training_contract.json",
         "ppo_checkpoint_640000_steps_vec_normalize.pkl",
     ]
 
@@ -575,7 +669,8 @@ def test_promote_sets_aside_the_robust_threshold_and_best_model(models_root):
         "le seuil de score robuste du run precedent s'applique encore au run repris"
     )
     assert not (agent_dir / "best_model.zip").exists()
-    assert len(sorted(agent_dir.glob("*_pre_resume_*"))) == 6, sorted(
+    # Modele, trois compagnons, sidecar TensorBoard, seuil robuste, best_model.
+    assert len(sorted(agent_dir.glob("*_pre_resume_*"))) == 7, sorted(
         p.name for p in agent_dir.glob("*_pre_resume_*")
     )
 
@@ -857,6 +952,7 @@ def test_promote_rejects_canonical_model_as_source(models_root):
     (models_root / "TestAgent" / "model_TestAgent_run_state.json").write_text(
         json.dumps({"episodes_trained": 1}), encoding="utf-8"
     )
+    (models_root / "TestAgent" / "model_TestAgent_training_contract.json").write_bytes(b"CONTRACT")
 
     with pytest.raises(ValueError, match="canonique"):
         _promote_checkpoint_for_resume(str(canonical), "TestAgent", _FakeConfigLoader(str(models_root)), log_fn=lambda _m: None)

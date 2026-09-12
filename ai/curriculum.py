@@ -1114,13 +1114,28 @@ def promote_stage_model(canonical_model_path: str, stage_name: str) -> List[str]
     suivante reprend via `--resume-from` quand son `init` le demande. Les compagnons suivent la
     convention d'`ai/model_artifacts` — un zip sans son `_vec_normalize.pkl` est injouable comme
     adversaire fige (V11 §0.35), donc les omettre reviendrait a promouvoir un artefact mort.
+
+    Le CONTRAT est exige, pas seulement copie s'il existe : `--resume-from` installe le contrat
+    du modele promu, et l'etape suivante refuserait un `model_<agent>_<etape>.zip` qui n'en a
+    pas. Le canonique en a toujours un apres le prologue d'un run ; son absence ici est un
+    dossier abime, pas un cas a passer sous silence.
     """
     from ai.model_artifacts import model_companion_paths
+    from ai.training_contract import contract_path
 
     if not os.path.exists(canonical_model_path):
         raise FileNotFoundError(
             f"Promotion d'etape impossible : le modele canonique est absent "
             f"({canonical_model_path}). Le run n'a rien ecrit."
+        )
+    # AVANT la premiere copie : refuser apres aurait laisse une etape a moitie promue, que la
+    # relance de `--close-stage` prend ensuite pour « deja promue ».
+    if not os.path.exists(contract_path(canonical_model_path)):
+        raise FileNotFoundError(
+            f"Promotion d'etape : aucun contrat d'entrainement a cote du modele canonique "
+            f"({contract_path(canonical_model_path)}). Sans lui, "
+            f"{os.path.basename(stage_model_path(canonical_model_path, stage_name))} ne serait "
+            f"pas reprenable par l'etape suivante (cf. ai/training_contract.py)."
         )
     target_model = stage_model_path(canonical_model_path, stage_name)
     pairs: List[Tuple[str, str]] = [(canonical_model_path, target_model)]

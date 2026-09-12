@@ -57,13 +57,22 @@ import json
 import os
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ai.companion_paths import companion_path
 from engine import macro_intents, observation_entities, spatial_grid
 from shared.json_atomic import json_draft
 
-#: Nom du fichier voisin du modele. Volontairement pas un `.zip` : `ai/models/**/*.zip` ne se
-#: modifie jamais automatiquement (CLAUDE.md), et le contrat doit pouvoir s'ecrire et se relire
-#: sans jamais toucher aux poids.
-CONTRACT_FILENAME = "training_contract.json"
+#: Suffixe du contrat, COMPAGNON du modele : `model_<agent>.zip` -> `model_<agent>_training_contract.json`,
+#: `ppo_checkpoint_640000_steps.zip` -> `ppo_checkpoint_640000_steps_training_contract.json`.
+#: Volontairement pas un `.zip` : `ai/models/**/*.zip` ne se modifie jamais automatiquement
+#: (CLAUDE.md), et le contrat doit pouvoir s'ecrire et se relire sans jamais toucher aux poids.
+#:
+#: Un nom PAR MODELE et non un `training_contract.json` partage par le dossier : chaque artefact
+#: reprenable (checkpoint periodique, modele d'etape, sauvegarde du Ctrl-C, archive d'un `--new`)
+#: emporte le contrat sous lequel IL a appris, et `--resume-from` installe celui-la. Avec le nom
+#: fixe, la promotion reposait sur le modele promu le contrat du canonique qu'elle ecartait, en
+#: supposant qu'ils sortaient du meme entrainement — un checkpoint d'un run anterieur passait
+#: alors la comparaison sur un contrat qui n'etait pas le sien.
+CONTRACT_SUFFIX = "_training_contract.json"
 
 #: Version du FORMAT du contrat. Un ancien fichier n'est pas « different », il est illisible par
 #: ce code : c'est un cas distinct d'une divergence de contenu, et il se dit autrement.
@@ -172,8 +181,8 @@ def build_contract(rewards_config: Mapping[str, Any], agent_key: str) -> Dict[st
 
 
 def contract_path(model_path: str) -> str:
-    """Le chemin du contrat voisin d'un modele donne."""
-    return os.path.join(os.path.dirname(model_path), CONTRACT_FILENAME)
+    """Le chemin du contrat compagnon d'un modele donne (`ai/companion_paths.py`)."""
+    return companion_path(model_path, CONTRACT_SUFFIX)
 
 
 def write_contract(model_path: str, contrat: Mapping[str, Any]) -> str:

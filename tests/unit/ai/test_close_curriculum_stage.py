@@ -82,9 +82,17 @@ def _make_run_info(tmp_path) -> dict:
 
 
 def _make_canonical_model(tmp_path) -> str:
-    """Cree un zip minimal sous le nom retourne par le mock de build_agent_model_path."""
+    """Cree un zip minimal sous le nom retourne par le mock de build_agent_model_path.
+
+    Avec son contrat : `promote_stage_model` l'EXIGE (un modele d'etape sans contrat n'est pas
+    reprenable par l'etape suivante). Le contenu n'est pas lu ici, seulement copie.
+    """
+    from ai.training_contract import contract_path
+
     model = tmp_path / "model_Stub.zip"
     model.write_bytes(b"fake-weights")
+    with open(contract_path(str(model)), "w", encoding="utf-8") as flux:
+        flux.write("{}")
     return str(model)
 
 

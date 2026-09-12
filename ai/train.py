@@ -1540,9 +1540,16 @@ def canonical_run_artifacts(model_path: str) -> list:
     best_model = os.path.join(model_dir, "best_model.zip")
     interrupted = _interrupted_model_path(model_path)
 
+    # Le contrat est un compagnon du modele (`COMPANION_SUFFIXES`), mais il n'entre ici que
+    # s'il y a un modele a accompagner : voir la fin de la liste. Les deux autres compagnons y
+    # figurent qu'ils existent ou non, `canonical_set_aside_pairs` filtre sur l'existence.
+    companions_without_contract = [
+        p for p in model_companion_paths(model_path) if p != contract_path(model_path)
+    ]
+
     return [
         model_path,                                              # model_<agent>.zip
-        *model_companion_paths(model_path),                      # ..._vec_normalize.pkl, ..._run_state.json
+        *companions_without_contract,                            # ..._vec_normalize.pkl, ..._run_state.json
         canonical_robust_meta_path(model_path),                  # seuil du score robuste
         pool_stop_path(model_path),                              # verdict d'arret anticipe
         best_model,                                              # meilleur modele SB3 du run
@@ -1551,16 +1558,16 @@ def canonical_run_artifacts(model_path: str) -> list:
         # partait a l'archive : le run suivant les ecrasait, et le best_model archive devenait
         # inexploitable — la normalisation d'un autre entrainement (V11 §0.35).
         get_vec_normalize_path(best_model),
-        # La sauvegarde d'urgence du Ctrl-C, avec ses deux compagnons : nom FIXE, donc le run
+        # La sauvegarde d'urgence du Ctrl-C, avec ses trois compagnons : nom FIXE, donc le run
         # suivant l'ECRASE a son propre Ctrl-C. C'est pourtant le seul artefact reprenable d'un
         # entrainement interrompu — le laisser en place, c'est perdre les poids du run precedent
         # au premier accident du run suivant.
         interrupted,
         *model_companion_paths(interrupted),
-        # Le CONTRAT du run (ai/training_contract.py) : nom FIXE dans le dossier du modele, donc
-        # le run neuf l'ecrase. Meme raison que les stats VecNormalize du best_model, deux lignes
-        # plus haut — un modele archive sans son contrat est irreprenable : sa reprise s'arreterait
-        # sur un « contrat absent » qui ne dit plus rien de ce sur quoi il a appris.
+        # Le CONTRAT du run (ai/training_contract.py) : le run neuf l'ecrase en ecrivant le
+        # sien. Meme raison que les stats VecNormalize du best_model, plus haut — un modele
+        # archive sans son contrat est irreprenable : sa reprise s'arreterait sur un « contrat
+        # absent » qui ne dit plus rien de ce sur quoi il a appris.
         #
         # SEULEMENT s'il y a un modele a accompagner. Un contrat SEUL ne decrit rien : c'est le
         # cas apres un premier `--new`, qui ecrit le contrat immediatement alors que le modele
@@ -2073,14 +2080,27 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
     des runs precedents et laissait orphelin leur compte d'episodes ; le chemin de rotation n'en
     a jamais eu (cf. le contrat des artefacts canoniques et
     `test_scored_and_checkpoint_models_are_NOT_archived`).
+
+    Chaque checkpoint emporte aussi une copie du CONTRAT du run (`run_contract_path`, celui que
+    le prologue a ecrit ou verifie a cote du modele canonique) : les checkpoints des runs
+    precedents restent dans le dossier, et `--resume-from` installe le contrat DU checkpoint
+    promu — sans cette copie, il ne pouvait que reposer celui du canonique ecarte, en supposant
+    qu'ils sortaient du meme entrainement.
     """
 
     #: Compteur d'episodes GLOBAL, pose apres construction — le tracker de metriques n'existe pas
     #: encore quand les callbacks sont crees. Meme convention que `BotEvaluationCallback`.
     metrics_tracker: Any = None
 
-    def __init__(self, **kwargs):
+    def __init__(self, run_contract_path: str, **kwargs):
         super().__init__(**kwargs)
+        if not run_contract_path:
+            raise ValueError(
+                "VecNormalizeCheckpointCallback : run_contract_path vide — un checkpoint sans "
+                "contrat n'est pas reprenable (cf. ai/training_contract.py)."
+            )
+        #: Contrat du run, copie a cote de chaque checkpoint ecrit.
+        self.run_contract_path = run_contract_path
         #: Chemins des zips ecrits par cette instance, du plus ancien au plus recent.
         self.written_checkpoints: List[str] = []
 
@@ -2095,6 +2115,13 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
             checkpoint_path = self._checkpoint_path(extension="zip")
             save_vec_normalize(self.model.get_env(), checkpoint_path)
             save_run_state(checkpoint_path, int(self.metrics_tracker.episode_count))
+            if not os.path.exists(self.run_contract_path):
+                raise FileNotFoundError(
+                    f"Contrat du run absent : {self.run_contract_path}. Le prologue l'ecrit "
+                    f"(--new) ou le verifie (reprise) avant tout checkpoint ; sans lui, "
+                    f"{os.path.basename(checkpoint_path)} ne serait pas reprenable."
+                )
+            shutil.copy2(self.run_contract_path, contract_path(checkpoint_path))
             # Un chemin reecrit (meme nombre de pas) redevient le plus recent, sans doublon.
             if checkpoint_path in self.written_checkpoints:
                 self.written_checkpoints.remove(checkpoint_path)
@@ -2381,6 +2408,16 @@ def _promote_checkpoint_for_resume(
             f"les reprendre relancerait la rampe de deploiement depuis `active_ratio_start` et "
             f"repartirait le compte d'episodes de zero (cf. ai/run_state.py). Repartir avec --new."
         )
+    checkpoint_contract = contract_path(checkpoint_path)
+    if not os.path.exists(checkpoint_contract):
+        raise FileNotFoundError(
+            f"--resume-from : contrat d'entrainement absent pour ce checkpoint : "
+            f"{checkpoint_contract}. Sans lui, rien ne dit sur quelle observation, quelles "
+            f"familles d'actions et quelles cles de recompense ce checkpoint a appris — reposer "
+            f"le contrat du modele canonique reviendrait a le supposer. Un artefact ecrit avant "
+            f"ce mecanisme et dont le contrat est CONNU se complete a la main : copier le "
+            f"contrat de son run sous ce nom. Sinon, repartir avec --new."
+        )
 
     model_path = build_agent_model_path(config_loader.get_models_root(), agent_key)
     if os.path.abspath(checkpoint_path) == os.path.abspath(model_path):
@@ -2431,18 +2468,36 @@ def _promote_checkpoint_for_resume(
     shutil.copy2(checkpoint_path, model_path)
     shutil.copy2(checkpoint_vec_path, get_vec_normalize_path(model_path))
     shutil.copy2(checkpoint_run_state, get_run_state_path(model_path))
-    # Le CONTRAT vient d'etre ecarte avec le modele canonique — or le checkpoint promu sort du
-    # MEME entrainement, donc il a appris sous ce contrat-la. Sans cette remise en place, toute
-    # reprise `--resume-from` s'arreterait aussitot sur « aucun contrat d'entrainement », en
-    # demandant une initialisation manuelle pour un modele dont le contrat est juste a cote.
-    # Copie et non deplacement : l'archive reste complete, comme pour les stats du checkpoint.
-    archived_contract = dict(promotion.set_aside_pairs).get(contract_path(model_path))
-    if archived_contract and os.path.exists(archived_contract):
-        shutil.copy2(archived_contract, contract_path(model_path))
+    # Le contrat DU CHECKPOINT, jamais celui du canonique ecarte : ce dernier decrit le modele
+    # qu'on vient de mettre de cote, et rien ne prouve que le checkpoint sort du meme
+    # entrainement — les checkpoints des runs precedents restent dans le dossier. C'est ce
+    # contrat-ci que le prologue comparera au code courant, en nommant le champ divergent.
+    shutil.copy2(checkpoint_contract, contract_path(model_path))
 
     _write_tensorboard_run_meta(model_path, "")
-    log_fn(f"♻️  --resume-from : {os.path.basename(checkpoint_path)} installe en {model_path}")
+    log_fn(
+        f"♻️  --resume-from : {os.path.basename(checkpoint_path)} installe en {model_path} "
+        f"({_describe_promotable(checkpoint_path)})"
+    )
+    if promotion.set_aside_path:
+        log_fn(f"   canonique ecarte : {_describe_promotable(promotion.set_aside_path)}")
     return model_path
+
+
+def _describe_promotable(model_zip_path: str) -> str:
+    """Date d'ecriture et compte d'episodes d'un modele, pour le log de promotion.
+
+    Deux runs de meme longueur ecrivent le meme `ppo_checkpoint_<n>_steps.zip` a tour de role :
+    le nombre de pas ne dit pas de quel run il vient. La date et le compte d'episodes sont ce
+    que l'operateur a pour le savoir ; le contrat installe garantit le SENS des grandeurs, pas
+    l'identite du run.
+    """
+    written = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(model_zip_path)))
+    # Le modele ECARTE peut etre anterieur au compte d'episodes (un `--new` l'archive tel quel) :
+    # ce n'est pas une erreur de la promotion, on le dit au lieu de lever sur une ligne de log.
+    if not os.path.exists(get_run_state_path(model_zip_path)):
+        return f"ecrit le {written}, compte d'episodes absent"
+    return f"ecrit le {written}, {load_run_state(model_zip_path)} episodes"
 
 
 def _resolve_tensorboard_run_dir(
@@ -4547,12 +4602,14 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
 
         checkpoint_callback = RotatingCheckpointCallback(
             max_checkpoints=max_checkpoints,
+            run_contract_path=contract_path(model_path),
             save_freq=callback_params["checkpoint_save_freq"],
             save_path=os.path.dirname(model_path),
             name_prefix=callback_params["checkpoint_name_prefix"],
         )
     else:
         checkpoint_callback = VecNormalizeCheckpointCallback(
+            run_contract_path=contract_path(model_path),
             save_freq=callback_params["checkpoint_save_freq"],
             save_path=os.path.dirname(model_path),
             name_prefix=callback_params["checkpoint_name_prefix"],
@@ -4927,6 +4984,8 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         save_run_state(interrupted_path, int(metrics_tracker.episode_count))
         if save_vec_normalize(model.get_env(), interrupted_path):
             print("   VecNormalize stats saved")
+        # Reprenable par `--resume-from`, donc avec le contrat du run, comme un checkpoint.
+        shutil.copy2(contract_path(model_path), contract_path(interrupted_path))
         print(f"💾 Progress saved to: {interrupted_path}")
         return False
         

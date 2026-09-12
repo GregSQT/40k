@@ -1,14 +1,18 @@
 """Les fichiers qui vont AVEC un modele — enumeration, copie, suppression. Source unique.
 
-Un modele entraine n'est pas un fichier, c'en est TROIS :
+Un modele entraine n'est pas un fichier, c'en est QUATRE :
 
-    model_<agent>.zip                 les poids
-    model_<agent>_vec_normalize.pkl   les stats de normalisation (V11 §0.35)
-    model_<agent>_run_state.json      les episodes deja joues     (V11 §0.58)
+    model_<agent>.zip                        les poids
+    model_<agent>_vec_normalize.pkl          les stats de normalisation (V11 §0.35)
+    model_<agent>_run_state.json             les episodes deja joues     (V11 §0.58)
+    model_<agent>_training_contract.json     le sens des grandeurs apprises (ai/training_contract.py)
 
-Les deux compagnons sont indispensables pour REPRENDRE : sans le pkl la reprise leve, sans
+Les trois compagnons sont indispensables pour REPRENDRE : sans le pkl la reprise leve, sans
 l'etat de run elle relancerait la rampe de deploiement depuis `active_ratio_start` et repartirait
-d'un compte d'episodes nul (cf. ai/run_state.py pour ce que ce compteur ne pilote PAS).
+d'un compte d'episodes nul (cf. ai/run_state.py pour ce que ce compteur ne pilote PAS), et sans
+le contrat elle ne peut pas verifier que l'observation, les actions et les cles de recompense
+sont encore celles sur lesquelles CE modele a appris — la promotion `--resume-from` installe le
+contrat du modele promu, jamais celui du canonique qu'elle ecarte.
 
 Ce module existe parce que la liste etait recopiee a la main sur chaque site qui manipule un
 modele — enumeration canonique, rotation des checkpoints, promotion `--resume-from`, copie du
@@ -29,6 +33,7 @@ from typing import List
 
 from ai.companion_paths import companion_path
 from ai.run_state import RUN_STATE_SUFFIX, remove_run_state, save_run_state
+from ai.training_contract import CONTRACT_SUFFIX, contract_path
 from ai.vec_normalize_utils import VEC_NORMALIZE_SUFFIX, get_vec_normalize_path
 
 __all__ = [
@@ -40,7 +45,7 @@ __all__ = [
 ]
 
 #: Suffixes des compagnons, dans l'ordre ou on les enumere.
-COMPANION_SUFFIXES = (VEC_NORMALIZE_SUFFIX, RUN_STATE_SUFFIX)
+COMPANION_SUFFIXES = (VEC_NORMALIZE_SUFFIX, RUN_STATE_SUFFIX, CONTRACT_SUFFIX)
 
 
 def model_companion_paths(model_path: str) -> List[str]:
@@ -54,6 +59,11 @@ def copy_model_with_companions(src_model_zip: str, dst_model_zip: str, episodes_
     `episodes_trained` est le compte au moment de la copie : la source vient d'etre sauvee dans
     le meme tour, c'est le meme nombre — et l'ecrire ici evite de le persister pour tous les
     modeles intermediaires que personne ne reprendra.
+
+    Le contrat n'est PAS copie : l'unique appelant reinstalle un instantane robuste sur le
+    modele CANONIQUE, dont le contrat est deja en place (ecrit ou verifie par le prologue du
+    run), et l'instantane n'en porte pas (`_save_model_with_vecnormalize` n'ecrit que zip et
+    stats). Copier ici, c'est copier un fichier absent ; ne rien faire laisse le bon.
     """
     if not os.path.exists(src_model_zip):
         raise FileNotFoundError(f"Source model zip not found: {src_model_zip}")
@@ -79,3 +89,6 @@ def remove_model_with_companions(model_zip_path: str) -> None:
     if os.path.exists(vec_path):
         os.remove(vec_path)
     remove_run_state(model_zip_path)
+    contract = contract_path(model_zip_path)
+    if os.path.exists(contract):
+        os.remove(contract)
