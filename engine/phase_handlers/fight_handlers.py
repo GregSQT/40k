@@ -1778,18 +1778,22 @@ def _fight_v11_arm_selection_exhortation(
     return True
 
 
-def _fight_v11_activation_locked_by_exhortation(
+def _fight_v11_activation_locked(
     game_state: Dict[str, Any], active: Optional[str], uid: str
 ) -> bool:
-    """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation EST sélectionnée
-    (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre unité (`uid`)
-    tant qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans ce verrou, le
-    dé serait joué puis l'ordre des combats réarrangé, ce que la règle interdit."""
+    """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation, OU qui a commité
+    son pile-in additionnel d'overrun (12.06, « one additional pile-in move, then fights »), EST
+    sélectionnée (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre
+    unité (`uid`) tant qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans
+    ce verrou, le dé serait joué ou le move fait, puis l'ordre des combats réarrangé, ce que la
+    règle interdit."""
     if active is None or uid == active:
+        return False
+    if active in require_key(game_state, "units_selected_to_fight"):
         return False
     return (
         active in require_key(game_state, "fight_exhortation_done")
-        and active not in require_key(game_state, "units_selected_to_fight")
+        or active in require_key(game_state, OVERRUN_PILE_IN_DONE_KEY)
     )
 
 
@@ -1804,10 +1808,10 @@ def _fight_v11_manual_activate(
     Armée : le plateau rendu ici est REMPLACÉ par `W40KEngine._process_fight_phase` (jet puis
     reprise par `_fight_v11_manual_state`) — un stub suffit, comme dans `_fight_v11_auto_step`,
     plutôt qu'un état complet calculé pour être jeté."""
-    if _fight_v11_activation_locked_by_exhortation(game_state, active, uid):
+    if _fight_v11_activation_locked(game_state, active, uid):
         _fight_v11_log(
             game_state,
-            f"{site} activate {uid} REFUSÉ : {active} a joué son Exhortation, elle doit combattre",
+            f"{site} activate {uid} REFUSÉ : {active} a joué son Exhortation ou son overrun, elle doit combattre",
         )
         return _fight_v11_manual_state(game_state)
     game_state["active_fight_unit"] = uid
@@ -4619,6 +4623,7 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
             "fight_selector": selector,
             "fight_eligible_units": list(remaining),
             "active_fight_unit": active, "valid_targets": valid,
+            "overrun_eligible": fight_v11_can_overrun_pile_in(game_state, u),
             "waiting_for_player": True, "action": "wait",
         }
     game_state["active_fight_unit"] = None
@@ -4686,6 +4691,15 @@ def _fight_v11_consolidation_new_foes_step(
     uid = str(uid) if uid is not None else None
     active = game_state.get("active_fight_unit")
     active = str(active) if active is not None else None
+
+    # OVERRUN FIGHT 12.06 — un New Foe dont l'engageur est mort avant sa sélection est
+    # désengagé : même pile-in additionnel que le dispatch FIGHT (source unique, même ordre :
+    # AVANT l'activation, pour qu'une autre action lève un plan en cours), sinon il serait
+    # « sélectionné sans attaque » là où le gym/auto lui font l'overrun.
+    skip = action.get("skip") is True or atype in ("skip", "right_click")
+    overrun_resp = _fight_v11_overrun_step(game_state, action, active, remaining, skip)
+    if overrun_resp is not None:
+        return overrun_resp
 
     # L'adversaire choisit l'ordre : sélection d'un New Foe à faire combattre.
     if atype == "activate_unit":
@@ -5379,6 +5393,82 @@ def _fight_v11_pile_in_model_plan_step(
     return True, None
 
 
+def _fight_v11_overrun_step(
+    game_state: Dict[str, Any],
+    action: Dict[str, Any],
+    active: Optional[str],
+    pool: List[str],
+    skip: bool,
+) -> Optional[Tuple[bool, Dict[str, Any]]]:
+    """OVERRUN FIGHT 12.06 en flux manuel — pile-in ADDITIONNEL par-figurine de l'unité active
+    (« Your unit can make one additional pile-in move, then fights »). SOURCE UNIQUE des deux
+    sélections manuelles : dispatch FIGHT (12.04) et New Foes to Face (12.08 AFTER, où le New Foe
+    dont l'engageur est mort est précisément une unité désengagée éligible 12.06).
+
+    Action séparée `overrun_pile_in`, AVANT le choix de cible : c'est quand l'unité n'a AUCUNE
+    cible avant ce move qu'il sert. Le plan est le même pile-in move 12.03 que l'étape 2 (cibles
+    engagées si engagée, sinon ≤5" ; l'unité DOIT finir engagée) ; le commit rend la main au
+    combat de l'unité, dont le pool de cibles est recalculé à sa nouvelle position, et la
+    VERROUILLE (`_fight_v11_activation_locked`) : le move fait partie de sa sélection, le joueur
+    ne peut plus lui préférer une autre unité.
+
+    Retour : la réponse à renvoyer telle quelle, ou ``None`` si l'action n'appartient pas à
+    l'overrun (l'appelant poursuit son dispatch normal).
+    """
+    atype = action.get("action")
+    overrun_uid = game_state.get(OVERRUN_PILE_IN_UNIT_KEY)
+    overrun_uid = str(overrun_uid) if overrun_uid is not None else None
+    if overrun_uid is not None and (active is None or overrun_uid != active):
+        # Drapeau orphelin (l'unité active a changé sous le plan) → levé, on dispatch normalement.
+        game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+        overrun_uid = None
+    if overrun_uid is not None:
+        if skip:
+            # Le joueur renonce au pile-in additionnel : l'unité reste ACTIVE et combat depuis
+            # sa position (ce n'est PAS le « passer » d'une unité sans cible, traité par l'appelant).
+            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+            _fight_v11_log(game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (joueur)")
+            return _fight_v11_manual_state(game_state)
+        if atype in PILE_IN_MODEL_PLAN_ACTIONS:
+            committed, response = _fight_v11_pile_in_model_plan_step(
+                game_state, overrun_uid, action, kind="overrun_pile_in"
+            )
+            if not committed:
+                assert response is not None
+                return response
+            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+            game_state[OVERRUN_PILE_IN_DONE_KEY].add(overrun_uid)
+            return _fight_v11_manual_state(game_state)
+        # Toute autre action abandonne le plan en cours et est traitée normalement.
+        game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+        _fight_v11_log(
+            game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (action {atype!r})"
+        )
+
+    if atype != "overrun_pile_in":
+        return None
+    if active is None or active not in pool:
+        return False, {"error": "no_active_fight_unit", "action": atype}
+    u = require_unit_by_id(game_state, active)
+    if not fight_v11_can_overrun_pile_in(game_state, u):
+        _fight_v11_log(game_state, f"OVERRUN PILE IN unit {active} REFUSÉ : non éligible 12.06")
+        return False, {"error": "overrun_not_eligible", "unitId": active}
+    # Les déclarations d'attaque faites AVANT le move sont caduques : les figurines
+    # bougent, leur éligibilité par-figurine (04.02) change, et le front repart de zéro.
+    from .shared_utils import clear_pending_fight_intent
+    clear_pending_fight_intent(game_state, active)
+    game_state[OVERRUN_PILE_IN_UNIT_KEY] = active
+    state = _fight_pile_in_model_plan_state(
+        game_state, u, view_level=int(action.get("level") or 0), overrun=True
+    )
+    _fight_v11_log(
+        game_state,
+        f"OVERRUN PILE IN : unit {active} (par-figurine, "
+        f"{len(state['eligible_models'])} figs déplaçables, cibles={state['pile_in_targets']})",
+    )
+    return True, state
+
+
 def _fight_v11_manual_step(
     game_state: Dict[str, Any],
     unit: Optional[Dict[str, Any]],
@@ -5609,62 +5699,11 @@ def _fight_v11_manual_step(
             f"step={game_state.get('fight_step')} fought={sorted(game_state.get('units_fought', set()))}"
         )
 
-        # OVERRUN FIGHT 12.06 — pile-in ADDITIONNEL par-figurine de l'unité active (« Your unit
-        # can make one additional pile-in move, then fights »). Action séparée, AVANT le choix de
-        # cible : c'est précisément quand l'unité n'a AUCUNE cible avant ce move qu'il sert. Le
-        # plan est le même pile-in move 12.03 que l'étape 2 (cibles engagées si engagée, sinon
-        # ≤5" ; l'unité DOIT finir engagée) ; le commit rend la main au combat de l'unité, dont le
-        # pool de cibles est recalculé à sa nouvelle position.
-        overrun_uid = game_state.get(OVERRUN_PILE_IN_UNIT_KEY)
-        overrun_uid = str(overrun_uid) if overrun_uid is not None else None
-        if overrun_uid is not None and (active is None or overrun_uid != active):
-            # Drapeau orphelin (l'unité active a changé sous le plan) → levé, on dispatch normalement.
-            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
-            overrun_uid = None
-        if overrun_uid is not None:
-            if skip:
-                # Le joueur renonce au pile-in additionnel : l'unité reste ACTIVE et combat depuis
-                # sa position (ce n'est PAS le « passer » d'une unité sans cible, traité plus bas).
-                game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
-                _fight_v11_log(game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (joueur)")
-                return _fight_v11_manual_state(game_state)
-            if atype in PILE_IN_MODEL_PLAN_ACTIONS:
-                committed, response = _fight_v11_pile_in_model_plan_step(
-                    game_state, overrun_uid, action, kind="overrun_pile_in"
-                )
-                if not committed:
-                    assert response is not None
-                    return response
-                game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
-                game_state[OVERRUN_PILE_IN_DONE_KEY].add(overrun_uid)
-                return _fight_v11_manual_state(game_state)
-            # Toute autre action abandonne le plan en cours et est traitée normalement.
-            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
-            _fight_v11_log(
-                game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (action {atype!r})"
-            )
-
-        if atype == "overrun_pile_in":
-            if active is None or active not in pool:
-                return False, {"error": "no_active_fight_unit", "action": atype}
-            u = require_unit_by_id(game_state, active)
-            if not fight_v11_can_overrun_pile_in(game_state, u):
-                _fight_v11_log(game_state, f"OVERRUN PILE IN unit {active} REFUSÉ : non éligible 12.06")
-                return False, {"error": "overrun_not_eligible", "unitId": active}
-            # Les déclarations d'attaque faites AVANT le move sont caduques : les figurines
-            # bougent, leur éligibilité par-figurine (04.02) change, et le front repart de zéro.
-            from .shared_utils import clear_pending_fight_intent
-            clear_pending_fight_intent(game_state, active)
-            game_state[OVERRUN_PILE_IN_UNIT_KEY] = active
-            state = _fight_pile_in_model_plan_state(
-                game_state, u, view_level=int(action.get("level") or 0), overrun=True
-            )
-            _fight_v11_log(
-                game_state,
-                f"OVERRUN PILE IN : unit {active} (par-figurine, "
-                f"{len(state['eligible_models'])} figs déplaçables, cibles={state['pile_in_targets']})",
-            )
-            return True, state
+        # OVERRUN FIGHT 12.06 — pile-in additionnel de l'unité active (source unique partagée
+        # avec les New Foes to Face : `_fight_v11_overrun_step`).
+        overrun_resp = _fight_v11_overrun_step(game_state, action, active, pool, skip)
+        if overrun_resp is not None:
+            return overrun_resp
 
         if skip:
             # « Passer » une unité en étape fight = clic droit (right_click → skip, calculé
