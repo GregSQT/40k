@@ -79,6 +79,8 @@ COUNTERS = {
         ('fight_wound_threshold_mismatch',),
         ('fight_alternation_violations',),
         ('hazardous_no_hazardous_weapon_fight',),
+        # 06.02 par capacité (grammaire 9) : compte de blessures mortelles ≠ dés de la ligne.
+        ('mw_ability_dice_mismatch',),
         # `fight_not_allocated_target_alive` : compteur retiré le 2026-08-12 (faux positifs par
         # construction ; l'invariant 05 est tenu par
         # `tests/unit/engine/test_attack_allocation_contract.py`).

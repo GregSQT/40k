@@ -7,10 +7,12 @@ HAZARDOUS » sur des unités qui n'en portent aucune.
 
 Format attendu :
   SUFFERS 7 Mortal Wounds [HOLD STILL AND SAY AARGH] MW:3,4 [FROM:12] [ALLOC_MODEL: ...]
+  SUFFERS 2 Mortal Wounds [EXHORTATION DE RAGE] Trigger:5 MW:2 [FROM:7] [ALLOC_MODEL: ...]
 
 `MW:` est un segment SÉPARÉ de `Roll:` : celui-ci porte des jets de hasard comparés à un seuil,
 celui-là les D6 qui donnent une quantité. Les confondre ferait sommer les uns par le contrôle
-de validité appliqué aux autres.
+de validité appliqué aux autres. `Trigger:` est le troisième sens — le D6 de DÉCLENCHEMENT
+d'Exhortation of Rage (4+) — et a donc son propre segment.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ def _details(
     hazard_context: str = HAZARD_CONTEXT_HOLD_STILL,
     mw_dice: Optional[List[int]] = None,
     source_id: Optional[str] = "12",
+    trigger: Optional[int] = None,
 ) -> Dict[str, Any]:
     d: Dict[str, Any] = {
         "current_turn": 1,
@@ -41,6 +44,8 @@ def _details(
     }
     if mw_dice is not None:
         d["mortal_wound_dice"] = mw_dice
+    if trigger is not None:
+        d["ability_trigger_roll"] = trigger
     if source_id is not None:
         d["mortal_wound_source_id"] = source_id
     if mortal_wounds > 0:
@@ -75,6 +80,25 @@ def test_tag_hold_still(tmp_path: Path) -> None:
 def test_tag_exhortation(tmp_path: Path) -> None:
     content = _emit(tmp_path, _details(hazard_context=HAZARD_CONTEXT_EXHORTATION, mw_dice=None))
     assert "[EXHORTATION DE RAGE]" in content, content
+
+
+def test_de_de_declenchement_exhortation(tmp_path: Path) -> None:
+    """ROUGE avant le fix : le D6 d'Exhortation n'atteignait pas step.log — il vivait dans le
+    texte libre du Game Log (`(D6=n)`), que le formateur ne recopie pas. `Trigger:` précède
+    `MW:` (le seuil avant la quantité) et reste distinct de `Roll:`."""
+    content = _emit(tmp_path, _details(
+        mortal_wounds=2, hazard_context=HAZARD_CONTEXT_EXHORTATION, mw_dice=[2], trigger=5,
+    ))
+    assert "[EXHORTATION DE RAGE] Trigger:5 MW:2 [FROM:12]" in content, content
+    assert "Roll:" not in content, content
+
+
+def test_jet_de_declenchement_rate(tmp_path: Path) -> None:
+    """Un D6 ≤ 3 laisse sa ligne : 0 blessure, le dé, et `[NO ALLOC]`."""
+    content = _emit(tmp_path, _details(
+        mortal_wounds=0, hazard_context=HAZARD_CONTEXT_EXHORTATION, mw_dice=None, trigger=2,
+    ))
+    assert "SUFFERS 0 Mortal Wounds [EXHORTATION DE RAGE] Trigger:2 [FROM:12] [NO ALLOC]" in content, content
 
 
 def test_des_de_blessures_mortelles(tmp_path: Path) -> None:

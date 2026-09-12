@@ -59,9 +59,19 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       (`reserves_declaration`), pour lequel aucune trace n existait. Verrou :
 #:       test_step_log_agent_decision.py et test_analyzer_agent_decision.py.
 #:
+#:   9 — toute ligne `SUFFERS N Mortal Wounds` d une CAPACITE de datasheet (06.02, tags de
+#:       `HAZARD_CONTEXT_TAGS` hors 24.15 et 09.07) porte les des qui ont produit son compte :
+#:       `MW:<d,d,…>` (des qui se SOMMENT — Hold Still and Say Aargh : un D6 par blessure
+#:       critique ; Exhortation of Rage sur 4-5 : le D3) et, pour une capacite a SEUIL,
+#:       `Trigger:<n>` (Exhortation of Rage : le D6 compare a 4+). Un jet de declenchement
+#:       RATE laisse lui aussi sa ligne (`SUFFERS 0 Mortal Wounds … Trigger:<n> [NO ALLOC]`).
+#:       Sur un journal log_grammar>=9, un compte qui ne suit pas ses des est une FAUTE
+#:       (`mw_ability_dice_mismatch`), jamais un vieux format. Verrou :
+#:       test_step_log_mortal_wounds_ability.py et test_analyzer_mw_ability_dice.py.
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 8
+LOG_GRAMMAR_VERSION = 9
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1358,6 +1368,12 @@ class StepLogger:
             _hdice = details.get("hazardous_dice_rolls")
             # L15 — jets individuels des dés HAZARDOUS (24.15), absents pour Desperate Escape.
             dice_suffix = f" Roll:{','.join(str(r) for r in _hdice)}" if _hdice else ""
+            # Dé de DÉCLENCHEMENT d'une capacité à seuil (Exhortation of Rage, 4+). Segment
+            # SÉPARÉ de `Roll:` (jets de hasard 24.15, 1-2 = échec) et de `MW:` (quantités) :
+            # trois sens, trois segments, sinon l'analyzer sommerait un seuil avec une quantité.
+            _trigger = details.get("ability_trigger_roll")
+            if _trigger is not None:
+                dice_suffix += f" Trigger:{int(_trigger)}"
             # 06.02 — D6 ayant produit le nombre de blessures mortelles d'une capacité (un par
             # blessure critique pour Hold Still). Segment SÉPARÉ de `Roll:` : celui-ci porte des
             # jets de hasard qu'on compare à un seuil, celui-là des quantités qu'on somme.

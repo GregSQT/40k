@@ -1,11 +1,17 @@
-"""Exhortation de Rage (passe 4) — D6 à la sélection combat → D3 ou 3 BM sur ennemi engagé.
+"""Exhortation of Rage (passe 4) — cible choisie PUIS D6 → 0, D3 ou 3 BM sur l'ennemi engagé.
+
+Datasheet (`Datasheets - Space Marines.pdf`, Chaplain with Jump Pack) : « you can select one
+enemy unit it is engaged with and roll one D6, and on a result of: 4-5: That enemy unit suffers
+D3 mortal wounds. 6: That enemy unit suffers 3 mortal wounds. »
 
 Invariants vérifiés :
 - Unité sans règle → retourne None (pas de déclenchement)
 - Aucun ennemi engagé → retourne None
-- D6 <= 3 → retourne None
-- D6 4-5 → payload waiting_for_agent_decision, décision posée, mw_count ∈ [1, 3]
-- D6 == 6 → payload waiting, mw_count = 3 (fixe)
+- ≥ 2 cibles → décision `mortal_wounds_target` posée SANS aucun jet (la cible précède le dé)
+- Cible choisie, D6 1-3 → ligne `SUFFERS 0` avec le dé, aucune allocation, combat repris
+- Cible choisie, D6 4-5 → D3 BM, ligne avec `Trigger:` ET `MW:`
+- Cible choisie, D6 6 → 3 BM, ligne avec `Trigger:` sans `MW:`
+- La ligne nomme la victime (`unitId`) et la source (`mortalWoundSourceId`), jamais `attackerId`
 
 Verrou ROUGE/VERT documenté pour chaque invariant.
 """
@@ -116,27 +122,21 @@ def test_pas_d_ennemis_engages_retourne_none(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# D6 <= 3 → None (pas de déclenchement)
+# ≥ 2 cibles → décision posée AVANT tout jet
 # ---------------------------------------------------------------------------
 
-def test_d6_bas_retourne_none(monkeypatch):
-    """ROUGE sans le fix : la décision est posée même sur D6 <= 3."""
-    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
-    monkeypatch.setattr(random, "randint", lambda a, b: 3)  # D6 = 3 → seuil 4 non atteint
-    engine = _FakeEngine(_gs())
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
-    assert result is None, f"D6=3 ne doit pas déclencher l'exhortation, got {result}"
-
-
-# ---------------------------------------------------------------------------
-# D6 == 6 → mw_count = 3, décision posée
-# ---------------------------------------------------------------------------
-
-def test_d6_6_pose_decision_et_mw_count_3(monkeypatch):
-    """ROUGE sans le fix : décision non posée ou mw_count != 3."""
+def test_deux_cibles_posent_la_decision_sans_aucun_jet(monkeypatch):
+    """ROUGE avant le fix : le D6 était jeté d'abord, et la décision ne se posait que sur 4+ —
+    l'agent choisissait sa cible en connaissant déjà le nombre de blessures. La datasheet dit
+    « select one enemy unit … and roll one D6 » : le dé ne sort pas avant que la cible soit
+    choisie, donc AUCUN `randint` ici."""
     decisions_posed = []
     monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
-    monkeypatch.setattr(random, "randint", lambda a, b: 6)  # D6 = 6
+
+    def _no_roll(a, b):
+        raise AssertionError("aucun dé ne doit être jeté avant le choix de la cible")
+
+    monkeypatch.setattr(random, "randint", _no_roll)
     monkeypatch.setattr(
         wcore, "set_pending_agent_decision",
         lambda gs, **kw: decisions_posed.append(kw),
@@ -144,11 +144,12 @@ def test_d6_6_pose_decision_et_mw_count_3(monkeypatch):
     engine = _FakeEngine(_gs())
     result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
 
-    assert result is not None, "D6=6 doit déclencher l'exhortation"
+    assert result is not None, "deux cibles engagées : la décision doit être posée"
     ok, payload = result
     assert ok is True
     assert payload.get("waiting_for_agent_decision") is True
     assert payload.get("decision_type") == "mortal_wounds_target"
+    assert "mw_count" not in payload and "exhortation_d6_roll" not in payload, payload
     assert len(decisions_posed) == 1, "set_pending_agent_decision doit être appelé une fois"
     assert decisions_posed[0].get("decision_type") == "mortal_wounds_target"
 
@@ -161,47 +162,111 @@ def test_d6_6_pose_decision_et_mw_count_3(monkeypatch):
         assert "payload" in opt and "target_eid" in opt["payload"], f"payload manquant : {opt}"
         assert not opt.get("declines"), f"declines doit être False : {opt}"
 
-    # mw_count = 3 stocké dans le pending
+    # Le pending ne porte QUE ce que la reprise a besoin de savoir : le dé n'existe pas encore.
     pending = engine.game_state.get("_pending_exhortation_fight")
-    assert pending is not None
-    assert pending["mw_count"] == 3, f"mw_count doit être 3 sur D6=6, got {pending['mw_count']}"
+    assert pending == {"squad_id": "CHAP", "target_slot": None}, pending
 
 
 # ---------------------------------------------------------------------------
-# D6 == 4 → mw_count = D3, décision posée
+# Cible choisie → le jet, sa ligne, et la reprise du combat
 # ---------------------------------------------------------------------------
 
-def test_d6_4_pose_decision_et_mw_count_d3(monkeypatch):
-    """D6=4 → D3 MW (1-3) et décision posée (≥2 cibles : path normal)."""
-    decisions_posed = []
-    rolls = iter([4, 2])  # premier randint → D6=4, second → D3=2
+def _apply_with_rolls(monkeypatch, rolls, *, target="ONLY_ENEMY"):
+    """Joue `_apply_exhortation_de_rage` sur `target` avec la suite de dés `rolls` (D6 puis
+    D3 éventuel). Rend (payload, ligne d'action_log, blessures allouées, reprises)."""
+    import engine.phase_handlers.shared_utils as su
+    mw_applied = []
+    continue_called = []
+    it = iter(rolls)
 
     def _fake_randint(a, b):
-        return next(rolls)
+        return next(it)
 
-    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
+    def _fake_allocate(gs, target_eid, count, auto_resolve, details):
+        mw_applied.append({"target": target_eid, "count": count})
+        # Comme la vraie allocation : un record par blessure, sur la figurine allouée.
+        details.extend({"modelId": "e1a", "col": 5, "row": 5, "died": False} for _ in range(count))
+
     monkeypatch.setattr(random, "randint", _fake_randint)
-    monkeypatch.setattr(
-        wcore, "set_pending_agent_decision",
-        lambda gs, **kw: decisions_posed.append(kw),
-    )
+    monkeypatch.setattr(su, "allocate_mortal_wounds", _fake_allocate)
     engine = _FakeEngine(_gs())
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+    engine._continue_squad_fight_after_selection = (
+        lambda squad_id, target_slot, **_kw: (
+            continue_called.append(squad_id) or (True, {"action": "squad_fight", "squad_id": squad_id})
+        )
+    )
+    result = engine._apply_exhortation_de_rage("CHAP", target, None, auto=True)
+    logs = [e for e in engine.game_state["action_logs"] if e["type"] == "mortal_wounds_ability"]
+    assert len(logs) == 1, f"une ligne par jet, got {len(logs)}"
+    return result, logs[0], mw_applied, continue_called
 
-    assert result is not None, "D6=4 doit déclencher l'exhortation"
-    pending = engine.game_state.get("_pending_exhortation_fight")
-    assert pending is not None
-    assert 1 <= pending["mw_count"] <= 3, f"mw_count D3 hors plage : {pending['mw_count']}"
-    assert pending["mw_count"] == 2, f"D3 simulé à 2, got {pending['mw_count']}"
-    assert len(decisions_posed) == 1
+
+def test_jet_rate_laisse_sa_ligne_sans_allocation(monkeypatch):
+    """ROUGE avant le fix : un D6 ≤ 3 ne laissait AUCUNE trace — ni ligne, ni dé. Le jet a eu
+    lieu, la règle a été exercée : la ligne porte 0 blessure et le dé qui l'explique."""
+    result, log, mw_applied, continue_called = _apply_with_rolls(monkeypatch, [3])
+    assert result is not None and result[0] is True
+    assert mw_applied == [], "D6=3 : aucune blessure à allouer"
+    assert continue_called == ["CHAP"], "le combat reprend après un jet raté"
+    assert log["hazardousMortalWounds"] == 0
+    assert log["abilityTriggerRoll"] == 3
+    assert "mortalWoundDice" not in log, log
+    assert "SUFFERS 0 Mortal Wounds [EXHORTATION DE RAGE] Trigger:3 [FROM:CHAP]" in log["message"], log["message"]
 
 
-# ---------------------------------------------------------------------------
-# Cible unique → application directe (pas de décision)
-# ---------------------------------------------------------------------------
+def test_jet_4_5_donne_d3_blessures_avec_les_deux_des(monkeypatch):
+    """D6=4 puis D3=2 : deux blessures, et la ligne porte le dé de seuil ET le dé de compte —
+    séparés, parce que l'un se compare à 4+ et l'autre se somme."""
+    result, log, mw_applied, continue_called = _apply_with_rolls(monkeypatch, [4, 2])
+    assert mw_applied == [{"target": "ONLY_ENEMY", "count": 2}]
+    assert continue_called == ["CHAP"]
+    assert log["hazardousMortalWounds"] == 2
+    assert log["abilityTriggerRoll"] == 4
+    assert log["mortalWoundDice"] == [2]
+    assert "SUFFERS 2 Mortal Wounds [EXHORTATION DE RAGE] Trigger:4 MW:2 [FROM:CHAP]" in log["message"], log["message"]
+
+
+def test_jet_6_donne_trois_blessures_sans_de_de_compte(monkeypatch):
+    """D6=6 : 3 blessures FIXES — aucun D3 n'est jeté, donc aucun `MW:` sur la ligne."""
+    result, log, mw_applied, _ = _apply_with_rolls(monkeypatch, [6])
+    assert mw_applied == [{"target": "ONLY_ENEMY", "count": 3}]
+    assert log["hazardousMortalWounds"] == 3
+    assert log["abilityTriggerRoll"] == 6
+    assert "mortalWoundDice" not in log, log
+    assert "Trigger:6 [FROM:CHAP]" in log["message"], log["message"]
+
+
+def test_la_ligne_nomme_la_victime_et_la_source_comme_hold_still(monkeypatch):
+    """ROUGE avant le fix : la ligne posait AUSSI `attackerId`, que `useGameLog` (front) préfère
+    à `unitId` — les deux producteurs de `mortal_wounds_ability` divergeaient d'une clé. La
+    victime est l'unité de la ligne, la source vit dans `mortalWoundSourceId`, comme Hold Still."""
+    _, log, _, _ = _apply_with_rolls(monkeypatch, [5, 1])
+    assert log["unitId"] == "ONLY_ENEMY"
+    assert log["mortalWoundSourceId"] == "CHAP"
+    assert "attackerId" not in log, log
+    assert log["player"] == 0, "le camp de la ligne est celui de la VICTIME"
+
+
+def test_la_ligne_step_log_porte_trigger_puis_mw(monkeypatch):
+    """CHEMIN DE PRODUCTION du journal : `_build_step_log_details` traduit les clés du moteur et
+    le formateur écrit `Trigger:` puis `MW:` avant `[FROM:]`."""
+    from ai.step_logger import StepLogger
+    _, log, _, _ = _apply_with_rolls(monkeypatch, [5, 3])
+    eng = wcore.W40KEngine.__new__(wcore.W40KEngine)
+    eng.game_state = {}
+    details = eng._build_step_log_details(log, pre_action_turn=1)
+    assert details["ability_trigger_roll"] == 5
+    assert details["mortal_wound_dice"] == [3]
+    logger = StepLogger(output_file="/dev/null", enabled=False, buffer_size=1)
+    msg = logger._format_replay_style_message("ONLY_ENEMY", "hazardous", details)
+    assert msg == (
+        "Unit ONLY_ENEMY(5,5) SUFFERS 3 Mortal Wounds [EXHORTATION DE RAGE] Trigger:5 MW:3 "
+        "[FROM:CHAP] [ALLOC_MODEL: e1a]"
+    ), msg
+
 
 def test_single_target_auto_applique_sans_decision(monkeypatch):
-    """D6=4, 1 seule cible : pas de set_pending_agent_decision, MW appliquées directement."""
+    """1 seule cible : pas de set_pending_agent_decision, jet immédiat, MW appliquées."""
     import engine.phase_handlers.shared_utils as su
     decisions_posed = []
     mw_applied = []
@@ -296,7 +361,6 @@ def test_candidats_mw_portent_des_traits_distincts(monkeypatch):
 
     posed = []
     monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
-    monkeypatch.setattr(random, "randint", lambda a, b: 6)
     monkeypatch.setattr(wcore, "set_pending_agent_decision", lambda gs, **kw: posed.append(kw))
     engine = _FakeEngine(_gs())
     engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
