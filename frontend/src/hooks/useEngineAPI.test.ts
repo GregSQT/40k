@@ -963,6 +963,84 @@ describe("useEngineAPI — executeAITurn, allocation du défenseur humain en pha
       window.history.replaceState({}, "", "/game");
     }
   });
+
+  // Pile-in / consolidation du bot (12.02, 12.08) : réglés par le driver `_fight_v11_gym_settle`
+  // AVANT que le serveur ne constate qu'aucune unité du bot n'est sélectionnable → réponse
+  // `ai_turn_skipped` (success:true) portant les `action_logs` du déplacement, buffer serveur
+  // vidé. Ces lignes ne reviendront par aucune autre réponse : le client doit les dispatcher
+  // comme celles d'une activation réussie, puis sortir de la boucle.
+  it("ROUGE sans la prise en charge : `ai_turn_skipped` avec un pile_in → backendLogEvent émis, boucle arrêtée après UN appel", async () => {
+    // Au départ le pool 12.02 porte l'unité du bot (pile-in à jouer) : c'est ce qui autorise
+    // l'appel `/game/ai-turn`. Après le settle, il ne reste que l'unité humaine.
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const settledState = { ...fightState, fight_eligible_units: ["1"] };
+    const pileInLog = {
+      type: "pile_in",
+      message: "Unit 2 PILED IN from (3,3) to (2,2)",
+      turn: 1,
+      phase: "fight",
+      unitId: "2",
+      player: 2,
+      is_ai_action: true,
+      moveDetails: [{ model_id: "2#0", from_col: 3, from_row: 3, to_col: 2, to_row: 2 }],
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: {
+            action: "ai_turn_skipped",
+            reason: "not_ai_player_turn",
+            details: { error: "not_ai_player_turn", reason: "no_eligible_ai_units_in_pool" },
+          },
+          game_state: settledState,
+          action_logs: [pileInLog],
+        });
+      })
+    );
+    const emitted: Array<Record<string, unknown>> = [];
+    const onLogEvent = (evt: Event) => {
+      emitted.push((evt as CustomEvent<Record<string, unknown>>).detail);
+    };
+    window.addEventListener("backendLogEvent", onLogEvent);
+
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(aiTurnCalls).toBe(1);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]).toMatchObject({
+        type: "pile_in",
+        message: pileInLog.message,
+        phase: "fight",
+        shooterId: "2",
+        player: 2,
+        is_ai_action: true,
+      });
+    } finally {
+      window.removeEventListener("backendLogEvent", onLogEvent);
+      window.history.replaceState({}, "", "/game");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

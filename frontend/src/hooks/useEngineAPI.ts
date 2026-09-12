@@ -9386,21 +9386,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           const activationData = await aiResponse.json();
 
-          if (activationData.result?.action === "ai_turn_skipped") {
-            if (activationData.game_state) {
-              setGameState((p) =>
-                mergeGameStatePreservingOmittedObjectives(
-                  p,
-                  activationData.game_state as APIGameState
-                )
-              );
-              setEndlessDutyState(
-                (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
-              );
-            }
-            break;
-          }
-
           // Process AI activation logs immediately
           const activationGsPhase = (activationData.game_state as { phase?: string } | undefined)
             ?.phase;
@@ -9527,6 +9512,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setEndlessDutyState(
               (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
             );
+          }
+
+          // `ai_turn_skipped` (success:true) : rien à jouer pour le bot — mais la réponse peut
+          // porter les `action_logs` réglés par le serveur avant ce constat (pile-in /
+          // consolidation du bot par `_fight_v11_gym_settle` en phase fight, 12.02/12.08), et
+          // le serveur a vidé son buffer : ils sont dispatchés ci-dessus, comme ceux d'une
+          // activation réussie, AVANT de sortir de la boucle.
+          if (activationData.result?.action === "ai_turn_skipped") {
+            break;
           }
 
           // Allocation manuelle des pertes par le DÉFENSEUR HUMAIN (05.03/05.04, 06.02) : le bot
