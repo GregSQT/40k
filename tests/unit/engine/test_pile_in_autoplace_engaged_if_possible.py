@@ -196,4 +196,39 @@ def test_closer_fallback_stays_put_when_no_cell_keeps_engagement(mode: str):
     assert _plan_cell(plan, "1#0") == STAY_SQUAD[0]
     assert _plan_cell(plan, "1#1") == STAY_SQUAD[1]
     assert preview["kept_engagements"] is True
+
+
+# FOCUS HORS PALIER, SLOTS FOCUS ATTEIGNABLES : S#0 (10,6), T (10,10) = palier (dist 4),
+# F = focus à 5 (cible pile-in ≤ 5″). L'ILP ne posait que sur des slots engageant F : quand un tel
+# slot est strictement plus proche de T sans l'engager, le validateur (« engaged with it if
+# possible ») refusait le plan, S#0 ayant des cases engagées-avec-T atteignables.
+#   - F (14,9) : aucun slot n'engage T et F à la fois → mesuré avant correction : (12,8), dT 3,
+#     dF 2, ``per_model`` False. Attendu : case engagée avec T (dT ≤ 2), départage par le mode.
+#   - F (7,9) : (9,8) engage T ET F → l'ILP doit la choisir (le Focus reste maximisé SOUS la règle).
+FAR_FOCUS: Cell = (14, 9)
+NEAR_FOCUS: Cell = (7, 9)
+
+
+@pytest.mark.parametrize(
+    ("focus", "mode", "focus_engaged"),
+    [
+        (FAR_FOCUS, "offensive", False),
+        (FAR_FOCUS, "defensive", False),
+        (NEAR_FOCUS, "offensive", True),
+        (NEAR_FOCUS, "defensive", True),
+    ],
+)
+def test_focus_outside_tier_ilp_only_takes_tier_engaged_slots(
+    focus: Cell, mode: str, focus_engaged: bool
+):
+    gs = _gs([(10, 6)], [TIER_ENEMY, focus])
+    unit = gs["unit_by_id"]["1"]
+    assert sorted(_fight_v11_pile_in_targets(gs, unit)) == ["2", "3"], "précondition : F est une cible"
+    plan, preview, tier = _autoplace_and_preview(gs, "3", mode)
+    assert tier == ["2"], "précondition : T est le palier, pas le focus"
+    dest = (int(plan[0][1]), int(plan[0][2]))
+    assert dest != (10, 6), "VERT VACANT : la figurine a bougé"
+    assert hex_distance(*dest, *TIER_ENEMY) <= 2, f"{dest} n'engage pas le palier T"
+    assert (hex_distance(*dest, *focus) <= 2) is focus_engaged, dest
+    assert preview["per_model"] == {"1#0": True}
     assert preview["can_validate"] is True
