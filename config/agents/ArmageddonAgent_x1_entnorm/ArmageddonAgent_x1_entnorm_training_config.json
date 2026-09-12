@@ -1,0 +1,1169 @@
+{
+    "_resolution_detail": "Le NOM d'une phase (x1_*, x5_*) ne fixe PAS la resolution du plateau : elle vient de `--resolution 1|5|10`, qui pose W40K_BOARD_PATH et prime sur paths.board (config_loader.py). Sans cet argument, le plateau est celui de config.json, quel que soit le nom de la phase. Mesure du 2026-08-09 : `--training-config x1_debug` sans `--resolution` a produit un plateau 220x300 (x5) ; le step.log etait juste (l'entete `Board:` porte inches_to_subhex et l'analyzer s'y adapte), mais les compteurs n'etaient plus comparables au run de reference en x1. Le nom decrit le jeu d'hyperparametres, rien d'autre.",
+    "x1": {
+        "type": "################################################### x1 — curriculum phase 1 (board 44x60x1, scale ×1) ###################################################",
+        "seed": 12345,
+        "total_episodes": 10000,
+        "total_episodes_normal": "10000 : la note annonçait 50000 en tete, perime -- total_episodes vaut 10000. MESURE DIRECTE de ce profil : 4 h 01 pour ces 10 000 episodes (run x1 de reference, 11 h 17 -> 15 h 18, evaluations NON comprises). Aucun taux ep./h n'en est derive, et c'est delibere : le run x1_long de 50 000 episodes a ete chronometre a 5 h 54 le 2026-08-18, soit 3,4 fois moins que ce que predisait l'extrapolation lineaire 4 h 01 x 5. La duree d'un episode depend de ce que la politique a appris, la pente n'est donc pas lineaire et aucun profil ne peut emprunter la mesure d'un autre. Le '0.1s/ep -> 36k ep / hour -> 100k ep / 2h30' que portait cette note datait du regime d'avant la refonte d'observation V11 ; retire le 2026-08-23.",
+        "agent_seat_mode": "random",
+        "agent_seat_p2_ratio": 0.75,
+        "agent_seat_p2_ratio_normal": "Part des episodes d'ENTRAINEMENT ou l'agent joue SECOND, quand agent_seat_mode vaut 'random'. Cle OBLIGATOIRE dans ce cas (require_key dans ai/train.py build_training_opponents, aucune valeur par defaut) : jusqu'au 2026-08-28 le tirage etait un pile ou face code en dur (parite d'un hachage sha256 de seed/rang d'env/index d'episode, ai/env_wrappers.py _resolve_controlled_player_for_episode) et rien ne permettait de le biaiser. RAISON D'ETRE : l'agent joue nettement moins bien en second. Mesure du run x1_long du 2026-08-12, 0.707 de win-rate en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run (cf. ai/bot_evaluation.py SEAT_KEYS et la courbe 00_critical/0_gap_p1-p2). Sur-echantillonner le siege faible est le seul levier d'exposition ; l'alternative etait agent_seat_mode: 'p2', qui supprime l'autre siege et rend le gap aveugle -- meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle r_win_rate_deploy_auto. Reglage courant 0.75 (2026-09-01) : trois episodes sur quatre en second, le quart restant gardant seat_aware/winrate_agent_p1 alimente et le gap calculable. 1.0 est accepte par la validation mais equivaut a 'p2' avec un instrument mort. L'EVALUATION N'EST PAS CONCERNEE : ai/bot_evaluation.py construit ses environnements sans passer cette cle, donc son tirage reste equitable et le win-rate publie reste comparable d'un run a l'autre -- meme separation que deployment_mode_schedule.training_only. Le tirage est desormais un SEUIL sur les 32 premiers bits du hachage (uniformes) et non une parite : a 0.5 la distribution est identique a l'ancienne, mais la sequence siege-par-siege d'un run rejoue differe. Verrou : tests/unit/ai/test_agent_seat_ratio.py, qui lit CE fichier et verifie les six profils.",
+        "eval_episodes": 50,
+        "eval_episodes_normal": "----------------------------------------------50",
+        "n_envs": 24,
+        "metrics_smoothing": null,
+        "model_params": {
+            "policy": "MultiInputPolicy",
+            "learning_rate": {
+                "initial": 0.002,
+                "final": 0.0005,
+                "decay_fraction": 1.0,
+                "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
+            },
+            "n_steps": 8160,
+            "batch_size": 1020,
+            "n_epochs": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "clip_range_vf": null,
+            "normalize_advantage": true,
+            "ent_coef": {
+                "start": 0.1,
+                "end": 0.01,
+                "decay_fraction": 1.0
+            },
+            "vf_coef": 0.17,
+            "max_grad_norm": 0.5,
+            "target_kl": 0.015,
+            "tensorboard_log": "./tensorboard/",
+            "policy_kwargs": {
+                "net_arch": [
+                    512,
+                    512
+                ],
+                "features_extractor_kwargs": {
+                    "cnn_features": 256
+                }
+            },
+            "verbose": 0
+        },
+        "callback_params": {
+            "bot_eval_scenario_pool": "holdout",
+            "bot_eval_show_progress": true,
+            "bot_eval_use_subprocess": true,
+            "bot_eval_n_workers": 2,
+            "bot_eval_n_workers_gate": 1,
+            "early_stopping_patience": 0,
+            "save_best_min_episodes": 10000,
+            "checkpoint_save_freq": 10000,
+            "max_checkpoints": 3,
+            "checkpoint_name_prefix": "ppo_checkpoint",
+            "eval_deterministic": true,
+            "eval_render": false,
+            "bot_eval_freq": 2000,
+            "bot_eval_freq_normal": "---------------------------------- 2000 ",
+            "bot_eval_use_episodes": true,
+            "bot_eval_intermediate": 10,
+            "bot_eval_final": 10,
+            "bot_eval_worker_device": "cpu",
+            "bot_eval_task_timeout_seconds": 3600,
+            "save_best_robust": false,
+            "save_best_robust_normal": "---------------------------------- false (true jusqu'au 2026-08-11) : ce profil ne SELECTIONNE rien, et l'annoncer etait une promesse vide. La fenetre du score robuste glisse sur les points de mesure ; a 10 000 episodes et bot_eval_freq 2000 il n'y en a que 5, pour un robust_window de 5 -- une seule position possible, la derniere. Le best model robuste etait donc mecaniquement le dernier point evalue, et il ne l'etait meme pas toujours : la sauvegarde robuste est conditionnee au gate (training_callbacks.py), donc un dernier point recale ne produisait AUCUN model_<agent>.zip. Le passer a false rend la sortie explicite et inconditionnelle -- train.py ecrit le modele FINAL, avec son run_state et ses stats VecNormalize --, ce qui est exactement ce qu'on attend d'un profil de mise au point. Meme raisonnement et meme issue que x5_new le 2026-08-10. x1_long, lui, garde save_best_robust: true : sa fenetre a ete ramenee a 3 le 2026-08-11 pour lui rendre une vraie selection (voir sa note robust_window_normal). robust_window reste a 5 ici, sans effet desormais, et volontairement : la comparaison en bloc de test_long_profile_is_its_reference_recalibrated fait de x1 la reference de x1_long, et y toucher deplacerait la reference au lieu de decrire ce profil. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_profile_promise_of_a_best_model_is_pinned (table PROMISES_BEST_MODEL) ; test_profile_can_produce_the_best_model_it_promises SKIP desormais ce profil.",
+            "save_best_robust_seed": true,
+            "robust_window": 5,
+            "robust_drawdown_penalty": 0.5,
+            "robust_penalty_bot": 0.12,
+            "robust_penalty_hard": 0.0,
+            "model_gating_enabled": false,
+            "model_gating_min_worst_bot": 0.25,
+            "model_gating_min_worst_scenario_combined": 0.3,
+            "model_gating_min_vs_control": 0.0,
+            "holdout_hard_opponent_budget_modifier": 1.1,
+            "bot_eval_weights": {
+                "alpha": 0.16666666666666666,
+                "attrition": 0.16666666666666666,
+                "decapitation": 0.16666666666666666,
+                "endgame": 0.16666666666666666,
+                "racer": 0.16666666666666666,
+                "scorer": 0.166666666666667
+            },
+            "bot_eval_randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            },
+            "bot_eval_n_workers_intermediate": 4
+        },
+        "roster_pool_schedule": {
+            "enabled": false,
+            "training": {
+                "start_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                },
+                "end_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                }
+            }
+        },
+        "deployment_mode_schedule": {
+            "enabled": true,
+            "training_only": true,
+            "active_ratio_start": 0.3,
+            "active_ratio_end": 0.9,
+            "schedule": "linear",
+            "freeze_after_progress": 1.0,
+            "justification": "Rampe de deploiement : part des episodes ou l'AGENT place lui-meme ses figurines ('active'), le reste etant deploye PAR LE MOTEUR ('auto'). Les deux modes jouent une VRAIE phase de deploiement ; seul change qui decide des poses. Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29 ; x1_selfplay, x1_panel, x1_long_panel, x1_new_bots et x5_append supprimes le 2026-08-17, commit 18dc8599). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.9 et non 1.0 depuis le 2026-08-12, et c'est une courbe de CONTROLE qui l'impose : a 1.0 il n'y a plus aucun episode auto, donc 00_critical/r_win_rate_deploy_auto n'a plus de donnees et cesse de mesurer quoi que ce soit. C'est le seul controle existant de ce que vaut l'agent depuis des positions qu'il n'a pas choisies, et l'ecart qu'il montre n'est pas marginal : sur le run du 2026-08-12, 0.866 de win-rate en deploiement actif contre 0.646 en auto. ⚠️ CES DEUX CHIFFRES SONT CEUX DU REGIME ASYMETRIQUE, mesures quand seul l'agent etait pose par le moteur et contre des bots a doctrine de pose fixe. Ils ne se comparent PAS aux valeurs posterieures au 2026-09-06 : la courbe a change de definition en meme temps que le mecanisme, et c'etait le but. Les 10 % d'episodes qui restent en auto sont hors distribution d'usage (l'evaluation impose TOUJOURS le deploiement par l'agent) : c'est le prix assume pour garder l'instrument vivant. Reglage precedent 0.8, historique de x1 retenu comme reference le 2026-07-29. Le 2026-08-08 le mode 'fixed' est REMPLACE par 'auto' : il rejouait les positions par figurine ecrites dans les rosters, generees hors ligne contre un seul terrain. Elles tombaient sur des murs des qu'un second terrain entrait dans la rotation (mesure sur terrain-mc2 : jusqu'a 10 hex de mur sous un socle, ValueError au chargement) et se placaient hors des zones de deploiement meme sur le terrain d'origine (12 a 17 figurines sur 23-37). 'auto' tire ses poses parmi les slots de STRATEGIE ouverts (macro_intents.open_placement_slots), jamais sur le masque brut : ACTION_WAIT y est ouvert et met l'unite en RESERVES (20.01), pas en attente. LES DEUX CAMPS SONT POSES PAR LE MOTEUR depuis le 2026-09-06, chacun avec ses propres tirages (une strategie est tiree par FIGURINE, rien n'apparie les deux camps). Jusque-la la substitution etait bornee au joueur controle : l'agent etait pose au hasard pendant que son adversaire — bot a doctrine, ou champion du pool jouant son reseau — se deployait avec sa politique, laquelle sait se placer puisqu'elle est entrainee a 90 % en mode actif. Le mode 'auto' etait donc un HANDICAP UNILATERAL, et r_win_rate_deploy_auto mesurait « ce que vaut l'agent handicape face a un adversaire qui ne l'est pas » au lieu de « ce qu'il vaut depuis des positions qu'il n'a pas choisies ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes : 0.304 de win-rate en auto contre 0.684 en actif, et un differentiel d'objectifs de -0.76 en auto contre +0.19 en actif — l'agent tenait trois quarts d'objectif de MOINS que son adversaire, la ou la mesure de reference donnait les deux differentiels positifs. La symetrie court-circuite VOLONTAIREMENT la doctrine de pose des bots et le reseau du snapshot : sans elle le regime de la courbe dependrait de l'adversaire tire, or la part de pool passe de 20 % en P1 a 85 % en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre. L'ABSORPTION, elle, reste propre au joueur controle : un tour d'adversaire n'alimente aucun rollout PPO, il n'y a donc rien a y absorber. Verrous : tests/unit/ai/test_auto_deployment_is_symmetric.py (les deux camps) et tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py (l'absorption). Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long et x5_long ajoutes pour les runs longs, cf. model_params.*.decay_fraction)."
+        },
+        "step_log_buffer_size": 200,
+        "vec_normalize": {
+            "enabled": true,
+            "norm_obs": true,
+            "norm_reward": true,
+            "clip_obs": 10.0,
+            "clip_reward": 10.0,
+            "gamma": 0.99,
+            "reset_on_curriculum": false
+        },
+        "vec_normalize_eval": {
+            "enabled": true,
+            "training": false,
+            "norm_reward": false
+        },
+        "bot_training": {
+            "ratios": {
+                "alpha": 0.16,
+                "attrition": 0.14,
+                "decapitation": 0.16,
+                "endgame": 0.14,
+                "racer": 0.1,
+                "scorer": 0.21,
+                "random": 0.09
+            },
+            "randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            }
+        },
+        "scenario_sampling": {
+            "eval_ref_strict": true,
+            "train_objective_count_weights": {
+                "1": 0.025,
+                "2": 0.025,
+                "3": 0.025,
+                "4": 0.025,
+                "5": 0.9
+            },
+            "eval_objective_count_weights": {
+                "5": 1.0
+            },
+            "train_wall_ref_weights": {
+                "default": 1.0
+            },
+            "eval_wall_refs": [
+                "walls-33.json",
+                "walls-mc1.json"
+            ],
+            "train_selection_mode": "uniform_within_count",
+            "eval_selection_mode": "uniform_within_count"
+        },
+        "training_hard": {
+            "enabled": false,
+            "target_episode_ratio": 0.3,
+            "max_scenario_weight": 4,
+            "scenario_names": []
+        },
+        "unit_rule_forcing": {
+            "enabled": false,
+            "target_controlled_episode_ratio": 0.2,
+            "max_scenario_weight": 6
+        }
+    },
+    "x1_long": {
+        "type": "################################################### x1_long — runs longs (board 44x60x1, scale x1) ###################################################",
+        "seed": 12345,
+        "total_episodes": 100000,
+        "total_episodes_normal": "100000 : run long ; rampe entropie achevee a 40000 (decay_fraction 0.4), rampe learning_rate a 90000 (0.9). MESURE DIRECTE : 5 h 54 pour 50 000 episodes (2026-08-18) -- prise sur l'ANCIEN budget de 50k avant le passage a 100k (commit ecbf843f) ; la duree d'un run complet de 100k n'est pas encore mesuree. C'est la mesure de reference du depot, et elle REFUTE l'extrapolation lineaire : les 4 h 01 mesurees sur les 10 000 episodes de x1 predisaient ~20 h, soit 3,4 fois trop. La duree d'un episode depend de ce que la politique a appris, aucun taux ep./h constant n'est donc publiable.",
+        "agent_seat_mode": "random",
+        "agent_seat_p2_ratio": 0.75,
+        "agent_seat_p2_ratio_normal": "Part des episodes d'ENTRAINEMENT ou l'agent joue SECOND, quand agent_seat_mode vaut 'random'. Cle OBLIGATOIRE dans ce cas (require_key dans ai/train.py build_training_opponents, aucune valeur par defaut) : jusqu'au 2026-08-28 le tirage etait un pile ou face code en dur (parite d'un hachage sha256 de seed/rang d'env/index d'episode, ai/env_wrappers.py _resolve_controlled_player_for_episode) et rien ne permettait de le biaiser. RAISON D'ETRE : l'agent joue nettement moins bien en second. Mesure du run x1_long du 2026-08-12, 0.707 de win-rate en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run (cf. ai/bot_evaluation.py SEAT_KEYS et la courbe 00_critical/0_gap_p1-p2). Sur-echantillonner le siege faible est le seul levier d'exposition ; l'alternative etait agent_seat_mode: 'p2', qui supprime l'autre siege et rend le gap aveugle -- meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle r_win_rate_deploy_auto. Reglage courant 0.75 (2026-09-01) : trois episodes sur quatre en second, le quart restant gardant seat_aware/winrate_agent_p1 alimente et le gap calculable. 1.0 est accepte par la validation mais equivaut a 'p2' avec un instrument mort. L'EVALUATION N'EST PAS CONCERNEE : ai/bot_evaluation.py construit ses environnements sans passer cette cle, donc son tirage reste equitable et le win-rate publie reste comparable d'un run a l'autre -- meme separation que deployment_mode_schedule.training_only. Le tirage est desormais un SEUIL sur les 32 premiers bits du hachage (uniformes) et non une parite : a 0.5 la distribution est identique a l'ancienne, mais la sequence siege-par-siege d'un run rejoue differe. Verrou : tests/unit/ai/test_agent_seat_ratio.py, qui lit CE fichier et verifie les six profils.",
+        "eval_episodes": 100,
+        "n_envs": 24,
+        "metrics_smoothing": null,
+        "model_params": {
+            "policy": "MultiInputPolicy",
+            "learning_rate": {
+                "initial": 0.002,
+                "final": 0.0005,
+                "decay_fraction": 0.9,
+                "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
+            },
+            "n_steps": 8160,
+            "batch_size": 1020,
+            "n_epochs": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "clip_range_vf": null,
+            "normalize_advantage": true,
+            "ent_coef": {
+                "start": 0.1,
+                "end": 0.01,
+                "decay_fraction": 0.4
+            },
+            "vf_coef": 0.17,
+            "max_grad_norm": 0.5,
+            "target_kl": 0.015,
+            "tensorboard_log": "./tensorboard/",
+            "policy_kwargs": {
+                "net_arch": [
+                    512,
+                    512
+                ],
+                "features_extractor_kwargs": {
+                    "cnn_features": 256
+                }
+            },
+            "verbose": 0
+        },
+        "callback_params": {
+            "bot_eval_scenario_pool": "holdout",
+            "bot_eval_show_progress": true,
+            "bot_eval_use_subprocess": true,
+            "bot_eval_n_workers": 2,
+            "bot_eval_n_workers_gate": 1,
+            "bot_eval_n_workers_normal": "---------------------------------- 2 : valeur optimale constatee en pratique sur cette machine. 16 workers a necessite une interruption (contention trop importante en co-existence avec le training GPU) ; 2 est la valeur retenue depuis. x1 porte la MEME valeur (`bot_eval_n_workers` n'est PAS dans la liste blanche de test_long_profile_is_its_reference_recalibrated : il ne depend pas de la longueur du run, donc x1 et x1_long doivent le partager).",
+            "early_stopping_patience": 0,
+            "save_best_min_episodes": 10000,
+            "checkpoint_save_freq": 10000,
+            "max_checkpoints": 3,
+            "checkpoint_name_prefix": "ppo_checkpoint",
+            "eval_deterministic": true,
+            "eval_render": false,
+            "bot_eval_freq": 10000,
+            "bot_eval_freq_normal": "---------------------------------- 10000 (5 evals sur 50k). Ces 5 evals ne sont atteintes que depuis le 2026-08-11, ou le declencheur a cesse de cumuler son depassement de seuil (BotEvaluationCallback._on_step) : il n'en produisait que 4, et donc aucun best model, alors que la garde de demarrage (train.py) en comptait 5. 5 points ne suffisent pas a une fenetre robuste de 5 -- elle n'aurait qu'une position, la derniere, et le best model serait mecaniquement le modele final : c'est robust_window qui a ete ramene a 3 (voir sa note), et non bot_eval_freq abaisse a 5000, qui aurait double le cout de l'evaluation intermediaire. COUT RE-MESURE depuis TensorBoard (run_20260818-100542, step 50000) : d_bot_eval_seconds = 98 s, e_bot_eval_episodes_per_second = 2.14 ep/s pour une eval intermediaire de 180 episodes (6 bots x bot_eval_intermediate 30) a bot_eval_n_workers 16, soit 5 x 98 = 490 s = ~8 min pour les 5 evals. ATTENTION, CES DUREES SONT PERIMEES DEPUIS LE 2026-08-26 (commit 8bb4e42e) : la mesure de 98 s a ete prise alors que la config portait 10 cles de bot_eval_weights, dont 4 a poids nul, toutes jouees (la boucle itere sur active_bot_names = tuple(eval_weights.keys()), bot_evaluation.py). L'eval intermediaire valait donc REELLEMENT 300 episodes et non les 180 annonces ici, et les 98 s couvraient ces 300 episodes. Les 4 bots a poids nul ayant ete supprimes, la decomposition 6 x 30 = 180 est desormais exacte et le cout attendu tombe a ~59 s par eval, soit ~5 min pour les 5 -- VALEUR NON MESUREE, a confirmer au prochain run x1_long avant d'etre citee comme mesure. CETTE DECOMPOSITION EST PERIMEE DEPUIS LE 2026-09-04 : bot_eval_intermediate est passe a 100, donc l'eval intermediaire de CE profil vaut 6 x 100 = 600 episodes et non 180, et aucune des durees ci-dessus n'a ete rechronometree a ce volume -- la raison du 100 et sa contrepartie sont dans bot_eval_intermediate_normal, seule source. (Precedente mesure run_20260816-235459 step 10000 : 86 s -- ecart attendu, les parties sont plus longues en fin de run sur un modele entraine.) Abaisser bot_eval_freq a 5000 couterait 10 evals x 98 s = 980 s = ~16 min. DUREE TOTALE DU RUN mesuree le 2026-08-18 : 50 000 episodes en 5 h 54 (non 20 h comme estime anterieurement depuis 4h01/10k x5 -- la pente n'est pas lineaire, un run neuf joue des parties courtes).",
+            "bot_eval_use_episodes": true,
+            "bot_eval_intermediate": 100,
+            "bot_eval_intermediate_normal": "---------------------------------- 100 depuis le 2026-09-04 (commit e6581218), REGLAGE DELIBERE pour la PRECISION des points de mesure intermediaires, et non une derive : 30 ep./bot donnaient une erreur-type de 0,5/racine(30) = 9,1 points sur un win-rate autour de 0,5, du meme ordre que les ecarts qu'on cherche a lire entre deux points consecutifs ; a 100 elle tombe a 5,0 points. C'est l'arithmetique de bot_eval_final_normal, appliquee aux points intermediaires. CONTREPARTIE, NON MESUREE a ce jour : l'eval intermediaire passe de 6 x 30 = 180 a 6 x 100 = 600 episodes, soit 3,3 fois le volume, et x1_long l'exerce a bot_eval_n_workers_intermediate 4 -- le cout horloge n'a pas ete rechronometre depuis, les durees citees dans bot_eval_freq_normal valent pour 180 episodes. A rechronometrer au prochain run x1_long avant d'etre citee comme mesure. x5_long reste a 30 : les deux profils _long ne sont plus alignes sur cette cle, et c'est assume -- le chiffre publie sort de x1_long. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated, table LONG_PROFILE_BOT_EVAL_INTERMEDIATE.",
+            "bot_eval_final": 300,
+            "bot_eval_final_normal": "---------------------------------- 300 depuis le 2026-08-16 (600 du 2026-08-02 au 2026-08-16 ; contre 100 sur x5_new et 10 sur x1). Ce profil est un run de MESURE : son win-rate final est le chiffre publie, donc sa PRECISION fait partie du livrable, et bot_eval_final est un nombre d'episodes PAR BOT. L'erreur-type d'un win-rate autour de 0,5 vaut 0,5/racine(n) : 5,0 points a 100 (IC95 ~ +/-9,8), 2,9 points a 300 (IC95 ~ +/-5,7), 2,0 points a 600 (IC95 ~ +/-4,0). Passer de 600 a 300 echange donc 0,9 point d'erreur-type contre la moitie du cout de l'eval finale, et le geste est REVERSIBLE : c'est le reglage de depart demande le 2026-08-16, a remonter a 600 le jour ou un chiffre publie doit departager deux runs a moins de 6 points d'ecart. COUTS RE-MESURES le 2026-08-16, et ils REMPLACENT les estimations precedentes, fausses d'un facteur ~2 : celles-ci derivaient des 13 min/100 ep. du commit 42326ed0, mesurees AVANT la refonte d'observation V11 qui a rendu le pas bien plus cher. A bot_eval_n_workers 12 sur 8 coeurs physiques, un episode d'evaluation coute 2,76 s de temps mural (3 repetitions alternees, dispersion < 2 %) et 14,5 s en serie. L'eval FINALE vaut donc 6 x 300 = 1800 episodes, soit ~1 h 23 -- elle valait ~2 h 46 a 600, et non le ~1 h 20 que cette note annoncait jusqu'au 2026-08-16. CE CALCUL N'ETAIT PAS EXACT AVANT LE 2026-08-26 (commit 8bb4e42e) : la config portait alors 10 cles de bot_eval_weights, dont 4 a poids nul, et la boucle d'evaluation les joue TOUTES (active_bot_names = tuple(eval_weights.keys()), bot_evaluation.py), donc l'eval finale valait 10 x 300 = 3000 episodes, soit ~2 h 18 au tarif de 2,76 s/episode -- la note sous-estimait la duree reelle d'un facteur 1,67. Les 4 bots a poids nul ayant ete supprimes, 6 x 300 = 1800 et le ~1 h 23 sont desormais exacts. ATTENTION, LA DUREE D'ENTRAINEMENT N'EST PAS RE-MESUREE ICI : un run x1 NEUF a fait 10 000 episodes en 1 h 12 le 2026-08-16 contre les 4 h 01 du 2026-08-10 (ROADMAP section 1 point 6), et l'ecart n'est pas explique. Une politique neuve perd vite -- ses parties durent 99 pas gym contre 141 pour un modele entraine (TensorBoard game_critical/episode_length) -- donc le debut d'un run est structurellement le moins cher et 1 h 12 ne s'extrapole PAS a un run complet. Les references de x1 et x5_new restent epinglees par REFERENCE_BOT_EVAL_FINAL ; celle-ci l'est par LONG_PROFILE_BOT_EVAL_FINAL, table par profil depuis le 2026-08-16 -- x5_long garde 600, faute d'avoir ete mesure. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated.",
+            "bot_eval_worker_device": "cpu",
+            "bot_eval_task_timeout_seconds": 7200,
+            "bot_eval_task_timeout_seconds_normal": "---------------------------------- 7200 (et non 3600 comme les autres profils) : le timeout porte sur un TASK, et un task = 1 bot x 1 scenario x (bot_eval_final / nb_scenarios) episodes joues SEQUENTIELLEMENT dans un seul sous-process (bot_evaluation.py, episodes_per_scenario) ; depuis le fix du 2026-08-02 les tasks sont soumises AU FIL DE L'EAU, au plus bot_eval_n_workers a la fois, donc l'instant de soumission est bien l'instant de depart (_collect_parallel_results_with_timeouts). Avant ce fix tout partait d'un coup et le chrono courait des la soumission : c'etait une deadline GLOBALE sur toute l'eval, qui tuait les tasks des dernieres vagues avant qu'elles ne commencent. MARGE RECALCULEE le 2026-08-16, apres le passage de bot_eval_final de 600 a 300 : un task de l'eval finale joue desormais 75 episodes (300 / 4 scenarios) et non 150. A 2,76 s/episode de temps mural sur 12 workers, un episode occupe son worker ~33 s, donc un task dure ~41 min et 7200 s laissent un facteur ~2,9 de marge -- la meme marge qu'a 600 episodes avec 7200 s, ce qui est voulu : l'asymetrie n'a pas change. Un seul task qui deborde force-termine TOUT le pool (_collect_parallel_results_with_timeouts) et fait lever l'eval finale, soit la mesure publiee PERDUE en fin de run, contre du temps gache une seule fois si le timeout est trop large. La valeur reste donc a 7200 malgre des tasks deux fois plus courtes, et reste un vrai garde-fou anti-worker-bloque (un episode est deja borne par max_steps_per_episode, ce n'est jamais un hang infini). Les autres profils restent a 3600. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated.",
+            "save_best_robust": true,
+            "save_best_robust_seed": true,
+            "robust_window": 3,
+            "robust_window_normal": "---------------------------------- 3 (et non 5 comme les autres profils), depuis le 2026-08-11, jour ou ce profil est passe de 200 000 a 50 000 episodes. Le score robuste n'existe qu'une fois robust_window evaluations accumulees (training_callbacks.py) : avec bot_eval_freq 10000, un run de 50 000 episodes ne donne que 5 points de mesure, donc une fenetre de 5 n'a QU'UNE position possible -- la derniere. Le best model robuste etait alors mecaniquement le modele FINAL : le mecanisme tournait sans rien selectionner, et son nom mentait. A 3, la fenetre a 3 positions et la selection redevient reelle, sans toucher au budget d'evaluation (l'autre issue, bot_eval_freq 5000, doublait le cout de l'evaluation intermediaire : ~16 min au lieu de ~8 min, sur un run mesure a 5 h 54 le 2026-08-18). Contrepartie assumee : une fenetre de 3 lisse moins un point isole que celle de 5. x5_long garde 5 : ses 20 points de mesure lui laissent 16 positions. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated, qui epingle la fenetre PAR COUPLE et exige au moins deux positions sur un profil _long.",
+            "robust_drawdown_penalty": 0.5,
+            "robust_penalty_bot": 0.12,
+            "robust_penalty_hard": 0.0,
+            "model_gating_enabled": true,
+            "model_gating_min_worst_bot": 0.25,
+            "model_gating_min_worst_scenario_combined": 0.3,
+            "model_gating_min_vs_control": 0.0,
+            "holdout_hard_opponent_budget_modifier": 1.1,
+            "bot_eval_weights": {
+                "alpha": 0.16666666666666666,
+                "attrition": 0.16666666666666666,
+                "decapitation": 0.16666666666666666,
+                "endgame": 0.16666666666666666,
+                "racer": 0.16666666666666666,
+                "scorer": 0.166666666666667
+            },
+            "bot_eval_randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            },
+            "bot_eval_n_workers_intermediate": 4,
+            "training_probe_every_n_evals": 3
+        },
+        "roster_pool_schedule": {
+            "enabled": false,
+            "training": {
+                "start_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                },
+                "end_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                }
+            }
+        },
+        "deployment_mode_schedule": {
+            "enabled": true,
+            "training_only": true,
+            "active_ratio_start": 0.3,
+            "active_ratio_end": 0.9,
+            "schedule": "linear",
+            "freeze_after_progress": 1.0,
+            "justification": "Rampe de deploiement : part des episodes ou l'AGENT place lui-meme ses figurines ('active'), le reste etant deploye PAR LE MOTEUR ('auto'). Les deux modes jouent une VRAIE phase de deploiement ; seul change qui decide des poses. Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29 ; x1_selfplay, x1_panel, x1_long_panel, x1_new_bots et x5_append supprimes le 2026-08-17, commit 18dc8599). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.9 et non 1.0 depuis le 2026-08-12, et c'est une courbe de CONTROLE qui l'impose : a 1.0 il n'y a plus aucun episode auto, donc 00_critical/r_win_rate_deploy_auto n'a plus de donnees et cesse de mesurer quoi que ce soit. C'est le seul controle existant de ce que vaut l'agent depuis des positions qu'il n'a pas choisies, et l'ecart qu'il montre n'est pas marginal : sur le run du 2026-08-12, 0.866 de win-rate en deploiement actif contre 0.646 en auto. ⚠️ CES DEUX CHIFFRES SONT CEUX DU REGIME ASYMETRIQUE, mesures quand seul l'agent etait pose par le moteur et contre des bots a doctrine de pose fixe. Ils ne se comparent PAS aux valeurs posterieures au 2026-09-06 : la courbe a change de definition en meme temps que le mecanisme, et c'etait le but. Les 10 % d'episodes qui restent en auto sont hors distribution d'usage (l'evaluation impose TOUJOURS le deploiement par l'agent) : c'est le prix assume pour garder l'instrument vivant. Reglage precedent 0.8, historique de x1 retenu comme reference le 2026-07-29. Le 2026-08-08 le mode 'fixed' est REMPLACE par 'auto' : il rejouait les positions par figurine ecrites dans les rosters, generees hors ligne contre un seul terrain. Elles tombaient sur des murs des qu'un second terrain entrait dans la rotation (mesure sur terrain-mc2 : jusqu'a 10 hex de mur sous un socle, ValueError au chargement) et se placaient hors des zones de deploiement meme sur le terrain d'origine (12 a 17 figurines sur 23-37). 'auto' tire ses poses parmi les slots de STRATEGIE ouverts (macro_intents.open_placement_slots), jamais sur le masque brut : ACTION_WAIT y est ouvert et met l'unite en RESERVES (20.01), pas en attente. LES DEUX CAMPS SONT POSES PAR LE MOTEUR depuis le 2026-09-06, chacun avec ses propres tirages (une strategie est tiree par FIGURINE, rien n'apparie les deux camps). Jusque-la la substitution etait bornee au joueur controle : l'agent etait pose au hasard pendant que son adversaire — bot a doctrine, ou champion du pool jouant son reseau — se deployait avec sa politique, laquelle sait se placer puisqu'elle est entrainee a 90 % en mode actif. Le mode 'auto' etait donc un HANDICAP UNILATERAL, et r_win_rate_deploy_auto mesurait « ce que vaut l'agent handicape face a un adversaire qui ne l'est pas » au lieu de « ce qu'il vaut depuis des positions qu'il n'a pas choisies ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes : 0.304 de win-rate en auto contre 0.684 en actif, et un differentiel d'objectifs de -0.76 en auto contre +0.19 en actif — l'agent tenait trois quarts d'objectif de MOINS que son adversaire, la ou la mesure de reference donnait les deux differentiels positifs. La symetrie court-circuite VOLONTAIREMENT la doctrine de pose des bots et le reseau du snapshot : sans elle le regime de la courbe dependrait de l'adversaire tire, or la part de pool passe de 20 % en P1 a 85 % en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre. L'ABSORPTION, elle, reste propre au joueur controle : un tour d'adversaire n'alimente aucun rollout PPO, il n'y a donc rien a y absorber. Verrous : tests/unit/ai/test_auto_deployment_is_symmetric.py (les deux camps) et tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py (l'absorption). Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long et x5_long ajoutes pour les runs longs, cf. model_params.*.decay_fraction)."
+        },
+        "step_log_buffer_size": 200,
+        "vec_normalize": {
+            "enabled": true,
+            "norm_obs": true,
+            "norm_reward": true,
+            "clip_obs": 10.0,
+            "clip_reward": 10.0,
+            "gamma": 0.99,
+            "reset_on_curriculum": false
+        },
+        "vec_normalize_eval": {
+            "enabled": true,
+            "training": false,
+            "norm_reward": false
+        },
+        "bot_training": {
+            "ratios": {
+                "alpha": 0.16,
+                "attrition": 0.14,
+                "decapitation": 0.16,
+                "endgame": 0.14,
+                "racer": 0.1,
+                "scorer": 0.21,
+                "random": 0.09
+            },
+            "randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            }
+        },
+        "scenario_sampling": {
+            "eval_ref_strict": true,
+            "train_objective_count_weights": {
+                "1": 0.025,
+                "2": 0.025,
+                "3": 0.025,
+                "4": 0.025,
+                "5": 0.9
+            },
+            "eval_objective_count_weights": {
+                "5": 1.0
+            },
+            "train_wall_ref_weights": {
+                "default": 1.0
+            },
+            "eval_wall_refs": [
+                "walls-33.json",
+                "walls-mc1.json"
+            ],
+            "train_selection_mode": "uniform_within_count",
+            "eval_selection_mode": "uniform_within_count"
+        },
+        "training_hard": {
+            "enabled": false,
+            "target_episode_ratio": 0.3,
+            "max_scenario_weight": 4,
+            "scenario_names": []
+        },
+        "unit_rule_forcing": {
+            "enabled": false,
+            "target_controlled_episode_ratio": 0.2,
+            "max_scenario_weight": 6
+        }
+    },
+    "x1_lineage": {
+        "type": "################################################### x1_lineage — etapes de lignee, reprise a chaud (board 44x60x1, scale x1) ###################################################",
+        "extends": "x1_long",
+        "_doc": "PROFIL DE LIGNEE : toute etape de curriculum qui REPREND des poids (init 'from:'), learners P1..P10 comme exploiteurs E1..E3. Le depart a froid P0 garde 'x1_long', dont ce profil herite ; c'est le curriculum qui impose l'un ou l'autre (bloc 'training_configs' de curriculum.json, refus au lancement si le mauvais est passe). CE QUI CHANGE, ET POURQUOI DES SCALAIRES. Une rampe s'exprime en FRACTION de la duree du run (setup_callbacks, LearningRateScheduleCallback / EntropyScheduleCallback) : chaque etape reparcourait donc la sienne depuis le depart et rendrait a un modele deja converge le regime d'exploration d'un demarrage. MESURE du 2026-09-04 : P1 s'etait arretee a un ent_coef de ~0,018, P2 est repartie a 0,100, l'evaluation bots est tombee de 0,911 a 0,694 et le score contre P1 — garanti a 0,50 par construction puisque P2 EST P1 a l'episode 0 — est tombe a 0,118. Le correctif d'alors, faire partir la rampe de la valeur atteinte, a lui-meme ete mesure le 2026-09-05 : parti de 0,0177 le score de la sonde est reste PLAT a 0,496 sur six mesures et 60 000 episodes, pendant que l'evaluation bots retombait sous celle du modele de depart. Les deux regimes echouaient pour la meme raison : la valeur de l'entropie etait une consequence de l'HISTOIRE du modele, jamais une decision. Un scalaire constant sur toute la lignee la rend decidable et comparable d'une etape a l'autre. VALEUR PAR VALEUR. ent_coef 0.01 depuis le 2026-09-08 (0.03 du 2026-09-07 au 2026-09-08), essai retenu apres avoir observe que train/loss montait a 0.02 et redescendait puis remontait a 0.015. ATTENTION, CE CRITERE NE POUVAIT PAS REPONDRE : train/loss contient le terme ent_coef x entropy_loss, donc deux valeurs d'ent_coef ne produisent pas des loss comparables — le coefficient regle est un terme de la somme observee. Et une loss qui monte est le regime NORMAL d'un run qui progresse : la cible du critic est le RETOUR, qui grandit avec la politique, donc value_loss grandit a precision egale. Les seuls juges de l'entropie sont train/entropy_loss contre sa bande publiee [-2.0, -0.5] et, en dernier ressort, 03_selfplay ; le juge du critic est explained_variance, sans echelle. MESURE du run P2 du 2026-09-07 a 17 294 episodes : entropie 1,16 -> 0,94 nat (dans la bande), explained_variance 0,868 -> 0,881 (en hausse), 03_selfplay/P1 0,495 -> 0,535. A REDECIDER apres le premier run a n_steps 8160 : la politique s'y deplacera ~4x plus vite, donc son entropie chutera ~4x plus vite, et 0.01 peut ne plus suffire. learning_rate 0.001 : la valeur qu'a effectivement portee P1, seule etape reussie de la lignee. n_steps 8160 depuis le 2026-09-08 : il retombe sur la valeur de x1_long, et la surcharge n'est gardee que pour rendre la decision lisible. Le 32640 qui figurait ici — quatre fois le rollout, pour rendre le gradient lisible face a un adversaire de meme niveau — a produit L'INVERSE de son intention. target_kl plafonne le DEPLACEMENT DE POLITIQUE d'une update a 1,5 x 0,015 = 0,0225 nat, quelle que soit la taille du rollout : le deplacement par timestep est donc proportionnel a 1/n_steps, et quadrupler le rollout sans toucher au seuil a divise par QUATRE la vitesse d'apprentissage par episode. MESURE, run P2 du 2026-09-07 : les 55 updates du run, SANS EXCEPTION, ont ete coupees par l'early-stop (train/approx_kl_max > 0,0225 sur 55/55 — tag publie par le commit 5c668fb8 pour exactement ce diagnostic), la duree d'update de 5,5 s situant la coupure vers le 32e mini-lot sur les 128 disponibles, soit UNE epoch sur quatre ; la fraction de clipping tombait a 0,083, sous le clip_fraction_min de 0,10 que ce profil se donne lui-meme. Les deux issues coutaient le MEME temps horloge (~126 s par 32640 timesteps, le rollout pesant 96 % de l'horloge et l'update 4 %) : remonter target_kl a 0.03 rendait x1,9 en prenant des pas de 0,045 nat, au-dela de ce que clip_range 0.2 encadre ; revenir a 8160 rend x3,8 en gardant la region de confiance intacte. A 8160 avec batch_size 1020 et n_epochs 4 il y a EXACTEMENT 32 pas de gradient disponibles, soit le point ou la coupure tombait — les quatre epochs vont desormais au bout. batch_size N'EST PLUS surcharge : il retombe sur le 1020 de x1_long, donc huit minibatches sur un rollout de 8160. Le 4080 qui figurait ici du 2026-09-07 au matin — quatre fois le mini-lot, pour garder huit minibatches sur le rollout de 32640 — est PERIME deux fois : il avait deja tue P2 a la PREMIERE update (290 episodes, `RuntimeError: CUDA driver error: device not ready`, pic 8,89 Go sur les 8,19 Go de la carte) et sa raison d'etre a disparu avec le rollout de 32640. Le bench du 2026-08-26 le disait deja (Documentation/Chantiers/backlog/perf_entrainement.md : 4080 a 2 769 ech/s, x2,6 pire que 1020, VRAM saturee). La contrainte VRAM qui justifiait ces calculs n'existe plus depuis le 2026-09-07 : les observations ne sont plus residentes sur le device, seul le mini-lot courant y part, et la VRAM tenue par le buffer etait tombee de 3,437 a 0,275 GiB (torch.cuda.memory_allocated). vf_coef 0.17 depuis le 2026-09-08 (0.15 la veille) : reglage MESURE, part du gradient revenant a la politique 0,235 -> 0,62 avec un explained_variance intact a 0,87 — a 0.5 le critic captait 75,2 % du gradient alors qu'il n'est jamais appele hors entrainement. La valeur a ete PORTEE DANS x1 ET x1_long le meme jour, donc la surcharge n'est plus qu'un rappel : test_long_profile_is_its_reference_recalibrated compare model_params hors rampes, et bouger un seul membre du couple met le verrou au rouge (mesure : `{'vf_coef': 0.17} != {'vf_coef': 0.5}`). CONSEQUENCE NON VERIFIEE POUR P0, qui demarre A FROID sur x1_long : le 0.17 a ete mesure sur une reprise a chaud dont le critic etait deja excellent (explained_variance 0,87 des la premiere update). Sur un critic neuf l'erreur de valeur est enorme et devrait produire un gradient large meme a 0.17, mais c'est a LIRE sur diag/grad_share_policy_mb0 dans les 5 000 premiers episodes de P0 : au-dessus de ~0,9 durablement, le critic est etouffe et la valeur est a remonter. max_grad_norm n'est PAS surcharge : le 0.5 de x1_long convient, a une norme brute retombee vers 0,36 il n'ecrete plus rien. agent_seat_p2_ratio 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11) et non le 0.75 de x1_long : sur-representer le siege faible sert un modele qui l'apprend encore, pas une lignee qui doit rester comparable a elle-meme. CE QUI EST HERITE : tout le reste, dont batch_size, n_epochs, gamma, gae_lambda, clip_range, target_kl, l'architecture, n_envs, les bots, les seuils et les schedules. Aucune de ces valeurs n'est recopiee ici, et c'est le point : quinze cles etaient dupliquees a l'identique entre deux profils voisins avant que 'extends' n'existe. EXCEPTION : total_episodes est surcharge a 300000, valeur minimale pour couvrir le budget_cap des exploiteurs (E3 = 300000). Les etapes learner surchargent cette valeur via training_config_overrides ; training_config_overrides est interdit sur les exploiteurs, donc ils utilisent celle-ci.",
+        "total_episodes": 300000,
+        "total_episodes_normal": "300000 : minimum pour couvrir le budget_cap de tous les exploiteurs de la lignee (E1/E2 = 200000, E3 = 300000 dans curriculum.json). Les etapes learner surchargent cette valeur via training_config_overrides.total_episodes ; training_config_overrides etant interdit sur les exploiteurs (ai/curriculum.py::_validate_stage_hp_overrides), cette valeur est la seule qu'ils puissent recevoir. Augmenter si un futur budget_cap depasse 300000.",
+        "agent_seat_p2_ratio": 0.70,
+        "model_params": {
+            "learning_rate": 0.001,
+            "ent_coef": 0.01,
+            "n_steps": 8160,
+            "vf_coef": 0.17
+        },
+        "early_stop": {
+            "promote_min_episodes": 30000
+        }
+    },
+    "x1_long_entnorm": {
+        "type": "################################################### x1_long_entnorm — x1_long + entropie normalisee par l'etat (bras TRAITE, 2026-09-13) ###################################################",
+        "extends": "x1_long",
+        "_doc": "BRAS TRAITE de l'experience entropie normalisee (decision du 2026-09-13, option B : normalisation par l'etat plutot que poids par phase ; temoin = x1_long de CE fichier, meme code, meme cle d'agent, lance juste avant). Deux surcharges et rien d'autre. (1) entropy_normalize_by_legal : le terme d'entropie de la loss devient -mean(H_i / ln n_i) sur les etats a n_i > 1 actions legales (ai/patched_ppo.py, entropy_loss_normalized_by_legal), borne dans [-1, 0]. (2) ent_coef x5 sur toute la rampe (0.1->0.01 devient 0.5->0.05, decay_fraction 0.4 inchangee) : la normalisation divise le gradient d'entropie de chaque etat par ln n_i, donc la pression sur un etat de MOUVEMENT (ln n moyen 5,07 mesure le 2026-09-12, 194 actions legales en moyenne) devient 5/5,07 = 0,99 fois l'ancienne — inchangee — et celle des tetes courtes est relevee de 5/ln n : charge_slot (ln n moyen 0,86) x5,8, shoot_slot (1,58) x3,2, deploy_slot (1,95) x2,6, oath (1,59) x3,1, fight_weapon_slot (1,35) x3,7. Cause mesuree (sonde 6 episodes, 1 301 decisions, 2026-09-12) : train/entropy_loss est une moyenne dominee par move_cell (H 2,23) alors que charge_slot vaut 0,007 nat sur 0,86 possible, shoot 0,23/1,58, deploy 0,16/1,95, oath 0,11/1,59, fight 0,17/1,35 ; ent_coef 0,01 pesait 1,3 % du gradient et n'agissait que sur le mouvement. Metrique decisive : win-rate holdout final controle vs traite (bot_eval_final 300 ep./bot, IC95 +/-5,7 par bras) et 00_critical/s_win_rate_deploy_auto ; table H / KL par famille des deux modeles finaux (scripts/family_entropy_probe.py). Un run par bras ne mesure pas la variance entre entrainements : ecart < ~10 points = second run traite, pas de verdict.",
+        "model_params": {
+            "entropy_normalize_by_legal": true,
+            "ent_coef": {
+                "start": 0.5,
+                "end": 0.05,
+                "decay_fraction": 0.4
+            }
+        }
+    },
+    "x1_debug": {
+        "type": "################################################### x1 debug ###################################################",
+        "seed": 12345,
+        "total_episodes": 96,
+        "total_episodes_normal": "96 : deux episodes par environnement a n_envs = 48 (total_episodes est un total GLOBAL, tous env confondus), soit le plus petit run qui fait passer chaque env par un reset complet. Profil de DEBUG : il verifie que le pipeline demarre et se termine, il n'apprend rien et ne produit aucun best model (save_best_robust false, et save_best_min_episodes 10000 depasse de toute facon la duree du run). AUCUNE duree annoncee ici : le '0,1 s/ep' que repetaient les versions precedentes de ce texte datait du regime d'avant la refonte d'observation V11, et il n'y a pas de mesure de x1_debug au regime actuel. Aucun facteur de peremption n'est donne non plus -- le '~14' qu'affichait cette note venait de comparer 36k ep./h a une extrapolation lineaire du run de 10 000 episodes, extrapolation refutee depuis (x1 : 4 h 01 pour 10 000 ep. ; x1_long : 5 h 54 pour 50 000, 2026-08-18). Valeurs successives : 50000, puis 480, puis 10, puis 96, puis 1000, puis 96 le 2026-08-11. Verrou : scripts/check_doc_references.py confronte cette valeur au tableau des profils de Documentation/Roadmap/v11_chemin_critique.md.",
+        "agent_seat_mode": "random",
+        "agent_seat_p2_ratio": 0.75,
+        "agent_seat_p2_ratio_normal": "Part des episodes d'ENTRAINEMENT ou l'agent joue SECOND, quand agent_seat_mode vaut 'random'. Cle OBLIGATOIRE dans ce cas (require_key dans ai/train.py build_training_opponents, aucune valeur par defaut) : jusqu'au 2026-08-28 le tirage etait un pile ou face code en dur (parite d'un hachage sha256 de seed/rang d'env/index d'episode, ai/env_wrappers.py _resolve_controlled_player_for_episode) et rien ne permettait de le biaiser. RAISON D'ETRE : l'agent joue nettement moins bien en second. Mesure du run x1_long du 2026-08-12, 0.707 de win-rate en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run (cf. ai/bot_evaluation.py SEAT_KEYS et la courbe 00_critical/0_gap_p1-p2). Sur-echantillonner le siege faible est le seul levier d'exposition ; l'alternative etait agent_seat_mode: 'p2', qui supprime l'autre siege et rend le gap aveugle -- meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle r_win_rate_deploy_auto. Reglage courant 0.75 (2026-09-01) : trois episodes sur quatre en second, le quart restant gardant seat_aware/winrate_agent_p1 alimente et le gap calculable. 1.0 est accepte par la validation mais equivaut a 'p2' avec un instrument mort. L'EVALUATION N'EST PAS CONCERNEE : ai/bot_evaluation.py construit ses environnements sans passer cette cle, donc son tirage reste equitable et le win-rate publie reste comparable d'un run a l'autre -- meme separation que deployment_mode_schedule.training_only. Le tirage est desormais un SEUIL sur les 32 premiers bits du hachage (uniformes) et non une parite : a 0.5 la distribution est identique a l'ancienne, mais la sequence siege-par-siege d'un run rejoue differe. Verrou : tests/unit/ai/test_agent_seat_ratio.py, qui lit CE fichier et verifie les six profils.",
+        "eval_episodes": 10,
+        "n_envs": 24,
+        "metrics_smoothing": null,
+        "model_params": {
+            "policy": "MultiInputPolicy",
+            "learning_rate": {
+                "initial": 0.002,
+                "final": 0.0002,
+                "decay_fraction": 1.0
+            },
+            "n_steps": 8160,
+            "batch_size": 1020,
+            "n_epochs": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "clip_range_vf": null,
+            "normalize_advantage": true,
+            "ent_coef": {
+                "start": 0.1,
+                "end": 0.01,
+                "decay_fraction": 1.0
+            },
+            "vf_coef": 0.5,
+            "max_grad_norm": 0.5,
+            "target_kl": 0.015,
+            "tensorboard_log": "./tensorboard/",
+            "policy_kwargs": {
+                "net_arch": [
+                    512,
+                    512
+                ],
+                "features_extractor_kwargs": {
+                    "cnn_features": 256
+                }
+            },
+            "verbose": 0
+        },
+        "callback_params": {
+            "bot_eval_scenario_pool": "holdout",
+            "bot_eval_show_progress": true,
+            "bot_eval_use_subprocess": true,
+            "bot_eval_n_workers": 4,
+            "bot_eval_n_workers_gate": 2,
+            "early_stopping_patience": 0,
+            "save_best_min_episodes": 10000,
+            "checkpoint_save_freq": 10000,
+            "max_checkpoints": 3,
+            "checkpoint_name_prefix": "ppo_checkpoint",
+            "eval_deterministic": true,
+            "eval_render": false,
+            "bot_eval_freq": 48,
+            "bot_eval_use_episodes": true,
+            "bot_eval_intermediate": 1,
+            "bot_eval_final": 0,
+            "bot_eval_worker_device": "cpu",
+            "bot_eval_task_timeout_seconds": 3600,
+            "save_best_robust": false,
+            "save_best_robust_seed": false,
+            "robust_window": 5,
+            "robust_drawdown_penalty": 0.5,
+            "robust_penalty_bot": 0.12,
+            "robust_penalty_hard": 0.0,
+            "model_gating_enabled": false,
+            "model_gating_min_worst_bot": 0.25,
+            "model_gating_min_worst_scenario_combined": 0.3,
+            "model_gating_min_vs_control": 0.0,
+            "holdout_hard_opponent_budget_modifier": 1.1,
+            "bot_eval_weights": {
+                "alpha": 0.16666666666666666,
+                "attrition": 0.16666666666666666,
+                "decapitation": 0.16666666666666666,
+                "endgame": 0.16666666666666666,
+                "racer": 0.16666666666666666,
+                "scorer": 0.166666666666667
+            },
+            "bot_eval_randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            },
+            "bot_eval_n_workers_intermediate": 4
+        },
+        "roster_pool_schedule": {
+            "enabled": false,
+            "training": {
+                "start_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                },
+                "end_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                }
+            }
+        },
+        "deployment_mode_schedule": {
+            "enabled": true,
+            "training_only": true,
+            "active_ratio_start": 0.3,
+            "active_ratio_end": 0.9,
+            "schedule": "linear",
+            "freeze_after_progress": 1.0,
+            "justification": "Rampe de deploiement : part des episodes ou l'AGENT place lui-meme ses figurines ('active'), le reste etant deploye PAR LE MOTEUR ('auto'). Les deux modes jouent une VRAIE phase de deploiement ; seul change qui decide des poses. Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29 ; x1_selfplay, x1_panel, x1_long_panel, x1_new_bots et x5_append supprimes le 2026-08-17, commit 18dc8599). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.9 et non 1.0 depuis le 2026-08-12, et c'est une courbe de CONTROLE qui l'impose : a 1.0 il n'y a plus aucun episode auto, donc 00_critical/r_win_rate_deploy_auto n'a plus de donnees et cesse de mesurer quoi que ce soit. C'est le seul controle existant de ce que vaut l'agent depuis des positions qu'il n'a pas choisies, et l'ecart qu'il montre n'est pas marginal : sur le run du 2026-08-12, 0.866 de win-rate en deploiement actif contre 0.646 en auto. ⚠️ CES DEUX CHIFFRES SONT CEUX DU REGIME ASYMETRIQUE, mesures quand seul l'agent etait pose par le moteur et contre des bots a doctrine de pose fixe. Ils ne se comparent PAS aux valeurs posterieures au 2026-09-06 : la courbe a change de definition en meme temps que le mecanisme, et c'etait le but. Les 10 % d'episodes qui restent en auto sont hors distribution d'usage (l'evaluation impose TOUJOURS le deploiement par l'agent) : c'est le prix assume pour garder l'instrument vivant. Reglage precedent 0.8, historique de x1 retenu comme reference le 2026-07-29. Le 2026-08-08 le mode 'fixed' est REMPLACE par 'auto' : il rejouait les positions par figurine ecrites dans les rosters, generees hors ligne contre un seul terrain. Elles tombaient sur des murs des qu'un second terrain entrait dans la rotation (mesure sur terrain-mc2 : jusqu'a 10 hex de mur sous un socle, ValueError au chargement) et se placaient hors des zones de deploiement meme sur le terrain d'origine (12 a 17 figurines sur 23-37). 'auto' tire ses poses parmi les slots de STRATEGIE ouverts (macro_intents.open_placement_slots), jamais sur le masque brut : ACTION_WAIT y est ouvert et met l'unite en RESERVES (20.01), pas en attente. LES DEUX CAMPS SONT POSES PAR LE MOTEUR depuis le 2026-09-06, chacun avec ses propres tirages (une strategie est tiree par FIGURINE, rien n'apparie les deux camps). Jusque-la la substitution etait bornee au joueur controle : l'agent etait pose au hasard pendant que son adversaire — bot a doctrine, ou champion du pool jouant son reseau — se deployait avec sa politique, laquelle sait se placer puisqu'elle est entrainee a 90 % en mode actif. Le mode 'auto' etait donc un HANDICAP UNILATERAL, et r_win_rate_deploy_auto mesurait « ce que vaut l'agent handicape face a un adversaire qui ne l'est pas » au lieu de « ce qu'il vaut depuis des positions qu'il n'a pas choisies ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes : 0.304 de win-rate en auto contre 0.684 en actif, et un differentiel d'objectifs de -0.76 en auto contre +0.19 en actif — l'agent tenait trois quarts d'objectif de MOINS que son adversaire, la ou la mesure de reference donnait les deux differentiels positifs. La symetrie court-circuite VOLONTAIREMENT la doctrine de pose des bots et le reseau du snapshot : sans elle le regime de la courbe dependrait de l'adversaire tire, or la part de pool passe de 20 % en P1 a 85 % en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre. L'ABSORPTION, elle, reste propre au joueur controle : un tour d'adversaire n'alimente aucun rollout PPO, il n'y a donc rien a y absorber. Verrous : tests/unit/ai/test_auto_deployment_is_symmetric.py (les deux camps) et tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py (l'absorption). Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long et x5_long ajoutes pour les runs longs, cf. model_params.*.decay_fraction)."
+        },
+        "step_log_buffer_size": 200,
+        "vec_normalize": {
+            "enabled": true,
+            "norm_obs": true,
+            "norm_reward": true,
+            "clip_obs": 10.0,
+            "clip_reward": 10.0,
+            "gamma": 0.99
+        },
+        "vec_normalize_eval": {
+            "enabled": true,
+            "training": false,
+            "norm_reward": false
+        },
+        "bot_training": {
+            "ratios": {
+                "alpha": 0.16,
+                "attrition": 0.14,
+                "decapitation": 0.16,
+                "endgame": 0.14,
+                "racer": 0.1,
+                "scorer": 0.21,
+                "random": 0.09
+            },
+            "randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            }
+        },
+        "scenario_sampling": {
+            "eval_ref_strict": true,
+            "train_objective_count_weights": {
+                "1": 0.025,
+                "2": 0.025,
+                "3": 0.025,
+                "4": 0.025,
+                "5": 0.9
+            },
+            "eval_objective_count_weights": {
+                "5": 1.0
+            },
+            "train_wall_ref_weights": {
+                "default": 1.0
+            },
+            "eval_wall_refs": [
+                "walls-33.json",
+                "walls-mc1.json"
+            ],
+            "train_selection_mode": "uniform_within_count",
+            "eval_selection_mode": "uniform_within_count"
+        },
+        "training_hard": {
+            "enabled": false,
+            "target_episode_ratio": 0.3,
+            "max_scenario_weight": 4,
+            "scenario_names": []
+        },
+        "unit_rule_forcing": {
+            "enabled": false,
+            "target_controlled_episode_ratio": 0.2,
+            "max_scenario_weight": 6
+        }
+    },
+    "x5_new": {
+        "type": "################################################### x5_new — TETE de la chaine x5, modele neuf (board 44x60x5, scale x5) ###################################################",
+        "seed": 12345,
+        "total_episodes": 1000,
+        "total_episodes_normal": "1000 : run de MISE AU POINT, pas d'apprentissage : il cree un modele neuf sur le plateau x5 et verifie que le pipeline tourne. Sa sortie utile est son modele FINAL (train.py:3121), que x5_long reprend ensuite ; il ne produit AUCUN best model, cf. save_best_robust. Hors cet ecart de longueur et la cadence d'evaluation qui en decoule (bot_eval_freq), le profil est aligne trait pour trait sur x1 depuis le 2026-08-10. AUCUNE duree annoncee ici : le '0.1s/ep -> 36k ep / hour, soit ~1 min 40' que portait cette note datait du regime d'avant la refonte d'observation V11 (retire le 2026-08-23), et le regime mesure sur x1 ne se transporte PAS sur le plateau x5 -- la resolution change le cout du pas d'un ordre de grandeur (5,7 s/ep en x1 contre 233 s/ep en x10, cf. Documentation/AI_TRAINING.md). Aucun run x5 n'a ete chronometre. La chaine est x5_new -> x5_long ; x5_append, qu'annonçait cette note, a ete supprime le 2026-08-17 (commit 18dc8599).",
+        "agent_seat_mode": "random",
+        "agent_seat_p2_ratio": 0.75,
+        "agent_seat_p2_ratio_normal": "Part des episodes d'ENTRAINEMENT ou l'agent joue SECOND, quand agent_seat_mode vaut 'random'. Cle OBLIGATOIRE dans ce cas (require_key dans ai/train.py build_training_opponents, aucune valeur par defaut) : jusqu'au 2026-08-28 le tirage etait un pile ou face code en dur (parite d'un hachage sha256 de seed/rang d'env/index d'episode, ai/env_wrappers.py _resolve_controlled_player_for_episode) et rien ne permettait de le biaiser. RAISON D'ETRE : l'agent joue nettement moins bien en second. Mesure du run x1_long du 2026-08-12, 0.707 de win-rate en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run (cf. ai/bot_evaluation.py SEAT_KEYS et la courbe 00_critical/0_gap_p1-p2). Sur-echantillonner le siege faible est le seul levier d'exposition ; l'alternative etait agent_seat_mode: 'p2', qui supprime l'autre siege et rend le gap aveugle -- meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle r_win_rate_deploy_auto. Reglage courant 0.75 (2026-09-01) : trois episodes sur quatre en second, le quart restant gardant seat_aware/winrate_agent_p1 alimente et le gap calculable. 1.0 est accepte par la validation mais equivaut a 'p2' avec un instrument mort. L'EVALUATION N'EST PAS CONCERNEE : ai/bot_evaluation.py construit ses environnements sans passer cette cle, donc son tirage reste equitable et le win-rate publie reste comparable d'un run a l'autre -- meme separation que deployment_mode_schedule.training_only. Le tirage est desormais un SEUIL sur les 32 premiers bits du hachage (uniformes) et non une parite : a 0.5 la distribution est identique a l'ancienne, mais la sequence siege-par-siege d'un run rejoue differe. Verrou : tests/unit/ai/test_agent_seat_ratio.py, qui lit CE fichier et verifie les six profils.",
+        "eval_episodes": 10,
+        "n_envs": 24,
+        "metrics_smoothing": null,
+        "model_params": {
+            "policy": "MultiInputPolicy",
+            "learning_rate": {
+                "initial": 0.002,
+                "final": 0.0005,
+                "decay_fraction": 1.0,
+                "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
+            },
+            "n_steps": 8160,
+            "batch_size": 1020,
+            "n_epochs": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "clip_range_vf": null,
+            "normalize_advantage": true,
+            "ent_coef": {
+                "start": 0.1,
+                "end": 0.01,
+                "decay_fraction": 1.0
+            },
+            "vf_coef": 0.5,
+            "max_grad_norm": 0.5,
+            "target_kl": 0.015,
+            "tensorboard_log": "./tensorboard/",
+            "policy_kwargs": {
+                "net_arch": [
+                    512,
+                    512
+                ],
+                "features_extractor_kwargs": {
+                    "cnn_features": 256
+                }
+            },
+            "verbose": 0
+        },
+        "callback_params": {
+            "bot_eval_scenario_pool": "holdout",
+            "bot_eval_show_progress": true,
+            "bot_eval_use_subprocess": true,
+            "bot_eval_n_workers": 2,
+            "bot_eval_n_workers_gate": 1,
+            "early_stopping_patience": 0,
+            "save_best_min_episodes": 10000,
+            "checkpoint_save_freq": 10000,
+            "max_checkpoints": 3,
+            "checkpoint_name_prefix": "ppo_checkpoint",
+            "eval_deterministic": true,
+            "eval_render": false,
+            "bot_eval_freq": 250,
+            "bot_eval_freq_normal": "---------------------------------- 250 (et non 2000 comme x1, dont x5_new reprend tout le reste) : bot_eval_freq est un nombre d'EPISODES, et x5_new n'en joue que 1000. A 2000 aucune evaluation intermediaire ne se declencherait jamais -- le profil tournerait sans le moindre point de mesure, en silence. 250 en donne quatre. C'est le SEUL ecart de cadence assume avec x1 ; il decoule de total_episodes, pas d'un reglage d'apprentissage.",
+            "bot_eval_use_episodes": true,
+            "bot_eval_intermediate": 10,
+            "bot_eval_final": 100,
+            "bot_eval_worker_device": "cpu",
+            "bot_eval_task_timeout_seconds": 3600,
+            "save_best_robust": false,
+            "save_best_robust_normal": "---------------------------------- false (true jusqu'au 2026-08-10) : sur 1000 episodes ce profil ne peut produire AUCUN best model, et l'annoncer etait une promesse vide. Pire, le profil n'etait meme pas LANCABLE : setup_callbacks refuse au demarrage un save_best_robust dont la fenetre est inatteignable (train.py:3596-3612), et a bot_eval_freq 250 un run de 1000 episodes ne produit que quatre evaluations pour un robust_window de 5. `--training-config x5_new` levait donc avant le premier episode. Le passer a false le rend lancable ET honnete : meme sans cette garde, aucun best model ne serait ecrit, car toute sauvegarde -- robuste (training_callbacks.py:2088) comme simple (:2008) -- exige eval_marker >= save_best_min_episodes = 10000, seuil que ce run n'atteint jamais puisqu'il demarre a zero. La sortie de x5_new est son modele FINAL (train.py:3121), seul objet dont la chaine ait besoin. save_best_min_episodes reste a 10000, valeur commune a tous les profils : l'abaisser ferait selectionner un best model parmi quatre points de mesure d'un run de mise au point, c'est-a-dire du bruit. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_profile_promise_of_a_best_model_is_pinned, qui fixe ce false dans la table PROMISES_BEST_MODEL -- test_profile_can_produce_the_best_model_it_promises, lui, SKIP ce profil puisqu'il ne promet rien.",
+            "save_best_robust_seed": true,
+            "robust_window": 5,
+            "robust_drawdown_penalty": 0.5,
+            "robust_penalty_bot": 0.12,
+            "robust_penalty_hard": 0.0,
+            "model_gating_enabled": false,
+            "model_gating_min_worst_bot": 0.25,
+            "model_gating_min_worst_scenario_combined": 0.3,
+            "model_gating_min_vs_control": 0.0,
+            "holdout_hard_opponent_budget_modifier": 1.1,
+            "bot_eval_weights": {
+                "alpha": 0.16666666666666666,
+                "attrition": 0.16666666666666666,
+                "decapitation": 0.16666666666666666,
+                "endgame": 0.16666666666666666,
+                "racer": 0.16666666666666666,
+                "scorer": 0.16666666666666674
+            },
+            "bot_eval_randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            },
+            "bot_eval_n_workers_intermediate": 4
+        },
+        "roster_pool_schedule": {
+            "enabled": false,
+            "training": {
+                "start_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                },
+                "end_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                }
+            }
+        },
+        "deployment_mode_schedule": {
+            "enabled": true,
+            "training_only": true,
+            "active_ratio_start": 0.3,
+            "active_ratio_end": 0.9,
+            "schedule": "linear",
+            "freeze_after_progress": 1.0,
+            "justification": "Rampe de deploiement : part des episodes ou l'AGENT place lui-meme ses figurines ('active'), le reste etant deploye PAR LE MOTEUR ('auto'). Les deux modes jouent une VRAIE phase de deploiement ; seul change qui decide des poses. Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29 ; x1_selfplay, x1_panel, x1_long_panel, x1_new_bots et x5_append supprimes le 2026-08-17, commit 18dc8599). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.9 et non 1.0 depuis le 2026-08-12, et c'est une courbe de CONTROLE qui l'impose : a 1.0 il n'y a plus aucun episode auto, donc 00_critical/r_win_rate_deploy_auto n'a plus de donnees et cesse de mesurer quoi que ce soit. C'est le seul controle existant de ce que vaut l'agent depuis des positions qu'il n'a pas choisies, et l'ecart qu'il montre n'est pas marginal : sur le run du 2026-08-12, 0.866 de win-rate en deploiement actif contre 0.646 en auto. ⚠️ CES DEUX CHIFFRES SONT CEUX DU REGIME ASYMETRIQUE, mesures quand seul l'agent etait pose par le moteur et contre des bots a doctrine de pose fixe. Ils ne se comparent PAS aux valeurs posterieures au 2026-09-06 : la courbe a change de definition en meme temps que le mecanisme, et c'etait le but. Les 10 % d'episodes qui restent en auto sont hors distribution d'usage (l'evaluation impose TOUJOURS le deploiement par l'agent) : c'est le prix assume pour garder l'instrument vivant. Reglage precedent 0.8, historique de x1 retenu comme reference le 2026-07-29. Le 2026-08-08 le mode 'fixed' est REMPLACE par 'auto' : il rejouait les positions par figurine ecrites dans les rosters, generees hors ligne contre un seul terrain. Elles tombaient sur des murs des qu'un second terrain entrait dans la rotation (mesure sur terrain-mc2 : jusqu'a 10 hex de mur sous un socle, ValueError au chargement) et se placaient hors des zones de deploiement meme sur le terrain d'origine (12 a 17 figurines sur 23-37). 'auto' tire ses poses parmi les slots de STRATEGIE ouverts (macro_intents.open_placement_slots), jamais sur le masque brut : ACTION_WAIT y est ouvert et met l'unite en RESERVES (20.01), pas en attente. LES DEUX CAMPS SONT POSES PAR LE MOTEUR depuis le 2026-09-06, chacun avec ses propres tirages (une strategie est tiree par FIGURINE, rien n'apparie les deux camps). Jusque-la la substitution etait bornee au joueur controle : l'agent etait pose au hasard pendant que son adversaire — bot a doctrine, ou champion du pool jouant son reseau — se deployait avec sa politique, laquelle sait se placer puisqu'elle est entrainee a 90 % en mode actif. Le mode 'auto' etait donc un HANDICAP UNILATERAL, et r_win_rate_deploy_auto mesurait « ce que vaut l'agent handicape face a un adversaire qui ne l'est pas » au lieu de « ce qu'il vaut depuis des positions qu'il n'a pas choisies ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes : 0.304 de win-rate en auto contre 0.684 en actif, et un differentiel d'objectifs de -0.76 en auto contre +0.19 en actif — l'agent tenait trois quarts d'objectif de MOINS que son adversaire, la ou la mesure de reference donnait les deux differentiels positifs. La symetrie court-circuite VOLONTAIREMENT la doctrine de pose des bots et le reseau du snapshot : sans elle le regime de la courbe dependrait de l'adversaire tire, or la part de pool passe de 20 % en P1 a 85 % en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre. L'ABSORPTION, elle, reste propre au joueur controle : un tour d'adversaire n'alimente aucun rollout PPO, il n'y a donc rien a y absorber. Verrous : tests/unit/ai/test_auto_deployment_is_symmetric.py (les deux camps) et tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py (l'absorption). Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long et x5_long ajoutes pour les runs longs, cf. model_params.*.decay_fraction)."
+        },
+        "step_log_buffer_size": 200,
+        "vec_normalize": {
+            "enabled": true,
+            "norm_obs": true,
+            "norm_reward": true,
+            "clip_obs": 10.0,
+            "clip_reward": 10.0,
+            "gamma": 0.99
+        },
+        "vec_normalize_eval": {
+            "enabled": true,
+            "training": false,
+            "norm_reward": false
+        },
+        "bot_training": {
+            "ratios": {
+                "alpha": 0.16,
+                "attrition": 0.14,
+                "decapitation": 0.16,
+                "endgame": 0.14,
+                "racer": 0.1,
+                "scorer": 0.21,
+                "random": 0.09
+            },
+            "randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            }
+        },
+        "scenario_sampling": {
+            "eval_ref_strict": true,
+            "train_objective_count_weights": {
+                "1": 0.025,
+                "2": 0.025,
+                "3": 0.025,
+                "4": 0.025,
+                "5": 0.9
+            },
+            "eval_objective_count_weights": {
+                "5": 1.0
+            },
+            "train_wall_ref_weights": {
+                "default": 1.0
+            },
+            "eval_wall_refs": [
+                "walls-33.json",
+                "walls-mc1.json"
+            ],
+            "train_selection_mode": "uniform_within_count",
+            "eval_selection_mode": "uniform_within_count"
+        },
+        "training_hard": {
+            "enabled": false,
+            "target_episode_ratio": 0.3,
+            "max_scenario_weight": 4,
+            "scenario_names": []
+        },
+        "unit_rule_forcing": {
+            "enabled": false,
+            "target_controlled_episode_ratio": 0.2,
+            "max_scenario_weight": 6
+        }
+    },
+    "x5_long": {
+        "type": "################################################### x5_long — runs longs (board 44x60x5, scale x5) ###################################################",
+        "seed": 12345,
+        "total_episodes": 100000,
+        "total_episodes_normal": "100000 : run long ; rampe entropie achevee a 40000 (decay_fraction 0.4), rampe learning_rate a 90000 (0.9). Identique a x1_long : x5_long est le MEME jeu d'hyperparametres, joue sur le plateau x5 -- la resolution vient de --resolution 5, jamais du nom du profil (cf. _resolution_detail). AUCUNE duree annoncee : aucun run du plateau x5 n'a ete chronometre, et la mesure de x1_long (5 h 54 pour 50 000 episodes) ne se transporte ni a 100 000 episodes (pente non lineaire) ni a une autre resolution (le cout du pas change d'un ordre de grandeur).",
+        "agent_seat_mode": "random",
+        "agent_seat_p2_ratio": 0.75,
+        "agent_seat_p2_ratio_normal": "Part des episodes d'ENTRAINEMENT ou l'agent joue SECOND, quand agent_seat_mode vaut 'random'. Cle OBLIGATOIRE dans ce cas (require_key dans ai/train.py build_training_opponents, aucune valeur par defaut) : jusqu'au 2026-08-28 le tirage etait un pile ou face code en dur (parite d'un hachage sha256 de seed/rang d'env/index d'episode, ai/env_wrappers.py _resolve_controlled_player_for_episode) et rien ne permettait de le biaiser. RAISON D'ETRE : l'agent joue nettement moins bien en second. Mesure du run x1_long du 2026-08-12, 0.707 de win-rate en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run (cf. ai/bot_evaluation.py SEAT_KEYS et la courbe 00_critical/0_gap_p1-p2). Sur-echantillonner le siege faible est le seul levier d'exposition ; l'alternative etait agent_seat_mode: 'p2', qui supprime l'autre siege et rend le gap aveugle -- meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle r_win_rate_deploy_auto. Reglage courant 0.75 (2026-09-01) : trois episodes sur quatre en second, le quart restant gardant seat_aware/winrate_agent_p1 alimente et le gap calculable. 1.0 est accepte par la validation mais equivaut a 'p2' avec un instrument mort. L'EVALUATION N'EST PAS CONCERNEE : ai/bot_evaluation.py construit ses environnements sans passer cette cle, donc son tirage reste equitable et le win-rate publie reste comparable d'un run a l'autre -- meme separation que deployment_mode_schedule.training_only. Le tirage est desormais un SEUIL sur les 32 premiers bits du hachage (uniformes) et non une parite : a 0.5 la distribution est identique a l'ancienne, mais la sequence siege-par-siege d'un run rejoue differe. Verrou : tests/unit/ai/test_agent_seat_ratio.py, qui lit CE fichier et verifie les six profils.",
+        "eval_episodes": 100,
+        "n_envs": 24,
+        "metrics_smoothing": null,
+        "model_params": {
+            "policy": "MultiInputPolicy",
+            "learning_rate": {
+                "initial": 0.002,
+                "final": 0.0005,
+                "decay_fraction": 0.9,
+                "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
+            },
+            "n_steps": 8160,
+            "batch_size": 1020,
+            "n_epochs": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "clip_range_vf": null,
+            "normalize_advantage": true,
+            "ent_coef": {
+                "start": 0.1,
+                "end": 0.01,
+                "decay_fraction": 0.4
+            },
+            "vf_coef": 0.5,
+            "max_grad_norm": 0.5,
+            "target_kl": 0.015,
+            "tensorboard_log": "./tensorboard/",
+            "policy_kwargs": {
+                "net_arch": [
+                    512,
+                    512
+                ],
+                "features_extractor_kwargs": {
+                    "cnn_features": 256
+                }
+            },
+            "verbose": 0
+        },
+        "callback_params": {
+            "bot_eval_scenario_pool": "holdout",
+            "bot_eval_show_progress": true,
+            "bot_eval_use_subprocess": true,
+            "bot_eval_n_workers": 2,
+            "bot_eval_n_workers_gate": 1,
+            "bot_eval_n_workers_normal": "---------------------------------- 2 : valeur optimale constatee en pratique sur cette machine. 16 workers a necessite une interruption (contention trop importante en co-existence avec le training GPU) ; 2 est la valeur retenue depuis. x1_long porte la MEME valeur (`bot_eval_n_workers` n'est PAS dans la liste blanche de test_long_profile_is_its_reference_recalibrated : il ne depend pas de la longueur du run, donc x1_long et x5_long doivent le partager).",
+            "early_stopping_patience": 0,
+            "save_best_min_episodes": 10000,
+            "checkpoint_save_freq": 10000,
+            "max_checkpoints": 3,
+            "checkpoint_name_prefix": "ppo_checkpoint",
+            "eval_deterministic": true,
+            "eval_render": false,
+            "bot_eval_freq": 10000,
+            "bot_eval_freq_normal": "---------------------------------- 10000 (10 evals sur 100k). COUT NON RE-MESURE DIRECTEMENT (pas de run x5 en TensorBoard) : estime depuis x1_long (run_20260816-235459, d_bot_eval_seconds = 86 s pour 180 episodes a bot_eval_n_workers 16) et les pentes mesurees le 2026-08-16 (4 workers : 4,854 s/ep ; 16 workers : 2,521 s/ep). A 2 workers / 30 ep/bot (180 episodes), une eval intermediaire est estimee comme x1_long. ORIGINE DES CONSTANTES DE TEMPS : les 13 min par evaluation (commit 42326ed0) et les 17 s/episode du pire regime (V11 §0.14) ont ete mesurees sur le plateau x1 et n'ont PAS ete re-mesurees sur x5.",
+            "bot_eval_use_episodes": true,
+            "bot_eval_intermediate": 30,
+            "bot_eval_final": 300,
+            "bot_eval_final_normal": "---------------------------------- 300 depuis le 2026-08-30, aligne sur x1_long. Ce profil est un run de MESURE : son win-rate final est le chiffre publie, donc sa PRECISION fait partie du livrable. bot_eval_final est un nombre d'episodes PAR BOT. L'erreur-type d'un win-rate autour de 0,5 vaut 0,5/racine(n) : 2,9 points a 300 (IC95 ~ +/-5,7). Passer de 600 a 300 echange 0,9 point d'erreur-type contre la moitie du cout de l'eval finale, et le geste est REVERSIBLE : le remonter a 600 le jour ou un chiffre publie doit departager deux runs a moins de 6 points d'ecart. ORIGINE DES CONSTANTES DE TEMPS : les 13 min par evaluation (commit 42326ed0) et les 17 s/episode du pire regime (V11 §0.14) ont ete mesurees sur le plateau x1 et n'ont PAS ete re-mesurees sur x5. Elles sont reprises telles quelles faute de mesure x5 ; si un run x5_long fait deborder un task, c'est la premiere hypothese a verifier, et le facteur 5,6x de marge du timeout est ce qui l'absorbe en attendant. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated.",
+            "bot_eval_worker_device": "cpu",
+            "bot_eval_task_timeout_seconds": 7200,
+            "bot_eval_task_timeout_seconds_normal": "---------------------------------- 7200 (et non 3600 comme les autres profils) : le timeout porte sur un TASK, et un task = 1 bot x 1 scenario x (bot_eval_final / nb_scenarios) episodes joues SEQUENTIELLEMENT dans un seul sous-process (bot_evaluation.py, episodes_per_scenario) ; depuis le fix du 2026-08-02 les tasks sont soumises AU FIL DE L'EAU, au plus bot_eval_n_workers a la fois, donc l'instant de soumission est bien l'instant de depart (_collect_parallel_results_with_timeouts). Avant ce fix tout partait d'un coup et le chrono courait des la soumission : c'etait une deadline GLOBALE sur toute l'eval, qui tuait les tasks des dernieres vagues avant qu'elles ne commencent. Passer bot_eval_final de 100 a 300 multiplie donc par 3 la duree d'un task de l'eval FINALE : 75 episodes par task au lieu de 25, sur les 4 scenarios du holdout. A 3600 s le budget serait de 48 s/episode, alors que V11 §0.14 a MESURE 17 s/episode sur des parties degenerees (cap 2000 pas x cout geodesique §0.25) : soit un facteur 2,8, a la limite. L'asymetrie tranche le reglage — un seul task qui deborde force-termine TOUT le pool (_collect_parallel_results_with_timeouts) et fait lever l'eval finale, soit la mesure publiee PERDUE apres ~23 h d'entrainement, contre 2 h gachees une seule fois si le timeout est trop large. 7200 tolere 96 s/episode, ~5,6x le pire regime mesure, et reste un vrai garde-fou anti-worker-bloque (un episode est deja borne a max_steps_per_episode = 2000 pas, ce n'est donc jamais un hang infini). Les autres profils restent a 3600 : ils evaluent 100 episodes par bot, soit 25 par task. ORIGINE DES CONSTANTES DE TEMPS : les 13 min par evaluation (commit 42326ed0) et les 17 s/episode du pire regime (V11 §0.14) ont ete mesurees sur le plateau x1 et n'ont PAS ete re-mesurees sur x5. Elles sont reprises telles quelles faute de mesure x5 ; si un run x5_long fait deborder un task, c'est la premiere hypothese a verifier, et le facteur 5,6x de marge du timeout est ce qui l'absorbe en attendant. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated.",
+            "save_best_robust": true,
+            "save_best_robust_seed": true,
+            "robust_window": 3,
+            "robust_window_normal": "---------------------------------- 3 (et non 5 comme les autres profils), aligne sur x1_long depuis le 2026-08-30. Le score robuste n'existe qu'une fois robust_window evaluations accumulees (training_callbacks.py) : avec bot_eval_freq 10000, un run de 100 000 episodes ne donne que 10 points de mesure. A 3, la fenetre a 8 positions et la selection est reelle. Contrepartie assumee : une fenetre de 3 lisse moins un point isole que celle de 5. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated, qui epingle la fenetre PAR COUPLE et exige au moins deux positions sur un profil _long.",
+            "robust_drawdown_penalty": 0.5,
+            "robust_penalty_bot": 0.12,
+            "robust_penalty_hard": 0.0,
+            "model_gating_enabled": true,
+            "model_gating_min_worst_bot": 0.25,
+            "model_gating_min_worst_scenario_combined": 0.3,
+            "model_gating_min_vs_control": 0.0,
+            "holdout_hard_opponent_budget_modifier": 1.1,
+            "bot_eval_weights": {
+                "alpha": 0.16666666666666666,
+                "attrition": 0.16666666666666666,
+                "decapitation": 0.16666666666666666,
+                "endgame": 0.16666666666666666,
+                "racer": 0.16666666666666666,
+                "scorer": 0.16666666666666674
+            },
+            "bot_eval_randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            },
+            "bot_eval_n_workers_intermediate": 4
+        },
+        "roster_pool_schedule": {
+            "enabled": false,
+            "training": {
+                "start_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                },
+                "end_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                }
+            }
+        },
+        "deployment_mode_schedule": {
+            "enabled": true,
+            "training_only": true,
+            "active_ratio_start": 0.3,
+            "active_ratio_end": 0.9,
+            "schedule": "linear",
+            "freeze_after_progress": 1.0,
+            "justification": "Rampe de deploiement : part des episodes ou l'AGENT place lui-meme ses figurines ('active'), le reste etant deploye PAR LE MOTEUR ('auto'). Les deux modes jouent une VRAIE phase de deploiement ; seul change qui decide des poses. Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29 ; x1_selfplay, x1_panel, x1_long_panel, x1_new_bots et x5_append supprimes le 2026-08-17, commit 18dc8599). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.9 et non 1.0 depuis le 2026-08-12, et c'est une courbe de CONTROLE qui l'impose : a 1.0 il n'y a plus aucun episode auto, donc 00_critical/r_win_rate_deploy_auto n'a plus de donnees et cesse de mesurer quoi que ce soit. C'est le seul controle existant de ce que vaut l'agent depuis des positions qu'il n'a pas choisies, et l'ecart qu'il montre n'est pas marginal : sur le run du 2026-08-12, 0.866 de win-rate en deploiement actif contre 0.646 en auto. ⚠️ CES DEUX CHIFFRES SONT CEUX DU REGIME ASYMETRIQUE, mesures quand seul l'agent etait pose par le moteur et contre des bots a doctrine de pose fixe. Ils ne se comparent PAS aux valeurs posterieures au 2026-09-06 : la courbe a change de definition en meme temps que le mecanisme, et c'etait le but. Les 10 % d'episodes qui restent en auto sont hors distribution d'usage (l'evaluation impose TOUJOURS le deploiement par l'agent) : c'est le prix assume pour garder l'instrument vivant. Reglage precedent 0.8, historique de x1 retenu comme reference le 2026-07-29. Le 2026-08-08 le mode 'fixed' est REMPLACE par 'auto' : il rejouait les positions par figurine ecrites dans les rosters, generees hors ligne contre un seul terrain. Elles tombaient sur des murs des qu'un second terrain entrait dans la rotation (mesure sur terrain-mc2 : jusqu'a 10 hex de mur sous un socle, ValueError au chargement) et se placaient hors des zones de deploiement meme sur le terrain d'origine (12 a 17 figurines sur 23-37). 'auto' tire ses poses parmi les slots de STRATEGIE ouverts (macro_intents.open_placement_slots), jamais sur le masque brut : ACTION_WAIT y est ouvert et met l'unite en RESERVES (20.01), pas en attente. LES DEUX CAMPS SONT POSES PAR LE MOTEUR depuis le 2026-09-06, chacun avec ses propres tirages (une strategie est tiree par FIGURINE, rien n'apparie les deux camps). Jusque-la la substitution etait bornee au joueur controle : l'agent etait pose au hasard pendant que son adversaire — bot a doctrine, ou champion du pool jouant son reseau — se deployait avec sa politique, laquelle sait se placer puisqu'elle est entrainee a 90 % en mode actif. Le mode 'auto' etait donc un HANDICAP UNILATERAL, et r_win_rate_deploy_auto mesurait « ce que vaut l'agent handicape face a un adversaire qui ne l'est pas » au lieu de « ce qu'il vaut depuis des positions qu'il n'a pas choisies ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes : 0.304 de win-rate en auto contre 0.684 en actif, et un differentiel d'objectifs de -0.76 en auto contre +0.19 en actif — l'agent tenait trois quarts d'objectif de MOINS que son adversaire, la ou la mesure de reference donnait les deux differentiels positifs. La symetrie court-circuite VOLONTAIREMENT la doctrine de pose des bots et le reseau du snapshot : sans elle le regime de la courbe dependrait de l'adversaire tire, or la part de pool passe de 20 % en P1 a 85 % en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre. L'ABSORPTION, elle, reste propre au joueur controle : un tour d'adversaire n'alimente aucun rollout PPO, il n'y a donc rien a y absorber. Verrous : tests/unit/ai/test_auto_deployment_is_symmetric.py (les deux camps) et tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py (l'absorption). Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long et x5_long ajoutes pour les runs longs, cf. model_params.*.decay_fraction)."
+        },
+        "step_log_buffer_size": 200,
+        "vec_normalize": {
+            "enabled": true,
+            "norm_obs": true,
+            "norm_reward": true,
+            "clip_obs": 10.0,
+            "clip_reward": 10.0,
+            "gamma": 0.99
+        },
+        "vec_normalize_eval": {
+            "enabled": true,
+            "training": false,
+            "norm_reward": false
+        },
+        "bot_training": {
+            "ratios": {
+                "alpha": 0.16,
+                "attrition": 0.14,
+                "decapitation": 0.16,
+                "endgame": 0.14,
+                "racer": 0.1,
+                "scorer": 0.21,
+                "random": 0.09
+            },
+            "randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            }
+        },
+        "scenario_sampling": {
+            "eval_ref_strict": true,
+            "train_objective_count_weights": {
+                "1": 0.025,
+                "2": 0.025,
+                "3": 0.025,
+                "4": 0.025,
+                "5": 0.9
+            },
+            "eval_objective_count_weights": {
+                "5": 1.0
+            },
+            "train_wall_ref_weights": {
+                "default": 1.0
+            },
+            "eval_wall_refs": [
+                "walls-33.json",
+                "walls-mc1.json"
+            ],
+            "train_selection_mode": "uniform_within_count",
+            "eval_selection_mode": "uniform_within_count"
+        },
+        "training_hard": {
+            "enabled": false,
+            "target_episode_ratio": 0.3,
+            "max_scenario_weight": 4,
+            "scenario_names": []
+        },
+        "unit_rule_forcing": {
+            "enabled": false,
+            "target_controlled_episode_ratio": 0.2,
+            "max_scenario_weight": 6
+        }
+    },
+    "x5_debug": {
+        "type": "################################################### X5 debug ###################################################",
+        "seed": 12345,
+        "total_episodes": 96,
+        "total_episodes_classic----------------------": 500,
+        "total_episodes_normal": "96 : la note annonçait 50000 en tete, perime -- total_episodes vaut 96, le jumeau x5 de x1_debug. Profil de DEBUG : il verifie que le pipeline demarre et se termine sur le plateau x5, il n'apprend rien et ne produit aucun best model. AUCUNE duree annoncee ici, pour deux raisons : le '0.1s/ep -> 36k ep / hour -> 100k ep / 2h30' que portait cette note datait du regime d'avant la refonte d'observation V11 (retire le 2026-08-23), et aucun run du plateau x5 n'a jamais ete chronometre -- la mesure x1 ne s'y transporte pas, la resolution change le cout du pas d'un ordre de grandeur.",
+        "agent_seat_mode": "random",
+        "agent_seat_p2_ratio": 0.75,
+        "agent_seat_p2_ratio_normal": "Part des episodes d'ENTRAINEMENT ou l'agent joue SECOND, quand agent_seat_mode vaut 'random'. Cle OBLIGATOIRE dans ce cas (require_key dans ai/train.py build_training_opponents, aucune valeur par defaut) : jusqu'au 2026-08-28 le tirage etait un pile ou face code en dur (parite d'un hachage sha256 de seed/rang d'env/index d'episode, ai/env_wrappers.py _resolve_controlled_player_for_episode) et rien ne permettait de le biaiser. RAISON D'ETRE : l'agent joue nettement moins bien en second. Mesure du run x1_long du 2026-08-12, 0.707 de win-rate en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run (cf. ai/bot_evaluation.py SEAT_KEYS et la courbe 00_critical/0_gap_p1-p2). Sur-echantillonner le siege faible est le seul levier d'exposition ; l'alternative etait agent_seat_mode: 'p2', qui supprime l'autre siege et rend le gap aveugle -- meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle r_win_rate_deploy_auto. Reglage courant 0.75 (2026-09-01) : trois episodes sur quatre en second, le quart restant gardant seat_aware/winrate_agent_p1 alimente et le gap calculable. 1.0 est accepte par la validation mais equivaut a 'p2' avec un instrument mort. L'EVALUATION N'EST PAS CONCERNEE : ai/bot_evaluation.py construit ses environnements sans passer cette cle, donc son tirage reste equitable et le win-rate publie reste comparable d'un run a l'autre -- meme separation que deployment_mode_schedule.training_only. Le tirage est desormais un SEUIL sur les 32 premiers bits du hachage (uniformes) et non une parite : a 0.5 la distribution est identique a l'ancienne, mais la sequence siege-par-siege d'un run rejoue differe. Verrou : tests/unit/ai/test_agent_seat_ratio.py, qui lit CE fichier et verifie les six profils.",
+        "eval_episodes": 2,
+        "n_envs": 24,
+        "metrics_smoothing": null,
+        "callback_params": {
+            "bot_eval_scenario_pool": "holdout",
+            "bot_eval_show_progress": true,
+            "bot_eval_use_subprocess": true,
+            "bot_eval_n_workers": 4,
+            "bot_eval_n_workers_gate": 2,
+            "early_stopping_patience": 0,
+            "save_best_min_episodes": 10000,
+            "checkpoint_save_freq": 10000,
+            "max_checkpoints": 3,
+            "checkpoint_name_prefix": "ppo_checkpoint",
+            "eval_deterministic": true,
+            "eval_render": false,
+            "bot_eval_freq": 500,
+            "bot_eval_freq_normal": "-----------------------------------------------------2000",
+            "bot_eval_use_episodes": true,
+            "bot_eval_intermediate": 100,
+            "bot_eval_intermediate_normal": "-----------------------------------------------100",
+            "bot_eval_final": 1,
+            "bot_eval_worker_device": "cpu",
+            "bot_eval_task_timeout_seconds": 600,
+            "save_best_robust": false,
+            "save_best_robust_seed": false,
+            "robust_window": 5,
+            "robust_drawdown_penalty": 0.5,
+            "robust_penalty_bot": 0.12,
+            "robust_penalty_hard": 0.0,
+            "model_gating_enabled": false,
+            "model_gating_min_worst_bot": 0.25,
+            "model_gating_min_worst_scenario_combined": 0.3,
+            "model_gating_min_vs_control": 0.0,
+            "holdout_hard_opponent_budget_modifier": 1.1,
+            "bot_eval_weights": {
+                "alpha": 0.16666666666666666,
+                "attrition": 0.16666666666666666,
+                "decapitation": 0.16666666666666666,
+                "endgame": 0.16666666666666666,
+                "racer": 0.16666666666666666,
+                "scorer": 0.16666666666666674
+            },
+            "bot_eval_randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            },
+            "bot_eval_n_workers_intermediate": 4
+        },
+        "roster_pool_schedule": {
+            "enabled": false,
+            "training": {
+                "start_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                },
+                "end_counts": {
+                    "swarm": 16,
+                    "troop": 10,
+                    "elite": 6
+                }
+            }
+        },
+        "deployment_mode_schedule": {
+            "enabled": true,
+            "training_only": true,
+            "active_ratio_start": 0.3,
+            "active_ratio_end": 0.9,
+            "schedule": "linear",
+            "freeze_after_progress": 1.0,
+            "justification": "Rampe de deploiement : part des episodes ou l'AGENT place lui-meme ses figurines ('active'), le reste etant deploye PAR LE MOTEUR ('auto'). Les deux modes jouent une VRAIE phase de deploiement ; seul change qui decide des poses. Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29 ; x1_selfplay, x1_panel, x1_long_panel, x1_new_bots et x5_append supprimes le 2026-08-17, commit 18dc8599). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.9 et non 1.0 depuis le 2026-08-12, et c'est une courbe de CONTROLE qui l'impose : a 1.0 il n'y a plus aucun episode auto, donc 00_critical/r_win_rate_deploy_auto n'a plus de donnees et cesse de mesurer quoi que ce soit. C'est le seul controle existant de ce que vaut l'agent depuis des positions qu'il n'a pas choisies, et l'ecart qu'il montre n'est pas marginal : sur le run du 2026-08-12, 0.866 de win-rate en deploiement actif contre 0.646 en auto. ⚠️ CES DEUX CHIFFRES SONT CEUX DU REGIME ASYMETRIQUE, mesures quand seul l'agent etait pose par le moteur et contre des bots a doctrine de pose fixe. Ils ne se comparent PAS aux valeurs posterieures au 2026-09-06 : la courbe a change de definition en meme temps que le mecanisme, et c'etait le but. Les 10 % d'episodes qui restent en auto sont hors distribution d'usage (l'evaluation impose TOUJOURS le deploiement par l'agent) : c'est le prix assume pour garder l'instrument vivant. Reglage precedent 0.8, historique de x1 retenu comme reference le 2026-07-29. Le 2026-08-08 le mode 'fixed' est REMPLACE par 'auto' : il rejouait les positions par figurine ecrites dans les rosters, generees hors ligne contre un seul terrain. Elles tombaient sur des murs des qu'un second terrain entrait dans la rotation (mesure sur terrain-mc2 : jusqu'a 10 hex de mur sous un socle, ValueError au chargement) et se placaient hors des zones de deploiement meme sur le terrain d'origine (12 a 17 figurines sur 23-37). 'auto' tire ses poses parmi les slots de STRATEGIE ouverts (macro_intents.open_placement_slots), jamais sur le masque brut : ACTION_WAIT y est ouvert et met l'unite en RESERVES (20.01), pas en attente. LES DEUX CAMPS SONT POSES PAR LE MOTEUR depuis le 2026-09-06, chacun avec ses propres tirages (une strategie est tiree par FIGURINE, rien n'apparie les deux camps). Jusque-la la substitution etait bornee au joueur controle : l'agent etait pose au hasard pendant que son adversaire — bot a doctrine, ou champion du pool jouant son reseau — se deployait avec sa politique, laquelle sait se placer puisqu'elle est entrainee a 90 % en mode actif. Le mode 'auto' etait donc un HANDICAP UNILATERAL, et r_win_rate_deploy_auto mesurait « ce que vaut l'agent handicape face a un adversaire qui ne l'est pas » au lieu de « ce qu'il vaut depuis des positions qu'il n'a pas choisies ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes : 0.304 de win-rate en auto contre 0.684 en actif, et un differentiel d'objectifs de -0.76 en auto contre +0.19 en actif — l'agent tenait trois quarts d'objectif de MOINS que son adversaire, la ou la mesure de reference donnait les deux differentiels positifs. La symetrie court-circuite VOLONTAIREMENT la doctrine de pose des bots et le reseau du snapshot : sans elle le regime de la courbe dependrait de l'adversaire tire, or la part de pool passe de 20 % en P1 a 85 % en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre. L'ABSORPTION, elle, reste propre au joueur controle : un tour d'adversaire n'alimente aucun rollout PPO, il n'y a donc rien a y absorber. Verrous : tests/unit/ai/test_auto_deployment_is_symmetric.py (les deux camps) et tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py (l'absorption). Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long et x5_long ajoutes pour les runs longs, cf. model_params.*.decay_fraction)."
+        },
+        "step_log_buffer_size": 200,
+        "model_params": {
+            "policy": "MultiInputPolicy",
+            "learning_rate": {
+                "initial": 0.002,
+                "final": 0.0002,
+                "decay_fraction": 1.0
+            },
+            "n_steps": 8160,
+            "batch_size": 1020,
+            "n_epochs": 4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "clip_range_vf": null,
+            "normalize_advantage": true,
+            "ent_coef": {
+                "start": 0.1,
+                "end": 0.1,
+                "decay_fraction": 1.0
+            },
+            "vf_coef": 0.5,
+            "max_grad_norm": 0.5,
+            "target_kl": 0.015,
+            "tensorboard_log": "./tensorboard/",
+            "policy_kwargs": {
+                "net_arch": [
+                    512,
+                    512
+                ],
+                "features_extractor_kwargs": {
+                    "cnn_features": 256
+                }
+            },
+            "verbose": 0
+        },
+        "vec_normalize": {
+            "enabled": true,
+            "norm_obs": true,
+            "norm_reward": true,
+            "clip_obs": 10.0,
+            "clip_reward": 10.0,
+            "gamma": 0.99
+        },
+        "vec_normalize_eval": {
+            "enabled": true,
+            "training": false,
+            "norm_reward": false
+        },
+        "bot_training": {
+            "ratios": {
+                "alpha": 0.16,
+                "attrition": 0.14,
+                "decapitation": 0.16,
+                "endgame": 0.14,
+                "racer": 0.1,
+                "scorer": 0.21,
+                "random": 0.09
+            },
+            "randomness": {
+                "alpha": 0.05,
+                "attrition": 0.05,
+                "decapitation": 0.05,
+                "endgame": 0.05,
+                "racer": 0.05,
+                "scorer": 0.05
+            }
+        },
+        "scenario_sampling": {
+            "eval_ref_strict": true,
+            "train_objective_count_weights": {
+                "1": 0.025,
+                "2": 0.025,
+                "3": 0.025,
+                "4": 0.025,
+                "5": 0.9
+            },
+            "eval_objective_count_weights": {
+                "5": 1.0
+            },
+            "train_wall_ref_weights": {
+                "default": 1.0
+            },
+            "eval_wall_refs": [
+                "walls-33.json",
+                "walls-mc1.json"
+            ],
+            "train_selection_mode": "uniform_within_count",
+            "eval_selection_mode": "uniform_within_count"
+        },
+        "training_hard": {
+            "enabled": false,
+            "target_episode_ratio": 0.3,
+            "max_scenario_weight": 4,
+            "scenario_names": []
+        },
+        "unit_rule_forcing": {
+            "enabled": false,
+            "target_controlled_episode_ratio": 0.2,
+            "max_scenario_weight": 6
+        }
+    }
+}

@@ -196,6 +196,38 @@ Ces métriques révèlent la santé de l'algorithme PPO lui-même.
 - Chute vers 0 dans les 20 premiers épisodes → Augmenter `ent_coef`, relancer
 - Reste haute (< −1.5) après 200 épisodes → Réduire `ent_coef`
 
+**Ce qu'elle ne voit pas :** c'est une moyenne sur tous les états du rollout, en nats, donc
+**dominée par les états de mouvement** (~194 actions légales, ln n moyen 5,07). Mesure du
+2026-09-12 (6 épisodes, 1 301 décisions) : move_cell H = 2,23 alors que charge_slot vaut 0,007 sur
+0,86 possible, shoot_slot 0,23 / 1,58, deploy_slot 0,16 / 1,95, oath 0,11 / 1,59,
+fight_weapon_slot 0,17 / 1,35 — les têtes courtes sont effondrées sans que cette courbe ne
+bouge. Pour les voir : `train/entropy_loss_normalized` ci-dessous, ou la table par famille de
+`scripts/family_entropy_probe.py`. Cette courbe reste la moyenne **brute** quel que soit le terme
+optimisé (clé `entropy_normalize_by_legal` ou non) : ses lecteurs (`ai/metrics_tracker.py`,
+`ai/training_callbacks.py`, `00_critical/k_entropy_loss`) la lisent en nats.
+
+---
+
+#### `train/entropy_loss_normalized`
+**Ce que c'est :** `−mean_i(H_i / ln n_i)` sur les échantillons à `n_i > 1` actions légales
+(`ai/patched_ppo.py`, `entropy_loss_normalized_by_legal`) — l'entropie de chaque état rapportée à
+son maximum. **Bornée dans [−1, 0]** : −1 = uniforme sur les actions légales partout, 0 =
+déterministe partout, quelle que soit la largeur des masques. Publiée au même dump que
+`train/entropy_loss`, sur **tous** les runs, clé active ou non ; `NaN` si la politique ne rend
+pas d'entropie analytique (jamais le cas de `PointerMaskablePolicy`).
+
+**Ce qu'elle change quand `model_params.entropy_normalize_by_legal` vaut `true`** : c'est ce terme,
+et non `train/entropy_loss`, qui entre dans la loss (`ent_coef × entropy_loss_normalized`) et dans
+`diag/grad_norm_entropy_mb0`. Le gradient d'entropie de chaque état est divisé par ln n_i : à
+`ent_coef` égal, la pression sur un état de mouvement est divisée par ~5 et celle sur une tête à
+deux actions multipliée par 1,44. Le profil `x1_long_entnorm`
+(`config/agents/ArmageddonAgent_x1_entnorm/`) compense par `ent_coef` ×5 (0,5 → 0,05) : pression
+inchangée sur le mouvement, relevée de 5/ln n sur les têtes courtes. Clé absente = terme de loss
+strictement inchangé (verrou : `tests/unit/ai/test_entropy_normalize_by_legal.py`).
+
+**Interprétation :** lire l'écart entre les deux courbes. `train/entropy_loss` haute et
+`train/entropy_loss_normalized` proche de 0 = le mouvement explore, tout le reste est figé.
+
 ---
 
 #### `train/explained_variance`
@@ -220,8 +252,9 @@ Ces métriques révèlent la santé de l'algorithme PPO lui-même.
 
 #### `diag/grad_share_policy_mb0` (+ `diag/grad_norm_{policy,value,entropy}_mb0`)
 **Ce que c'est :** Décomposition de la **norme du gradient** entre les trois termes de la loss
-(`policy_loss + vf_coef × value_loss + ent_coef × entropy_loss`), et part qui revient à la
-politique. Miroir lissé dans le dashboard : `00_critical/g_grad_share_policy_mb0`.
+(`policy_loss + vf_coef × value_loss + ent_coef × entropy_loss`, ce dernier remplacé par
+`train/entropy_loss_normalized` quand `entropy_normalize_by_legal` est actif), et part qui
+revient à la politique. Miroir lissé dans le dashboard : `00_critical/g_grad_share_policy_mb0`.
 
 Mesuré par trois `backward` séparés sur le minibatch 0 de chaque update (`ai/patched_ppo.py`),
 avec `clip_grad_norm_(max_norm=inf)` qui retourne la norme **sans écrêter**. Comme

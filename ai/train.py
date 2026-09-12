@@ -113,7 +113,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecEnv  # VecEnv : resout la forward-ref de GymEnv pour get_type_hints()
 
 # Phase 2 perf_entrainement — sous-classes locales (jamais de fork du venv).
-from ai.patched_ppo import PatchedDummyVecEnv, PatchedMaskablePPO
+from ai.patched_ppo import PatchedDummyVecEnv, PatchedMaskablePPO, check_entropy_normalize_by_legal
 from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule  # Convert float hyperparameters to callable schedules
 from stable_baselines3.common.logger import configure as configure_sb3_logger
@@ -253,7 +253,7 @@ CURRICULUM_EXCLUDED_MODEL_PARAMS = frozenset({
 # suit par analyse syntaxique, restent des affectations explicites dans la fonction.
 _PLAIN_CURRICULUM_KEYS = (
     "ent_coef", "normalize_advantage", "target_kl", "gamma", "gae_lambda",
-    "batch_size", "n_epochs", "vf_coef", "max_grad_norm",
+    "batch_size", "n_epochs", "vf_coef", "max_grad_norm", "entropy_normalize_by_legal",
 )
 
 
@@ -304,6 +304,10 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
         model.lr_schedule = ConstantSchedule(_lr_value)
     if "clip_range" in model_params:
         model.clip_range = FloatSchedule(model_params["clip_range"])
+    if "entropy_normalize_by_legal" in model_params:
+        # Meme refus que le constructeur (`--new`) : sans lui, `"false"` ou `1` passeraient par
+        # `setattr` ci-dessous et activeraient le terme normalise en `--append` seulement.
+        check_entropy_normalize_by_legal(model_params["entropy_normalize_by_legal"])
     if "clip_range_vf" in model_params:
         model.clip_range_vf = None if clip_vf is None else FloatSchedule(clip_vf)
     for key in _PLAIN_CURRICULUM_KEYS:

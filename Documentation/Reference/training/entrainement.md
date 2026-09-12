@@ -611,6 +611,7 @@ Règles:
 | `n_steps` | 256 | 4096 | Larger batches (slower, more stable) |
 | `batch_size` | 64 | 256 | Training speed vs memory |
 | `gamma` | 0.90 | 0.99 | Long-term vs short-term rewards |
+| `entropy_normalize_by_legal` | `false` (défaut) | `true` | Terme d'entropie rapporté à ln(n légales) par état — chaque tête pèse sa part d'effondrement, pas sa taille ; relever `ent_coef` d'autant (×ln n moyen du mouvement, ~5) pour garder la pression sur le mouvement. Cf. `metriques.md`, `train/entropy_loss_normalized` |
 
 ### Rampes `learning_rate` / `ent_coef` — et `decay_fraction`
 
@@ -766,7 +767,8 @@ tensorboard --logdir=./tensorboard/
 |-----------|--------|------------|
 | `rollout/` | `ep_rew_mean` | Increasing |
 | `rollout/` | `ep_len_mean` | Stable or decreasing |
-| `train/` | `entropy_loss` | Decreasing gradually |
+| `train/` | `entropy_loss` | Decreasing gradually — moyenne brute en nats, dominée par le mouvement |
+| `train/` | `entropy_loss_normalized` | `−mean(H_i / ln n_i)` dans [−1, 0] : ce que les têtes courtes font vraiment ; terme optimisé sous `entropy_normalize_by_legal` |
 | `game_critical/` | `win_rate_100ep` | Increasing to target |
 | `game_critical/` | `invalid_action_rate` | <5% (ideally <2%) |
 | `bot_eval/` | `vs_random` / `vs_greedy` / `vs_defensive` / `vs_control` / `vs_adaptive` | Improving |

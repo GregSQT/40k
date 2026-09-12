@@ -110,6 +110,46 @@ def _mean_item(tensors: list[th.Tensor]) -> float:
     return th.stack(tensors).mean().item() if tensors else float("nan")
 
 
+def check_entropy_normalize_by_legal(value: Any) -> bool:
+    """La cle `model_params.entropy_normalize_by_legal`, ou TypeError si elle n'est pas un booleen.
+
+    UN SEUL refus pour les deux chemins — `--new` (constructeur) et `--append`
+    (`_apply_curriculum_model_params`, ai/train.py) : `"false"` (chaine) ou `1` seraient vrais
+    sous `if`, et le meme profil activerait le terme normalise dans un cas et leverait dans l'autre.
+    """
+    if not isinstance(value, bool):
+        raise TypeError(
+            f"model_params.entropy_normalize_by_legal doit etre un booleen (got {value!r})"
+        )
+    return value
+
+
+def entropy_loss_normalized_by_legal(entropy: th.Tensor, action_masks: th.Tensor) -> th.Tensor:
+    """`-mean_i(H_i / ln n_i)` sur les echantillons a n_i > 1 ; n_i = nombre d'actions LEGALES.
+
+    RAISON D'ETRE (sonde du 2026-09-12, 6 episodes, 1 301 decisions) : `-mean(H)` est une moyenne
+    DOMINEE par les etats de mouvement (194 actions legales en moyenne, ln n moyen 5,07, H mesuree
+    2,23) alors que les tetes courtes sont deja effondrees — charge_slot 0,007 nat sur 0,86
+    possible, shoot_slot 0,23 / 1,58, deploy_slot 0,16 / 1,95. `ent_coef` n'y pesait que 1,3 % du
+    gradient et n'agissait que sur le mouvement. Rapportee a son maximum ln n_i, l'entropie de chaque etat
+    vaut dans [0, 1] quel que soit son nombre d'actions : le terme est borne dans [-1, 0] et
+    chaque tete pese pour sa part d'effondrement, pas pour sa taille.
+
+    n_i = 1 : aucune decision, H_i = 0 et ln 1 = 0 — exclu de la moyenne. Le quotient est calcule
+    sur `clamp(n, 2)` puis ecarte par `where`, et non l'inverse : diviser d'abord fabriquerait
+    un `nan` dont le gradient traverse `th.where` (0 x inf). Aucun n_i > 1 dans le mini-lot →
+    terme nul mais RELIE au graphe (gradient nul), pour que le `backward` de diagnostic par terme
+    reste possible.
+
+    `action_masks` : bool ou float 0/1, une ligne par echantillon (forme du rollout buffer).
+    """
+    n_legal = action_masks.reshape(entropy.shape[0], -1).to(entropy.dtype).sum(dim=1)
+    valid = n_legal > 1
+    log_n = th.log(n_legal.clamp(min=2.0))
+    ratio = th.where(valid, entropy / log_n, th.zeros_like(entropy))
+    return -ratio.sum() / valid.sum().clamp(min=1)
+
+
 def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, float]:
     """Moyenne des normes BRUTES et part des minibatches ou l'ecretage a mordu.
 
@@ -123,6 +163,20 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
 
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
+
+    def __init__(self, *args: Any, entropy_normalize_by_legal: bool = False, **kwargs: Any) -> None:
+        """`entropy_normalize_by_legal` : cle `model_params`, voir `entropy_loss_normalized_by_legal`.
+
+        Absente (False) : le terme d'entropie de la loss reste `-mean(H)`, strictement le
+        comportement anterieur — seule la publication `train/entropy_loss_normalized` s'ajoute,
+        calculee sans gradient. Attribut d'instance ordinaire : SB3 le serialise dans le `data` du
+        zip et le restaure au chargement ; `_apply_curriculum_model_params` (ai/train.py) le
+        reapplique depuis le profil en `--append`.
+        """
+        self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
+            entropy_normalize_by_legal
+        )
+        super().__init__(*args, **kwargs)
 
     # ── 2.1 — GPU-resident buffer ─────────────────────────────────────────────────────────────
 
@@ -154,6 +208,9 @@ class PatchedMaskablePPO(MaskablePPO):
         pg_losses_t: list[th.Tensor] = []
         value_losses_t: list[th.Tensor] = []
         entropy_losses_t: list[th.Tensor] = []
+        # Entropie rapportee a ln(n legales), publiee sur TOUS les runs : c'est la seule des deux
+        # qui compare des tetes de tailles differentes, et un run temoin doit la porter aussi.
+        entropy_losses_normalized_t: list[th.Tensor] = []
         clip_fractions_t: list[th.Tensor] = []
         # Norme du gradient AVANT ecretage, telle que `clip_grad_norm_` la retourne. Elle est
         # deja calculee par l'appel qui ecrete : la recuperer ne coute rien, la recalculer sur
@@ -241,12 +298,35 @@ class PatchedMaskablePPO(MaskablePPO):
                 value_losses_t.append(value_loss)
 
                 if entropy is None:
+                    if self.entropy_normalize_by_legal:
+                        # Sans entropie analytique, rien a rapporter a ln n : `-log_prob` est une
+                        # estimation a un echantillon, pas l'entropie de l'etat. Lever, pas retomber.
+                        raise RuntimeError(
+                            "entropy_normalize_by_legal exige une entropie analytique de la "
+                            "politique ; evaluate_actions a rendu None."
+                        )
                     entropy_loss = -th.mean(-log_prob)
+                    entropy_loss_normalized = th.full((), float("nan"), device=log_prob.device)
                 else:
                     entropy_loss = -th.mean(entropy)
+                    if self.entropy_normalize_by_legal:
+                        entropy_loss_normalized = entropy_loss_normalized_by_legal(
+                            entropy, rollout_data.action_masks
+                        )
+                    else:
+                        with th.no_grad():
+                            entropy_loss_normalized = entropy_loss_normalized_by_legal(
+                                entropy, rollout_data.action_masks
+                            )
+                # `train/entropy_loss` reste la moyenne BRUTE quel que soit le terme optimise : ses
+                # lecteurs (metrics_tracker, training_callbacks, metriques.md) la lisent en nats.
                 entropy_losses_t.append(entropy_loss)
+                entropy_losses_normalized_t.append(entropy_loss_normalized)
+                entropy_term = (
+                    entropy_loss_normalized if self.entropy_normalize_by_legal else entropy_loss
+                )
 
-                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef * value_loss
 
                 # Norme du gradient de CHAQUE terme, pondere comme dans la loss.
                 # `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
@@ -258,7 +338,7 @@ class PatchedMaskablePPO(MaskablePPO):
                     for _term_name, _term in (
                         ("policy", policy_loss),
                         ("value", self.vf_coef * value_loss),
-                        ("entropy", self.ent_coef * entropy_loss),
+                        ("entropy", self.ent_coef * entropy_term),
                     ):
                         self.policy.optimizer.zero_grad()
                         _term.backward(retain_graph=True)
@@ -303,6 +383,7 @@ class PatchedMaskablePPO(MaskablePPO):
         clip_frac_mean = _mean_item(clip_fractions_t)
         value_loss_mean = _mean_item(value_losses_t)
         entropy_loss_mean = _mean_item(entropy_losses_t)
+        entropy_loss_normalized_mean = _mean_item(entropy_losses_normalized_t)
         grad_norm_mean, grad_clip_fraction = _grad_norm_stats(grad_norms_t, self.max_grad_norm)
 
         if approx_kl_divs_t:
@@ -323,6 +404,7 @@ class PatchedMaskablePPO(MaskablePPO):
 
         self.logger.record("train/time_update", time.perf_counter() - _t0_update)
         self.logger.record("train/entropy_loss", entropy_loss_mean)
+        self.logger.record("train/entropy_loss_normalized", entropy_loss_normalized_mean)
         self.logger.record("train/policy_gradient_loss", pg_loss_mean)
         self.logger.record("train/value_loss", value_loss_mean)
         self.logger.record("train/approx_kl", approx_kl_mean)

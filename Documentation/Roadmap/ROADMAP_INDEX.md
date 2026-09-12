@@ -120,6 +120,20 @@ un tour sur `full_pool_probe_every` (3). Sonder tout le pool à chaque fois coû
 lit toujours le pool entier, avec la dernière moyenne connue des membres non sondés.
 Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-09-07).
 
+**🔴 Entropie normalisée par l'état — expérience contrôle / traité (décision du 2026-09-13, code
+livré le 2026-09-12, deux runs à faire).** Cause mesurée le 2026-09-12 (6 épisodes, 1 301
+décisions) : `train/entropy_loss` est une moyenne dominée par `move_cell` (H 2,23 sur ln n moyen
+5,07) alors que `charge_slot` vaut 0,007 nat sur 0,86 possible, `shoot_slot` 0,23 / 1,58,
+`deploy_slot` 0,16 / 1,95 — `ent_coef` 0,01 pèse 1,3 % du gradient et n'agit que sur le
+mouvement. Option B retenue deux fois : normalisation **par l'état** (`−mean(H_i / ln n_i)`, clé
+`model_params.entropy_normalize_by_legal`, `ai/patched_ppo.py`) plutôt qu'un poids par phase ; et
+un **témoin même code** (`x1_long` sur la clé dédiée `ArmageddonAgent_x1_entnorm`, copie complète
+de la config) plutôt que P0 du 2026-09-10, invalide comme témoin après 70 commits moteur/IA.
+Bras traité : profil `x1_long_entnorm` = `x1_long` + clé + `ent_coef` ×5 (0,5 → 0,05). Les deux
+runs se lancent **après la fin de P1** (un seul run GPU). Métrique décisive : win-rate holdout
+final (300 ép./bot, IC95 ±5,7 par bras) ; écart < ~10 points = second run traité, pas de verdict.
+Détail : [training.md#entropie-normalisee](training.md#entropie-normalisee).
+
 ---
 
 ## J3 — Mesure de référence
