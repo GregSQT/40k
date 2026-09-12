@@ -21,6 +21,17 @@ Géométries MESURÉES (règles réelles : EZ = 2, cohésion 2, ``inches_to_subh
     n'a pas de case engagée cohérente avec S#1 encore en (10,5) → « closer » ; S#1 → (10,8)
     engagée. Point fixe : S#0 a maintenant (9,8)/(11,8) engagées et cohérentes → remontée. Sans le
     point fixe, ``per_model[S#0]`` serait False sur la configuration finale.
+
+  - REPLI « CLOSER » ET ENGAGEMENT DE DÉPART (12.03 AFTER « each model that started this move
+    engaged with an enemy unit must still be engaged with that enemy unit ») : la branche « closer »
+    du repli ne retient que les cases où la figurine CONSERVE ses engagements de départ (même filtre
+    que les arêtes ILP et la branche engagée) ; aucune → elle reste sur place.
+      · S#0 (10,8) engagée avec A (10,10), S#1 (12,7), S#2 (14,8) au contact de B (15,8) = palier =
+        focus. S#0 n'a aucune case engagée-avec-B qui garde A → « closer » ; les cases « closer »
+        (12,9)/(12,10) gardent A, (13,7)/(13,8) la perdent. Avant le filtre : (13,7) →
+        ``kept_engagements`` False.
+      · S#0 (11,8) engagée avec A (9,8), S#1 (13,8) au contact de B (14,8) : AUCUNE case « closer »
+        ne garde A → S#0 reste en (11,8), plan validable.
 """
 
 from __future__ import annotations
@@ -29,13 +40,18 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import pytest
 
+from engine.hex_utils import hex_distance
 from engine.phase_handlers.fight_handlers import (
+    _fight_model_start_engaged_entries,
     _fight_pile_in_closest_tier_ids,
     _fight_pile_in_model_plan_state,
     _fight_pile_in_preview_plan,
     _fight_v11_pile_in_targets,
+    _synth_model_entry,
     pile_in_autoplace_plan,
 )
+from engine.phase_handlers.shared_utils import get_engagement_zone
+from engine.spatial_relations import engagement_distance_metric, unit_entries_within_engagement_zone
 from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
 Cell = Tuple[int, int]
@@ -105,4 +121,79 @@ def test_multi_target_fallback_takes_a_feasible_engaged_cell(mode: str):
     # Les deux figurines finissent engagées avec T — dont S#0, remontée par le point fixe.
     assert _engaged_models(gs, plan) == ["1#0", "1#1"]
     assert preview["per_model"] == {"1#0": True, "1#1": True}
+    assert preview["can_validate"] is True
+
+
+def _plan_cell(plan: List[List[Any]], mid: str) -> Cell:
+    e = next(e for e in plan if e[0] == mid)
+    return int(e[1]), int(e[2])
+
+
+def _keeps_start_engagements(gs: Dict[str, Any], mid: str, cell: Cell) -> bool:
+    """La figurine ``mid`` posée en ``cell`` reste ≤ EZ de CHAQUE ennemi avec lequel elle est
+    engagée au départ (mesure du validateur, ``kept_engagements``)."""
+    m = gs["models_cache"][mid]
+    start = _fight_model_start_engaged_entries(gs, "1", m)
+    assert start, f"précondition : {mid} est engagée au départ"
+    ez = int(get_engagement_zone(gs))
+    metric = engagement_distance_metric(gs)
+    synth = _synth_model_entry(gs, "1", m, cell[0], cell[1], level=int(m["level"]))
+    return all(unit_entries_within_engagement_zone(synth, ce, ez, metric=metric) for ce in start)
+
+
+def _closer_cells_keeping_engagements(gs: Dict[str, Any], mid: str, tier_cell: Cell) -> List[Cell]:
+    """Cases à ≤ 3 du départ, strictement plus proches de ``tier_cell`` (WHILE) et qui gardent les
+    engagements de départ (AFTER) — énumération indépendante du repli, pour la précondition."""
+    m = gs["models_cache"][mid]
+    sc, sr = int(m["col"]), int(m["row"])
+    sm = hex_distance(sc, sr, *tier_cell)
+    return [
+        (c, r)
+        for c in range(sc - 3, sc + 4)
+        for r in range(sr - 3, sr + 4)
+        if (c, r) != (sc, sr)
+        and hex_distance(sc, sr, c, r) <= 3
+        and hex_distance(c, r, *tier_cell) < sm
+        and _keeps_start_engagements(gs, mid, (c, r))
+    ]
+
+
+KEEP_SQUAD: List[Cell] = [(10, 8), (12, 7), (14, 8)]
+KEEP_A: Cell = (10, 10)
+KEEP_B: Cell = (15, 8)
+
+
+@pytest.mark.parametrize("mode", ["offensive", "defensive"])
+def test_closer_fallback_keeps_start_engagement(mode: str):
+    gs = _gs(KEEP_SQUAD, [KEEP_A, KEEP_B])
+    keeping = _closer_cells_keeping_engagements(gs, "1#0", KEEP_B)
+    assert keeping, "précondition : S#0 a des cases « closer » qui gardent A"
+    plan, preview, tier = _autoplace_and_preview(gs, "3", mode)
+    assert tier == ["3"], "précondition : B est le palier (S#2 au contact)"
+    s0 = _plan_cell(plan, "1#0")
+    # S#0 bouge (repli « closer »), vers une case qui garde A — jamais (13,7)/(13,8) qui la perdent.
+    assert s0 != KEEP_SQUAD[0]
+    assert s0 in keeping
+    assert _keeps_start_engagements(gs, "1#0", s0)
+    assert preview["kept_engagements"] is True
+    assert preview["can_validate"] is True
+
+
+STAY_SQUAD: List[Cell] = [(11, 8), (13, 8)]
+STAY_A: Cell = (9, 8)
+STAY_B: Cell = (14, 8)
+
+
+@pytest.mark.parametrize("mode", ["offensive", "defensive"])
+def test_closer_fallback_stays_put_when_no_cell_keeps_engagement(mode: str):
+    gs = _gs(STAY_SQUAD, [STAY_A, STAY_B])
+    assert _closer_cells_keeping_engagements(gs, "1#0", STAY_B) == [], (
+        "précondition : aucune case « closer » de S#0 ne garde A"
+    )
+    plan, preview, tier = _autoplace_and_preview(gs, "3", mode)
+    assert tier == ["3"], "précondition : B est le palier (S#1 au contact)"
+    # S#0 reste sur place plutôt que de perdre A ; S#1 est figée (base-contact).
+    assert _plan_cell(plan, "1#0") == STAY_SQUAD[0]
+    assert _plan_cell(plan, "1#1") == STAY_SQUAD[1]
+    assert preview["kept_engagements"] is True
     assert preview["can_validate"] is True
