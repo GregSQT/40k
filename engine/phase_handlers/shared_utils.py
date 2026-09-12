@@ -2511,11 +2511,9 @@ def _get_unit_rules_registry() -> Dict[str, Dict[str, Any]]:
 
 def _resolve_effect_rule_id_to_technical(rule_id: str) -> str:
     """Resolve a rule id to technical effect id (alias chain pre-resolved at registry load)."""
-    if not isinstance(rule_id, str):
+    if not isinstance(rule_id, str) or not rule_id.strip():
         raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
     normalized_rule_id = rule_id.strip()
-    if not normalized_rule_id:
-        raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
     technical_rule_id = _get_unit_rules_caches()[1].get(normalized_rule_id)
     if technical_rule_id is None:
         raise KeyError(f"Unknown rule id '{normalized_rule_id}' in config/unit_rules.json")
@@ -15395,26 +15393,21 @@ def build_squad_action_mask(
 
     # --- Fight phase: un slot par cible de melee eligible (12.05), ou « combat a vide » ---
     elif phase == "fight":
-        # Parite masque/commit : le bit FIGHT reflete EXACTEMENT le pool de selection 12.04
-        # (`fight_v11_current_pool`), la MEME source que le commit (`_process_squad_action` ->
-        # squad_fight, qui verifie `squad_id in fight_v11_current_pool` sous garde
-        # `fight_subphase == "fight"`). `_squad_is_in_fight` etait une 3e copie divergente de la
-        # regle d eligibilite (engaged-now + charge, SANS le snapshot `engaged_at_fight_step_start`
+        # Parite masque/commit : le bit FIGHT reflete EXACTEMENT le pool de selection
+        # (`fight_v11_fight_selection_pool`), la MEME source que le commit (`_process_squad_action`
+        # -> squad_fight). Ce pool porte lui-meme la garde de sous-phase : machine 12.04 en
+        # sous-phase FIGHT (le snapshot `engaged_at_fight_step_start` n existe que la), New Foes
+        # to Face 12.08 en sous-phase CONSOLIDATE, vide ailleurs. `_squad_is_in_fight` etait une
+        # 3e copie divergente de la regle d eligibilite (engaged-now + charge, SANS le snapshot
         # de 12.04) : une unite engagee au debut de l etape mais desengagee par la mort de son
         # ennemi restait dans le pool tout en se voyant masquer FIGHT -> seul WAIT, qui ne clot pas
-        # son eligibilite -> boucle infinie. Le pool est la source unique. Le snapshot n existe que
-        # pendant la sous-phase FIGHT (poppe en fin d etape) et `fight_v11_current_pool` le lit via
-        # require_key : d ou la garde de sous-phase, comme le commit l exige — pas de `.get()` de
-        # contournement.
+        # son eligibilite -> boucle infinie. Le pool est la source unique.
         from engine.phase_handlers.fight_handlers import (
             _fight_build_valid_target_pool,
             _fight_v11_engaged_now,
-            fight_v11_current_pool,
+            fight_v11_fight_selection_pool,
         )
-        if (
-            game_state.get("fight_subphase") == "fight"
-            and squad_id in fight_v11_current_pool(game_state)
-        ):
+        if squad_id in fight_v11_fight_selection_pool(game_state):
             # V11 §9 P3-1 — CIBLE : le pool 12.05 (`_fight_build_valid_target_pool`) est la MEME
             # source que le commit (`_process_squad_action` -> squad_fight), qui refuse une cible
             # hors pool. Un slot est ouvert ssi l'escouade qu'il designe y figure : le masque dit

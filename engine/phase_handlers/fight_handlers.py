@@ -26,20 +26,20 @@ from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 #: moment où l'unité est sélectionnée, et `W40KEngine._process_fight_phase` la consomme dans la
 #: même requête. Valeur : `{"squad_id": <id>, "regime": <EXHORTATION_REGIME_*>}`.
 FIGHT_SELECTION_EXHORTATION_KEY = "_fight_selection_exhortation"
-#: Régimes de REPRISE du combat après le jet — trois flux d'activation, trois reprises :
-#: gym (`_continue_squad_fight_after_selection`), manuel PvP (`_fight_v11_manual_state`, le
-#: joueur déclare ses attaques contre les survivants), auto PvE (`_fight_v11_auto_resolve_selected`).
+#: Régimes de REPRISE du combat après le jet — deux flux d'activation, deux reprises :
+#: gym (`_continue_squad_fight_after_selection`, siège programmatique : politique en gym, bot en
+#: PvE) et manuel (`_fight_v11_manual_state`, siège humain en PvP comme en PvE : le joueur déclare
+#: ses attaques contre les survivants). Le régime suit le SIÈGE, jamais le mode de jeu.
 #: Type littéral : pyright contrôle chaque site qui passe une constante ; la seule valeur qui entre
 #: par les données (`game_state`, relue) passe par `exhortation_regime_of`.
-ExhortationRegime = Literal["gym", "manual", "auto"]
+ExhortationRegime = Literal["gym", "manual"]
 EXHORTATION_REGIME_GYM: ExhortationRegime = "gym"
 EXHORTATION_REGIME_MANUAL: ExhortationRegime = "manual"
-EXHORTATION_REGIME_AUTO: ExhortationRegime = "auto"
 
 
 def exhortation_regime_of(value: Any, site: str) -> ExhortationRegime:
     """Relit un régime depuis `game_state` (`_pending_exhortation_*`, armement) — T1 : une valeur
-    hors des trois régimes est une erreur explicite au point d'entrée, pas plus loin."""
+    hors des deux régimes est une erreur explicite au point d'entrée, pas plus loin."""
     if value not in get_args(ExhortationRegime):
         raise ValueError(f"{site}: régime d'Exhortation inconnu {value!r}")
     return value
@@ -157,8 +157,8 @@ def _is_ai_controlled_fight_unit(game_state: Dict[str, Any], unit: Dict[str, Any
     """Return True when the unit owner is programmatically controlled (auto-resolution).
 
     Delegue a la source unique is_programmatic_owner (shared_utils) : True en gym training,
-    sinon player_types == 'ai'. Utilise par les checks defender_human du flux fight et par
-    _fight_auto_defender (FIGHT_CTX) -> allocation des pertes en melee auto-resolue en gym."""
+    sinon player_types == 'ai'. Utilise par _fight_auto_defender (FIGHT_CTX) -> allocation des
+    pertes en melee tranchee headless quand le defenseur est un siege machine (gym, bot PvE)."""
     from .shared_utils import is_programmatic_owner
     unit_player = require_key(unit, "player")
     return is_programmatic_owner(game_state, unit_player)
@@ -222,27 +222,6 @@ def _log_end_of_turn_coherency_removals(
                 "reward": 0.0,
             },
         )
-
-
-def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
-    """
-    Return whether fight-phase auto execution is allowed for the current mode.
-
-    PvP modes are strictly manual: no auto-activation, no auto-targeting,
-    no auto-chain execution in fight phase.
-    """
-    mode_code = game_state.get("current_mode_code")
-    if mode_code is None:
-        return True
-    if not isinstance(mode_code, str):
-        raise TypeError(
-            f"game_state['current_mode_code'] must be str when present, got {type(mode_code).__name__}"
-        )
-    if mode_code in {"pvp", "pvp_test"}:
-        return False
-    if mode_code in {"pve", "pve_test", "endless_duty"}:
-        return True
-    raise ValueError(f"Unsupported current_mode_code for fight auto execution: {mode_code}")
 
 
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
@@ -1411,6 +1390,8 @@ def fight_ensure_v11_state(game_state: Dict[str, Any]) -> None:
         game_state["pile_in_done"] = set()
     if "consolidation_done" not in game_state:
         game_state["consolidation_done"] = set()
+    if OVERRUN_PILE_IN_DONE_KEY not in game_state:
+        game_state[OVERRUN_PILE_IN_DONE_KEY] = set()
 
 
 def fight_compute_engaged_snapshot(game_state: Dict[str, Any]) -> Dict[str, bool]:
@@ -1594,6 +1575,21 @@ def fight_v11_is_overrun_eligible(game_state: Dict[str, Any], unit: Dict[str, An
     return (not was_engaged_at_start) and engaged_now
 
 
+# Overrun 12.06 en flux manuel : unité dont le pile-in ADDITIONNEL par-figurine est en cours de
+# planification (posée par `overrun_pile_in`, levée au commit / à l'abandon), et unités qui ont
+# DÉJÀ fait ce pile-in cette phase (« one additional pile-in move » : un seul par sélection).
+OVERRUN_PILE_IN_UNIT_KEY = "overrun_pile_in_unit"
+OVERRUN_PILE_IN_DONE_KEY = "overrun_pile_in_done"
+
+
+def fight_v11_can_overrun_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """True si l'unité peut ENCORE faire le pile-in additionnel de l'overrun 12.06 : éligible
+    overrun (`fight_v11_is_overrun_eligible`) et pas déjà fait cette phase."""
+    if not fight_v11_is_overrun_eligible(game_state, unit):
+        return False
+    return str(require_key(unit, "id")) not in game_state.get(OVERRUN_PILE_IN_DONE_KEY, set())
+
+
 def fight_v11_is_normal_fight_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """Éligibilité NORMAL fight 12.05 : l'unité est engagée."""
     return _fight_v11_engaged_now(game_state, unit)
@@ -1760,18 +1756,22 @@ def _fight_v11_arm_selection_exhortation(
     return True
 
 
-def _fight_v11_activation_locked_by_exhortation(
+def _fight_v11_activation_locked(
     game_state: Dict[str, Any], active: Optional[str], uid: str
 ) -> bool:
-    """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation EST sélectionnée
-    (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre unité (`uid`)
-    tant qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans ce verrou, le
-    dé serait joué puis l'ordre des combats réarrangé, ce que la règle interdit."""
+    """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation, OU qui a commité
+    son pile-in additionnel d'overrun (12.06, « one additional pile-in move, then fights »), EST
+    sélectionnée (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre
+    unité (`uid`) tant qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans
+    ce verrou, le dé serait joué ou le move fait, puis l'ordre des combats réarrangé, ce que la
+    règle interdit."""
     if active is None or uid == active:
+        return False
+    if active in require_key(game_state, "units_selected_to_fight"):
         return False
     return (
         active in require_key(game_state, "fight_exhortation_done")
-        and active not in require_key(game_state, "units_selected_to_fight")
+        or active in require_key(game_state, OVERRUN_PILE_IN_DONE_KEY)
     )
 
 
@@ -1784,12 +1784,12 @@ def _fight_v11_manual_activate(
     déclare contre les survivants).
 
     Armée : le plateau rendu ici est REMPLACÉ par `W40KEngine._process_fight_phase` (jet puis
-    reprise par `_fight_v11_manual_state`) — un stub suffit, comme dans `_fight_v11_auto_step`,
-    plutôt qu'un état complet calculé pour être jeté."""
-    if _fight_v11_activation_locked_by_exhortation(game_state, active, uid):
+    reprise par `_fight_v11_manual_state`) — un stub suffit, plutôt qu'un état complet calculé
+    pour être jeté."""
+    if _fight_v11_activation_locked(game_state, active, uid):
         _fight_v11_log(
             game_state,
-            f"{site} activate {uid} REFUSÉ : {active} a joué son Exhortation, elle doit combattre",
+            f"{site} activate {uid} REFUSÉ : {active} a joué son Exhortation ou son overrun, elle doit combattre",
         )
         return _fight_v11_manual_state(game_state)
     game_state["active_fight_unit"] = uid
@@ -1919,6 +1919,12 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state["fight_exhortation_done"] = set()
     game_state["pile_in_done"] = set()
     game_state["consolidation_done"] = set()
+    game_state[OVERRUN_PILE_IN_DONE_KEY] = set()
+    game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+    # New Foes to Face (12.08 AFTER) : liste gelée propre à la phase. Une phase peut se clore avec
+    # une liste non vidée (New Foe sans action possible → masque vide → `advance_phase`) ; sans
+    # cette purge, `units_selected_to_fight` remis à zéro la ferait ressortir à la phase suivante.
+    _fight_v11_consolidation_clear_new_foes(game_state)
     # « until end of phase » : purgé à chaque nouvelle fight phase pour que
     # DEVASTATING WOUNDS ne persiste pas au-delà de la phase d'activation.
     game_state["finest_hour_active_this_phase"] = set()
@@ -2017,39 +2023,73 @@ def fight_v11_grouped_next(
     return None
 
 
+def fight_v11_new_foes_pool(game_state: Dict[str, Any]) -> List[str]:
+    """New Foes to Face (12.08 AFTER) restant à sélectionner par l'adversaire — non-mutant.
+
+    ``[]`` hors de cette attente : pas en sous-phase consolidate, aucune liste gelée, ou liste
+    épuisée (morts / déjà « selected to fight »).
+    """
+    if game_state.get("fight_subphase") != "consolidate":
+        return []
+    return _fight_v11_consolidation_new_foes_remaining(game_state)
+
+
+def fight_v11_fight_selection_pool(game_state: Dict[str, Any]) -> List[str]:
+    """Unités qu'une sélection « to fight » peut viser MAINTENANT — non-mutant.
+
+    Machine 12.04 en sous-phase fight ; New Foes 12.08 en sous-phase consolidate (« your
+    opponent must select each of those units, one at a time; when each is selected, it becomes
+    eligible to fight and is selected to fight ») ; ``[]`` sinon. SOURCE UNIQUE du masque FIGHT
+    (`build_squad_action_mask`) et du commit `squad_fight` (`_process_squad_action`) : la garde
+    de sous-phase vit ici, pas chez les appelants.
+    """
+    sub = game_state.get("fight_subphase")
+    if sub == "consolidate":
+        return fight_v11_new_foes_pool(game_state)
+    if sub != "fight":
+        return []
+    active = int(require_key(game_state, "current_player"))
+    step = game_state.get("fight_step") or "fights_first"
+    selector = int(game_state.get("fight_selector") or active)
+    if step == "remaining" and (
+        fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
+        or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
+    ):
+        step, selector = "fights_first", active
+    for _ in range(8):
+        ff = step == "fights_first"
+        mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
+        if mine:
+            return mine
+        theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
+        if theirs:
+            selector = 3 - selector
+            continue
+        if ff:
+            step = "remaining"
+            continue
+        return []
+    return []
+
+
 def fight_v11_current_pool(game_state: Dict[str, Any]) -> List[str]:
     """
     Liste NON-MUTANTE des unités actionnables dans la sous-phase FIGHT V11 courante
     (pour observation_builder / action_decoder / masking). Miroir lecture-seule des
     drivers : grouped_next pour pile_in/consolidate, machine de sélection 12.04 pour fight.
+    En consolidate, les New Foes (12.08 AFTER) priment sur la reprise de la consolidation,
+    comme dans `_fight_v11_manual_state` et `_fight_v11_gym_settle`.
     """
     sub = game_state.get("fight_subphase")
+    if sub == "fight":
+        return fight_v11_fight_selection_pool(game_state)
+    if sub == "consolidate":
+        new_foes = fight_v11_new_foes_pool(game_state)
+        if new_foes:
+            return new_foes
     if sub in ("pile_in", "consolidate"):
         nxt = fight_v11_grouped_next(game_state, sub)
         return list(nxt[1]) if nxt else []
-    if sub == "fight":
-        active = int(require_key(game_state, "current_player"))
-        step = game_state.get("fight_step") or "fights_first"
-        selector = int(game_state.get("fight_selector") or active)
-        if step == "remaining" and (
-            fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
-            or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
-        ):
-            step, selector = "fights_first", active
-        for _ in range(8):
-            ff = step == "fights_first"
-            mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
-            if mine:
-                return mine
-            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
-            if theirs:
-                selector = 3 - selector
-                continue
-            if ff:
-                step = "remaining"
-                continue
-            return []
-        return []
     return []
 
 
@@ -2131,6 +2171,7 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["fight_selector"] = None
     game_state["fight_eligible_units"] = []
     game_state["active_fight_unit"] = None
+    game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
     if "pending_squad_fight_intents" in game_state:
         game_state["pending_squad_fight_intents"] = {}
     add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
@@ -2145,61 +2186,6 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         return {"phase_complete": False, "awaiting_coherency_removal": True}
 
     return _fight_v11_end_progression(game_state)
-
-
-def _fight_v11_resolve_attacks(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    config: Dict[str, Any],
-    *,
-    preferred_target_id: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """
-    Résout les attaques de mêlée d'une unité « selected to fight » via le moteur
-    d'allocation par-figurine (groupes 05.03/05.04, T bodyguard 19.02, save par figurine
-    allouée). Convergence §9.4b-2 : remplace l'ancien résolveur pool
-    (``_execute_fight_attack_sequence``, cible = pool de PV homogène).
-
-    Sélection de cible auto (ou ``preferred_target_id``), puis déclaration per-figurine
-    (``squad_declare_fight`` : arme CC auto par figurine — 04.01) et allocation headless
-    (défenseur non-humain garanti en mode auto → ``auto_decider``). Retourne ``(events,
-    tid)`` : la liste des attack_result (1 par blessure infligée) ET l'unité cible
-    sélectionnée (None si aucune cible valide). La liste peut être vide quand toutes les
-    attaques ratent (fight « à vide ») — tid reste non-None dans ce cas.
-    """
-    unit_id = str(require_key(unit, "id"))
-    if not (melee_weapons(unit) or []):
-        return [], None
-
-    targets = _fight_build_valid_target_pool(game_state, unit)
-    if not targets:
-        return [], None
-    tid = preferred_target_id if (preferred_target_id in targets) else _ai_select_fight_target(
-        game_state, unit_id, targets
-    )
-
-    # Déclaration per-figurine + allocation via le moteur groupes (jumeau du chemin
-    # training w40k_core). Le hook FIGHT_CTX.on_unit_destroyed retire la cible morte des
-    # pools de combat (équivalent de l'ancien _remove_dead_unit_from_fight_pools).
-    squad_fight_restart_activation(game_state, unit_id)
-    squad_declare_fight(game_state, unit_id, tid)
-    alloc = build_manual_fight_allocation(game_state, unit_id)
-    if not alloc.get("done"):
-        raise RuntimeError(
-            f"_fight_v11_resolve_attacks: allocation combat non terminée en auto pour "
-            f"unité {unit_id} (défenseur non-IA ?) — action={alloc.get('action')}"
-        )
-    summary = alloc["shoot_result"]
-    return [
-        {
-            "attackerId": unit_id,
-            "shooterId": unit_id,
-            "targetId": str(ev["target_squad_id"]),
-            "target_died": bool(ev["destroyed"]),
-            "damage": int(ev["damage"]),
-        }
-        for ev in require_key(summary, "events")
-    ], tid
 
 
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F811 (V11 override of V10)
@@ -2224,116 +2210,16 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
         _fight_v11_log(game_state, "Aucune unité engagée/chargée → phase FIGHT vide, complétion immédiate")
         return _fight_v11_phase_complete(game_state)
 
-    if not _is_fight_auto_execution_allowed(game_state):
-        # Manuel (PvP) : entre dans l'étape PILE IN interactive. _fight_v11_manual_state
-        # n'auto-présente aucune unité : il expose le pool cliquable (fight_eligible_units,
-        # active_fight_unit=None) ; le pile-in lui-même est par-figurine (pile_in_model_move).
-        _fight_v11_log(game_state, "START (manuel) → étape PILE IN interactive")
-        _ok, state = _fight_v11_manual_state(game_state)
-        out = dict(state)
-        out["phase_initialized"] = True
-        return out
-
-    # Auto (PvE/gym) : reste en PILE IN, _fight_v11_auto_step gère les moves.
-    game_state["fight_eligible_units"] = fight_v11_current_pool(game_state)
-    game_state["active_fight_unit"] = None
-    _fight_v11_log(
-        game_state,
-        f"START → étape PILE IN (éligibles pile-in courants={game_state['fight_eligible_units']})",
-    )
-    return {"phase_initialized": True, "fight_subphase": "pile_in", "phase_complete": False}
-
-
-def _fight_v11_auto_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
-    """Pile-in groupé AUTO — par-figurine (fight_pile_in_plan). Marque pile_in_done."""
-    uid = str(require_key(unit, "id"))
-    try:
-        from .shared_utils import fight_pile_in_plan, commit_move
-        plan = fight_pile_in_plan(game_state, uid)
-        if plan is not None:
-            commit_move(plan, game_state, "pile_in")
-    finally:
-        game_state["pile_in_done"].add(uid)
-
-
-def _fight_v11_auto_consolidate(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
-    """
-    Consolidation AUTO (V1) : skip (consolidation est OPTIONNELLE, 12 encart) — choix
-    légal et conservateur. Marque consolidation_done. La consolidation auto effective
-    (3 modes + déclencheur Engaging, décision #7) est affinée avec l'UI (Bloc front).
-    """
-    game_state["consolidation_done"].add(str(require_key(unit, "id")))
-
-
-def _fight_v11_auto_resolve_selected(
-    game_state: Dict[str, Any], uid: str, config: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Résolution AUTO des attaques d'une unité DÉJÀ « selected to fight » (12.04) : overrun
-    12.06 si éligible, puis attaques (`_fight_v11_resolve_attacks`). Partagée par
-    `_fight_v11_auto_step` et par la reprise après Exhortation of Rage (régime auto)."""
-    u = require_unit_by_id(game_state, uid)
-    overrun = (
-        fight_v11_is_overrun_eligible(game_state, u)
-        and not _fight_v11_engaged_now(game_state, u)
-    )
-    if overrun:
-        from .shared_utils import _fight_overrun_pile_in_plan, commit_move
-        _ov_plan = _fight_overrun_pile_in_plan(game_state, uid)
-        if _ov_plan is not None:
-            commit_move(_ov_plan, game_state, "pile_in")
-    results, primary_tid = _fight_v11_resolve_attacks(game_state, u, config)
-    return fight_v11_combat_result(uid, results, primary_tid, overrun)
-
-
-def fight_v11_combat_result(
-    uid: str, results: List[Any], primary_tid: Optional[str], overrun: bool
-) -> Dict[str, Any]:
-    """Résultat `combat` d'une activation résolue en AUTO — forme unique, partagée avec la reprise
-    du moteur quand l'attaquant est mort avant ses attaques (`_continue_fight_after_exhortation`)."""
-    return {"action": "combat", "phase": "fight", "unitId": uid,
-            "fight_subphase": "fight", "all_attack_results": results,
-            "targetId": primary_tid,
-            "fight_type": "overrun" if overrun else "normal",
-            "waiting_for_player": False}
-
-
-def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """Une activation V11 par appel (granularité V10), résolution automatique (IA/gym/PvE)."""
-    for _ in range(6):
-        sub = require_key(game_state, "fight_subphase")
-        if sub == "pile_in":
-            nxt = fight_v11_grouped_next(game_state, "pile_in")
-            if nxt is None:
-                fight_v11_enter_fight_step(game_state)
-                continue
-            uid = nxt[1][0]
-            u = require_unit_by_id(game_state, uid)
-            _fight_v11_auto_pile_in(game_state, u, config)
-            return True, {"action": "pile_in", "phase": "fight", "unitId": uid,
-                          "fight_subphase": "pile_in", "waiting_for_player": False}
-        if sub == "fight":
-            uid = fight_v11_advance_selection(game_state)
-            if uid is None:
-                fight_v11_enter_consolidate(game_state)
-                continue
-            _fight_v11_register_selection(game_state, uid)
-            # Exhortation of Rage à la sélection : le jet est celui du moteur, qui reprend ensuite
-            # par `_fight_v11_auto_resolve_selected` (même résolution que ci-dessous).
-            if _fight_v11_arm_selection_exhortation(game_state, uid, EXHORTATION_REGIME_AUTO):
-                return True, {"action": "fight_selection", "phase": "fight", "unitId": uid,
-                              "fight_subphase": "fight", "waiting_for_player": False}
-            return True, _fight_v11_auto_resolve_selected(game_state, uid, config)
-        if sub == "consolidate":
-            nxt = fight_v11_grouped_next(game_state, "consolidate")
-            if nxt is None:
-                return True, _fight_v11_phase_complete(game_state)
-            uid = nxt[1][0]
-            u = require_unit_by_id(game_state, uid)
-            _fight_v11_auto_consolidate(game_state, u, config)
-            return True, {"action": "consolidation", "phase": "fight", "unitId": uid,
-                          "fight_subphase": "consolidate", "waiting_for_player": False}
-        return True, _fight_v11_phase_complete(game_state)
-    raise RuntimeError("_fight_v11_auto_step did not converge")
+    # Étape PILE IN interactive, quel que soit le mode : _fight_v11_manual_state n'auto-présente
+    # aucune unité, il expose le pool cliquable du groupe courant (fight_eligible_units,
+    # active_fight_unit=None) ; le pile-in lui-même est par-figurine (pile_in_model_move). Les
+    # unités d'un siège programmatique (bot PvE, politique en gym) sont résolues par le driver
+    # `W40KEngine._fight_v11_gym_settle`, qui s'arrête dès que le groupe courant est humain.
+    _fight_v11_log(game_state, "START → étape PILE IN interactive")
+    _ok, state = _fight_v11_manual_state(game_state)
+    out = dict(state)
+    out["phase_initialized"] = True
+    return out
 
 
 def _fight_fig_effective_level(entry: Dict[str, Any], model_id: str) -> int:
@@ -2638,6 +2524,105 @@ def _fight_pile_in_closest_tier_ids(
     return tier
 
 
+def _fight_model_start_engaged_entries(
+    game_state: Dict[str, Any], squad_id: str, model: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Entrées ennemies avec lesquelles ``model`` est engagée à SON départ (position et étage
+    courants du ``models_cache``). Base des clauses AFTER « must still be engaged with that
+    enemy unit » (12.03 / 12.08 Ongoing). Lecture pure."""
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
+    from .shared_utils import get_engagement_zone
+
+    ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
+    units_cache = require_key(game_state, "units_cache")
+    player = int(model["player"])
+    synth_start = _synth_model_entry(
+        game_state, str(squad_id), model, int(model["col"]), int(model["row"]),
+        level=int(require_key(model, "level")),
+    )
+    return [
+        ce for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=str(squad_id))
+        if unit_entries_within_engagement_zone(synth_start, ce, ez, metric=metric)
+    ]
+
+
+def _fight_model_destination_feasible(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    model_id: str,
+    col: int,
+    row: int,
+    level: int,
+    others: Dict[str, Tuple[int, int, int]],
+    start_engaged: List[Dict[str, Any]],
+) -> bool:
+    """Une destination de ``model_id`` est FAISABLE si, les AUTRES figurines de l'escouade étant à
+    leurs positions ``others`` ({mid: (col, row, level)}), la configuration respecte la cohésion
+    03.03 (`coherency_violation_flags`, source unique) ET si la figurine y conserve chacun de ses
+    engagements de départ ``start_engaged`` (12.03 / 12.08 Ongoing AFTER). C'est le sens retenu
+    de « possible » dans « engaged with it if possible » / « within range […] if possible ».
+    Lecture pure."""
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
+    from .shared_utils import get_engagement_zone, coherency_violation_flags
+
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache[str(model_id)]
+    config = [{**model, "col": int(col), "row": int(row)}]
+    for mid, (oc, orow, _olv) in others.items():
+        if str(mid) == str(model_id):
+            continue
+        config.append({**models_cache[str(mid)], "col": int(oc), "row": int(orow)})
+    if any(coherency_violation_flags(config, game_state)):
+        return False
+    if not start_engaged:
+        return True
+    ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
+    synth_end = _synth_model_entry(
+        game_state, str(squad_id), model, int(col), int(row), level=int(level)
+    )
+    return all(
+        unit_entries_within_engagement_zone(synth_end, ce, ez, metric=metric) for ce in start_engaged
+    )
+
+
+def _fight_model_legal_destinations(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    model_id: str,
+    pool: Dict[str, List[List[int]]],
+    level: int,
+    others: Dict[str, Tuple[int, int, int]],
+) -> List[List[int]]:
+    """Destinations LÉGALES d'une figurine déplacée — clause « if possible » (12.03 WHILE ;
+    12.08 WHILE Ongoing/Engaging « engaged with it if possible » ; 12.08 WHILE Objective
+    « within range of the selected objective if possible, or closer to it if not »).
+
+    ``pool`` = sortie d'un builder par-figurine ({"closer", "engaged"}, engaged ⊆ closer ; pour
+    l'Objective, « engaged » = empreinte dans la zone). S'il existe AU MOINS une case « engaged »
+    faisable (`_fight_model_destination_feasible` : cohésion de la configuration + engagements de
+    départ de la figurine), seules ces cases sont légales ; sinon « closer » suffit.
+
+    SOURCE UNIQUE pour : le pool exposé au front (plan_state), ``per_model`` des deux preview_plan,
+    et le repli de l'auto-placement. Le verdict porte sur la configuration finale (les autres
+    figurines à ``others``), comme la cohésion 03 « Ending a move ». Lecture pure.
+    """
+    closer = pool["closer"]
+    engaged = pool["engaged"]
+    if not engaged:
+        return closer
+    model = require_key(game_state, "models_cache")[str(model_id)]
+    start_engaged = _fight_model_start_engaged_entries(game_state, squad_id, model)
+    feasible = [
+        [int(c), int(r)] for c, r in engaged
+        if _fight_model_destination_feasible(
+            game_state, squad_id, model_id, int(c), int(r), int(level), others, start_engaged
+        )
+    ]
+    return feasible if feasible else closer
+
+
 def _fight_pile_in_preview_plan(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -2648,8 +2633,10 @@ def _fight_pile_in_preview_plan(
 
     ``plan`` couvre TOUTES les figs vivantes, entrées ``(mid, col, row[, level])`` (le 4ᵉ élément =
     niveau d'étage de destination ; absent → niveau courant de la fig). Légalité par-fig =
-    appartenance au pool ``closer`` calculé AU NIVEAU planifié de la fig (ou figurine laissée à sa
-    position d'origine). On ajoute la cohésion d'unité et les contraintes AFTER : l'escouade finit
+    appartenance aux destinations LÉGALES calculées AU NIVEAU planifié de la fig
+    (``_fight_model_legal_destinations`` : cases engagées faisables si elles existent — « engaged
+    with it if possible » —, sinon pool ``closer``), ou figurine laissée à sa position d'origine.
+    On ajoute la cohésion d'unité et les contraintes AFTER : l'escouade finit
     engagée (niveau unité) et chaque figurine engagée au départ reste engagée avec la même unité
     ennemie (par-figurine).
 
@@ -2682,7 +2669,7 @@ def _fight_pile_in_preview_plan(
     if n == 0:
         return empty
 
-    # 1) Légalité par-fig : dans son pool ``closer`` au NIVEAU planifié (autres figs = positions
+    # 1) Légalité par-fig : dans ses destinations LÉGALES au NIVEAU planifié (autres figs = positions
     # provisoires (col,row,level)) ou immobile.
     pos_by_model = {mid: (c, r, lv) for mid, c, r, lv in norm}
     per_model: Dict[str, bool] = {}
@@ -2695,8 +2682,12 @@ def _fight_pile_in_preview_plan(
             continue
         pool = _fight_pile_in_build_model_pool(
             game_state, mid, closest_tier_ids, provisional_plan=prov, view_level=lv
-        )["closer"]
-        per_model[mid] = [c, r] in pool
+        )
+        # « engaged with it if possible » : une case engagée faisable existe → seule une telle
+        # case est légale ; sinon « closer » suffit (source unique `_fight_model_legal_destinations`).
+        per_model[mid] = [c, r] in _fight_model_legal_destinations(
+            game_state, str(squad_id), mid, pool, lv, prov
+        )
 
     # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
     # combat mesurent désormais la MÊME chose). Cette section était une COPIE inline des deux puces,
@@ -2775,6 +2766,7 @@ def _fight_pile_in_model_plan_state(
     provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
     selected_model: Optional[str] = None,
     view_level: int = 0,
+    overrun: bool = False,
 ) -> Dict[str, Any]:
     """État du plan pile-in par-figurine exposé au front (miroir simplifié de ``charge_model_plan_state``).
 
@@ -2783,6 +2775,8 @@ def _fight_pile_in_model_plan_state(
     les autres restent à leur position/niveau d'origine. ``selected_model`` non-None → calcule SON pool +
     empreinte lissée. ``view_level`` (étages, §13.06) = niveau de VUE UI ; le pool proposé et le niveau de
     destination des figs posées suivent ce niveau (miroir move par-figurine).
+    ``overrun`` : pile-in ADDITIONNEL de l'overrun 12.06 (étape FIGHT, même plan, mêmes cibles 12.03) ;
+    le front en déduit que le commit rend la main au combat de l'unité et non au pool de pile-in.
     """
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
     from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
@@ -2822,9 +2816,17 @@ def _fight_pile_in_model_plan_state(
     if selected_model is not None and str(selected_model) in alive:
         sel = str(selected_model)
         sel_prov = {k: v for k, v in prov.items() if k != sel}
-        pool = _fight_pile_in_build_model_pool(
-            game_state, sel, closest_tier, provisional_plan=sel_prov, view_level=_vl
-        )["closer"]
+        # Pool exposé = destinations LÉGALES de la fig sélectionnée (clause « if possible » :
+        # cases engagées faisables si elles existent, sinon closer). Les autres figs sont à leur
+        # position posée (prov) ou d'origine — même configuration que le dry-run du plan.
+        pool = _fight_model_legal_destinations(
+            game_state, squad_id, sel,
+            _fight_pile_in_build_model_pool(
+                game_state, sel, closest_tier, provisional_plan=sel_prov, view_level=_vl
+            ),
+            _vl,
+            {m: (sel_prov[m] if m in sel_prov else origin[m]) for m in alive if m != sel},
+        )
         if pool:
             # Le pool est celui de la figurine SELECTIONNEE : son voile se mesure a SON socle.
             _m_sel = require_key(game_state, "models_cache")[sel]
@@ -2861,8 +2863,9 @@ def _fight_pile_in_model_plan_state(
 
     return {
         "phase": "fight",
-        "fight_subphase": "pile_in",
+        "fight_subphase": require_key(game_state, "fight_subphase"),
         "pile_in_model_move": True,
+        "overrun_pile_in": bool(overrun),
         "engaged_models": engaged_models,
         "pile_in_targets": [str(t) for t in targets],
         "unitId": squad_id,
@@ -3023,6 +3026,7 @@ def pile_in_autoplace_plan(
 
     # Palier WHILE : empreintes des cibles les plus proches de l'unité.
     tier_fps: List[Set[Tuple[int, int]]] = []
+    tier_entries: List[Dict[str, Any]] = []  # « engaged with it if possible » du repli (12.03 WHILE)
     for tid in closest_tier:
         # Contrat de sortie de `_fight_pile_in_closest_tier_ids` : absence = désynchronisation,
         # pas un palier vide.
@@ -3030,6 +3034,7 @@ def pile_in_autoplace_plan(
             str(tid), game_state, "pile_in_autoplace_plan/tier"
         )
         tier_fps.append(set(entry_footprint(ce)))
+        tier_entries.append(ce)
 
     # Collision = test EUCLIDIEN officiel du jeu (``footprints_overlap`` : rond↔rond bord-à-bord
     # continu, méthode empreinte sinon), pas l'intersection de cellules — sinon des socles ronds
@@ -3128,6 +3133,22 @@ def pile_in_autoplace_plan(
         )
         return unit_entries_within_engagement_zone(
             synth, focus_entry, ez, metric=metric)
+
+    def _slot_level(mid: str, c: int, r: int) -> int:
+        """Niveau EFFECTIF de la figurine posée en (c, r) — celui de `_engages_focus`."""
+        return _fight_effective_level_at(
+            game_state, models_cache[mid], c, r, int(require_key(models_cache[mid], "level"))
+        )
+
+    def _engages_tier(mid: str, c: int, r: int) -> bool:
+        """Empreinte à ≤ EZ d'une cible du PALIER le plus proche (12.03 WHILE « engaged with it »)
+        — même mesure que le pool de validation (`_fight_pile_in_build_model_pool`, « engaged »)."""
+        synth = _synth_model_entry(
+            game_state, squad_id, models_cache[mid], c, r, level=_slot_level(mid, c, r)
+        )
+        return any(
+            unit_entries_within_engagement_zone(synth, te, ez, metric=metric) for te in tier_entries
+        )
 
     def _fp_min_to_tier(fp: Set[Tuple[int, int]]) -> int:
         return min(min_distance_between_sets(fp, t) for t in tier_fps) if tier_fps else 1 << 30
@@ -3296,15 +3317,59 @@ def pile_in_autoplace_plan(
 
     # Engagements de départ par fig (AFTER : à conserver au slot).
     def _start_engagements(mid: str) -> List[Dict[str, Any]]:
+        # Source unique avec le validateur (`_fight_model_start_engaged_entries`) : le repli et
+        # les arêtes ILP conservent exactement les engagements que le dry-run exigera.
+        return _fight_model_start_engaged_entries(game_state, squad_id, models_cache[mid])
+
+    def _keeps_start_engagements(
+        mid: str, c: int, r: int, start_eng: List[Dict[str, Any]]
+    ) -> bool:
+        """AFTER 12.03 : la figurine posée en (c, r) reste engagée avec CHAQUE ennemi de
+        ``start_eng`` — même mesure que ``kept_engagements`` du dry-run."""
         synth = _synth_model_entry(
-            game_state, squad_id, models_cache[mid], *starts[mid],
-            level=int(require_key(models_cache[mid], "level")),
+            game_state, squad_id, models_cache[mid], c, r, level=_slot_level(mid, c, r)
         )
-        out: List[Dict[str, Any]] = []
-        for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id):
-            if unit_entries_within_engagement_zone(synth, ce, ez, metric=metric):
-                out.append(ce)
-        return out
+        return all(
+            unit_entries_within_engagement_zone(synth, ce, ez, metric=metric) for ce in start_eng
+        )
+
+    # « engaged with it if possible » (12.03 WHILE) du côté ILP. Le validateur n'admet une case
+    # NON engagée avec le palier que s'il n'existe AUCUNE case engagée-avec-le-palier faisable
+    # dans la configuration FINALE ; or l'ILP ne pose que des slots engageant le FOCUS, qui peut
+    # ne pas appartenir au palier (unité engagée avec E1 proche et E2 plus loin, Focus sur E2).
+    # Une figurine qui a une option engagée-avec-le-palier — cases atteignables, strictement plus
+    # proches, hors bloqueurs statiques, engagements de départ conservés : SUR-ENSEMBLE de la
+    # faisabilité du validateur, qui ne fait que retirer les chevauchements de coéquipières et
+    # la cohésion, tous deux dépendants d'une configuration que l'ILP ne connaît pas encore — ne
+    # reçoit donc que des arêtes vers des slots engageant AUSSI le palier. Sans option : le slot
+    # focus-seul est légal (« closer » suffit). Focus ∈ palier : tout slot engage le palier,
+    # l'option n'est jamais consultée.
+    _tier_option_cache: Dict[str, bool] = {}
+
+    def _has_tier_engaged_option(mid: str) -> bool:
+        cached = _tier_option_cache.get(mid)
+        if cached is not None:
+            return cached
+        level = eff_level[mid]
+        sm = start_min[mid]
+        obstacles = _at_level(static_blockers, level)
+        start_eng = _start_engagements(mid)
+        found = False
+        for (cc, rr) in _reachable(mid):
+            if (cc, rr) == starts[mid]:
+                continue
+            soc = _socle(mid, cc, rr)
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
+                continue
+            if _overlaps(soc, obstacles, level):
+                continue
+            if _fp_min_to_tier(set(soc.fp)) >= sm:
+                continue  # WHILE
+            if _engages_tier(mid, cc, rr) and _keeps_start_engagements(mid, cc, rr, start_eng):
+                found = True
+                break
+        _tier_option_cache[mid] = found
+        return found
 
     # --- Arêtes ILP : (fig f, slot s) légales. edges_by_slot[s] = liste d'indices d'arête. ---
     edges: List[Tuple[str, int, int]] = []  # (mid, slot_index, pathdist)
@@ -3321,24 +3386,13 @@ def pile_in_autoplace_plan(
             pd = reach.get((sc, sr))
             if pd is None:
                 continue  # slot hors budget (atteignabilité réelle)
-            if start_eng:
-                synth_slot = _synth_model_entry(
-                    game_state, squad_id, models_cache[mid], sc, sr,
-                    level=_fight_effective_level_at(
-                        game_state, models_cache[mid], sc, sr,
-                        int(require_key(models_cache[mid], "level")),
-                    ),
-                )
-                if not all(
-                    unit_entries_within_engagement_zone(
-                        synth_slot, ce, ez, metric=metric)
-                    for ce in start_eng
-                ):
-                    continue  # AFTER : un engagement de départ serait perdu
+            if not _keeps_start_engagements(mid, sc, sr, start_eng):
+                continue  # AFTER : un engagement de départ serait perdu
+            if not _engages_tier(mid, sc, sr) and _has_tier_engaged_option(mid):
+                continue  # WHILE « engaged with it if possible » : le palier est atteignable
             edges.append((mid, si, pd))
 
     provisional: Dict[str, Tuple[int, int]] = {}
-    placed_socles: List[Tuple[int, Any]] = list(static_blockers)
 
     if edges:
         n = len(edges)
@@ -3398,52 +3452,110 @@ def pile_in_autoplace_plan(
             for e_i, x in enumerate(res.x):
                 if x > 0.5:
                     mid, si, _pd = edges[e_i]
-                    sc, sr, soc, _sm, _df, slv = all_slots[si]
+                    sc, sr, _soc, _sm, _df, _slv = all_slots[si]
                     provisional[mid] = (sc, sr)
-                    placed_socles.append((slv, soc))
 
-    # Figs mobiles non posées par l'ILP : rapprochement au max (strictement plus proche, sans chevaucher).
+    # Figs mobiles non posées par l'ILP : repli PAR FIGURINE (12.03 WHILE).
+    #   1. « engaged with it if possible » : s'il existe une case ENGAGÉE avec le palier le plus
+    #      proche et FAISABLE (cohésion 03.03 de la configuration + engagements de départ de la
+    #      figurine — `_fight_model_destination_feasible`, même prédicat que le validateur), la
+    #      figurine en prend une ; départage = mode (offensif → au plus près du focus, défensif →
+    #      au plus loin) ;
+    #   2. sinon rapprochement au max : strictement plus proche du palier, au plus près du focus,
+    #      parmi les cases où la figurine CONSERVE ses engagements de départ (12.03 AFTER « must
+    #      still be engaged with that enemy unit ») ; aucune → elle reste sur place (une figurine
+    #      non déplacée n'est soumise ni au WHILE ni à une perte d'engagement).
+    # Obstacles = ennemis, autres unités, figées, et CHAQUE autre figurine de l'escouade à sa position
+    # COURANTE (posée par l'ILP, déjà repliée, ou encore à son départ). Une figurine restée à son
+    # départ occupe donc bien sa case — c'était le crash « chevauchement de socles ».
     placed = set(provisional)
-    # Réservation des cases de DÉPART : toute fig mobile non encore bougée (candidate au repli ou
-    # susceptible de RESTER sur place) occupe son départ → une autre fig ne doit pas s'y poser.
-    # Une fig est retirée de la réservation dès qu'elle bouge effectivement (elle libère sa case).
-    # Corrige le crash « chevauchement de socles » : une fig restée au départ n'était pas un bloqueur.
-    reserved_start_socles: Dict[str, Tuple[int, Any]] = {
-        mid: (eff_level[mid], _socle(mid, *starts[mid])) for mid in movable if mid not in placed
-    }
+
+    def _other_socles_now(mid: str, level: int) -> List[Any]:
+        out = _at_level(static_blockers, level)
+        for om in movable:
+            if om == mid or eff_level[om] != level:
+                continue
+            out.append(_socle(om, *provisional.get(om, starts[om])))  # get allowed (non posée = départ)
+        return out
+
+    def _others_now(mid: str) -> Dict[str, Tuple[int, int, int]]:
+        others: Dict[str, Tuple[int, int, int]] = {}
+        for om in alive:
+            if om == mid:
+                continue
+            oc, orow = provisional.get(om, (int(models_cache[om]["col"]), int(models_cache[om]["row"])))  # get allowed (non posée = départ)
+            others[om] = (int(oc), int(orow), eff_level[om])
+        return others
+
+    def _fallback_pick(mid: str) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
+        """(meilleure case engagée-faisable, meilleure case « closer ») pour ``mid`` dans l'état
+        courant de ``provisional`` ; (None, None) si la figurine ne peut pas bouger."""
+        level = eff_level[mid]
+        sm = start_min[mid]
+        if sm <= 0:
+            return None, None
+        obstacles = _other_socles_now(mid, level)
+        others = _others_now(mid)
+        start_eng = _start_engagements(mid)
+        best_closer: Optional[Tuple[int, int]] = None
+        best_closer_score: Optional[int] = None
+        best_eng: Optional[Tuple[int, int]] = None
+        best_eng_score: Optional[int] = None
+        for (cc, rr), _pd in _reachable(mid).items():
+            if (cc, rr) == starts[mid]:
+                continue
+            soc = _socle(mid, cc, rr)
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
+                continue
+            if _overlaps(soc, obstacles, level):
+                continue
+            d_tier = _fp_min_to_tier(set(soc.fp))
+            if d_tier >= sm:
+                continue  # WHILE
+            if start_eng and not _keeps_start_engagements(mid, cc, rr, start_eng):
+                continue  # AFTER : un engagement de départ serait perdu (le dry-run le refuse)
+            d_focus = min_distance_between_sets(set(soc.fp), focus_fp)
+            if best_closer_score is None or d_focus < best_closer_score:
+                best_closer_score = d_focus
+                best_closer = (cc, rr)
+            if _engages_tier(mid, cc, rr) and _fight_model_destination_feasible(
+                game_state, squad_id, mid, cc, rr, _slot_level(mid, cc, rr), others, start_eng
+            ):
+                eng_score = d_focus if mode == "offensive" else -d_focus
+                if best_eng_score is None or eng_score < best_eng_score:
+                    best_eng_score = eng_score
+                    best_eng = (cc, rr)
+        return best_eng, best_closer
+
+    fallback_engaged: Dict[str, bool] = {}
     for mid in movable:
         if mid in placed:
             continue
-        level = eff_level[mid]
-        sm = start_min[mid]
-        best: Optional[Tuple[int, int]] = None
-        others_reserved = [
-            s for om, (lv, s) in reserved_start_socles.items() if om != mid and lv == level
-        ]
-        level_placed = _at_level(placed_socles, level)
-        if sm > 0:
-            best_score = None
-            for (cc, rr), _pd in _reachable(mid).items():
-                if (cc, rr) == starts[mid]:
-                    continue
-                soc = _socle(mid, cc, rr)
-                if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
-                    continue
-                if _overlaps(soc, level_placed, level) or _overlaps(soc, others_reserved, level):
-                    continue
-                d_tier = _fp_min_to_tier(set(soc.fp))
-                if d_tier >= sm:
-                    continue  # WHILE
-                d_focus = min_distance_between_sets(set(soc.fp), focus_fp)
-                if best_score is None or d_focus < best_score:
-                    best_score = d_focus
-                    best = (cc, rr)
-            if best is not None:
-                provisional[mid] = best
-                placed_socles.append((level, _socle(mid, *best)))
-                reserved_start_socles.pop(mid, None)  # a bougé → libère sa case de départ
-        if mid not in provisional:
-            provisional[mid] = starts[mid]  # reste à sa position (départ, déjà réservée)
+        best_eng, best_closer = _fallback_pick(mid)
+        if best_eng is not None:
+            provisional[mid] = best_eng
+            fallback_engaged[mid] = True
+        else:
+            provisional[mid] = best_closer if best_closer is not None else starts[mid]
+            fallback_engaged[mid] = False
+
+    # Point fixe : le validateur juge « possible » sur la configuration FINALE, alors que la passe
+    # ci-dessus est séquentielle (les figurines suivantes étaient encore à leur départ). Une
+    # figurine repliée « closer » peut donc avoir, une fois les autres posées, une case engagée
+    # faisable — le dry-run la refuserait. On la remonte tant qu'il en reste ; chaque tour en
+    # engage au moins une de plus, donc ≤ len(movable) tours.
+    for _round in range(len(movable)):
+        upgraded = False
+        for mid, is_eng in list(fallback_engaged.items()):
+            if is_eng:
+                continue
+            best_eng, _bc = _fallback_pick(mid)
+            if best_eng is not None:
+                provisional[mid] = best_eng
+                fallback_engaged[mid] = True
+                upgraded = True
+        if not upgraded:
+            break
 
     # Figs figées : conservées à leur départ.
     for mid in alive:
@@ -3925,6 +4037,11 @@ def _fight_consolidation_preview_plan(
 ) -> Dict[str, Any]:
     """Dry-run d'un plan de consolidation par-figurine (12.08 WHILE/AFTER + cohésion 03.03).
 
+    WHILE par figurine déplacée (``per_model``) : destinations LÉGALES de
+    ``_fight_model_legal_destinations`` — cases engagées avec le palier (Ongoing/Engaging) ou dans
+    la zone de l'objectif (Objective) FAISABLES si elles existent (« engaged with it if possible » /
+    « within range […] if possible »), sinon pool ``closer`` (« or closer to it if not »).
+
     AFTER par mode :
       - ongoing   : chaque figurine engagée au départ reste engagée avec la même unité (par-figurine) ;
       - engaging  : unité engagée avec **toutes** les unités ennemies sélectionnées (tier) ;
@@ -3962,7 +4079,7 @@ def _fight_consolidation_preview_plan(
     if n == 0:
         return empty
 
-    # 1) Légalité par-fig : dans son pool ``closer`` au NIVEAU planifié (autres figs = positions
+    # 1) Légalité par-fig : dans ses destinations LÉGALES au NIVEAU planifié (autres figs = positions
     # provisoires (col,row,level)) ou immobile.
     pos_by_model = {mid: (c, r, lv) for mid, c, r, lv in norm}
     per_model: Dict[str, bool] = {}
@@ -3976,8 +4093,12 @@ def _fight_consolidation_preview_plan(
         pool = _fight_consolidation_build_model_pool(
             game_state, mid, tier_kind=tier_kind, tier=tier,
             lock_base_contact=lock_base_contact, provisional_plan=prov, view_level=lv,
-        )["closer"]
-        per_model[mid] = [c, r] in pool
+        )
+        # « engaged with it if possible » (Ongoing/Engaging) / « within range […] if possible »
+        # (Objective) : source unique `_fight_model_legal_destinations`.
+        per_model[mid] = [c, r] in _fight_model_legal_destinations(
+            game_state, str(squad_id), mid, pool, lv, prov
+        )
 
     # Empreintes par-figurine du plan : consommées par le test de zone d'objectif ci-dessous
     # (la cohésion, elle, passe par la source unique juste en dessous ; l'engagement, lui, se
@@ -4189,10 +4310,17 @@ def _fight_consolidation_model_plan_state(
     if selected_model is not None and str(selected_model) in alive:
         sel = str(selected_model)
         sel_prov = {k: v for k, v in prov.items() if k != sel}
-        pool = _fight_consolidation_build_model_pool(
-            game_state, sel, tier_kind=tier_kind, tier=tier,
-            lock_base_contact=lock_base_contact, provisional_plan=sel_prov, view_level=_vl,
-        )["closer"]
+        # Pool exposé = destinations LÉGALES de la fig sélectionnée (clause « if possible » :
+        # engagées / within range faisables si elles existent, sinon closer) — miroir pile-in.
+        pool = _fight_model_legal_destinations(
+            game_state, squad_id, sel,
+            _fight_consolidation_build_model_pool(
+                game_state, sel, tier_kind=tier_kind, tier=tier,
+                lock_base_contact=lock_base_contact, provisional_plan=sel_prov, view_level=_vl,
+            ),
+            _vl,
+            {m: (sel_prov[m] if m in sel_prov else origin[m]) for m in alive if m != sel},
+        )
         if pool:
             # Le pool est celui de la figurine SELECTIONNEE : son voile se mesure a SON socle.
             _m_sel = require_key(game_state, "models_cache")[sel]
@@ -4317,9 +4445,7 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     if not remaining:
         _fight_v11_consolidation_clear_new_foes(game_state)
         return None
-    selector = int(
-        game_state.get("consolidation_new_foes_selector", 3 - int(require_key(game_state, "current_player")))
-    )
+    selector = int(require_key(game_state, "consolidation_new_foes_selector"))
     for_unit = game_state.get("consolidation_new_foes_for_unit")
     game_state["fight_eligible_units"] = list(remaining)
     active = game_state.get("active_fight_unit")
@@ -4335,6 +4461,7 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
             "fight_selector": selector,
             "fight_eligible_units": list(remaining),
             "active_fight_unit": active, "valid_targets": valid,
+            "overrun_eligible": fight_v11_can_overrun_pile_in(game_state, u),
             "waiting_for_player": True, "action": "wait",
         }
     game_state["active_fight_unit"] = None
@@ -4351,23 +4478,40 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     }
 
 
+def fight_v11_consolidation_freeze_new_foes(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> List[str]:
+    """Gèle les New Foes (12.08 AFTER) d'une consolidation engaging de ``unit`` qui vient d'être
+    commitée : ennemis engagés avec elle non encore « selected to fight ». Pose les trois clés
+    ``consolidation_new_foes_*`` et retourne la liste gelée ; ``[]`` (aucune clé posée) sans New Foe.
+
+    Sélecteur = ADVERSAIRE DU PROPRIÉTAIRE de ``unit``, pas ``3 - current_player`` : en seconde
+    moitié de 12.07 c'est l'unité du joueur NON actif qui consolide, et son adversaire EST le
+    joueur courant. Source unique des chemins PvP (`_fight_v11_consolidation_resolve_new_foes`)
+    et gym (`W40KEngine._fight_v11_gym_settle`).
+    """
+    new_foes = [str(x) for x in fight_v11_engaging_triggered_unit_ids(game_state, unit)]
+    if not new_foes:
+        return []
+    selector = 3 - int(require_key(unit, "player"))
+    game_state["consolidation_new_foes_pending"] = list(new_foes)
+    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
+    game_state["consolidation_new_foes_selector"] = selector
+    _fight_v11_log(
+        game_state,
+        f"CONSOLIDATE engaging : New Foes to Face = {new_foes} (sélecteur P{selector}, in-place)",
+    )
+    return new_foes
+
+
 def _fight_v11_consolidation_resolve_new_foes(
     game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """Au commit engaging : gèle les New Foes (ennemis engagés non sélectionnés) et présente le
     premier choix au sélecteur (adversaire). ``None`` si aucun New Foe (reprise immédiate)."""
-    new_foes = fight_v11_engaging_triggered_unit_ids(game_state, unit)
-    if not new_foes:
+    if not fight_v11_consolidation_freeze_new_foes(game_state, unit):
         return None
-    game_state["consolidation_new_foes_pending"] = [str(x) for x in new_foes]
-    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
-    game_state["consolidation_new_foes_selector"] = 3 - int(require_key(game_state, "current_player"))
     game_state["active_fight_unit"] = None
-    _fight_v11_log(
-        game_state,
-        f"CONSOLIDATE engaging : New Foes to Face = {list(new_foes)} "
-        f"(sélecteur P{game_state['consolidation_new_foes_selector']}, in-place)",
-    )
     return _fight_v11_consolidation_new_foes_state(game_state)
 
 
@@ -4385,6 +4529,15 @@ def _fight_v11_consolidation_new_foes_step(
     uid = str(uid) if uid is not None else None
     active = game_state.get("active_fight_unit")
     active = str(active) if active is not None else None
+
+    # OVERRUN FIGHT 12.06 — un New Foe dont l'engageur est mort avant sa sélection est
+    # désengagé : même pile-in additionnel que le dispatch FIGHT (source unique, même ordre :
+    # AVANT l'activation, pour qu'une autre action lève un plan en cours), sinon il serait
+    # « sélectionné sans attaque » là où le gym/auto lui font l'overrun.
+    skip = action.get("skip") is True or atype in ("skip", "right_click")
+    overrun_resp = _fight_v11_overrun_step(game_state, action, active, remaining, skip)
+    if overrun_resp is not None:
+        return overrun_resp
 
     # L'adversaire choisit l'ordre : sélection d'un New Foe à faire combattre.
     if atype == "activate_unit":
@@ -4418,21 +4571,15 @@ def _fight_v11_consolidation_new_foes_step(
         if not intents:
             _fight_v11_log(game_state, f"NEW FOE validate {active} : aucune declaration -> ignore")
             return _fight_v11_manual_state(game_state)
-        target_id = str(intents[0]["target_unit_id"])
-        target_unit = require_unit_by_id(game_state, target_id)
-        defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
-        if not defender_human:
-            raise RuntimeError(
-                f"NEW FOE validate {active} : flux de declaration manuelle non supporte pour defenseur IA"
-            )
         _fight_v11_register_selection(game_state, active)
         game_state["active_fight_unit"] = None
-        alloc_result = build_manual_fight_allocation(game_state, active)
-        if alloc_result.get("waiting_for_player"):
-            return True, alloc_result
+        waiting = _fight_v11_allocate_declared(game_state, active)
+        if waiting is not None:
+            return True, waiting
         return _fight_v11_manual_state(game_state)
 
-    # Clic direct sur une cible → résolution + allocation (defenseur humain) ou auto (IA).
+    # Clic direct sur une cible → déclaration de toute l'escouade puis allocation des pertes
+    # (le défenseur décide : manuel s'il est humain, headless s'il est programmatique).
     if atype in ("fight", "left_click"):
         valid = _fight_build_valid_target_pool(game_state, u)
         if not valid:
@@ -4444,26 +4591,49 @@ def _fight_v11_consolidation_new_foes_step(
         _fight_v11_register_selection(game_state, active)
         pref = str(action["targetId"]) if "targetId" in action else None
         target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, active, valid)
-        target_unit = require_unit_by_id(game_state, target_id)
-        defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
         game_state["active_fight_unit"] = None
-        _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
-        if defender_human:
-            # Meme regle qu au dispatch FIGHT : le clic-cible repart de zero.
-            squad_fight_restart_activation(game_state, active)
-            squad_declare_fight(game_state, active, target_id)
-            alloc_result = build_manual_fight_allocation(game_state, active)
-            if alloc_result.get("waiting_for_player"):
-                return True, alloc_result
-        else:
-            _fight_v11_resolve_attacks(game_state, u, config, preferred_target_id=target_id)
+        _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref})")
+        waiting = _fight_v11_fight_target(game_state, active, target_id)
+        if waiting is not None:
+            return True, waiting
         return _fight_v11_manual_state(game_state)
 
     return _fight_v11_manual_state(game_state)
 
 
+def _fight_v11_allocate_declared(game_state: Dict[str, Any], uid: str) -> Optional[Dict[str, Any]]:
+    """Alloue les pertes des attaques DÉCLARÉES de ``uid`` (05.03/05.04). Le DÉFENSEUR décide :
+    siège humain → allocation manuelle, payload d'attente rendu ; siège programmatique →
+    ``FIGHT_CTX.auto_decider`` tranche headless dans le même appel, ``None`` rendu. Un résultat
+    ni en attente ni terminé est une rupture du moteur d'allocation, pas un cas à absorber."""
+    alloc = build_manual_fight_allocation(game_state, uid)
+    if alloc.get("waiting_for_player"):
+        _fight_v11_log(game_state, f"FIGHT unit {uid} : allocation manuelle du défenseur en attente")
+        return alloc
+    if not alloc.get("done"):
+        raise RuntimeError(
+            f"_fight_v11_allocate_declared: allocation combat ni en attente ni terminée pour "
+            f"{uid} — action={alloc.get('action')!r}"
+        )
+    return None
+
+
+def _fight_v11_fight_target(
+    game_state: Dict[str, Any], uid: str, target_id: str
+) -> Optional[Dict[str, Any]]:
+    """Combat cible-d'abord d'une unité DÉJÀ « selected to fight » : redéclare toute l'escouade
+    contre ``target_id`` (arme CC par figurine — 04.01 ; le clic-cible écrase ce que
+    ``squad_fight_assign`` avait pu déclarer) puis alloue (`_fight_v11_allocate_declared`)."""
+    squad_fight_restart_activation(game_state, uid)
+    squad_declare_fight(game_state, uid, target_id)
+    return _fight_v11_allocate_declared(game_state, uid)
+
+
 def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """État actionnable courant pour le joueur humain (PvP). Avance les transitions de sous-phase."""
+    """État actionnable courant exposé au client (pool du groupe / du sélecteur courant, unité
+    active). Avance les transitions de sous-phase et termine la phase quand tout est vidé. Le
+    pool exposé peut appartenir au siège programmatique : le client relance alors le bot
+    (`/game/ai-turn`), et `_fight_v11_manual_step` refuse d'agir à sa place."""
     for _ in range(64):
         sub = require_key(game_state, "fight_subphase")
         if sub == "pile_in":
@@ -4528,7 +4698,7 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                               "fight_eligible_units": list(pool),
                               "active_fight_unit": active, "valid_targets": valid_targets,
                               "declarations": fight_decls,
-                              "overrun_eligible": bool(u and fight_v11_is_overrun_eligible(game_state, u)),
+                              "overrun_eligible": fight_v11_can_overrun_pile_in(game_state, u),
                               "waiting_for_player": True, "action": "wait"}
             # Aucune unité active → le joueur doit choisir (cercle vert sur le pool).
             game_state["active_fight_unit"] = None
@@ -4972,13 +5142,256 @@ def build_manual_fight_allocation(game_state: Dict[str, Any], attacker_squad_id:
     return _build_manual_allocation(game_state, attacker_squad_id, FIGHT_CTX, _manual_roll_fight_intent)
 
 
+def fight_v11_pending_selection_squad(game_state: Dict[str, Any]) -> Optional[str]:
+    """Escouade dont la sélection 12.04 par la POLITIQUE est en cours (choix d'arme V11 §0.69 ou
+    re-sélection de cible après la mort de la cible désignée), ou ``None``. `squad_fight` a déjà
+    enregistré cette escouade et passé le sélecteur à l'adversaire : le pool 12.04 ne la contient
+    plus, et pourtant c'est encore à son siège d'agir — le client et le driver doivent le voir."""
+    from engine.action_decoder import PENDING_FIGHT_TARGET_KEY, PENDING_FIGHT_WEAPON_KEY
+    for key in (PENDING_FIGHT_WEAPON_KEY, PENDING_FIGHT_TARGET_KEY):
+        pending = game_state.get(key)  # get allowed : None = aucune sélection en cours
+        if pending is not None:
+            return str(require_key(pending, "squad_id"))
+    return None
+
+
+def fight_v11_expected_seat(game_state: Dict[str, Any]) -> Optional[int]:
+    """Joueur dont la machine V11 attend la décision, ou ``None`` si l'étape courante est vidée.
+
+    Sélection de la politique en cours (arme / cible) → le siège de cette escouade ; New Foes
+    to Face en attente → leur sélecteur (l'adversaire du consolidant, 12.08) ; étape groupée
+    (pile-in 12.02 / consolidation 12.07) → le joueur du groupe courant ; étape FIGHT (12.04) →
+    le propriétaire du pool du sélecteur courant, handoff compris. Lecture seule."""
+    pending_squad = fight_v11_pending_selection_squad(game_state)
+    if pending_squad is not None:
+        return int(require_key(require_key(game_state, "units_cache")[pending_squad], "player"))
+    sub = game_state.get("fight_subphase")
+    if fight_v11_new_foes_pool(game_state):
+        return int(require_key(game_state, "consolidation_new_foes_selector"))
+    if sub in ("pile_in", "consolidate"):
+        nxt = fight_v11_grouped_next(game_state, sub)
+        return int(nxt[0]) if nxt is not None else None
+    if sub == "fight":
+        pool = fight_v11_current_pool(game_state)
+        if not pool:
+            return None
+        return int(require_key(require_key(game_state, "units_cache")[str(pool[0])], "player"))
+    return None
+
+
+def fight_v11_client_pool(game_state: Dict[str, Any]) -> List[str]:
+    """Rafraîchit et rend `fight_eligible_units`, le pool que le CLIENT lit pour relancer le bot
+    (`/game/ai-turn` quand il contient des unités du siège machine) ou terminer la phase quand
+    il est vide. La machine manuelle l'écrit à chaque état rendu ; le chemin du bot
+    (`W40KEngine.execute_ai_turn`) doit l'écrire lui-même, sinon le client voit un pool périmé.
+    Pendant une allocation manuelle des pertes, le pool n'est pas touché : la seule action
+    attendue est celle du défenseur."""
+    if PENDING_FIGHT_ALLOCATION_KEY in game_state or game_state.get("fight_subphase") is None:
+        return list(game_state.get("fight_eligible_units") or [])
+    pending_squad = fight_v11_pending_selection_squad(game_state)
+    pool = [pending_squad] if pending_squad is not None else fight_v11_current_pool(game_state)
+    game_state["fight_eligible_units"] = list(pool)
+    return list(pool)
+
+
+# Actions du plan pile-in par-figurine (mode fin type charge) — partagées entre le pile-in
+# groupé (sous-phase pile_in, 12.02) et le pile-in ADDITIONNEL de l'overrun (étape FIGHT, 12.06).
+PILE_IN_MODEL_PLAN_ACTIONS = ("pile_in_plan_state", "pile_in_autoplace", "commit_pile_in_plan")
+
+
+def _fight_v11_pile_in_model_plan_step(
+    game_state: Dict[str, Any], act_uid: str, action: Dict[str, Any], kind: str
+) -> Tuple[bool, Optional[Tuple[bool, Dict[str, Any]]]]:
+    """Traite UNE action de `PILE_IN_MODEL_PLAN_ACTIONS` pour l'unité active ``act_uid`` — SOURCE
+    UNIQUE du pile-in par-figurine manuel : le pile-in groupé (12.02) et le pile-in additionnel de
+    l'overrun (12.06) sont le MÊME pile-in move 12.03 (cibles `_fight_v11_pile_in_targets` : engagées
+    si engagée, sinon ≤5" ; WHILE/AFTER `_fight_pile_in_preview_plan`). Seul diffère ``kind``
+    (``"pile_in"`` / ``"overrun_pile_in"``) : verbe du log et marquage fait par l'APPELANT.
+
+    Retour ``(committed, response)`` : ``response`` est la réponse à renvoyer telle quelle (aperçu,
+    autoplace, plan refusé) ; ``committed`` True signifie que le plan a été POSÉ et loggé, et que
+    l'appelant fait son marquage puis renvoie l'état manuel suivant.
+    """
+    atype = action.get("action")
+    _view_level = int(action.get("level") or 0)
+    u = require_unit_by_id(game_state, act_uid)
+
+    def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
+        # Le niveau d'étage capturé au drop de chaque fig est OBLIGATOIRE : une fig posée sur
+        # un étage y reste (§13.06, miroir move par-figurine).
+        return parse_model_plan_as_map(
+            action.get("plan") or [], action_name="pile_in plan"
+        )
+
+    overrun = kind == "overrun_pile_in"
+    label = "OVERRUN PILE IN" if overrun else "PILE IN"
+
+    if atype == "pile_in_plan_state":
+        # Refresh de l'aperçu par-figurine (plan provisoire + figurine sélectionnée).
+        sel = action.get("selected_model")
+        return False, (True, _fight_pile_in_model_plan_state(
+            game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
+            view_level=_view_level, overrun=overrun,
+        ))
+
+    if atype == "pile_in_autoplace":
+        # Focus : auto-placement optimal (ILP) des figs pour maximiser celles frappant la cible.
+        focus = action.get("targetId")
+        if focus is None:
+            return False, (False, {"error": "pile_in_autoplace requires targetId", "action": action})
+        mode = str(action.get("mode", "defensive"))
+        out = pile_in_autoplace_plan(game_state, act_uid, str(focus), mode=mode)
+        return False, (True, {"action": "pile_in_autoplace", "unitId": act_uid, **out})
+
+    if atype != "commit_pile_in_plan":
+        raise ValueError(f"_fight_v11_pile_in_model_plan_step: action inattendue {atype!r}")
+
+    # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
+    prov = _prov_from_action()
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
+    origin = {
+        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
+            int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
+        for m in alive
+    }
+    full_plan: List[Tuple[str, int, int, int]] = [
+        (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
+        else (m, origin[m][0], origin[m][1], origin[m][2])
+        for m in alive
+    ]
+    targets = _fight_v11_pile_in_targets(game_state, u)
+    closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
+    prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest)
+    if not prev["can_validate"]:
+        _fight_v11_log(game_state, f"{label} unit {act_uid} → plan invalide {prev}")
+        return False, (True, _fight_pile_in_model_plan_state(
+            game_state, u, prov, None, view_level=_view_level, overrun=overrun
+        ))
+    _uc_before = require_key(game_state, "units_cache")[act_uid]
+    _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
+    _fight_pile_in_commit_plan(game_state, u, full_plan)
+    # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
+    _uc_after = require_key(game_state, "units_cache")[act_uid]
+    _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
+    _move_details = [
+        {
+            "modelId": m,
+            "fromCol": origin[m][0],
+            "fromRow": origin[m][1],
+            "toCol": int(nc),
+            "toRow": int(nr),
+            "toLevel": int(nlv),
+        }
+        for m, nc, nr, nlv in full_plan
+    ]
+    _append_fight_move_log(
+        game_state, u, kind=kind,
+        from_col=_from_col, from_row=_from_row,
+        to_col=_to_col, to_row=_to_row,
+        move_details=_move_details,
+        # L17 — cibles sélectionnées (= targets calculé juste avant commit).
+        pile_in_target_ids=[str(t) for t in targets],
+    )
+    _fight_v11_log(
+        game_state, f"{label} unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
+    )
+    return True, None
+
+
+def _fight_v11_overrun_step(
+    game_state: Dict[str, Any],
+    action: Dict[str, Any],
+    active: Optional[str],
+    pool: List[str],
+    skip: bool,
+) -> Optional[Tuple[bool, Dict[str, Any]]]:
+    """OVERRUN FIGHT 12.06 en flux manuel — pile-in ADDITIONNEL par-figurine de l'unité active
+    (« Your unit can make one additional pile-in move, then fights »). SOURCE UNIQUE des deux
+    sélections manuelles : dispatch FIGHT (12.04) et New Foes to Face (12.08 AFTER, où le New Foe
+    dont l'engageur est mort est précisément une unité désengagée éligible 12.06).
+
+    Action séparée `overrun_pile_in`, AVANT le choix de cible : c'est quand l'unité n'a AUCUNE
+    cible avant ce move qu'il sert. Le plan est le même pile-in move 12.03 que l'étape 2 (cibles
+    engagées si engagée, sinon ≤5" ; l'unité DOIT finir engagée) ; le commit rend la main au
+    combat de l'unité, dont le pool de cibles est recalculé à sa nouvelle position, et la
+    VERROUILLE (`_fight_v11_activation_locked`) : le move fait partie de sa sélection, le joueur
+    ne peut plus lui préférer une autre unité.
+
+    Retour : la réponse à renvoyer telle quelle, ou ``None`` si l'action n'appartient pas à
+    l'overrun (l'appelant poursuit son dispatch normal).
+    """
+    atype = action.get("action")
+    overrun_uid = game_state.get(OVERRUN_PILE_IN_UNIT_KEY)
+    overrun_uid = str(overrun_uid) if overrun_uid is not None else None
+    if overrun_uid is not None and (active is None or overrun_uid != active):
+        # Drapeau orphelin (l'unité active a changé sous le plan) → levé, on dispatch normalement.
+        game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+        overrun_uid = None
+    if overrun_uid is not None:
+        if skip:
+            # Le joueur renonce au pile-in additionnel : l'unité reste ACTIVE et combat depuis
+            # sa position (ce n'est PAS le « passer » d'une unité sans cible, traité par l'appelant).
+            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+            _fight_v11_log(game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (joueur)")
+            return _fight_v11_manual_state(game_state)
+        if atype in PILE_IN_MODEL_PLAN_ACTIONS:
+            committed, response = _fight_v11_pile_in_model_plan_step(
+                game_state, overrun_uid, action, kind="overrun_pile_in"
+            )
+            if not committed:
+                assert response is not None
+                return response
+            game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+            game_state[OVERRUN_PILE_IN_DONE_KEY].add(overrun_uid)
+            return _fight_v11_manual_state(game_state)
+        # Toute autre action abandonne le plan en cours et est traitée normalement.
+        game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+        _fight_v11_log(
+            game_state, f"OVERRUN PILE IN unit {overrun_uid} → abandonné (action {atype!r})"
+        )
+
+    if atype != "overrun_pile_in":
+        return None
+    if active is None or active not in pool:
+        return False, {"error": "no_active_fight_unit", "action": atype}
+    u = require_unit_by_id(game_state, active)
+    if not fight_v11_can_overrun_pile_in(game_state, u):
+        _fight_v11_log(game_state, f"OVERRUN PILE IN unit {active} REFUSÉ : non éligible 12.06")
+        return False, {"error": "overrun_not_eligible", "unitId": active}
+    # Les déclarations d'attaque faites AVANT le move sont caduques : les figurines
+    # bougent, leur éligibilité par-figurine (04.02) change, et le front repart de zéro.
+    from .shared_utils import clear_pending_fight_intent
+    clear_pending_fight_intent(game_state, active)
+    game_state[OVERRUN_PILE_IN_UNIT_KEY] = active
+    state = _fight_pile_in_model_plan_state(
+        game_state, u, view_level=int(action.get("level") or 0), overrun=True
+    )
+    _fight_v11_log(
+        game_state,
+        f"OVERRUN PILE IN : unit {active} (par-figurine, "
+        f"{len(state['eligible_models'])} figs déplaçables, cibles={state['pile_in_targets']})",
+    )
+    return True, state
+
+
 def _fight_v11_manual_step(
     game_state: Dict[str, Any],
     unit: Optional[Dict[str, Any]],
     action: Dict[str, Any],
     config: Dict[str, Any],
 ) -> Tuple[bool, Dict[str, Any]]:
-    """Traite une action humaine (PvP) dans l'étape V11 courante, puis renvoie l'état suivant."""
+    """Traite une action du siège HUMAIN dans l'étape V11 courante, puis renvoie l'état suivant.
+
+    Même machine en PvP hot-seat et en PvE : ce que le joueur décide (12.02 « they choose to
+    move », 12.04 alternance, 12.07, 05.03/05.04 quand il défend) lui appartient quel que soit
+    le mode. Quand la machine attend un siège PROGRAMMATIQUE (groupe pile-in/consolidation du
+    bot, sélection 12.04 du bot, New Foes à son adversaire bot), toute action de jeu est REFUSÉE :
+    ce siège joue par `W40KEngine._process_squad_action` et `_fight_v11_gym_settle`, et un clic
+    humain sur ses unités (le front expose le pool du groupe courant) ne doit pas les conduire.
+    L'allocation des pertes par le défenseur humain passe AVANT ce refus : c'est précisément une
+    décision du siège humain pendant le combat du siège machine."""
     sub = require_key(game_state, "fight_subphase")
     atype = action.get("action")
     uid = action.get("unitId")
@@ -5012,6 +5425,22 @@ def _fight_v11_manual_step(
             _fight_v11_log(game_state, "FIGHT allocation annulee par le joueur")
             return _fight_v11_manual_state(game_state)
         return True, manual_allocation_waiting_payload(game_state, FIGHT_CTX)
+
+    if not game_state.get("gym_training_mode"):
+        from .shared_utils import is_programmatic_owner
+        seat = fight_v11_expected_seat(game_state)
+        if seat is not None and is_programmatic_owner(game_state, seat):
+            _fight_v11_log(
+                game_state,
+                f"action {atype!r} REFUSÉE : la machine attend le siège programmatique P{seat} "
+                f"(subphase={sub})",
+            )
+            return False, {
+                "error": "programmatic_seat_turn",
+                "player": seat,
+                "fight_subphase": sub,
+                "action": atype,
+            }
 
     # Combat cible-d abord par arme/quantite/figurine (jumeau du tir). Traite ICI, dans la
     # machine V11, et NON dans w40k_core : le garde-fou d allocation ci-dessus s applique donc
@@ -5154,13 +5583,6 @@ def _fight_v11_manual_step(
 
         _view_level = int(action.get("level") or 0)
 
-        def _prov_from_action() -> Dict[str, Tuple[int, int, int]]:
-            # Le niveau d'étage capturé au drop de chaque fig est OBLIGATOIRE : une fig posée sur
-            # un étage y reste (§13.06, miroir move par-figurine).
-            return parse_model_plan_as_map(
-                action.get("plan") or [], action_name="pile_in plan"
-            )
-
         if skip:
             # Le joueur renonce à piler l'unité active → marquée traitée sans déplacement.
             if act_uid is not None and act_uid in eligible:
@@ -5168,84 +5590,16 @@ def _fight_v11_manual_step(
                 _fight_v11_log(game_state, f"PILE IN unit {act_uid} → SKIP (joueur)")
             return _fight_v11_manual_state(game_state)
 
-        if atype == "pile_in_plan_state":
-            # Refresh de l'aperçu par-figurine (plan provisoire + figurine sélectionnée).
+        if atype in PILE_IN_MODEL_PLAN_ACTIONS:
             if act_uid is None or act_uid not in eligible:
                 return _fight_v11_manual_state(game_state)
-            u = require_unit_by_id(game_state, act_uid)
-            sel = action.get("selected_model")
-            return True, _fight_pile_in_model_plan_state(
-                game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
-                view_level=_view_level,
+            committed, response = _fight_v11_pile_in_model_plan_step(
+                game_state, act_uid, action, kind="pile_in"
             )
-
-        if atype == "pile_in_autoplace":
-            # Focus : auto-placement optimal (ILP) des figs pour maximiser celles frappant la cible.
-            if act_uid is None or act_uid not in eligible:
-                return _fight_v11_manual_state(game_state)
-            focus = action.get("targetId")
-            if focus is None:
-                return False, {"error": "pile_in_autoplace requires targetId", "action": action}
-            mode = str(action.get("mode", "defensive"))
-            out = pile_in_autoplace_plan(game_state, act_uid, str(focus), mode=mode)
-            return True, {"action": "pile_in_autoplace", "unitId": act_uid, **out}
-
-        if atype == "commit_pile_in_plan":
-            # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
-            if act_uid is None or act_uid not in eligible:
-                return _fight_v11_manual_state(game_state)
-            u = require_unit_by_id(game_state, act_uid)
-            prov = _prov_from_action()
-            models_cache = require_key(game_state, "models_cache")
-            squad_models = require_key(game_state, "squad_models")
-            alive = [str(m) for m in require_key(squad_models, act_uid) if str(m) in models_cache]
-            origin = {
-                m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
-                    int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
-                for m in alive
-            }
-            full_plan: List[Tuple[str, int, int, int]] = [
-                (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
-                else (m, origin[m][0], origin[m][1], origin[m][2])
-                for m in alive
-            ]
-            targets = _fight_v11_pile_in_targets(game_state, u)
-            closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
-            prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest)
-            if not prev["can_validate"]:
-                _fight_v11_log(game_state, f"PILE IN unit {act_uid} → plan invalide {prev}")
-                return True, _fight_pile_in_model_plan_state(
-                    game_state, u, prov, None, view_level=_view_level
-                )
-            _uc_before = require_key(game_state, "units_cache")[act_uid]
-            _from_col, _from_row = int(_uc_before["col"]), int(_uc_before["row"])
-            _fight_pile_in_commit_plan(game_state, u, full_plan)
+            if not committed:
+                assert response is not None
+                return response
             game_state["pile_in_done"].add(act_uid)
-            # Log par-figurine (mode fin type charge, sans roll) : ligne unite + moveDetails.
-            _uc_after = require_key(game_state, "units_cache")[act_uid]
-            _to_col, _to_row = int(_uc_after["col"]), int(_uc_after["row"])
-            _move_details = [
-                {
-                    "modelId": m,
-                    "fromCol": origin[m][0],
-                    "fromRow": origin[m][1],
-                    "toCol": int(nc),
-                    "toRow": int(nr),
-                    "toLevel": int(nlv),
-                }
-                for m, nc, nr, nlv in full_plan
-            ]
-            _append_fight_move_log(
-                game_state, u, kind="pile_in",
-                from_col=_from_col, from_row=_from_row,
-                to_col=_to_col, to_row=_to_row,
-                move_details=_move_details,
-                # L17 — cibles sélectionnées (= targets calculé juste avant commit).
-                pile_in_target_ids=[str(t) for t in targets],
-            )
-            _fight_v11_log(
-                game_state, f"PILE IN unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
-            )
             return _fight_v11_manual_state(game_state)
 
         if atype == "activate_unit" and uid in eligible:
@@ -5276,6 +5630,12 @@ def _fight_v11_manual_step(
             f"FIGHT dispatch: pool={pool} active={active} uid_recu={uid} action={atype!r} "
             f"step={game_state.get('fight_step')} fought={sorted(game_state.get('units_fought', set()))}"
         )
+
+        # OVERRUN FIGHT 12.06 — pile-in additionnel de l'unité active (source unique partagée
+        # avec les New Foes to Face : `_fight_v11_overrun_step`).
+        overrun_resp = _fight_v11_overrun_step(game_state, action, active, pool, skip)
+        if overrun_resp is not None:
+            return overrun_resp
 
         if skip:
             # « Passer » une unité en étape fight = clic droit (right_click → skip, calculé
@@ -5352,24 +5712,11 @@ def _fight_v11_manual_step(
             if not intents:
                 _fight_v11_log(game_state, f"FIGHT validate {sel} : aucune declaration -> ignore")
                 return _fight_v11_manual_state(game_state)
-            # Defenseur : en PvP test les cibles appartiennent au joueur adverse (humain).
-            target_id = str(intents[0]["target_unit_id"])
-            target_unit = require_unit_by_id(game_state, target_id)
-            defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
-            if not defender_human:
-                raise RuntimeError(
-                    f"FIGHT validate {sel} : flux de declaration manuelle non supporte "
-                    f"pour un defenseur IA (cible {target_id})"
-                )
             _fight_v11_register_selection(game_state, sel)
             game_state["active_fight_unit"] = None
-            alloc_result = build_manual_fight_allocation(game_state, sel)
-            _fight_v11_log(
-                game_state,
-                f"FIGHT validate {sel} : alloc waiting={alloc_result.get('waiting_for_player')}"
-            )
-            if alloc_result.get("waiting_for_player"):
-                return True, alloc_result
+            waiting = _fight_v11_allocate_declared(game_state, sel)
+            if waiting is not None:
+                return True, waiting
             return _fight_v11_manual_state(game_state)
 
         # ÉTAPE 2 — unité active + clic sur une cible → résolution + allocation.
@@ -5377,40 +5724,20 @@ def _fight_v11_manual_step(
             sel = active
             u = require_unit_by_id(game_state, sel)
             _fight_v11_register_selection(game_state, sel)
-            ftype = "normal"
-            if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
-                ftype = "overrun"
-                from .shared_utils import _fight_overrun_pile_in_plan, commit_move
-                _ov_plan = _fight_overrun_pile_in_plan(game_state, sel)
-                if _ov_plan is not None:
-                    commit_move(_ov_plan, game_state, "pile_in")
+            # Type de fight 12.04/12.06 (journal) : le pile-in additionnel de l'overrun, s'il a eu
+            # lieu, a été posé AVANT ce clic par l'action `overrun_pile_in`.
+            ftype = "overrun" if sel in game_state[OVERRUN_PILE_IN_DONE_KEY] else "normal"
             valid = _fight_build_valid_target_pool(game_state, u)
             _fight_v11_log(game_state, f"FIGHT unit {sel} (type={ftype}) : pool cibles = {valid}")
             if valid:
                 pref = str(action["targetId"]) if "targetId" in action else None
                 target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, sel, valid)
-                target_unit = require_unit_by_id(game_state, target_id)
-                defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
-                _fight_v11_log(game_state, f"FIGHT unit {sel} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
+                _fight_v11_log(game_state, f"FIGHT unit {sel} -> cible {target_id} (clic={pref})")
                 # L'unité a fini d'attaquer : on libère l'active (la prochaine sera re-choisie).
                 game_state["active_fight_unit"] = None
-                if defender_human:
-                    # Defenseur humain (§G) : allocation manuelle des pertes (par-figurine).
-                    # restart_ : le clic-cible redeclare toute l escouade, il ecrase donc
-                    # ce que squad_fight_assign avait pu declarer avant lui.
-                    squad_fight_restart_activation(game_state, sel)
-                    squad_declare_fight(game_state, sel, target_id)
-                    alloc_result = build_manual_fight_allocation(game_state, sel)
-                    _fight_v11_log(
-                        game_state,
-                        f"FIGHT unit {sel} : alloc waiting={alloc_result.get('waiting_for_player')} done={alloc_result.get('done')}"
-                    )
-                    if alloc_result.get("waiting_for_player"):
-                        return True, alloc_result
-                else:
-                    # Defenseur IA : resolution auto (chemin V11 inchange, HP-pool unite).
-                    _fight_v11_log(game_state, f"FIGHT unit {sel} : defenseur IA -> resolution auto")
-                    _fight_v11_resolve_attacks(game_state, u, config, preferred_target_id=target_id)
+                waiting = _fight_v11_fight_target(game_state, sel, target_id)
+                if waiting is not None:
+                    return True, waiting
             else:
                 _fight_v11_log(game_state, f"FIGHT unit {sel} : aucune cible valide")
             return _fight_v11_manual_state(game_state)
@@ -5645,12 +5972,13 @@ def execute_action(  # noqa: F811 (V11 override of V10)
 ) -> Tuple[bool, Dict[str, Any]]:
     """
     Routage de la phase FIGHT V11 (override). Sous-phases pile_in → fight → consolidate.
-    - PvE / gym / endless (auto autorisé) : une activation résolue par appel (_fight_v11_auto_step).
-    - PvP / pvp_test (manuel) : traite l'action humaine et renvoie l'état actionnable suivant.
+    Point d'entrée du siège HUMAIN, dans tous les modes (PvP hot-seat, siège humain du PvE,
+    endless duty) : traite l'action reçue et renvoie l'état actionnable suivant. Le siège
+    programmatique ne passe jamais ici — il joue par `W40KEngine._process_squad_action`
+    (sélection 12.04 par la politique) et par le driver `_fight_v11_gym_settle` (pile-in,
+    consolidation, New Foes to Face).
     """
     if game_state.get("phase") != "fight":
         fight_phase_start(game_state)
     fight_ensure_v11_state(game_state)
-    if _is_fight_auto_execution_allowed(game_state):
-        return _fight_v11_auto_step(game_state, config)
     return _fight_v11_manual_step(game_state, unit, action, config)

@@ -18,7 +18,7 @@ import type { AuthSession } from "../auth/authStorage";
 import type { Unit, Weapon } from "../types/game";
 import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
-import { useEngineAPI } from "./useEngineAPI";
+import { readManualAllocationPrompt, readManualOrderPrompt, useEngineAPI } from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------
 // ErrorBoundary pour tester les hooks qui lancent une exception sur erreur
@@ -765,5 +765,628 @@ describe("useEngineAPI — refus de la confirmation de danger", () => {
     // REPOSÉ : sans lui, le prochain geste de mouvement croirait le danger réglé.
     expect(result.current.hazardWarningPopup).toEqual({ unitId: 10 });
     expect(result.current.error).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PvE, phase fight : le bot a attaqué (`/game/ai-turn`), le DÉFENSEUR HUMAIN alloue ses pertes
+// (05.03/05.04). Le prompt s'ouvre depuis la réponse du tour IA, sans attendre un geste humain.
+// ---------------------------------------------------------------------------
+
+describe("readManualAllocationPrompt", () => {
+  const allocation = {
+    attacker_unit_id: "2",
+    target_unit_id: "1",
+    defender_player: 1,
+    choices: [{ model_id: "1#0", col: 0, row: 0, HP_CUR: 5, HP_MAX: 5 }],
+    wounds_remaining: 1,
+  };
+
+  it("payload fight en attente → allocation de famille fight", () => {
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: true,
+        allocation,
+      })
+    ).toEqual({ ...allocation, kind: "fight" });
+  });
+
+  it("familles shoot et hazard reconnues", () => {
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_shoot_manual_alloc",
+        waiting_for_player: true,
+        allocation,
+      })?.kind
+    ).toBe("shoot");
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_hazard_manual_alloc",
+        waiting_for_player: true,
+        allocation,
+      })?.kind
+    ).toBe("hazard");
+  });
+
+  it("pas une attente d'allocation → null (autre action, pas d'attente, sans allocation)", () => {
+    expect(
+      readManualAllocationPrompt({ action: "wait", waiting_for_player: true, allocation })
+    ).toBeNull();
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: false,
+        allocation,
+      })
+    ).toBeNull();
+    expect(
+      readManualAllocationPrompt({ action: "squad_fight_manual_alloc", waiting_for_player: true })
+    ).toBeNull();
+    expect(readManualAllocationPrompt(undefined)).toBeNull();
+  });
+});
+
+describe("readManualOrderPrompt", () => {
+  const order_request = {
+    attacker_unit_id: "2",
+    target_unit_id: "1",
+    defender_player: 1,
+    wounds_to_save: 2,
+    groups: [],
+  };
+
+  it("payload fight en attente d'ordre → requête de famille fight", () => {
+    expect(
+      readManualOrderPrompt({
+        action: "squad_fight_declare_order",
+        waiting_for_player: true,
+        order_request,
+      })
+    ).toEqual({ ...order_request, kind: "fight" });
+  });
+
+  it("pas une attente d'ordre → null", () => {
+    expect(
+      readManualOrderPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: true,
+        order_request,
+      })
+    ).toBeNull();
+    expect(
+      readManualOrderPrompt({ action: "squad_fight_declare_order", waiting_for_player: true })
+    ).toBeNull();
+  });
+});
+
+describe("useEngineAPI — executeAITurn, allocation du défenseur humain en phase fight", () => {
+  it("ROUGE sans la prise en charge : `/game/ai-turn` rend squad_fight_manual_alloc → prompt posé, boucle arrêtée", async () => {
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const allocation = {
+      attacker_unit_id: "2",
+      target_unit_id: "1",
+      defender_player: 1,
+      choices: [{ model_id: "1#0", col: 0, row: 0, HP_CUR: 5, HP_MAX: 5 }],
+      wounds_remaining: 1,
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: { action: "squad_fight_manual_alloc", waiting_for_player: true, allocation },
+          game_state: fightState,
+          action_logs: [],
+        });
+      })
+    );
+
+    // Le mode vient de l'URL (`?mode=pve`) : c'est lui qui autorise un siège 2 de type "ai".
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+      expect(result.current.manualAllocation).toBeNull();
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(result.current.manualAllocation).toEqual({ ...allocation, kind: "fight" });
+      // La main est à l'humain : un seul appel, pas de relance tant qu'il n'a pas alloué.
+      expect(aiTurnCalls).toBe(1);
+    } finally {
+      window.history.replaceState({}, "", "/game");
+    }
+  });
+
+  it("cible hétérogène (05.03) : `/game/ai-turn` rend squad_fight_declare_order → ordre demandé, boucle arrêtée", async () => {
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const order_request = {
+      attacker_unit_id: "2",
+      target_unit_id: "1",
+      defender_player: 1,
+      wounds_to_save: 2,
+      groups: [],
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: { action: "squad_fight_declare_order", waiting_for_player: true, order_request },
+          game_state: fightState,
+          action_logs: [],
+        });
+      })
+    );
+
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+      expect(result.current.manualOrderRequest).toBeNull();
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(result.current.manualOrderRequest).toEqual({ ...order_request, kind: "fight" });
+      expect(result.current.manualAllocation).toBeNull();
+      expect(aiTurnCalls).toBe(1);
+    } finally {
+      window.history.replaceState({}, "", "/game");
+    }
+  });
+
+  // Pile-in / consolidation du bot (12.02, 12.08) : réglés par le driver `_fight_v11_gym_settle`
+  // AVANT que le serveur ne constate qu'aucune unité du bot n'est sélectionnable → réponse
+  // `ai_turn_skipped` (success:true) portant les `action_logs` du déplacement, buffer serveur
+  // vidé. Ces lignes ne reviendront par aucune autre réponse : le client doit les dispatcher
+  // comme celles d'une activation réussie, puis sortir de la boucle.
+  it("ROUGE sans la prise en charge : `ai_turn_skipped` avec un pile_in → backendLogEvent émis, boucle arrêtée après UN appel", async () => {
+    // Au départ le pool 12.02 porte l'unité du bot (pile-in à jouer) : c'est ce qui autorise
+    // l'appel `/game/ai-turn`. Après le settle, il ne reste que l'unité humaine.
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const settledState = { ...fightState, fight_eligible_units: ["1"] };
+    const pileInLog = {
+      type: "pile_in",
+      message: "Unit 2 PILED IN from (3,3) to (2,2)",
+      turn: 1,
+      phase: "fight",
+      unitId: "2",
+      player: 2,
+      is_ai_action: true,
+      moveDetails: [{ model_id: "2#0", from_col: 3, from_row: 3, to_col: 2, to_row: 2 }],
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: {
+            action: "ai_turn_skipped",
+            reason: "not_ai_player_turn",
+            details: { error: "not_ai_player_turn", reason: "no_eligible_ai_units_in_pool" },
+          },
+          game_state: settledState,
+          action_logs: [pileInLog],
+        });
+      })
+    );
+    const emitted: Array<Record<string, unknown>> = [];
+    const onLogEvent = (evt: Event) => {
+      emitted.push((evt as CustomEvent<Record<string, unknown>>).detail);
+    };
+    window.addEventListener("backendLogEvent", onLogEvent);
+
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(aiTurnCalls).toBe(1);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]).toMatchObject({
+        type: "pile_in",
+        message: pileInLog.message,
+        phase: "fight",
+        shooterId: "2",
+        player: 2,
+        is_ai_action: true,
+      });
+    } finally {
+      window.removeEventListener("backendLogEvent", onLogEvent);
+      window.history.replaceState({}, "", "/game");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overrun fight 12.06 (PvP) — pile-in ADDITIONNEL par-figurine avant le combat.
+//
+// PDF 12 : « EFFECT: Your unit can make one additional pile-in move, then fights ». Le moteur
+// expose ``overrun_eligible`` sur l'état d'attente FIGHT ; le bouton Overrun émet
+// ``overrun_pile_in`` → réponse ``pile_in_model_move`` + ``overrun_pile_in`` (même mode que le
+// pile-in 12.02) ; le commit ramène au COMBAT de la même unité (cibles recalculées), pas à la
+// sélection. Avant ce lot, aucune action du front ne portait l'overrun : l'unité passait.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — overrun 12.06 (pile-in additionnel)", () => {
+  function fightGameState(active: string | null) {
+    const attacker = makeUnit(1, 1, { col: 20, row: 20, ATTACK_LEFT: 1 });
+    const foe = makeUnit(2, 2, { col: 23, row: 20, ATTACK_LEFT: 1 });
+    return makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      fight_eligible_units: ["1"],
+      active_fight_unit: active,
+      move_activation_pool: [],
+      units: [attacker, foe],
+      units_cache: {
+        "1": { occupied_hexes_by_model: { "1#0": [20, 20] } },
+        "2": { occupied_hexes_by_model: { "2#0": [23, 20] } },
+      },
+    });
+  }
+
+  function fightWait(validTargets: string[], overrunEligible: boolean) {
+    return {
+      phase: "fight",
+      fight_subphase: "fight",
+      active_fight_unit: "1",
+      unitId: "1",
+      valid_targets: validTargets,
+      overrun_eligible: overrunEligible,
+      waiting_for_player: true,
+      action: "wait",
+    };
+  }
+
+  const overrunPlanState = {
+    phase: "fight",
+    fight_subphase: "fight",
+    pile_in_model_move: true,
+    overrun_pile_in: true,
+    unitId: "1",
+    active_fight_unit: "1",
+    origin_models: { "1#0": [20, 20] },
+    provisional: {},
+    eligible_models: ["1#0"],
+    selected_model: null,
+    pool: [],
+    footprint_mask_loops: [],
+    unplaced: ["1#0"],
+    can_validate: true,
+    per_model_valid: { "1#0": true },
+    coherency_ok: true,
+    unit_engaged: true,
+    kept_engagements: true,
+    engaged_models: ["1#0"],
+    pile_in_targets: ["2"],
+    waiting_for_player: true,
+    action: "wait",
+  };
+
+  /** Démarre en étape FIGHT, active l'unité 1 (sans cible, overrun possible), ouvre l'overrun. */
+  async function ouvreOverrun(bodies: Array<Record<string, unknown>>) {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightGameState(null) })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.action === "activate_unit") {
+          return HttpResponse.json({
+            success: true,
+            game_state: fightGameState("1"),
+            result: fightWait([], true),
+          });
+        }
+        if (body.action === "overrun_pile_in") {
+          return HttpResponse.json({
+            success: true,
+            game_state: fightGameState("1"),
+            result: overrunPlanState,
+          });
+        }
+        if (body.action === "commit_pile_in_plan") {
+          // Le commit rend la main au combat : l'unité, toujours active, a maintenant une cible
+          // et a épuisé son unique pile-in additionnel.
+          return HttpResponse.json({
+            success: true,
+            game_state: fightGameState("1"),
+            result: fightWait(["2"], false),
+          });
+        }
+        if (body.action === "skip") {
+          // Sous plan overrun, skip = renoncer au move : l'unité reste active, sans cible.
+          return HttpResponse.json({
+            success: true,
+            game_state: fightGameState("1"),
+            result: fightWait([], true),
+          });
+        }
+        throw new Error(`action inattendue ${String(body.action)}`);
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+        expect(result.current.maxTurns).not.toBeNull();
+      },
+      { timeout: 5000 }
+    );
+
+    await act(async () => {
+      await result.current.onSelectUnit(1);
+    });
+    expect(result.current.mode).toBe("attackPreview");
+    expect(result.current.fightOverrunEligible).toBe(true);
+    expect(result.current.squadFightPlan?.unitId).toBe(1);
+
+    await act(async () => {
+      await result.current.onOverrunPileIn();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "overrun_pile_in", unitId: "1" });
+    expect(result.current.mode).toBe("pileInModelMove");
+    expect(result.current.pileInMovePlan).toMatchObject({
+      unitId: 1,
+      overrun: true,
+      canValidate: true,
+      pileInTargets: ["2"],
+    });
+    // Le plan fight local est purgé le temps du move (sinon il intercepte les clics de pose).
+    expect(result.current.squadFightPlan).toBeNull();
+    return result;
+  }
+
+  it("commit du pile-in additionnel → retour au combat de la même unité, cibles recalculées", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await ouvreOverrun(bodies);
+
+    await act(async () => {
+      await result.current.onCommitPileInPlan();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "commit_pile_in_plan", plan: [] });
+    expect(result.current.mode).toBe("attackPreview");
+    expect(result.current.selectedUnitId).toBe(1);
+    expect(result.current.pileInMovePlan).toBeNull();
+    expect(result.current.squadFightPlan?.unitId).toBe(1);
+    expect(result.current.fightOverrunEligible).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("abandon du pile-in additionnel (skip) → l'unité reste active et peut encore l'ouvrir", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await ouvreOverrun(bodies);
+
+    await act(async () => {
+      await result.current.onCancelPileInModelMove();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "skip" });
+    expect(result.current.mode).toBe("attackPreview");
+    expect(result.current.selectedUnitId).toBe(1);
+    expect(result.current.pileInMovePlan).toBeNull();
+    expect(result.current.squadFightPlan?.unitId).toBe(1);
+    expect(result.current.fightOverrunEligible).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New Foes to Face (12.08 AFTER) + overrun 12.06 : un New Foe DÉSENGAGÉ (son engageur est mort
+// avant sa sélection) porte ``overrun_eligible`` sur l'état New Foes (sous-phase consolidate).
+// Le bouton Overrun s'appuie sur l'unité fight active (pas de plan fight local en New Foes :
+// l'attaque passe par le clic-cible direct) ; le commit / l'abandon ramènent à l'état New Foes
+// (sélection posée, mode select), sans rouvrir de plan fight.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — overrun 12.06 d'un New Foe désengagé", () => {
+  function newFoesGameState(active: string | null) {
+    const foe = makeUnit(3, 2, { col: 27, row: 20, ATTACK_LEFT: 1 });
+    const target = makeUnit(4, 1, { col: 31, row: 20, ATTACK_LEFT: 1 });
+    return makeGameState({
+      phase: "fight",
+      fight_subphase: "consolidate",
+      fight_eligible_units: ["3"],
+      active_fight_unit: active,
+      move_activation_pool: [],
+      units: [foe, target],
+      units_cache: {
+        "3": { occupied_hexes_by_model: { "3#0": [27, 20] } },
+        "4": { occupied_hexes_by_model: { "4#0": [31, 20] } },
+      },
+    });
+  }
+
+  function newFoesWait(active: string | null, validTargets: string[], overrunEligible: boolean) {
+    return {
+      phase: "fight",
+      fight_subphase: "consolidate",
+      consolidation_new_foes: ["3"],
+      consolidation_new_foes_for_unit: "1",
+      fight_selector: 2,
+      fight_eligible_units: ["3"],
+      active_fight_unit: active,
+      valid_targets: validTargets,
+      overrun_eligible: overrunEligible,
+      waiting_for_player: true,
+      action: "wait",
+    };
+  }
+
+  const overrunPlanState = {
+    phase: "fight",
+    fight_subphase: "consolidate",
+    pile_in_model_move: true,
+    overrun_pile_in: true,
+    unitId: "3",
+    active_fight_unit: "3",
+    origin_models: { "3#0": [27, 20] },
+    provisional: {},
+    eligible_models: ["3#0"],
+    selected_model: null,
+    pool: [],
+    footprint_mask_loops: [],
+    unplaced: ["3#0"],
+    can_validate: true,
+    per_model_valid: { "3#0": true },
+    coherency_ok: true,
+    unit_engaged: true,
+    kept_engagements: true,
+    engaged_models: ["3#0"],
+    pile_in_targets: ["4"],
+    waiting_for_player: true,
+    action: "wait",
+  };
+
+  async function ouvreOverrunNewFoe(bodies: Array<Record<string, unknown>>) {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: newFoesGameState(null) })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.action === "activate_unit") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: newFoesWait("3", [], true),
+          });
+        }
+        if (body.action === "overrun_pile_in") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: overrunPlanState,
+          });
+        }
+        if (body.action === "commit_pile_in_plan") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: newFoesWait("3", ["4"], false),
+          });
+        }
+        if (body.action === "skip") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: newFoesWait("3", [], true),
+          });
+        }
+        throw new Error(`action inattendue ${String(body.action)}`);
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+        expect(result.current.maxTurns).not.toBeNull();
+      },
+      { timeout: 5000 }
+    );
+
+    await act(async () => {
+      await result.current.onSelectUnit(3);
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "activate_unit", unitId: "3" });
+    // État New Foes : sélection posée, mode select (clic-cible direct), AUCUN plan fight local.
+    expect(result.current.mode).toBe("select");
+    expect(result.current.selectedUnitId).toBe(3);
+    expect(result.current.consolidationNewFoes).toEqual(["3"]);
+    expect(result.current.squadFightPlan).toBeNull();
+    expect(result.current.fightOverrunEligible).toBe(true);
+
+    await act(async () => {
+      await result.current.onOverrunPileIn();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "overrun_pile_in", unitId: "3" });
+    expect(result.current.mode).toBe("pileInModelMove");
+    expect(result.current.pileInMovePlan).toMatchObject({
+      unitId: 3,
+      overrun: true,
+      canValidate: true,
+      pileInTargets: ["4"],
+    });
+    return result;
+  }
+
+  it("commit du pile-in additionnel → retour à l'état New Foes du même New Foe, sans plan fight", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await ouvreOverrunNewFoe(bodies);
+
+    await act(async () => {
+      await result.current.onCommitPileInPlan();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "commit_pile_in_plan", plan: [] });
+    expect(result.current.mode).toBe("select");
+    expect(result.current.selectedUnitId).toBe(3);
+    expect(result.current.pileInMovePlan).toBeNull();
+    expect(result.current.squadFightPlan).toBeNull();
+    expect(result.current.consolidationNewFoes).toEqual(["3"]);
+    expect(result.current.fightOverrunEligible).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("abandon du pile-in additionnel (skip) → le New Foe reste actif et peut encore l'ouvrir", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await ouvreOverrunNewFoe(bodies);
+
+    await act(async () => {
+      await result.current.onCancelPileInModelMove();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "skip" });
+    expect(result.current.mode).toBe("select");
+    expect(result.current.selectedUnitId).toBe(3);
+    expect(result.current.pileInMovePlan).toBeNull();
+    expect(result.current.squadFightPlan).toBeNull();
+    expect(result.current.fightOverrunEligible).toBe(true);
   });
 });

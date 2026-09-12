@@ -500,6 +500,53 @@ export interface ManualOrderGroup {
   has_wounded: boolean;
 }
 
+/**
+ * Payload d'ATTENTE d'allocation manuelle des pertes (défenseur humain, 05.03/05.04, 06.02) tel
+ * que le moteur le rend sur `/game/action` comme sur `/game/ai-turn` (attaquant bot en PvE) :
+ * `{ action: squad_*_manual_alloc, waiting_for_player: true, allocation }`. Rend l'allocation
+ * typée (avec sa famille) ou `null` si le payload n'en est pas une.
+ */
+export function readManualAllocationPrompt(result: unknown): ManualAllocation | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as { action?: unknown; waiting_for_player?: unknown; allocation?: unknown };
+  if (r.waiting_for_player !== true || !r.allocation || typeof r.allocation !== "object") {
+    return null;
+  }
+  const kind =
+    r.action === "squad_fight_manual_alloc"
+      ? "fight"
+      : r.action === "squad_hazard_manual_alloc"
+        ? "hazard"
+        : r.action === "squad_shoot_manual_alloc"
+          ? "shoot"
+          : null;
+  if (kind === null) return null;
+  return { ...(r.allocation as ManualAllocation), kind };
+}
+
+/**
+ * Payload d'ATTENTE de déclaration de l'ordre des groupes d'allocation (05.03, cible hétérogène /
+ * CHARACTER) — même double provenance que `readManualAllocationPrompt` :
+ * `{ action: squad_*_declare_order, waiting_for_player: true, order_request }`.
+ */
+export function readManualOrderPrompt(result: unknown): ManualOrderRequest | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as { action?: unknown; waiting_for_player?: unknown; order_request?: unknown };
+  if (r.waiting_for_player !== true || !r.order_request || typeof r.order_request !== "object") {
+    return null;
+  }
+  const kind =
+    r.action === "squad_fight_declare_order"
+      ? "fight"
+      : r.action === "squad_hazard_declare_order"
+        ? "hazard"
+        : r.action === "squad_shoot_declare_order"
+          ? "shoot"
+          : null;
+  if (kind === null) return null;
+  return { ...(r.order_request as ManualOrderRequest), kind };
+}
+
 export interface ManualOrderRequest {
   /** "shoot" = ordre d'allocation du tir (défaut) ; "fight" = du combat ; "hazard" = mortal wounds Desperate Escape. */
   kind?: "shoot" | "fight" | "hazard";
@@ -769,6 +816,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     engagedModels: string[];
     /** Cibles pile-in (focus) → cercle violet + hit-test. */
     pileInTargets: string[];
+    /** Pile-in ADDITIONNEL de l'overrun 12.06 (étape FIGHT) : le commit / l'abandon rendent la
+     * main au combat de l'unité (toujours active), pas au pool de pile-in 12.02. */
+    overrun: boolean;
   } | null>(null);
   const pileInMovePlanRef = useRef<typeof pileInMovePlan>(null);
   pileInMovePlanRef.current = pileInMovePlan;
@@ -881,6 +931,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Ref miroir de squadFightPlan pour accès synchrone dans les callbacks. */
   const squadFightPlanRef = useRef<typeof squadFightPlan>(null);
   squadFightPlanRef.current = squadFightPlan;
+  /** Overrun 12.06 : l'unité fight active peut ENCORE faire son pile-in additionnel
+   * (``overrun_eligible`` de l'état d'attente FIGHT du moteur) → bouton « Overrun ». */
+  const [fightOverrunEligible, setFightOverrunEligible] = useState(false);
   /** Nombre de figs ASSIGNABLES (engagées) de l'unité fight active, remonté par BoardPvp
    * (qui a la géométrie + boardConfig). Sert de dénominateur au décompte de la barre. */
   const [fightAssignableCount, setFightAssignableCount] = useState(0);
@@ -1065,6 +1118,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [manualOrderRequest, setManualOrderRequest] = useState<ManualOrderRequest | null>(null);
   const manualOrderRequestRef = useRef<ManualOrderRequest | null>(null);
   manualOrderRequestRef.current = manualOrderRequest;
+  /** Pose le prompt du DÉFENSEUR humain depuis un payload d'attente — ordre des groupes (05.03)
+   *  ou choix de figurine (05.04) — et rend true s'il en a posé un. Les deux états s'excluent :
+   *  poser l'un efface l'autre. */
+  const applyManualDefenderPrompt = useCallback((result: unknown): boolean => {
+    const order = readManualOrderPrompt(result);
+    if (order !== null) {
+      setManualOrderRequest(order);
+      if (manualAllocationRef.current !== null) setManualAllocation(null);
+      return true;
+    }
+    const allocation = readManualAllocationPrompt(result);
+    if (allocation !== null) {
+      setManualAllocation(allocation);
+      if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+      return true;
+    }
+    return false;
+  }, []);
 
   // Track last action to detect activate_unit in shoot phase
   const lastActionRef = useRef<{ action: string; phase: string; unitId?: string } | null>(null);
@@ -1669,6 +1740,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return { unitIds: [], blinkTimer: null, attackerId: null };
     });
     setAttackPreview(null);
+    setFightOverrunEligible(false);
     moveDestPoolRef.current = new Set();
     footprintZoneRef.current = new Set();
     footprintMaskLoopsRef.current = null;
@@ -2053,56 +2125,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           // Déclaration de l'ordre des groupes d'allocation (cible hétérogène / CHARACTER) :
           // le backend attend l'ordre avant l'allocation fig par fig.
-          if (
-            (data.result?.action === "squad_shoot_declare_order" ||
-              data.result?.action === "squad_fight_declare_order" ||
-              data.result?.action === "squad_hazard_declare_order") &&
-            data.result?.waiting_for_player === true &&
-            data.result?.order_request
-          ) {
-            const orderKind =
-              data.result.action === "squad_fight_declare_order"
-                ? "fight"
-                : data.result.action === "squad_hazard_declare_order"
-                  ? "hazard"
-                  : "shoot";
-            setManualOrderRequest({
-              ...(data.result.order_request as ManualOrderRequest),
-              kind: orderKind,
-            });
-            if (manualAllocationRef.current !== null) setManualAllocation(null);
-            setGameState((p) => {
-              const merged = mergeGameStatePreservingOmittedObjectives(
-                p,
-                data.game_state as APIGameState
-              );
-              latestGameStateRef.current = merged;
-              return merged;
-            });
-            return;
-          }
-
           // Allocation manuelle des pertes (defenseur humain) : le backend attend un
-          // choix de figurine. Capté ici comme rule_choice ; le garde-fou backend renvoie
-          // le même payload tant que l'allocation n'est pas terminée → l'état se ré-arme.
-          if (
-            (data.result?.action === "squad_shoot_manual_alloc" ||
-              data.result?.action === "squad_fight_manual_alloc" ||
-              data.result?.action === "squad_hazard_manual_alloc") &&
-            data.result?.waiting_for_player === true &&
-            data.result?.allocation
-          ) {
-            const allocKind =
-              data.result.action === "squad_fight_manual_alloc"
-                ? "fight"
-                : data.result.action === "squad_hazard_manual_alloc"
-                  ? "hazard"
-                  : "shoot";
-            setManualAllocation({
-              ...(data.result.allocation as ManualAllocation),
-              kind: allocKind,
-            });
-            if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+          // choix de figurine (ou l'ordre des groupes avant). Capté ici comme rule_choice ; le
+          // garde-fou backend renvoie le même payload tant que l'allocation n'est pas terminée
+          // → l'état se ré-arme.
+          if (applyManualDefenderPrompt(data.result)) {
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
                 p,
@@ -3045,6 +3072,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const af = data.result.active_fight_unit ?? data.game_state.active_fight_unit;
             setSelectedUnitId(af != null ? parseInt(String(af), 10) : null);
             setMode("select");
+            // New Foe désengagé (son engageur est mort avant sa sélection) → overrun 12.06.
+            setFightOverrunEligible(data.result.overrun_eligible === true);
           }
           // Fight : sous-phase pile_in SANS unité active (présentation paresseuse).
           // Le moteur expose seulement le pool éligible (sélection libre) ; on nettoie
@@ -3125,6 +3154,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const unitId = parseInt(data.result.unitId || data.game_state.active_fight_unit, 10);
             setSelectedUnitId(unitId);
             setMode("attackPreview");
+            setFightOverrunEligible(data.result.overrun_eligible === true);
 
             // L'EZ rouge du combat dépend du MODE "attackPreview", pas de l'OBJET attackPreview
             // (concept TIR : tireur à sa position de preview). En fight l'unité n'a pas bougé et a
@@ -3179,6 +3209,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(parseInt(String(data.game_state.active_fight_unit), 10));
             setMode("attackPreview");
             setAttackPreview(null);
+            setFightOverrunEligible(data.result.overrun_eligible === true);
             if (blinkingUnits.blinkTimer) {
               clearInterval(blinkingUnits.blinkTimer);
             }
@@ -3331,6 +3362,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       clearChargePoolRefs,
       syncChargePoolRefs,
       blinkingUnits.coverByUnitId,
+      applyManualDefenderPrompt,
     ]
   );
 
@@ -3821,6 +3853,31 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const startDeploySquadRef = useRef<((unitId: number | string) => void) | null>(null);
 
   // Event handlers aligned with backend
+  /** Pose le plan fight local (menu cible-d'abord + barre Cancel/Fight) de l'unité fight active.
+   * Figs lues depuis le cache. Appelé à l'activation en étape FIGHT et au retour du pile-in
+   * additionnel de l'overrun (le plan est purgé pendant ce move, sinon le handler capture fight
+   * intercepterait les clics de pose). */
+  const openSquadFightPlan = useCallback(
+    (unitId: number) => {
+      const gsModels = (latestGameStateRef.current ?? gameState) as {
+        units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
+      };
+      const fightModels = Object.keys(
+        gsModels.units_cache?.[String(unitId)]?.occupied_hexes_by_model ?? {}
+      );
+      setSquadFightPlan({
+        unitId,
+        models: fightModels,
+        targets: {},
+        declarations: [],
+        activeModelId: null,
+        activeWeaponIndex: null,
+        canValidate: false,
+      });
+    },
+    [gameState]
+  );
+
   const handleSelectUnit = useCallback(
     async (unitId: number | string | null) => {
       // [SEL-DEBUG] Entrée du hook de sélection : joueur de l'unité vs current_player frontend.
@@ -3967,24 +4024,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
               // Flux manuel par arme/figurine : initialise le plan local UNIQUEMENT en étape FIGHT.
               // En pile_in / consolidate (move par-figurine), ne PAS poser squadFightPlan — sinon le
-              // handler capture fight intercepterait les clics de pose. Figs lues depuis le cache.
-              const gsModels = (latestGameStateRef.current ?? gameState) as {
-                fight_subphase?: string | null;
-                units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
-              };
-              if (gsModels.fight_subphase === "fight") {
-                const fightModels = Object.keys(
-                  gsModels.units_cache?.[String(numericUnitId)]?.occupied_hexes_by_model ?? {}
-                );
-                setSquadFightPlan({
-                  unitId: numericUnitId,
-                  models: fightModels,
-                  targets: {},
-                  declarations: [],
-                  activeModelId: null,
-                  activeWeaponIndex: null,
-                  canValidate: false,
-                });
+              // handler capture fight intercepterait les clics de pose.
+              if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
+                openSquadFightPlan(numericUnitId);
               }
             } finally {
               activationInProgressRef.current = false;
@@ -4101,6 +4143,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       handleFightPhaseClick,
       currentLevelRef,
       noteActionOutcome,
+      openSquadFightPlan,
     ]
   );
 
@@ -7344,6 +7387,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const keptEngagements = result.kept_engagements === true;
     const engagedModels = ((result.engaged_models ?? []) as unknown[]).map((m) => String(m));
     const pileInTargets = ((result.pile_in_targets ?? []) as unknown[]).map((m) => String(m));
+    const overrun = result.overrun_pile_in === true;
     setPileInMovePlan((prev) => {
       const base = prev ?? {
         unitId: parseInt(String(result.unitId), 10),
@@ -7362,6 +7406,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         keptEngagements: false,
         engagedModels: [] as string[],
         pileInTargets: [] as string[],
+        overrun,
       };
       // Fig active = celle échoée par le backend si encore éligible, sinon l'ancienne si toujours
       // éligible, sinon aucune. Le pool ne vaut que pour elle (calcul ciblé backend).
@@ -7392,6 +7437,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         keptEngagements,
         engagedModels,
         pileInTargets,
+        overrun,
       };
     });
   }, []);
@@ -7523,16 +7569,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPileInFocusMode(null);
       setPileInFocusTargetId(null);
       setPileInMovePlan(null);
+      if (plan.overrun) {
+        // Overrun 12.06 : « one additional pile-in move, THEN fights » — la réponse est l'état
+        // d'attente de la même unité, cibles recalculées à sa nouvelle position. Étape FIGHT :
+        // mode attackPreview posé à la réception, on rouvre son plan fight au lieu de
+        // désélectionner. New Foes (sous-phase consolidate) : la réception a déjà posé la
+        // sélection en mode select, l'attaque passe par le clic-cible direct (pas de plan).
+        if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
+          openSquadFightPlan(plan.unitId);
+        }
+        return;
+      }
       setSelectedUnitId(null);
       setMode("select");
     } catch (e) {
       console.error("[PILE-IN] commit FAILED", e);
       setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction, currentLevelRef, noteActionOutcome]);
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan, gameState]);
 
-  /** Bouton Annuler : renonce à piler l'unité active (skip, la consomme), nettoie le plan local. */
+  /** Bouton Annuler : renonce à piler l'unité active (skip), nettoie le plan local. Pile-in
+   * groupé : skip la consomme (12.02). Overrun : skip renonce seulement au move additionnel,
+   * l'unité reste active et combat depuis sa position → on rouvre son plan fight. */
   const handleCancelPileInModelMove = useCallback(async () => {
+    const overrunUnitId = pileInMovePlanRef.current?.overrun
+      ? pileInMovePlanRef.current.unitId
+      : null;
     pileInModelPoolRef.current = new Set();
     pileInModelMaskLoopsRef.current = null;
     setPileInFocusMode(null);
@@ -7543,9 +7605,49 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     } catch (e) {
       console.error("Cancel pile-in model move (skip) failed:", e);
     }
+    if (overrunUnitId != null) {
+      // Même partage que le commit : plan fight en étape FIGHT, clic-cible direct en New Foes.
+      if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
+        openSquadFightPlan(overrunUnitId);
+      }
+      return;
+    }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction, noteActionOutcome]);
+  }, [executeAction, noteActionOutcome, openSquadFightPlan, gameState]);
+
+  /** Bouton Overrun (12.06) : ouvre le pile-in ADDITIONNEL par-figurine de l'unité fight active.
+   * Le plan fight local est purgé le temps du move (le handler capture fight intercepterait les
+   * clics de pose) ; la réponse ``pile_in_model_move`` + ``overrun_pile_in`` pose le mode. */
+  const handleOverrunPileIn = useCallback(async () => {
+    // Étape FIGHT : l'unité du plan fight local (purgé le temps du move). New Foes (12.08
+    // AFTER, sous-phase consolidate) : pas de plan, l'unité est l'active du moteur.
+    const plan = squadFightPlanRef.current;
+    const activeStr = getActiveFightUnitIdString(
+      latestGameStateRef.current as ActivationPointerGameState | null,
+      (latestGameStateRef.current ?? gameState) as ActivationPointerGameState
+    );
+    const unitId = plan ? plan.unitId : activeStr ? parseInt(activeStr, 10) : null;
+    if (unitId == null) return;
+    setSquadFightPlan(null);
+    const reopen = () => {
+      if (plan) openSquadFightPlan(unitId);
+    };
+    try {
+      const data = await executeAction({
+        action: "overrun_pile_in",
+        unitId: String(unitId),
+        level: currentLevelRef?.current ?? 0,
+      });
+      if (noteActionOutcome(data, "Overrun").kind !== "ok") {
+        reopen();
+      }
+    } catch (e) {
+      console.error("[OVERRUN] overrun_pile_in FAILED", e);
+      setError(`Overrun failed: ${formatApiConnectionError(e)}`);
+      reopen();
+    }
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan, gameState]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). active_fight_unit posée
@@ -8376,6 +8478,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelSquadShoot: async () => {},
       onSquadShootTypeSelect: async () => {},
       squadFightPlan: null,
+      fightOverrunEligible: false,
+      onOverrunPileIn: async () => {},
       onSelectModelForFight: () => {},
       onAssignFightTarget: async () => {},
       onAssignFightWeapon: async () => {},
@@ -8833,6 +8937,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelSquadShoot: handleCancelSquadShoot,
     onSquadShootTypeSelect: handleSquadShootTypeSelect,
     squadFightPlan,
+    fightOverrunEligible,
+    onOverrunPileIn: handleOverrunPileIn,
     onSelectModelForFight: handleSelectModelForFight,
     onAssignFightTarget: handleAssignFightTarget,
     onAssignFightWeapon: handleAssignFightWeapon,
@@ -9280,21 +9386,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           const activationData = await aiResponse.json();
 
-          if (activationData.result?.action === "ai_turn_skipped") {
-            if (activationData.game_state) {
-              setGameState((p) =>
-                mergeGameStatePreservingOmittedObjectives(
-                  p,
-                  activationData.game_state as APIGameState
-                )
-              );
-              setEndlessDutyState(
-                (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
-              );
-            }
-            break;
-          }
-
           // Process AI activation logs immediately
           const activationGsPhase = (activationData.game_state as { phase?: string } | undefined)
             ?.phase;
@@ -9421,6 +9512,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setEndlessDutyState(
               (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
             );
+          }
+
+          // `ai_turn_skipped` (success:true) : rien à jouer pour le bot — mais la réponse peut
+          // porter les `action_logs` réglés par le serveur avant ce constat (pile-in /
+          // consolidation du bot par `_fight_v11_gym_settle` en phase fight, 12.02/12.08), et
+          // le serveur a vidé son buffer : ils sont dispatchés ci-dessus, comme ceux d'une
+          // activation réussie, AVANT de sortir de la boucle.
+          if (activationData.result?.action === "ai_turn_skipped") {
+            break;
+          }
+
+          // Allocation manuelle des pertes par le DÉFENSEUR HUMAIN (05.03/05.04, 06.02) : le bot
+          // a attaqué, le moteur attend un clic de figurine de l'humain. Même prompt que sur
+          // le chemin `executeAction` ; sans lui, le joueur ne verrait rien avant son prochain
+          // geste (le garde-fou backend ne ré-arme le prompt qu'à la requête suivante), et la
+          // boucle relancerait `/game/ai-turn` que le moteur refuse tant que l'allocation dure.
+          if (applyManualDefenderPrompt(activationData.result)) {
+            break;
           }
 
           // Step 2: Check if we got a preview response requiring decision
