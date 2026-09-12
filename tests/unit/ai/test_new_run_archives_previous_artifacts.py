@@ -64,10 +64,12 @@ def test_canonical_artifacts_are_the_fixed_name_ones(tmp_path) -> None:
         "model_TestAgent_interrupted.zip",
         "model_TestAgent_interrupted_vec_normalize.pkl",
         "model_TestAgent_interrupted_run_state.json",
-        # Le contrat du run (observation, familles d'actions, clés de récompense) : nom FIXE, donc
-        # écrasé par le run neuf. Un modèle archivé sans son contrat est irreprenable — sa reprise
-        # s'arrêterait sur un « contrat absent », exactement comme un zip sans ses stats.
-        "training_contract.json",
+        "model_TestAgent_interrupted_training_contract.json",
+        # Le contrat du run (observation, familles d'actions, clés de récompense) : compagnon du
+        # modèle, écrasé par le run neuf qui écrit le sien. Un modèle archivé sans son contrat est
+        # irreprenable — sa reprise s'arrêterait sur un « contrat absent », exactement comme un
+        # zip sans ses stats.
+        "model_TestAgent_training_contract.json",
     }
 
 

@@ -27,7 +27,7 @@ from typing import Any, Dict
 import pytest
 
 from ai.training_contract import (
-    CONTRACT_FILENAME,
+    CONTRACT_SUFFIX,
     build_contract,
     contract_mismatch,
     contract_path,
@@ -517,8 +517,9 @@ def test_une_ecriture_interrompue_laisse_le_contrat_precedent_intact(tmp_path) -
     assert read_contract(model_path) == valide, (
         "l'écriture cassée a laissé un fragment à la place du contrat précédent"
     )
+    nom_contrat = os.path.basename(contract_path(model_path))
     residus = [n for n in os.listdir(os.path.dirname(contract_path(model_path)))
-               if n.startswith(CONTRACT_FILENAME) and n != CONTRACT_FILENAME]
+               if n.startswith(nom_contrat) and n != nom_contrat]
     assert not residus, f"brouillon laissé derrière l'écriture cassée : {residus}"
 
 
@@ -576,7 +577,7 @@ def test_le_contrat_neuf_survit_a_l_archivage(tmp_path, monkeypatch) -> None:
         str(models_root), AGENT, True, False, 1, _rewards(), AGENT, log_fn=lambda _m: None
     )
 
-    contrat = models_root / AGENT / CONTRACT_FILENAME
+    contrat = models_root / AGENT / f"model_{AGENT}{CONTRACT_SUFFIX}"
     assert contrat.exists(), "le contrat neuf a été archivé avec le run précédent"
     assert json.loads(contrat.read_text(encoding="utf-8")) == build_contract(_rewards(), AGENT)
 
@@ -599,7 +600,9 @@ def test_un_contrat_seul_n_est_pas_archive_sans_son_modele(tmp_path) -> None:
 
     noms = {os.path.basename(p) for p in canonical_run_artifacts(model_path)}
 
-    assert CONTRACT_FILENAME not in noms, "un contrat sans modèle n'a rien à accompagner"
+    assert f"model_{AGENT}{CONTRACT_SUFFIX}" not in noms, (
+        "un contrat sans modèle n'a rien à accompagner"
+    )
 
 
 def test_deux_new_dans_la_meme_seconde_ne_levent_pas(tmp_path, monkeypatch) -> None:
@@ -620,50 +623,106 @@ def test_deux_new_dans_la_meme_seconde_ne_levent_pas(tmp_path, monkeypatch) -> N
             str(models_root), AGENT, True, False, 1, _rewards(), AGENT, log_fn=lambda _m: None
         )
 
-    assert (models_root / AGENT / CONTRACT_FILENAME).exists()
+    assert (models_root / AGENT / f"model_{AGENT}{CONTRACT_SUFFIX}").exists()
 
 
-def test_resume_from_conserve_le_contrat_du_modele(tmp_path, monkeypatch) -> None:
-    """`--resume-from` ne doit pas laisser le modèle promu sans contrat.
+class _LoaderPromotion:
+    """Ce que `_promote_checkpoint_for_resume` et `prepare_run_artifacts` consomment."""
 
-    La promotion écarte les artefacts canoniques du modèle en place — contrat compris. Or le
-    checkpoint promu sort du MÊME entraînement : il a appris sous ce contrat-là. Sans remise en
-    place, la reprise s'arrêtait aussitôt sur « aucun contrat d'entrainement », en réclamant une
-    initialisation manuelle pour un contrat qui était juste à côté.
+    def __init__(self, tmp_path: Path) -> None:
+        self._models_root = tmp_path / "models"
+
+    def get_models_root(self) -> str:
+        return str(self._models_root)
+
+    def _resolve_agent_config_key(self, agent_key: str) -> str:
+        return agent_key
+
+
+def _canonique_et_checkpoint(tmp_path: Path, monkeypatch, *, contrat_checkpoint) -> tuple:
+    """Un canonique sous le contrat `win=3.0`, un checkpoint sous `contrat_checkpoint` (ou sans).
+
+    `build_agent_model_path` passe par le loader GLOBAL pour résoudre la clé d'agent, pas par
+    celui qu'on donne à la promotion : sans ce patch, le test irait chercher un vrai dossier
+    `config/agents/TestAgent/`.
     """
     from ai import train
+    from ai.run_state import save_run_state
+    from ai.vec_normalize_utils import get_vec_normalize_path
 
-    class _Loader:
-        def get_models_root(self) -> str:
-            return str(tmp_path / "models")
-
-        def _resolve_agent_config_key(self, agent_key: str) -> str:
-            return agent_key
-
-    # `build_agent_model_path` passe par le loader GLOBAL pour résoudre la clé d'agent, pas par
-    # celui qu'on donne à la promotion : sans ce patch, le test irait chercher un vrai dossier
-    # `config/agents/TestAgent/`.
-    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    loader = _LoaderPromotion(tmp_path)
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: loader)
+    monkeypatch.setattr(train, "_pending_resume_promotion", None, raising=False)
     dossier = tmp_path / "models" / AGENT
     dossier.mkdir(parents=True)
     model_path = dossier / f"model_{AGENT}.zip"
     model_path.write_bytes(b"PK\x03\x04 canonique")
-    contrat = build_contract(_rewards(win=3.0), AGENT)
-    write_contract(str(model_path), contrat)
+    write_contract(str(model_path), build_contract(_rewards(win=3.0), AGENT))
 
     checkpoint = dossier / "ppo_checkpoint_1000_steps.zip"
     checkpoint.write_bytes(b"PK\x03\x04 checkpoint")
-    for compagnon in train.model_companion_paths(str(checkpoint)):
-        Path(compagnon).write_bytes(b"compagnon")
+    Path(get_vec_normalize_path(str(checkpoint))).write_bytes(b"stats")
+    save_run_state(str(checkpoint), 7)
+    if contrat_checkpoint is not None:
+        write_contract(str(checkpoint), contrat_checkpoint)
+    return train, loader, str(checkpoint)
 
-    monkeypatch.setattr(train, "_pending_resume_promotion", None, raising=False)
-    promu = train._promote_checkpoint_for_resume(
-        str(checkpoint), AGENT, _Loader(), log_fn=lambda _m: None
+
+def test_resume_from_installe_le_contrat_du_checkpoint_pas_celui_du_canonique(
+    tmp_path, monkeypatch
+) -> None:
+    """Le modèle promu porte le contrat sous lequel LUI a appris.
+
+    La promotion écarte les artefacts canoniques — contrat compris — et reposait ce contrat-là
+    sur le checkpoint, en supposant qu'ils sortaient du même entraînement. Rien ne le garantit :
+    les checkpoints des runs précédents restent dans le dossier. Le checkpoint emporte donc le
+    sien, et c'est celui-là qui est installé.
+    """
+    contrat_checkpoint = build_contract(_rewards(win=3.0, kill=2.0), AGENT)
+    train, loader, checkpoint = _canonique_et_checkpoint(
+        tmp_path, monkeypatch, contrat_checkpoint=contrat_checkpoint
     )
 
-    assert read_contract(promu) == contrat, (
-        "le modèle promu n'a plus de contrat : toute reprise --resume-from s'arrêterait"
+    promu = train._promote_checkpoint_for_resume(checkpoint, AGENT, loader, log_fn=lambda _m: None)
+
+    assert read_contract(promu) == contrat_checkpoint, (
+        "le modèle promu porte le contrat du canonique écarté, pas le sien"
     )
+
+
+def test_resume_from_refuse_un_checkpoint_sans_contrat(tmp_path, monkeypatch) -> None:
+    """Sans contrat, on ne sait pas sur quoi le checkpoint a appris : on s'arrête, on ne suppose pas."""
+    train, loader, checkpoint = _canonique_et_checkpoint(
+        tmp_path, monkeypatch, contrat_checkpoint=None
+    )
+
+    with pytest.raises(FileNotFoundError, match="contrat d'entrainement absent"):
+        train._promote_checkpoint_for_resume(checkpoint, AGENT, loader, log_fn=lambda _m: None)
+
+    assert (tmp_path / "models" / AGENT / f"model_{AGENT}.zip").read_bytes() == b"PK\x03\x04 canonique", (
+        "le refus a laissé la promotion toucher au modèle canonique"
+    )
+
+
+def test_un_checkpoint_d_un_autre_run_est_compare_sur_SON_contrat(tmp_path, monkeypatch) -> None:
+    """Le scénario du bug, de bout en bout : promotion puis prologue.
+
+    Le canonique a appris sous le contrat COURANT (`win` seul) ; le checkpoint vient d'un run
+    antérieur où `kill` existait encore. Avec le contrat du canonique reposé sur le checkpoint, le
+    prologue comparait ce contrat-là au code courant, disait « inchangé », et le run repartait sur
+    des poids qui lisaient une clé disparue. Il doit s'arrêter en nommant `kill`.
+    """
+    contrat_ancien_run = build_contract(_rewards(win=3.0, kill=2.0), AGENT)
+    train, loader, checkpoint = _canonique_et_checkpoint(
+        tmp_path, monkeypatch, contrat_checkpoint=contrat_ancien_run
+    )
+    train._promote_checkpoint_for_resume(checkpoint, AGENT, loader, log_fn=lambda _m: None)
+
+    with pytest.raises(ValueError, match="kill"):
+        train.prepare_run_artifacts(
+            loader.get_models_root(), AGENT, False, True, 1, _rewards(win=3.0), AGENT,
+            log_fn=lambda _m: None,
+        )
 
 
 def test_la_cle_de_recompense_du_contrat_est_celle_du_run(tmp_path, monkeypatch) -> None:
@@ -692,7 +751,9 @@ def test_la_cle_de_recompense_du_contrat_est_celle_du_run(tmp_path, monkeypatch)
         str(models_root), AGENT, True, False, 1, table, "PhaseB", log_fn=lambda _m: None
     )
 
-    ecrit = json.loads((models_root / AGENT / CONTRACT_FILENAME).read_text(encoding="utf-8"))
+    ecrit = json.loads(
+        (models_root / AGENT / f"model_{AGENT}{CONTRACT_SUFFIX}").read_text(encoding="utf-8")
+    )
     assert "kill" in ecrit["reward_keys"], (
         "le contrat a empreinté la table de --agent au lieu de celle du run"
     )

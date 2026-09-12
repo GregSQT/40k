@@ -117,19 +117,30 @@ champs d'observation, il double SB3 en s'arrêtant plus tôt, et ne prétend pas
 inoffensif pour un modèle déjà entraîné — la comparaison de listes ordonnées le signale quand même.
 Un arrêt de trop coûte une commande ; un arrêt manquant, des dizaines d'heures.
 
-`ai/training_contract.py` écrit donc, à côté de chaque modèle, un `training_contract.json` qui
-porte **les noms, dans leur ordre** : registres d'observation (`*_FIELDS` de
-`engine/observation_entities.py`, découverts par introspection), canaux de
-`GRID_CHANNEL_NAMES`, `ACTION_FAMILIES`, et les **chemins de clés** de la table de récompense de
-l'agent.
+`ai/training_contract.py` écrit donc, à côté de chaque modèle, un **compagnon**
+`<stem>_training_contract.json` (`model_<agent>_training_contract.json` pour le canonique,
+`ppo_checkpoint_<run>_<n>_steps_training_contract.json` pour un checkpoint — même dérivation que
+`_vec_normalize.pkl` et `_run_state.json`, `ai/model_artifacts.py`) qui porte **les noms, dans leur
+ordre** : registres d'observation (`*_FIELDS` de `engine/observation_entities.py`, découverts par
+introspection), canaux de `GRID_CHANNEL_NAMES`, `ACTION_FAMILIES`, et les **chemins de clés** de la
+table de récompense de l'agent.
 
 - `--new` **écrit** le contrat (après l'archivage : écrit avant, il partirait avec le run précédent) ;
 - toute **reprise** le compare et **s'arrête** au moindre écart, en nommant le champ divergent ;
 - le contrat suit le modèle à l'archivage, comme ses stats VecNormalize — une archive sans contrat
   serait irreprenable — mais **seulement quand un modèle part avec lui** : un contrat seul ne décrit
   rien, et l'écarter faisait entrer en collision deux `--new` de la même seconde ;
-- `--resume-from` **repose** le contrat écarté sur le checkpoint promu : il sort du même
-  entraînement, donc il a appris sous ce contrat-là ;
+- **chaque artefact reprenable emporte le sien** : le callback de checkpoint copie le contrat du run
+  à côté de chaque `ppo_checkpoint_*`, la sauvegarde `_interrupted` du Ctrl-C et la promotion
+  d'étape (`model_<agent>_<étape>.zip`) font de même — la promotion d'étape **lève** si le canonique
+  n'en a pas ;
+- `--resume-from` **installe le contrat du modèle promu**, jamais celui du canonique qu'il écarte
+  (décision 2026-09-12) : les checkpoints des runs précédents restent dans le dossier, et rien ne
+  prouve que le promu sort du même entraînement. C'est ce contrat-là que le prologue compare au code
+  courant — un checkpoint d'un run antérieur au contrat divergent est refusé en nommant le champ,
+  un checkpoint au contrat identique est repris même s'il vient d'un autre run. Un artefact **sans**
+  contrat n'est pas promouvable ; s'il est antérieur à ce mécanisme et que son contrat est connu, le
+  copier à la main sous `<stem>_training_contract.json` ;
 - la table empreintée est celle **du run** (`--rewards-config`, qui porte le suffixe de phase), pas
   celle de `--agent` — même distinction que dans `test_trained_model`.
 
@@ -173,8 +184,14 @@ restent donc en place, et **le nom porte l'horodatage du run** :
 `<checkpoint_name_prefix>_<AAAAMMJJ-HHMMSS>_<pas>_steps.zip`. Nommé par le seul nombre de pas, un
 `--new` (qui repart de 0) comme un `--resume-from` (qui continue au compte du checkpoint promu)
 écrasait en silence ceux du run précédent à chaque compte atteint. Le dossier dit donc à quel run
-appartient chaque checkpoint ; la promotion repose le contrat courant sur le checkpoint promu sans
-vérifier sa lignée.
+appartient chaque checkpoint. Ce que la promotion **garantit**, c'est le sens des grandeurs — chaque
+checkpoint emporte son contrat (`<stem>_training_contract.json`), c'est lui qui est installé et
+comparé au code courant, jamais celui du canonique écarté. Ce qu'elle **ne vérifie pas**, c'est
+l'identité du run : le log de promotion donne la date d'écriture et le compte d'épisodes du promu et
+du canonique écarté, c'est à l'opérateur de les lire. Un checkpoint est un ensemble de **quatre**
+fichiers (zip, `_vec_normalize.pkl`, `_run_state.json`, `_training_contract.json`) écrits l'un après
+l'autre : un Ctrl-C entre le premier et le dernier laisse un checkpoint incomplet, que `--resume-from`
+refuse explicitement.
 
 ### Key Paths
 - **Training Configs**: `config/agents/<agent_name>/<agent_name>_training_config.json`
