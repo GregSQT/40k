@@ -2099,8 +2099,6 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
         """
         discarded = list(self.written_checkpoints)
         for checkpoint_path in discarded:
-            # Les compagnons partent AVEC leur zip : un orphelin serait relu par un futur
-            # checkpoint de meme nom (cf. ai/model_artifacts.py).
             remove_model_with_companions(checkpoint_path)
         self.written_checkpoints.clear()
         return discarded
@@ -2123,8 +2121,6 @@ class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
     def _on_step(self) -> bool:
         continue_training = super()._on_step()
         while len(self.written_checkpoints) > self.max_checkpoints:
-            # Les compagnons partent AVEC leur zip : un orphelin serait relu par un futur
-            # checkpoint de meme nom (cf. ai/model_artifacts.py).
             remove_model_with_companions(self.written_checkpoints.pop(0))
         return continue_training
 
@@ -4881,9 +4877,11 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         
         # Les callbacks arrivent de `setup_callbacks`, appelee AVANT que ce tracker n'existe :
         # c'est ici que le compteur d'episodes rejoint les checkpoints (cf. ai/run_state.py).
-        for _callback in callbacks:
-            if isinstance(_callback, VecNormalizeCheckpointCallback):
-                _callback.metrics_tracker = metrics_tracker
+        checkpoint_callbacks = [
+            callback for callback in callbacks if isinstance(callback, VecNormalizeCheckpointCallback)
+        ]
+        for checkpoint_callback in checkpoint_callbacks:
+            checkpoint_callback.metrics_tracker = metrics_tracker
 
         all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
@@ -4914,15 +4912,12 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
             publish_canonical_model(model, model_path, int(metrics_tracker.episode_count))
         
-        # Le run reussi retire SES checkpoints periodiques, compagnons compris (zip, stats
-        # VecNormalize, compte d'episodes) : le modele canonique est publie, ils n'ont plus
-        # d'usage. Ceux des runs precedents restent en place — un balayage `ppo_*_steps.zip` du
-        # dossier les effacait avec, et laissait orphelin le compte d'episodes de chacun.
+        # Le run reussi retire SES checkpoints periodiques : le canonique est publie, ils n'ont
+        # plus d'usage. Ceux des runs precedents restent (cf. `discard_written_checkpoints`).
         discarded_checkpoints = [
             path
-            for callback in callbacks
-            if isinstance(callback, VecNormalizeCheckpointCallback)
-            for path in callback.discard_written_checkpoints()
+            for checkpoint_callback in checkpoint_callbacks
+            for path in checkpoint_callback.discard_written_checkpoints()
         ]
         if discarded_checkpoints:
             print(f"\n🧹 {len(discarded_checkpoints)} checkpoint(s) de ce run retire(s)")
@@ -4931,7 +4926,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         interrupted_path = _interrupted_model_path(model_path)
         if os.path.exists(interrupted_path):
             remove_model_with_companions(interrupted_path)
-            print(f"🧹 Removed old interrupted file")
+            print("🧹 Removed old interrupted file")
         
         return True
         

@@ -173,7 +173,8 @@ def test_promote_requires_agent(models_root):
 
 
 class _FakeModel:
-    """Modele minimal : le callback n'en consomme que la sauvegarde et l'env normalise."""
+    """Modele minimal : le callback n'en consomme que la sauvegarde et l'env normalise ;
+    `train_model` y ajoute un `learn()` qui n'apprend rien."""
 
     def __init__(self, env, logger):
         self.env = env
@@ -186,6 +187,9 @@ class _FakeModel:
     def save(self, path):
         with open(path, "wb") as f:
             f.write(b"MODEL")
+
+    def learn(self, **kwargs):
+        pass
 
 
 def _make_vec_normalize_model():
@@ -269,6 +273,12 @@ def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
     ]
 
 
+def _write_stale_checkpoint(save_path, steps: str) -> None:
+    (save_path / f"ppo_checkpoint_{steps}_steps.zip").write_bytes(b"stale")
+    (save_path / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"stale")
+    (save_path / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text('{"episodes_trained": 1}')
+
+
 def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(models_root, tmp_path):
     """Reproduction du 2026-09-12 : trois checkpoints périmés à 24 M pas, un run `--new` qui repart
     de 0. La rotation triait TOUS les `<prefix>_*_steps.zip` du dossier par nombre de pas : les
@@ -277,9 +287,7 @@ def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(mod
     save_path = tmp_path / "ckpts"
     save_path.mkdir()
     for steps in ("24309576", "24549576", "24789576"):
-        (save_path / f"ppo_checkpoint_{steps}_steps.zip").write_bytes(b"stale")
-        (save_path / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"stale")
-        (save_path / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text('{"episodes_trained": 1}')
+        _write_stale_checkpoint(save_path, steps)
     callback = RotatingCheckpointCallback(
         max_checkpoints=3, save_freq=1, save_path=str(save_path), name_prefix="ppo_checkpoint"
     )
@@ -303,12 +311,6 @@ def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(mod
     ]
     # Et les compagnons du checkpoint tourné partent avec lui.
     assert not any(p.startswith("ppo_checkpoint_10000_steps") for p in os.listdir(save_path))
-
-
-def _write_stale_checkpoint(save_path, steps: str) -> None:
-    (save_path / f"ppo_checkpoint_{steps}_steps.zip").write_bytes(b"stale")
-    (save_path / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"stale")
-    (save_path / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text('{"episodes_trained": 1}')
 
 
 def test_discard_written_checkpoints_removes_only_this_runs_checkpoints_with_companions(
@@ -347,16 +349,65 @@ def test_discard_written_checkpoints_removes_only_this_runs_checkpoints_with_com
     assert callback.discard_written_checkpoints() == []
 
 
-def test_train_model_discards_the_checkpoints_of_the_run_through_the_callbacks():
-    """`train_model` ne balaie plus le dossier : il retire par les callbacks, et le `_interrupted`
-    part avec ses compagnons. Vérifié sur la source, comme `test_the_training_paths_share_the_prologue` :
-    le jouer demanderait un `learn()` réel et la publication du modèle canonique."""
-    import inspect
+def test_train_model_discards_the_checkpoints_of_the_run_through_the_callbacks(
+    models_root, tmp_path, monkeypatch
+):
+    """Joue le VRAI `train_model` (apprentissage a vide) : le run reussi publie le canonique, puis
+    retire par ses callbacks les checkpoints qu'il a ecrits — avec leurs trois artefacts — et le
+    `_interrupted` d'un Ctrl-C precedent ; le checkpoint perime d'un run precedent reste. Un
+    balayage `ppo_*_steps.zip` du dossier emportait le perime et laissait orphelin son compte
+    d'episodes."""
+    import ai.metrics_tracker as metrics_tracker_module
 
-    source = inspect.getsource(ai.train.train_model)
-    assert "discard_written_checkpoints()" in source
-    assert "remove_model_with_companions(interrupted_path)" in source
-    assert "glob.glob(" not in source
+    model_dir = models_root / "TestAgent"
+    model_path = str(model_dir / "model_TestAgent.zip")
+    _write_stale_checkpoint(model_dir, "24789576")
+    interrupted = ai.train._interrupted_model_path(model_path)
+    open(interrupted, "wb").close()
+    (model_dir / "model_TestAgent_interrupted_run_state.json").write_text('{"episodes_trained": 1}')
+
+    class _FakeTracker:
+        def __init__(self, agent_name, tensorboard_dir, **kwargs):
+            self.episode_count = 7
+
+        def truncation_summary_lines(self):
+            return []
+
+    class _NoLearnCallback:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def print_final_training_summary(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(metrics_tracker_module, "W40KMetricsTracker", _FakeTracker)
+    monkeypatch.setattr(metrics_tracker_module, "resolve_perf_windows", lambda cfg: (100, 10))
+    monkeypatch.setattr(ai.train, "MetricsCollectionCallback", _NoLearnCallback)
+
+    model = _make_vec_normalize_model()
+    model.logger = SimpleNamespace(get_dir=lambda: str(tmp_path / "tb"))
+    callback = VecNormalizeCheckpointCallback(
+        save_freq=1, save_path=str(model_dir), name_prefix="ppo_checkpoint"
+    )
+    callback.init_callback(cast(Any, model))
+    # Le tracker n'est pose par `train_model` qu'AVANT `learn()` : pour ecrire les checkpoints
+    # sans apprendre, on le pose ici et on joue le callback a la main.
+    callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
+    for steps in (10000, 20000):
+        _run_checkpoint(callback, model, steps)
+
+    training_config = {"total_timesteps": 1, "callback_params": {"save_best_robust": False}}
+    assert ai.train.train_model(model, training_config, [callback], model_path, "x1", "TestAgent") is True
+
+    assert sorted(os.listdir(model_dir)) == [
+        "model_TestAgent.zip",
+        "model_TestAgent_run_state.json",
+        "model_TestAgent_vec_normalize.pkl",
+        "ppo_checkpoint_24789576_steps.zip",
+        "ppo_checkpoint_24789576_steps_run_state.json",
+        "ppo_checkpoint_24789576_steps_vec_normalize.pkl",
+    ]
+    assert callback.written_checkpoints == []
 
 
 def _write_previous_canonical_model(models_root, run_dir: str = "/tb/run_20260101-000000"):
