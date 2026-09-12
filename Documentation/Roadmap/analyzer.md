@@ -128,6 +128,33 @@ Nouveau `unit_ability_attack_cap` (`analyzer_perfig.py`), jumeau INVERSE de `per
 
 Verrous : `test_analyzer_unit_ability_attached_19_04.py`, `test_analyzer_hail_of_bolts.py`.
 
+**✅ LIVRÉ (2026-09-11) — §1.7, MÊME cause 19.04, autre registre : 2 `INVALID` → 0.** Le registre
+de validité `rule_to_units` (`analyzer_config.py`) est bâti sur les datasheets d'ESCOUADE : il ne
+voyait pas la capacité du personnage replié dedans. Sur le run holdout du 2026-09-11,
+`mortal_wounds_on_fight_activation` (Chaplain dans un Vanguard, 90 usages) et
+`mortal_wounds_on_critical_wound` (PainBoy dans des Boyz, 4 usages) sortaient donc `INVALID`,
+soit **4 des 4 erreurs du run**. Le moteur, lui, applique 19.04 — vérifié en reconstruisant le
+scénario : `unit 1 (Boyz)` porte bien la règle via `_ATTACHED_RULE_GROUPS['_inline_1_11']`.
+Le verdict juge sur la composition OBSERVÉE (`[MODEL_TYPES:]`) et non sur `CAN_LEAD` — ce dernier
+décrit les attachements LÉGAUX, un sur-ensemble qui blanchirait un usage réellement invalide.
+
+**✅ ITÉRATION (2026-09-11, suite 80) — le verdict passe du post-traitement au RELEVÉ.** Jugé a
+posteriori sur la clé `(règle, type d'escouade)`, il se prononçait sur la composition de
+DÉPLOIEMENT, unionnée par type et sur les deux camps : une capacité restait `OK` après la mort de
+sa source (19.04 l'arrête là), et une seule escouade attachée blanchissait ses homonymes (sur le
+step.log du jour, `Unit 4 (Intercessor)` mène un `Librarian`, `Unit 5 (Intercessor)` un
+`CaptainRelicShield`). `note_special_rule_usage` (`ai/analyzer_rules.py`) est désormais le SITE
+UNIQUE d'écriture de `special_rule_usage` : il reçoit l'`unit_id`, lit le vivant dans
+`unit_model_hp` (`living_datasheets`), et accumule les relevés fautifs dans
+`stats['special_rule_usage_invalid']` — que `error_totals` SOMME (90 usages illégaux comptent 90)
+et que le tableau §1.7 rend en `INVALID(n)`. `stats['model_types_by_unit_id']` remplace
+`model_types_by_unit_type`. Deux abstentions assumées : la règle de la datasheet d'ESCOUADE reste
+valide (le journal ne dit pas quel socle est natif ; l'exiger serait plus strict que la règle), et
+un socle vivant de datasheet inconnue suspend le verdict — cas des figurines RENDUES (`#r<n>`, que
+19.04 réhabilite). Verrou : `test_analyzer_attached_rule_validity.py` (8 verts, 3 mutations
+rouge→vert) ; `test_analyzer_faction_ability_validity.py` APPELLE le prédicat au lieu de recopier
+son critère. Re-dépouillement du même step.log : 1909 utilisations, 0 `INVALID`.
+
 **✅ LIVRÉ (2026-09-02) — 1935 → 0 `surcharge_atk` restants** : deux capacités Primitive B absentes de `max_allowed_shots` :
 
 3. **`weapon_attacks_bonus_vs_keyword` (Dakkablitz / BigMekDakkarig)** — +6 A au Blitzcannon si cible hors MONSTER/VEHICLE. `excluded_keywords` absent du registre JSON (tableau TS silencieusement ignoré par le parseur). Fix : `unit_registry.py` parse désormais les tableaux de chaînes dans `rule_args`. Nouveau `unit_ability_atk_bonus_vs_keyword_cap` dans `analyzer_perfig.py`.

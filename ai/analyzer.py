@@ -1668,10 +1668,13 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             sum(require_key(stats, 'double_activation_by_phase').values())
             + require_key(stats, 'double_activation_reactive_move')
         ),
-        # §1.7 / §1.8 — « invalide » = une paire observée que le registre ne déclare pas.
+        # §1.8 — « invalide » = une paire observée que le registre ne déclare pas.
+        # §1.7 : un RELEVÉ invalide = une faute. Le verdict est rendu au relevé (19.04 dépend de la
+        # composition VIVANTE de l'escouade qui joue, cf. `note_special_rule_usage`) ; ici on ne
+        # fait que sommer. Compter les CLÉS, comme avant, rendait 1 pour 90 usages illégaux.
         'special_rules_invalid': sum(
-            1 for (rule_id, unit_type) in require_key(stats, 'special_rule_usage')
-            if rule_id not in stats['rule_to_units'] or unit_type not in stats['rule_to_units'][rule_id]
+            counts[1] + counts[2]
+            for counts in require_key(stats, 'special_rule_usage_invalid').values()
         ),
         'weapon_rules_invalid': sum(
             1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
@@ -1837,6 +1840,11 @@ def parse_step_log(filepath: str) -> Dict:
     # Statistics structure
     stats = {
         'rule_to_units': rule_to_units,  # rule_id -> set of unit_types (for validity)
+        # Composition DÉCLARÉE par ESCOUADE : {unit_id -> datasheets de ses figurines}, lue dans
+        # `[MODEL_TYPES:]` de l'entête d'épisode. Elle permet à §1.7 de juger une escouade
+        # ATTACHÉE (19.04) sans inventer d'attachement — cf. `living_datasheets` et
+        # `note_special_rule_usage` (ai/analyzer_rules.py).
+        'model_types_by_unit_id': defaultdict(set),  # unit_id -> set of model datasheets
         'squadmates_by_type': _cfg.squadmates_by_type,  # leader_type -> set of led unit_types
         'weapon_rule_to_weapons': weapon_rule_to_weapons,  # rule -> set of "weapon (unit)"
         # rule -> {"ranged"|"melee" -> set of unit_types} : l'applicabilité des règles d'ARMES,
@@ -2059,6 +2067,11 @@ def parse_step_log(filepath: str) -> Dict:
         # le reste. Un compteur commun rendait la ligne d'exemple ambiguë.
         'fight_move_invalid': {'pile_in': {1: 0, 2: 0}, 'consolidation': {1: 0, 2: 0}},
         'special_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule_id, unit_type) -> {1: count, 2: count}
+        # RELEVÉS jugés INVALID, même clé que `special_rule_usage`. Le verdict 19.04 est rendu
+        # AU MOMENT DU RELEVÉ par `note_special_rule_usage` — seul instant où l'on sait quelle
+        # escouade a utilisé la règle et quelles de ses figurines vivaient encore. Un verdict
+        # a posteriori sur la clé `(règle, type)` ne pouvait répondre ni à l'une ni à l'autre.
+        'special_rule_usage_invalid': defaultdict(lambda: {1: 0, 2: 0}),
         # Capacités de FACTION (08.04) : Waaagh!, Oath of Moment. Elles ne figurent dans AUCUN
         # `UNIT_RULES` de datasheet — c'est le mot-clé de faction qui les donne — donc la table
         # `rule_to_units` de 1.7, bâtie sur les datasheets, ne les contient pas et ne pouvait pas
@@ -3835,6 +3848,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     special_rule_usage = stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
     rule_to_units = stats.get('rule_to_units', {})  # get allowed: optional stats
+    # MÊME source que le compteur `special_rules_invalid` d'`error_totals` : les relevés jugés
+    # au moment où ils ont été faits. Deux verdicts bâtis chacun de leur côté ont déjà divergé
+    # en silence dans ce rapport (V16).
+    _invalid_usage = stats.get('special_rule_usage_invalid', {})  # get allowed: optional stats
     expected_keys = set()
     for rule_id, unit_types in rule_to_units.items():
         for unit_type in unit_types:
@@ -3845,8 +3862,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             counts = special_rule_usage.get((rule_id, unit_type), {1: 0, 2: 0})
             p1 = counts.get(1, 0)  # get allowed: optional player counts
             p2 = counts.get(2, 0)  # get allowed: optional player counts
-            has_rule = unit_type in rule_to_units.get(rule_id, set())
-            validite = "OK" if has_rule else "INVALID"
+            # Une paire peut être valide à un tour et invalide au suivant (19.04 : la source
+            # meurt). Le tableau rend donc le NOMBRE de relevés fautifs, pas un verdict binaire
+            # sur la paire, qui aurait effacé le rapport 3-sur-90.
+            _bad = _invalid_usage.get((rule_id, unit_type), {1: 0, 2: 0})  # get allowed: optional stats
+            _bad_total = _bad.get(1, 0) + _bad.get(2, 0)  # get allowed: optional player counts
+            validite = f"INVALID({_bad_total})" if _bad_total else "OK"
             log_print(f"{rule_id:<40} {unit_type:<55} {p1:10d} {p2:10d} {validite:>10}")
     else:
         log_print("No special rule usage recorded.")

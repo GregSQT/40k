@@ -266,7 +266,117 @@ def test_checkpoint_tasks_consume_raw_scenario_files(tmp_path):
     assert {task["scenario_file"] for task in tasks} == expected
 
 
-# ── Archive incompatible : skip journalise, pas de crash de tache ────────────────────────────
+# ── Archive incompatible : les trois formes de rupture §12.15 ────────────────────────────────
+
+
+def _arch(grid_channels: int = 12, *, missing: bool = False, wide: bool = False):
+    """Triplet `_archive_architecture` gree a la main : espaces reels, signature reelle.
+
+    Pas un MagicMock : c'est l'egalite de `gym.spaces.Dict` et la comparaison de formes que le
+    tri exerce, et un mock les rendrait vraies par construction.
+    """
+    import gymnasium as gym
+
+    obs = gym.spaces.Dict({
+        "grid": gym.spaces.Box(low=0.0, high=1.0, shape=(grid_channels, 32, 32), dtype=np.float32),
+        "global_cont": gym.spaces.Box(low=-1.0, high=1.0, shape=(8,), dtype=np.float32),
+    })
+    act = gym.spaces.Discrete(12)
+    sig = {
+        "features_extractor.cnn_stem.0.weight": (32, grid_channels, 3, 3),
+        "fight_weapon_query_net.weight": (64, 64),
+        "action_net.weight": (12, 128 if wide else 64),
+    }
+    if missing:
+        del sig["fight_weapon_query_net.weight"]
+    return (obs, act, sig)
+
+
+def _arch_identique(path, device):
+    """Toute archive est conforme : neutralise le tri pour les tests qui visent autre chose."""
+    return _arch()
+
+
+@pytest.mark.parametrize(
+    "candidate, motif",
+    [
+        (_arch(grid_channels=9), "observation_space"),
+        (_arch(missing=True), "manquante"),
+        (_arch(wide=True), "forme"),
+    ],
+    ids=["observation", "cle_absente", "forme_divergente"],
+)
+def test_filter_ecarte_les_trois_formes_de_rupture(tmp_path, candidate, motif, capsys):
+    """Chacune des trois divergences ecarte l'archive, et le DIT a l'ecran.
+
+    Le critere precedent n'attrapait qu'un texte d'exception, « Missing key ». La rupture de
+    grille du 2026-09-08 casse avant le chargement des poids (`ValueError` de
+    `SpatialCombinedExtractor`) et une rupture de formes seules leverait `size mismatch` : les
+    deux traversaient le `except` et faisaient crasher l'evaluation entiere.
+    """
+    from ai.bot_evaluation import filter_compatible_archives
+
+    model = tmp_path / "model.zip"
+    bad = tmp_path / "bad.zip"
+    model.touch()
+    bad.touch()
+    par_chemin = {str(model): _arch(), str(bad): candidate}
+
+    with patch(
+        "ai.bot_evaluation._archive_architecture",
+        side_effect=lambda path, device: par_chemin[str(path)],
+    ):
+        kept, skipped = filter_compatible_archives(str(model), [(str(bad), "P1")])
+
+    assert kept == []
+    assert [label for _, label in skipped] == ["P1"]
+    trace = capsys.readouterr().out
+    assert "CHECKPOINT_SKIP" in trace, "un skip muet n'est pas un skip (logging.info n'emet rien ici)"
+    assert motif in trace, f"la trace doit nommer la divergence, obtenu : {trace!r}"
+
+
+def test_filter_garde_une_archive_conforme(tmp_path, capsys):
+    """Memes espaces et meme signature : l'archive joue, et rien ne s'affiche."""
+    from ai.bot_evaluation import filter_compatible_archives
+
+    model = tmp_path / "model.zip"
+    good = tmp_path / "good.zip"
+    model.touch()
+    good.touch()
+
+    with patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique):
+        kept, skipped = filter_compatible_archives(str(model), [(str(good), "P0")])
+
+    assert [label for _, label in kept] == ["P0"]
+    assert skipped == []
+    assert "CHECKPOINT_SKIP" not in capsys.readouterr().out
+
+
+def test_archive_architecture_lit_sans_construire_de_policy(tmp_path):
+    """Le triplet vient des donnees du zip : aucune policy, aucun extracteur instancie."""
+    import gymnasium as gym
+    import torch
+
+    from ai.bot_evaluation import _archive_architecture
+
+    archive = tmp_path / "a.zip"
+    archive.touch()
+    obs = gym.spaces.Dict({"grid": gym.spaces.Box(0.0, 1.0, (12, 32, 32), np.float32)})
+    act = gym.spaces.Discrete(7)
+    charge = (
+        {"observation_space": obs, "action_space": act},
+        {"policy": {"action_net.weight": torch.zeros(7, 64)}, "policy.optimizer": {}},
+        None,
+    )
+
+    with patch(
+        "stable_baselines3.common.save_util.load_from_zip_file", return_value=charge
+    ) as load:
+        obs_lu, act_lu, signature = _archive_architecture(str(archive), "cpu")
+
+    assert load.call_args.kwargs["load_data"] is True
+    assert obs_lu == obs and act_lu == act
+    assert signature == {"action_net.weight": (7, 64)}
 
 
 def test_incompatible_archive_is_skipped_not_crashed(tmp_path):
@@ -280,10 +390,7 @@ def test_incompatible_archive_is_skipped_not_crashed(tmp_path):
     for i in range(2):
         (tmp_path / f"scenario_{i}.json").touch()
 
-    def _load(path, device=None, **kwargs):
-        if str(path) == str(bad):
-            raise RuntimeError("Missing key policy.mlp_extractor.weight")
-        return MagicMock()
+    par_chemin = {str(good): _arch(), str(bad): _arch(grid_channels=9)}
 
     seen_tasks: list = []
 
@@ -294,7 +401,10 @@ def test_incompatible_archive_is_skipped_not_crashed(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=[str(tmp_path / f"scenario_{i}.json") for i in range(2)],
         ),
-        patch("sb3_contrib.MaskablePPO.load", side_effect=_load),
+        patch(
+            "ai.bot_evaluation._archive_architecture",
+            side_effect=lambda path, device: par_chemin[str(path)],
+        ),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch(
             "ai.bot_evaluation._eval_worker_task",
@@ -316,8 +426,12 @@ def test_incompatible_archive_is_skipped_not_crashed(tmp_path):
     assert all(task["checkpoint_zip"] == str(good) for task in seen_tasks)
 
 
-def test_non_missing_key_runtime_error_is_not_swallowed(tmp_path):
-    """Seul « Missing key » vaut un skip §12.15 ; toute autre RuntimeError remonte."""
+def test_erreur_de_lecture_d_archive_n_est_pas_avalee(tmp_path):
+    """Le tri portant sur la DONNEE, plus aucune exception de lecture n'est rattrapee.
+
+    Remplace `test_non_missing_key_runtime_error_is_not_swallowed` : il n'y a plus de `except`
+    qui trie sur le texte d'une exception, donc plus de texte a faire passer au travers.
+    """
     from ai.bot_evaluation import evaluate_against_checkpoints
 
     archive = tmp_path / "ckpt.zip"
@@ -331,7 +445,10 @@ def test_non_missing_key_runtime_error_is_not_swallowed(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=[str(tmp_path / "scenario_0.json")],
         ),
-        patch("sb3_contrib.MaskablePPO.load", side_effect=RuntimeError("disque illisible")),
+        patch(
+            "ai.bot_evaluation._archive_architecture",
+            side_effect=RuntimeError("disque illisible"),
+        ),
     ):
         with pytest.raises(RuntimeError, match="disque illisible"):
             evaluate_against_checkpoints(
@@ -373,7 +490,7 @@ def test_failed_episodes_raise_instead_of_shrinking_denominator(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=[str(tmp_path / "scenario_0.json")],
         ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch("ai.bot_evaluation._eval_worker_task", side_effect=_timeout_result),
     ):
@@ -417,7 +534,7 @@ def test_capped_episode_counts_as_draw_and_keeps_win_rate(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=[str(tmp_path / "scenario_0.json")],
         ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch("ai.bot_evaluation._eval_worker_task", side_effect=_one_win_one_cap),
     ):
@@ -639,6 +756,47 @@ def test_pool_early_stopping_closes_its_pool_when_the_evaluation_raises(tmp_path
     _assert_probe_closed_its_pool(probe, pool, created)
 
 
+def test_les_deux_sondes_effacent_leur_zip_temporaire_sur_le_chemin_NOMINAL(tmp_path):
+    """VERROU : le .zip temporaire est efface aussi quand l'evaluation REUSSIT.
+
+    Jumeau des deux tests ci-dessus, qui ne couvraient que le chemin d'exception. Le corps commun
+    `_EvalPoolOwnerMixin._run_checkpoint_probe` rend le dict d'evaluation par un `return` place
+    DANS le `try`, donc c'est le `finally` — et lui seul — qui efface le fichier sur le chemin
+    nominal. Sans ce verrou, un `return` remonte d'un cran hors du `try` laisserait un .zip de
+    45 Mo par sonde dans le dossier temporaire, invisible jusqu'a saturation du disque : une
+    etape a pool sonde toutes les quelques milliers d'episodes pendant des heures.
+
+    Les deux sondes sont exercees dans le MEME test parce qu'elles partagent desormais ce corps :
+    les separer donnerait deux tests dont l'un seul suffit a faire rougir la regression.
+    """
+    archive = tmp_path / "champion.zip"
+    archive.touch()
+
+    for probe, appel in (
+        (exploiter_probe_callback(archive), lambda p: p._probe(n_episodes=10, label="cheap")),
+        (pool_early_stopping_callback(archive), lambda p: p._probe()),
+    ):
+        probe._eval_pool = MagicMock()
+        created: List[str] = []
+        with (
+            patch(
+                "ai.bot_evaluation.evaluate_against_checkpoints",
+                return_value={"target": 0.6, "champion": 0.6},
+            ),
+            patch("ai.vec_normalize_utils.save_vec_normalize"),
+            patch("tempfile.mkstemp", side_effect=_mkstemp_spy(created)),
+        ):
+            appel(probe)
+
+        nom = type(probe).__name__
+        assert len(created) == 1, f"{nom} : la sonde cree exactement un .zip temporaire"
+        assert not os.path.exists(created[0]), (
+            f"{nom} : le .zip temporaire doit etre efface aussi quand l'evaluation reussit"
+        )
+        assert probe._eval_pool is not None, (
+            f"{nom} : une evaluation REUSSIE ne doit pas fermer le pool — il sert a la suivante"
+        )
+
 # ── Helpers ─────────────────────────────────────────────────────────────────────────────────
 
 
@@ -730,7 +888,7 @@ def _build_tasks(tmp_path, n_episodes, n_scenarios, n_workers, use_subprocess=Tr
               return_value=_fake_config(n_workers=n_workers, use_subprocess=use_subprocess)),
         patch("config_loader.get_max_turns", return_value=10),
         patch("ai.training_utils.get_scenario_list_for_phase", return_value=scenarios),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch("ai.bot_evaluation._eval_worker_task", side_effect=_record),
         patch("ai.bot_evaluation.ProcessPoolExecutor", MagicMock()),
@@ -819,7 +977,7 @@ def test_task_dict_contains_model_version_token(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=[str(tmp_path / "scenario_0.json")],
         ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch("ai.bot_evaluation._eval_worker_task", side_effect=_record),
     ):
@@ -861,7 +1019,7 @@ def test_external_pool_used_without_creating_new_pool(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=[str(tmp_path / "scenario_0.json")],
         ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch("ai.bot_evaluation.ProcessPoolExecutor") as mock_ppe,
         patch(
@@ -905,7 +1063,7 @@ def test_internal_pool_shutdown_called_on_success(tmp_path):
         patch("config_loader.get_max_turns", return_value=10),
         patch("ai.training_utils.get_scenario_list_for_phase",
               return_value=[str(tmp_path / "scenario_0.json")]),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation.ProcessPoolExecutor", mock_pool_cls),
         patch("ai.bot_evaluation._collect_parallel_results_with_timeouts",
               side_effect=_serial_collect),
@@ -939,7 +1097,7 @@ def test_internal_pool_shutdown_called_on_exception(tmp_path):
         patch("config_loader.get_max_turns", return_value=10),
         patch("ai.training_utils.get_scenario_list_for_phase",
               return_value=[str(tmp_path / "scenario_0.json")]),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", side_effect=_arch_identique),
         patch("ai.bot_evaluation.ProcessPoolExecutor", mock_pool_cls),
         patch("ai.bot_evaluation._collect_parallel_results_with_timeouts",
               side_effect=KeyboardInterrupt),

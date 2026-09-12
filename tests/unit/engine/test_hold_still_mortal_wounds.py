@@ -201,6 +201,7 @@ def test_crit_porte_son_d6(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
 
     result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    assert result is not None
     assert result["pending_mortal_wounds"] == {
         "ability": HAZARD_CONTEXT_HOLD_STILL, "dice": [4],
     }
@@ -213,6 +214,7 @@ def test_un_d6_par_crit(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: next(_rolls))
 
     result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    assert result is not None
     assert result["pending_mortal_wounds"]["dice"] == [3, 5]
     assert result["counts"]["wounds"] == 3, "les trois blessures restent des blessures"
     assert len(result["pending_wounds"]) == 3
@@ -237,6 +239,7 @@ def test_sans_crit_pas_de_bm(monkeypatch):
     _patch_fight_harness(monkeypatch, _noncrit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    assert result is not None
     assert result["pending_mortal_wounds"] is None
 
 
@@ -245,6 +248,7 @@ def test_mauvaise_arme_pas_de_bm(monkeypatch):
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     result = fh._manual_roll_fight_intent(_gs(), _intent(weapon_index=0), {})
+    assert result is not None
     assert result["pending_mortal_wounds"] is None
 
 
@@ -253,6 +257,7 @@ def test_target_vehicle_pas_de_bm(monkeypatch):
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     result = fh._manual_roll_fight_intent(_gs(vehicle=True), _intent(), {})
+    assert result is not None
     assert result["pending_mortal_wounds"] is None
 
 
@@ -263,6 +268,7 @@ def test_crit_devastating_produit_aussi_ses_bm(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: 2)
 
     result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    assert result is not None
     assert result["pending_mortal_wounds"]["dice"] == [2]
     assert len(result["pending_wounds"]) == 1
 

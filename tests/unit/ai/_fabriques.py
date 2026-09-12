@@ -26,7 +26,7 @@ ce qui doit y être : ses fixtures.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Dict
+from typing import Any, Dict, List, Set, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -510,3 +510,117 @@ def table_de_recompense(agent_key: str = "TestAgent", **overrides: Any) -> Dict[
     sous_table: Dict[str, Any] = {"base_actions": {"charge_fail": -1.0}}
     sous_table.update(overrides)
     return {agent_key: sous_table}
+
+
+#: Dump d'update PPO COMPLET, tel que `MetricsCollectionCallback` passe
+#: `model.logger.name_to_value` à `W40KMetricsTracker.log_training_metrics` — `train/ent_coef`
+#: compris, que le callback injecte lui-même dans sa copie du dict.
+#:
+#: COMPLET est le point : chaque test qui l'écrivait à la main n'y mettait que les clés qu'il
+#: regardait, et trois copies de même nom (`_UPDATE_STATS`) divergeaient déjà — l'une portait
+#: `time/fps`, une autre non, une troisième ni `train/approx_kl_max` ni `train/grad_clip_fraction`.
+#: Or ce que ces tests verrouillent est précisément le JEU de clés que le tracker consomme : une
+#: clé retirée d'une seule copie ne rougit nulle part. Une seule source désormais.
+_PPO_UPDATE_STATS: Dict[str, float] = {
+    "train/learning_rate": 3e-4,
+    "train/policy_gradient_loss": -0.2,
+    "train/value_loss": 0.3,
+    "train/entropy_loss": 0.05,
+    "train/ent_coef": 0.01,
+    "train/clip_fraction": 0.2,
+    "train/approx_kl": 0.01,
+    "train/approx_kl_max": 0.034,
+    "train/explained_variance": 0.42,
+    "train/n_updates": 10,
+    "train/gradient_norm": 0.8,
+    "train/grad_clip_fraction": 0.15,
+    "diag/grad_share_policy_mb0": 0.235,
+    "time/fps": 100.0,
+}
+
+
+def ppo_update_stats(**overrides: float) -> Dict[str, float]:
+    """Copie NEUVE du dump d'update PPO complet (cf. `_PPO_UPDATE_STATS`).
+
+    Neuve à chaque appel : `log_training_metrics` reçoit ce dict d'un appelant qui le possède, et
+    un test qui muterait la constante partagée contaminerait ses voisins.
+    """
+    stats = dict(_PPO_UPDATE_STATS)
+    stats.update(overrides)
+    return stats
+
+
+class RecordingWriter:
+    """Doublure TYPÉE du writer TensorBoard : retient `(tag, valeur, abscisse)` de chaque écriture.
+
+    TYPÉE parce que c'est ce qui rend la doublure portante : des paramètres implicitement `Any`
+    satisferaient n'importe quel protocole, et `tracker_avec_writer_espion` vérifie l'affectation
+    contre `MetricsWriter` (ai/metrics_tracker.py). Les QUATRE méthodes du contrat sont déclarées,
+    y compris celles qu'un appelant donné n'exerce pas : en omettre une rendrait la doublure non
+    conforme au protocole, donc muette sur sa dérive.
+
+    Retient les doublons : un tag émis deux fois pour un même instant est un défaut que ces tests
+    cherchent, pas un détail à dédoublonner ici.
+    """
+
+    def __init__(self) -> None:
+        self.scalars: List[Tuple[str, float, int]] = []
+        self.custom_layouts: List[Dict[str, Any]] = []
+        self.flushed = 0
+        self.closed = 0
+
+    def add_scalar(self, tag: str, scalar_value: float, global_step: int, /) -> None:
+        self.scalars.append((tag, float(scalar_value), int(global_step)))
+
+    def add_custom_scalars(self, layout: Dict[str, Any], /) -> None:
+        self.custom_layouts.append(layout)
+
+    def flush(self) -> None:
+        self.flushed += 1
+
+    def close(self) -> None:
+        self.closed += 1
+
+    def tags(self) -> Set[str]:
+        """Les tags écrits, sans leurs valeurs ni leur abscisse."""
+        return {tag for tag, _valeur, _abscisse in self.scalars}
+
+
+def tracker_avec_writer_espion(
+    tmp_path: Any, *, window: int = 1, episode_count: int = 1
+) -> Tuple[Any, RecordingWriter]:
+    """Un VRAI `W40KMetricsTracker` (pas `__new__`) dont seul le writer est espionné.
+
+    VRAI constructeur : c'est lui qui prouve quelque chose sur l'état du tracker. Une doublure
+    d'état recopierait à la main les compteurs que ces tests interrogent, et un attribut retiré
+    du `__init__` — `initial_step_count` vient de l'être — ne s'y verrait pas.
+
+    Le writer réel construit par `__init__` est FERMÉ avant d'être remplacé : il tient un fichier
+    d'événements ouvert sous `tmp_path`, que rien ne refermerait ensuite.
+
+    `window` ramène les deux fenêtres de lissage à 1 : ces tests portent sur l'appariement
+    tag/valeur/abscisse, pas sur la taille des fenêtres de production (500/100), qui obligerait
+    chaque cas à rejouer des centaines d'épisodes. Égales, elles suppriment aussi le doublon
+    `_100ep`, donc les comptages d'occurrences restent lisibles.
+
+    `episode_count` est posé explicitement et vaut 1 par défaut : une abscisse à 0 rendrait muette
+    toute assertion d'axe, un writer qui n'écrirait rien la satisfaisant aussi bien qu'un writer
+    correct.
+
+    Import différé : `ai.metrics_tracker` tire torch, que les tests d'analyzer important ce
+    module n'ont aucune raison de charger.
+    """
+    from ai.metrics_tracker import W40KMetricsTracker
+
+    tracker = W40KMetricsTracker(
+        "ArmageddonAgent_x1",
+        log_dir=str(tmp_path),
+        show_banner=False,
+        perf_window=window,
+        perf_window_fast=window,
+    )
+    tracker.writer.close()
+    espion = RecordingWriter()
+    tracker.writer = espion
+    tracker.episode_count = episode_count
+    return tracker, espion

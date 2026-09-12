@@ -17,6 +17,13 @@ from engine.phase_handlers.shared_utils import (
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
+def _pending_decision(gs: Dict[str, Any]) -> Dict[str, Any]:
+    """La décision en attente, EXIGÉE : `read_pending_agent_decision` rend None sans décision."""
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None, "aucune décision agent en attente"
+    return decision
+
+
 def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
     return {**unit_invariants(),
         "id": uid,
@@ -662,7 +669,7 @@ class TestReactiveMoveStateDecision:
     def test_exactly_one_candidate_declines(self, monkeypatch):
         """`declines` est ce qui rend « ne pas réagir » discernable pour l'agent."""
         gs, _reactive, _result = _suspended_window(monkeypatch)
-        options = read_pending_agent_decision(gs)["options"]
+        options = _pending_decision(gs)["options"]
 
         declining = [option for option in options if option["declines"]]
         assert len(declining) == 1
@@ -682,7 +689,7 @@ class TestReactiveMoveStateDecision:
         from engine.combat_utils import calculate_hex_distance
 
         gs, _reactive, _result = _suspended_window(monkeypatch)
-        options = read_pending_agent_decision(gs)["options"]
+        options = _pending_decision(gs)["options"]
 
         assert options[0]["label"].startswith("Pression")
         assert options[0]["declines"] is False
@@ -717,7 +724,7 @@ class TestReactiveMoveStateDecision:
         gs, reactive, _result = _suspended_window(monkeypatch)
         chosen = next(
             option
-            for option in read_pending_agent_decision(gs)["options"]
+            for option in _pending_decision(gs)["options"]
             if not option["declines"]
         )
         destination = chosen["payload"]["destination"]
@@ -743,7 +750,7 @@ class TestReactiveMoveStateDecision:
         monkeypatch.setattr("random.randint", lambda a, b: 6)
         chosen = next(
             option
-            for option in read_pending_agent_decision(gs)["options"]
+            for option in _pending_decision(gs)["options"]
             if not option["declines"]
         )
         gs["reactive_decision_payload"]["2"] = chosen["payload"]
@@ -780,7 +787,7 @@ def _engine_with_reactive_enemy(shoot_pool: List[str]) -> Any:
         build_engine_config,
     )
 
-    shooter = _fall_back_unit_cfg("1", 1, 10, 20)
+    shooter = _fall_back_unit_cfg(1, 1, 10, 20)
     shooter["UNIT_RULES"] = [
         {
             "ruleId": "move_after_shooting",
@@ -790,9 +797,9 @@ def _engine_with_reactive_enemy(shoot_pool: List[str]) -> Any:
             "rule_args": {"distance": 3},
         }
     ]
-    reactive = _fall_back_unit_cfg("3", 2, 10, 28)
+    reactive = _fall_back_unit_cfg(3, 2, 10, 28)
     reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
-    units = [shooter, _fall_back_unit_cfg("2", 1, 40, 40), reactive]
+    units = [shooter, _fall_back_unit_cfg(2, 1, 40, 40), reactive]
 
     config = build_engine_config(_fall_back_base_config(units))
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), patch.object(
@@ -869,7 +876,7 @@ class TestPhaseNAvancePasSousFenetreReactive:
         assert result.get("phase_complete") is None
         assert gs["shoot_activation_pool"] == ["2"]
         assert gs["phase"] == "shoot"
-        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+        assert _pending_decision(gs)["type"] == "reactive_move"
 
     def test_advance_phase_envoye_apres_l_armement_n_avance_pas_non_plus(self):
         """La reproduction du PvP humain : le mouvement déclencheur vide le pool de mouvement.
@@ -889,11 +896,11 @@ class TestPhaseNAvancePasSousFenetreReactive:
             build_engine_config,
         )
 
-        reactive = _fall_back_unit_cfg("3", 2, 10, 24)
+        reactive = _fall_back_unit_cfg(3, 2, 10, 24)
         reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
         units = [
-            _fall_back_unit_cfg("1", 1, 10, 10),
-            _fall_back_unit_cfg("2", 1, 10, 12),
+            _fall_back_unit_cfg(1, 1, 10, 10),
+            _fall_back_unit_cfg(2, 1, 10, 12),
             reactive,
         ]
         config = build_engine_config(_fall_back_base_config(units))
@@ -914,13 +921,13 @@ class TestPhaseNAvancePasSousFenetreReactive:
             {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
         )
         assert gs["move_activation_pool"] == []
-        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+        assert _pending_decision(gs)["type"] == "reactive_move"
 
         engine.execute_semantic_action({"action": "advance_phase", "from": "move"})
 
         assert gs["phase"] == "move"
         assert gs["reaction_window_active"] is True
-        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+        assert _pending_decision(gs)["type"] == "reactive_move"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -943,11 +950,11 @@ def _pvp_engine_with_reactive_enemy() -> Any:
         build_engine_config,
     )
 
-    reactive = _fall_back_unit_cfg("3", 2, 10, 24)
+    reactive = _fall_back_unit_cfg(3, 2, 10, 24)
     reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
     units = [
-        _fall_back_unit_cfg("1", 1, 10, 10),
-        _fall_back_unit_cfg("2", 1, 10, 12),
+        _fall_back_unit_cfg(1, 1, 10, 10),
+        _fall_back_unit_cfg(2, 1, 10, 12),
         reactive,
     ]
     config = build_engine_config(_fall_back_base_config(units))
@@ -973,7 +980,7 @@ class TestRefusPendantUneDecisionReactive:
         engine.execute_semantic_action(
             {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
         )
-        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+        assert _pending_decision(gs)["type"] == "reactive_move"
         assert gs["move_activation_pool"] == ["1"]
 
         success, result = engine.execute_semantic_action(
@@ -1045,11 +1052,11 @@ def _pve_engine(player_types: Dict[str, str]) -> Any:
         build_engine_config,
     )
 
-    reactive = _fall_back_unit_cfg("3", 2, 10, 24)
+    reactive = _fall_back_unit_cfg(3, 2, 10, 24)
     reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
     units = [
-        _fall_back_unit_cfg("1", 1, 10, 10),
-        _fall_back_unit_cfg("2", 1, 10, 12),
+        _fall_back_unit_cfg(1, 1, 10, 10),
+        _fall_back_unit_cfg(2, 1, 10, 12),
         reactive,
     ]
     config = build_engine_config(_fall_back_base_config(units))

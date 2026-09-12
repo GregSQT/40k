@@ -111,7 +111,12 @@ def parse_args() -> argparse.Namespace:
         "--decaying-tags",
         nargs="+",
         default=[
-            "training_diagnostic/learning_rate",
+            # `train/learning_rate` et non `training_diagnostic/learning_rate` : la recopie que
+            # le tracker en faisait a ete supprimee le 2026-09-11 (elle datait la valeur en PAS
+            # quand le tracker date tout en EPISODES). Le logger SB3 publie le tag d'origine
+            # dans le MEME dossier de run. `entropy_coef` reste cote tracker : SB3 ne le voit
+            # pas, le callback l'injecte dans une COPIE de `name_to_value`.
+            "train/learning_rate",
             "training_diagnostic/entropy_coef",
         ],
         help=(

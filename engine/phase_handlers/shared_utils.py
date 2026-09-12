@@ -2114,6 +2114,49 @@ def build_enemy_adjacent_hexes(
     return enemy_adjacent_hexes
 
 
+def engagement_zone_from_cells(
+    cells: AbstractSet[Tuple[int, int]],
+    engagement_zone: int,
+    board_cols: int,
+    board_rows: int,
+) -> Set[Tuple[int, int]]:
+    """Zone d'engagement (03.04) autour de `cells`, CASES SOURCES COMPRISES.
+
+    SOURCE UNIQUE des trois producteurs de `enemy_adjacent_hexes_player_N` — recalcul complet,
+    instantané réactif, et delta incrémental. Les trois dilataient chacun de leur côté, et il a
+    suffi d'en corriger un pour que le trou survive dans les deux autres.
+
+    ⚠️ `dilate_hex_set` EXCLUT PAR CONTRAT ses cases sources (« The input hexes themselves are
+    NOT included in the result »). La zone d'engagement, elle, les CONTIENT : 03.04 place dans
+    l'engagement range d'une figurine tout ce qui est « within 2" horizontally », distance 0
+    comprise. L'union les rend.
+
+    L'écart était inoffensif tant que l'occupation ennemie était un veto 2D : une case tenue par
+    un ennemi n'était de toute façon pas une destination. Elle ne l'est plus depuis que
+    l'occupation se filtre PAR NIVEAU (`build_enemy_occupied_positions_set(..., level=)`,
+    superposition inter-étage 13.06) : la case AU SOL sous une figurine ennemie posée à l'étage
+    n'était vetée ni par l'occupation (autre niveau) ni par la zone (case source retirée).
+    Mesuré sur le run holdout du 2026-09-11, deux fois : `E10 T4 P1 MOVE : Unit 5(4,52) MOVED
+    from (10,48) to (4,52) [MOVE_TYPE:normal]`, avec `102#1@(4,52,z3)`. Le moteur se contredisait
+    dans le même tour — 09.05 « AFTER MOVING: Your unit must be unengaged » d'un côté, et quatre
+    lignes plus bas l'unité 5 pile puis frappe l'unité 102 sans avoir chargé, donc par la seule
+    branche « It is engaged » (12.03).
+
+    Le SENS de l'écart compte : cette union ne peut que RESTREINDRE la zone offerte au move,
+    jamais l'élargir. Elle ne touche pas le volet vertical, que cet ensemble n'a jamais porté
+    (cf. `move_enemy_ez_forbidden_cells`) — l'EZ du move reste 2D, donc plus restrictive que
+    celle du combat à étages, écart préexistant et documenté.
+
+    Le DELTA incrémental (`_apply_enemy_adjacent_delta_for_moved_unit`) doit passer par ici lui
+    aussi, et pas seulement pour la règle : ses compteurs sont posés par les deux autres
+    producteurs, et une zone `old` plus étroite que celle qui a servi à les poser lève
+    `KeyError: Delta update missing old zone hex`.
+    """
+    source = set(cells)
+    from engine.hex_utils import dilate_hex_set
+    return dilate_hex_set(source, engagement_zone, board_cols, board_rows) | source
+
+
 def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     game_state: Dict[str, Any], player: int
 ) -> Tuple[Dict[Tuple[int, int], int], FrozenSet[Tuple[int, int]]]:
@@ -2123,6 +2166,9 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     (get_engagement_zone = engagement_zone inches × inches_to_subhex), cohérent avec
     l'éligibilité fight/pile-in et le blocage mouvement. NB: avant, ce cache dilatait de
     inches_to_subhex (1") en supposant engagement_zone == 1" ; faux dès engagement_zone ≠ 1".
+
+    Les cases OCCUPÉES par l'ennemi font partie de la zone (distance 0 ≤ engagement_zone) : cf.
+    l'union explicite plus bas, et la raison pour laquelle elle a dû être écrite.
     """
     units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
@@ -2145,8 +2191,9 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
         all_enemy_occupied.update(unit_cells)
         per_unit_occupied.append(unit_cells)
 
-    from engine.hex_utils import dilate_hex_set
-    zone_hexes = dilate_hex_set(all_enemy_occupied, ez_dilation, board_cols, board_rows)
+    zone_hexes = engagement_zone_from_cells(
+        all_enemy_occupied, ez_dilation, board_cols, board_rows
+    )
 
     counts: Dict[Tuple[int, int], int] = {h: 1 for h in zone_hexes}
 
@@ -2187,7 +2234,8 @@ def _build_enemy_adjacent_structures_from_units_cache(
 ) -> Tuple[Dict[int, Dict[Tuple[int, int], int]], Dict[int, Set[Tuple[int, int]]]]:
     """
     Build per-player enemy-adjacent counters and sets from current units_cache snapshot.
-    Uses dilate_hex_set with engagement_zone for consistency with build_enemy_adjacent_hexes.
+    Passe par `engagement_zone_from_cells`, comme `build_enemy_adjacent_hexes` et le delta : les
+    trois publient la MÊME clé, ils ne peuvent pas avoir trois définitions de la zone.
     """
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
@@ -2195,7 +2243,6 @@ def _build_enemy_adjacent_structures_from_units_cache(
     # engagement zone réelle (engagement_zone inches × inches_to_subhex), PAS inches_to_subhex seul
     # (= 1") : sinon move/tir détectent l'engagement à 1" et le fight à 2" (incohérent).
     ez_dilation = int(get_engagement_zone(game_state))
-    from engine.hex_utils import dilate_hex_set
 
     counters_by_player: Dict[int, Dict[Tuple[int, int], int]] = {
         player_int: {} for player_int in players_present
@@ -2224,7 +2271,11 @@ def _build_enemy_adjacent_structures_from_units_cache(
             unit_cells = set(by_model.values())
         else:
             unit_cells = {(int(require_key(cache_entry, "col")), int(require_key(cache_entry, "row")))}
-        unit_zone = dilate_hex_set(unit_cells, ez_dilation, board_cols, board_rows)
+        # Cases sources comprises — MÊME producteur que le recalcul complet, sinon l'instantané
+        # réactif republie sous les mêmes clés une zone trouée (cf. `engagement_zone_from_cells`).
+        unit_zone = engagement_zone_from_cells(
+            unit_cells, ez_dilation, board_cols, board_rows
+        )
         for perspective_player in players_present:
             if perspective_player == unit_player_int:
                 continue
@@ -2255,11 +2306,12 @@ def _apply_enemy_adjacent_delta_for_moved_unit(
     """
     Apply incremental enemy-adjacent cache update after one unit position change.
     Supports multi-hex footprints via old_occupied / new_occupied sets.
-    Uses dilate_hex_set with engagement_zone to match the full-recompute path.
+    Passe par `engagement_zone_from_cells`, comme le recalcul complet et l'instantané réactif.
     """
-    from engine.hex_utils import dilate_hex_set
-    old_zone = dilate_hex_set(old_occupied, engagement_zone, board_cols, board_rows)
-    new_zone = dilate_hex_set(new_occupied, engagement_zone, board_cols, board_rows)
+    # Cases sources comprises, comme les deux producteurs qui ont posé ces compteurs : une zone
+    # `old` plus étroite que celle qui les a écrits lève `Delta update missing old zone hex`.
+    old_zone = engagement_zone_from_cells(old_occupied, engagement_zone, board_cols, board_rows)
+    new_zone = engagement_zone_from_cells(new_occupied, engagement_zone, board_cols, board_rows)
 
     for perspective_player in players_present:
         if perspective_player == moved_unit_player:
@@ -12645,6 +12697,9 @@ def build_manual_hazard_allocation(
         "current_model_id": None,
         # Items minimaux : "rec" present pour _mark_manual_overkill_wasted (overkill MW perdues).
         "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
+        # 06.02 : lu a la fermeture du lot par `_apply_batch_mortal_wounds`. Un jet de hasard
+        # n en produit aucune en plus des siennes : ecrit `None`, meme regime que le lot de tir.
+        "pending_mortal_wounds": None,
     }
     game_state[HAZARD_CTX.alloc_key] = {
         "attacker_squad_id": sid,

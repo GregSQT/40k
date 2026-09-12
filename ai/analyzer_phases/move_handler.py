@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from shared.data_validation import require_key
-from ai.analyzer_rules import note_rule_usage
+from ai.analyzer_rules import note_rule_usage, note_special_rule_usage
 from ai.analyzer_phases import PHASE_ORDER
 
 if TYPE_CHECKING:
@@ -411,7 +411,9 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         # n'écrit aucun `[FLY]`. Le keyword du registre exemptait ici toute unité volante du
         # BFS — un Gargoyle traversant un mur n'aurait jamais été remonté.
         stats['move_after_shooting'][player] += 1
-        stats['special_rule_usage'][("move_after_shooting", move_unit_type)][player] += 1
+        note_special_rule_usage(
+            stats, state, config, "move_after_shooting", move_unit_id, move_unit_type, player
+        )
         state.units_moved_after_shooting_in_turn.add(move_unit_id)
     if is_move_after_shooting:
         _track_action_phase_accuracy(stats, "move_after_shooting", phase, state.current_episode_num, line)

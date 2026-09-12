@@ -34,6 +34,7 @@ from ai.unit_registry import UnitRegistry
 from engine.game_state import WAAAGH_INVUL_SAVE
 from engine.weapon_damage_cache import (
     _TABLE_PATH,
+    BestWeaponCache,
     load_weapon_damage_table,
     lookup_best_weapon,
     weapon_off_key,
@@ -127,7 +128,7 @@ def test_un_profil_absent_de_la_table_leve_au_lieu_de_valoir_zero() -> None:
     C'est ce silence qui a laissé 57 armes hors de la table sans qu'aucun bot ne s'en plaigne.
     L'absence d'une entrée DÉFENSIVE, elle, reste un zéro légitime (test suivant).
     """
-    cache = {("M1", 1): (None,)}
+    cache: BestWeaponCache = {("M1", 1): (None,)}
 
     with pytest.raises(KeyError, match="profil offensif absent"):
         lookup_best_weapon(cache, "M1", (4, 3, 7), True)
@@ -139,7 +140,7 @@ def test_une_entree_defensive_absente_reste_un_zero() -> None:
     Une arme dont le profil est connu mais qui ne peut pas blesser CETTE cible-là vaut zéro, et
     c'est un résultat. Confondre les deux cas ferait lever sur une partie parfaitement normale.
     """
-    cache = {("M1", 1): ({(4, 3, 7): 1.5},)}
+    cache: BestWeaponCache = {("M1", 1): ({(4, 3, 7): 1.5},)}
 
     assert lookup_best_weapon(cache, "M1", (4, 3, 7), True) == (0, 1.5)
     assert lookup_best_weapon(cache, "M1", (10, 2, 4), True) == (-1, 0.0)

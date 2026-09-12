@@ -13,6 +13,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import contextlib
+import functools
 import json
 import os
 import time
@@ -26,7 +27,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
 import gymnasium as gym
-from typing import Dict, Iterable, Optional, Any, List, Set, Tuple, cast
+from typing import (
+    Any, Callable, Concatenate, Dict, Iterable, List, Optional, ParamSpec, Set, Tuple, TypeVar,
+    cast,
+)
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.utils import ConstantSchedule
 
@@ -461,8 +465,9 @@ class EpisodeTerminationCallback(BaseCallback):
         # a 121,80 s contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce
         # qu'elle sert a reperer — une dispersion d'origine MOTEUR.
         # Ce compteur ne contient PAS la duree des evals async (le mode par defaut), qui ne
-        # bloquent rien : cf. BotEvaluationCallback._add_blocking_eval_seconds, seul point
-        # d'alimentation, pour le detail et la mesure.
+        # bloquent rien : cf. `_BlockingEvalClockMixin._add_blocking_eval_seconds`, porte par les
+        # TROIS callbacks qui peuvent figer la boucle — eval bot, sonde exploiteur, sonde de
+        # pool —, pour le detail et la mesure.
         blocking_eval_seconds = (
             self.gate_display_state.get("blocking_eval_seconds", 0.0)
             if self.gate_display_state else 0.0
@@ -557,7 +562,6 @@ class EpisodeTerminationCallback(BaseCallback):
                 ):
                     eval_delta = blocking_eval_seconds - self.blocking_eval_seconds_at_last_display
                     delta_time = current_time - self.last_display_time - eval_delta
-                    self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
                     delta_episodes = display_episode_count - self.last_display_episode_count
                     if delta_time > 0 and delta_episodes > 0:
                         avg_time_per_episode = delta_time / delta_episodes
@@ -572,6 +576,16 @@ class EpisodeTerminationCallback(BaseCallback):
                             )
                 self.last_display_time = current_time
                 self.last_display_episode_count = display_episode_count
+                # Les TROIS ancres decrivent le meme instant, elles se posent donc ensemble et
+                # HORS de la branche ci-dessus. Le cumul d'eval y etait pose a l'interieur, donc
+                # jamais au PREMIER affichage : tout ce qui avait bloque avant lui etait impute
+                # au second, dont le `delta_time` passait sous zero et sautait en silence
+                # l'initialisation de l'EMA — donc l'ETA. Inatteignable tant que rien ne bloquait
+                # avant le premier affichage ; la sonde de BASELINE du pool, desormais
+                # chronometree (`PoolEarlyStoppingCallback._probe`, appelee par
+                # `_on_training_start`, soit avant tout `_on_step`), y met plusieurs centaines de
+                # secondes.
+                self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
 
                 # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
                 remaining_episodes = display_total_episodes - display_episode_count
@@ -803,7 +817,9 @@ class MetricsCollectionCallback(BaseCallback):
 
         Mesure du run du 2026-09-03 (etape P1, reprise depuis P00) : 41 756 points sur
         `training_critical/clip_fraction` pour 575 updates reels, contre 1 063 points pour 1 063
-        updates sur un run neuf comparable. La fenetre de vingt valeurs de
+        updates sur un run neuf comparable. Ce tag n'existe plus (recopie de `train/clip_fraction`,
+        supprimee le 2026-09-11) ; la mesure reste celle qui a etabli le defaut, et
+        `hyperparameter_tracking` continue de l'exposer via `00_critical/i_clip_fraction`. La fenetre de vingt valeurs de
         `W40KMetricsTracker._calculate_smoothed_metric` ne couvrait alors plus vingt updates mais
         vingt copies du dernier : les quatre courbes de sante PPO de `00_critical` n'etaient plus
         lissees, et paraissaient quatre a quatorze fois plus bruitees qu'un run neuf.
@@ -848,11 +864,9 @@ class MetricsCollectionCallback(BaseCallback):
                     else:
                         ent_coef_value = float(ent_coef_value)
                     model_stats['train/ent_coef'] = ent_coef_value
-                # AVANT `log_training_metrics`, qui ecrit chacun de ses scalaires a
-                # `_tracker.step_count` : pose apres, l'update courant partait a l'abscisse du
-                # dump PRECEDENT, et toutes les courbes `training_critical/*` et
-                # `training_diagnostic/*` etaient decalees d'un dump sur l'axe des pas.
-                _tracker.step_count = cast(Any, _model).num_timesteps
+                # `_tracker.step_count = _model.num_timesteps` occupait cette place. Le tracker
+                # n'a plus d'abscisse en pas : ses scalaires sont dates en episodes, et l'axe
+                # des pas est celui du writer de SB3, qui ecrit dans le meme dossier de run.
                 _tracker.log_training_metrics(model_stats)
                 # La recopie des cles `diag/` vers le writer du tracker a ete retiree ici. Elle
                 # se justifiait par « _original_dump may have no TF writer » : le logger du
@@ -1120,28 +1134,11 @@ class MetricsCollectionCallback(BaseCallback):
         # dans ce projet — un actor-critic, sans q_net. Le commentaire qui l'accompagnait
         # l'admettait deja. self.q_value_history / max_q_value_history partent avec lui.
 
-        # Log training step data
-        step_data = {}
-        if hasattr(self.model, 'learning_rate'):
-            # learning_rate may be a callable schedule function - evaluate it
-            lr = self.model.learning_rate
-            if callable(lr):
-                # Call with current progress (1.0 at start, 0.0 at end)
-                step_data['learning_rate'] = lr(self.model._current_progress_remaining if hasattr(self.model, '_current_progress_remaining') else 1.0)
-            else:
-                step_data['learning_rate'] = lr
-        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
-            if 'train/loss' in self.model.logger.name_to_value:
-                step_data['loss'] = self.model.logger.name_to_value['train/loss']
-        # `if hasattr(self.model, 'exploration_rate'): step_data['exploration_rate'] = ...`
-        # occupait cette place. exploration_rate est l'epsilon d'une politique epsilon-greedy
-        # (DQN) : MaskablePPO explore par l'entropie de sa politique, il n'a pas cet attribut.
-        # La cle n'etait donc jamais posee, et la courbe training_diagnostic/exploration_rate
-        # cote metrics_tracker n'a jamais rien recu.
+        # La construction de `step_data` et l'appel `metrics_tracker.log_training_step`
+        # occupaient cette place, a CHAQUE step gym. Supprimes le 2026-09-11 avec la methode
+        # appelee : la raison est portee par la pierre tombale de `log_training_step`
+        # (ai/metrics_tracker.py), pour n'avoir qu'un seul recit a tenir a jour.
 
-        if step_data:
-            cast(Any, self.metrics_tracker).log_training_step(step_data)
-        
         # NOTE: PPO training metrics are captured in _on_rollout_start()
         # SB3 only populates model.logger.name_to_value during train() which happens BETWEEN rollouts
         
@@ -1164,10 +1161,6 @@ class MetricsCollectionCallback(BaseCallback):
     def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
-
-        # CRITICAL: Update step_count BEFORE logging episode metrics
-        # This ensures 00_critical/ metrics use timesteps (not episodes) as x-axis
-        self.metrics_tracker.step_count = self.model.num_timesteps
 
         # Extract episode data (we are only called when 'episode' in info; engine sets info["episode"] = {"r","l","t"})
         ep = info['episode']
@@ -1329,7 +1322,97 @@ class MetricsCollectionCallback(BaseCallback):
             return 1.0 / (1.0 - gamma)
 
 
-class BotEvaluationCallback(BaseCallback):
+class _BlockingEvalClockMixin:
+    """Compteur PARTAGE du temps ou la boucle d'entrainement est REELLEMENT arretee.
+
+    Les trois callbacks qui peuvent figer cette boucle l'alimentent : `BotEvaluationCallback`
+    (eval synchrone, attente de future, sauvegardes de modele) et les deux callbacks a SONDES,
+    `ExploiterProbeCallback` et `PoolEarlyStoppingCallback`, synchrones par construction. Le
+    compteur vivait dans le premier SEUL, donc le temps des sondes etait compte comme de
+    l'ENTRAINEMENT. MESURE qui l'impose, 2026-09-11, part du temps bloquant reellement
+    retranchee sur les trois etapes d'un meme run de lignee : 87 % en P0 — etape sans pool,
+    donc sans sonde — contre 53 % en P1 et 57 % en P2. Une etape a pool ne retranchait que la
+    moitie de ce qui figeait sa boucle, et `moy` n'etait plus comparable d'une etape a l'autre
+    — ce que cette colonne existe precisement pour permettre, et ce dont `read_steady_rate`
+    (scripts/ab_bench.py) tire le regime etabli d'un banc.
+
+    Le defaut de CLASSE `None` n'est pas un repli anti-erreur : un callback construit hors run
+    (tests, appel direct) n'a aucun dict a alimenter, cas que `_add_blocking_eval_seconds`
+    traite deja comme une absence d'affichage de gate. En run, la liaison se fait avec celle du
+    `metrics_tracker`, juste apres le `setup_callbacks` qui cree le dict (ai/train.py, bloc
+    `if extra_callbacks:`).
+
+    Aucun hook SB3 ici, meme raison que `_EvalPoolOwnerMixin` : les porteurs heritent APRES
+    `BaseCallback`, dont les stubs gagneraient dans le MRO.
+    """
+
+    gate_display_state: Optional[Dict[str, Any]] = None
+
+    def _add_blocking_eval_seconds(self, seconds: float) -> None:
+        """Cumule le temps ou la boucle d'entrainement est REELLEMENT arretee par une eval.
+
+        Ce compteur (`gate_display_state["blocking_eval_seconds"]`) est retranche des durees
+        d'episode et des quatre chiffres `s/ep` de la barre (EpisodeTerminationCallback._on_step,
+        ~ligne 417 et ~ligne 523). Il ne doit donc contenir QUE du wall-clock pendant lequel
+        aucun episode n'a pu progresser. La duree d'une eval async ne convient pas : elle
+        s'ecoule sur un thread worker (`_async_eval_executor`) PENDANT que la boucle continue
+        de produire des episodes. La retrancher rendait des durees d'episode negatives —
+        mesure du 2026-08-02, run x1_long a n_envs=48 : `min` affiche a -4,791 s/ep, soit
+        -230 s bruts, une eval concurrente entiere soustraite d'un episode de ~10 s.
+        Les seuls temps reellement bloquants sont donc cumules ici : l'eval synchrone,
+        l'attente explicite du future (`force_wait`), toute sauvegarde de modele
+        (`_save_model_with_vecnormalize` : snapshot d'eval, best_model, best_robust) et les
+        SONDES de curriculum (`ExploiterProbeCallback._probe`, `PoolEarlyStoppingCallback._probe`),
+        synchrones par construction. Tous ces appels ont lieu sur le thread d'entrainement,
+        ce qui fait aussi de ce dict une donnee mono-ecrivain.
+        """
+        if self.gate_display_state is None:
+            return
+        if seconds < 0:
+            raise ValueError(f"Blocking eval duration must be >= 0 (got {seconds})")
+        self.gate_display_state["blocking_eval_seconds"] = (
+            self.gate_display_state.get("blocking_eval_seconds", 0.0) + seconds
+        )
+
+    @contextlib.contextmanager
+    def _blocking_eval_timer(self):
+        """Impute au temps bloque le wall-clock passe dans le bloc encadre."""
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._add_blocking_eval_seconds(time.perf_counter() - start)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+#: BORNE au mixin, et non le mixin lui-meme : le decorateur doit rendre une methode de la MEME
+#: classe que celle qu'il recoit. Annoter le parametre `_BlockingEvalClockMixin` en dur le ferait
+#: rendre une methode du mixin, que pyright refuse d'affecter a `ExploiterProbeCallback._probe`.
+_S = TypeVar("_S", bound=_BlockingEvalClockMixin)
+
+
+def _temps_bloque(
+    methode: Callable[Concatenate[_S, _P], _R],
+) -> Callable[Concatenate[_S, _P], _R]:
+    """Impute au temps bloque TOUT le corps de la methode decoree.
+
+    Sur la METHODE et non aux call-sites : instrumenter les call-sites avait deja laisse deux
+    sauvegardes de modele sur trois hors du compte (`_save_model_with_vecnormalize`). Le porteur
+    d'une methode entierement bloquante le declare donc a sa signature, ou un futur appelant le
+    lit — un `with` autour du corps le dirait aussi, mais au prix d'un niveau d'indentation sur
+    des corps qui en comptent deja trois (`try` / `try` / `except`).
+    """
+
+    @functools.wraps(methode)
+    def enveloppe(self: _S, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with self._blocking_eval_timer():
+            return methode(self, *args, **kwargs)
+
+    return enveloppe
+
+
+class BotEvaluationCallback(BaseCallback, _BlockingEvalClockMixin):
     """Callback to test agent against evaluation bots with best model saving.
 
     `scenario_pool` est en tete et SANS defaut : il dit sur quel split l'agent est note, donc
@@ -2276,40 +2359,6 @@ class BotEvaluationCallback(BaseCallback):
             remove_model_with_companions(self._pending_eval_snapshot_path)
             self._pending_eval_snapshot_path = None
 
-    def _add_blocking_eval_seconds(self, seconds: float) -> None:
-        """Cumule le temps ou la boucle d'entrainement est REELLEMENT arretee par une eval.
-
-        Ce compteur (`gate_display_state["blocking_eval_seconds"]`) est retranche des durees
-        d'episode et des quatre chiffres `s/ep` de la barre (EpisodeTerminationCallback._on_step,
-        ~ligne 417 et ~ligne 523). Il ne doit donc contenir QUE du wall-clock pendant lequel
-        aucun episode n'a pu progresser. La duree d'une eval async ne convient pas : elle
-        s'ecoule sur un thread worker (`_async_eval_executor`) PENDANT que la boucle continue
-        de produire des episodes. La retrancher rendait des durees d'episode negatives —
-        mesure du 2026-08-02, run x1_long a n_envs=48 : `min` affiche a -4,791 s/ep, soit
-        -230 s bruts, une eval concurrente entiere soustraite d'un episode de ~10 s.
-        Les seuls temps reellement bloquants sont donc cumules ici : l'eval synchrone,
-        l'attente explicite du future (`force_wait`), et toute sauvegarde de modele
-        (`_save_model_with_vecnormalize` : snapshot d'eval, best_model, best_robust). Tous ces
-        appels ont lieu sur le thread d'entrainement, ce qui fait aussi de ce dict une donnee
-        mono-ecrivain.
-        """
-        if self.gate_display_state is None:
-            return
-        if seconds < 0:
-            raise ValueError(f"Blocking eval duration must be >= 0 (got {seconds})")
-        self.gate_display_state["blocking_eval_seconds"] = (
-            self.gate_display_state.get("blocking_eval_seconds", 0.0) + seconds
-        )
-
-    @contextlib.contextmanager
-    def _blocking_eval_timer(self):
-        """Impute au temps bloque le wall-clock passe dans le bloc encadre."""
-        start = time.perf_counter()
-        try:
-            yield
-        finally:
-            self._add_blocking_eval_seconds(time.perf_counter() - start)
-
     def _consume_async_eval_if_ready(self, force_wait: bool = False) -> None:
         """Consume completed async evaluation result and apply it."""
         if self._pending_eval_future is None:
@@ -2622,8 +2671,17 @@ def _next_probe_checkpoint(stage_episode: int, every: int) -> int:
     return (stage_episode // every + 1) * every
 
 
-class _EvalPoolOwnerMixin:
+class _EvalPoolOwnerMixin(_BlockingEvalClockMixin):
     """Pool de workers d'évaluation, créé à la PREMIÈRE sonde et fermé à la sortie de la boucle.
+
+    HÉRITE de `_BlockingEvalClockMixin` plutôt que de le côtoyer : ce mixin porte
+    `_run_checkpoint_probe`, c'est-à-dire le chemin « sauvegarder le modèle puis l'évaluer »,
+    qui est SYNCHRONE par construction — aucun épisode ne progresse pendant qu'il tourne. Posséder
+    ce pool, c'est donc pouvoir figer la boucle, et le temps bloqué devient une propriété du
+    chemin au lieu d'une consigne que chaque sonde future devrait penser à réappliquer. Les deux
+    porteurs n'ont plus à déclarer `_BlockingEvalClockMixin` dans leurs bases : ils l'obtiennent
+    d'ici, et l'ordre du MRO est inchangé (`_EvalPoolOwnerMixin` en est une sous-classe, donc
+    passe avant lui).
 
     PAS dans `_on_training_start`/`_on_training_end` : SB3 appaire ces deux hooks autour de
     CHAQUE `learn()` (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467) et la boucle budgétée
@@ -2657,6 +2715,10 @@ class _EvalPoolOwnerMixin:
     rewards_config_name: str
     intermediate_n_workers: Optional[int]
     metrics_tracker: Any
+    #: Posé par `BaseCallback.init_callback`, que les deux porteurs héritent. Déclaré ici parce
+    #: que `_run_checkpoint_probe` le lit : sans l'annotation, le mixin promettrait un appel
+    #: qu'il ne peut pas tenir seul.
+    model: Any
     # Valeurs de CLASSE, pas de simples annotations : un futur porteur du mixin qui oublierait de
     # les initialiser dans son `__init__` ferait lever `shutdown_probe_eval_pools` par
     # AttributeError, depuis le `finally` de la boucle — l'endroit exact où une exception en
@@ -2768,6 +2830,66 @@ class _EvalPoolOwnerMixin:
         self._eval_pool = None
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
+
+    @_temps_bloque
+    def _run_checkpoint_probe(
+        self, checkpoint_archives: List[Tuple[str, str]], n_episodes: int
+    ) -> Dict[str, Any]:
+        """Sauvegarde le modèle courant dans un fichier temporaire et l'évalue contre `archives`.
+
+        Corps COMMUN des deux sondes de curriculum, qui n'en différaient que par les archives
+        visées, le nombre d'épisodes, et la mise en forme du résultat : 25 lignes strictement
+        identiques, à tenir en double à chaque évolution du chemin. Ce qui reste chez chaque
+        appelant est ce qui lui est propre — le message de log de l'exploiteur, le filtrage par
+        label du pool.
+
+        Décoré UNE fois : tout ce corps est du wall-clock où aucun épisode ne progresse, la
+        sauvegarde du modèle autant que l'évaluation. Chronométrer ici plutôt que chez chaque
+        appelant est la même règle que pour `_save_model_with_vecnormalize`, où l'instrumentation
+        par call-site avait laissé deux sauvegardes sur trois hors du compte.
+
+        Rend le dict d'`evaluate_against_checkpoints` TEL QUEL, sans le convertir ni vérifier
+        qu'il est peuplé : un dict vide ne veut pas dire la même chose aux deux appelants — c'est
+        une panne de configuration pour l'exploiteur, qui vise une archive unique, et un tour sans
+        résultat exploitable pour le pool, qui filtre déjà par label.
+        """
+        from ai.bot_evaluation import evaluate_against_checkpoints
+        from ai.vec_normalize_utils import save_vec_normalize
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        try:
+            self.model.save(tmp_path)
+            save_vec_normalize(self.model.get_env(), tmp_path)
+            self._ensure_eval_pool()
+            try:
+                return evaluate_against_checkpoints(
+                    model_path=tmp_path,
+                    checkpoint_archives=checkpoint_archives,
+                    training_config_name=self.training_config_name,
+                    rewards_config_name=self.rewards_config_name,
+                    n_episodes=n_episodes,
+                    controlled_agent=self.rewards_config_name,
+                    scenario_pool="holdout",
+                    device="cpu",
+                    # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
+                    # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
+                    # `max_in_flight`.
+                    n_workers_override=self._eval_n_workers,
+                    pool=self._eval_pool,
+                )
+            except Exception:
+                # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
+                # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
+                # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
+                # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
+                # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
+                self._shutdown_eval_pool()
+                raise
+        finally:
+            # Le `return` du bloc `try` passe par ici AVANT de rendre la main : le fichier
+            # temporaire est supprimé sur le chemin nominal comme sur celui de l'exception.
+            remove_model_with_companions(tmp_path)
 
 
 class StopAwareCallbackList(CallbackList):
@@ -2898,46 +3020,16 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         # plafond, budget — se comptent en épisodes DE L'ÉTAPE, cf. `_stage_episode`).
 
     def _probe(self, n_episodes: int, label: str) -> float:
-        """Sauvegarde le modele courant dans un fichier temporaire et evalue contre la cible.
+        """Evalue le modele courant contre sa cible figee et rend le win-rate.
 
         Synchrone : bloque le thread d'entrainement le temps de l'evaluation. Aucun Future,
-        aucune sonde ne peut etre abandonnee en silence.
+        aucune sonde ne peut etre abandonnee en silence. La sauvegarde, l'evaluation et le
+        chronometre du temps bloque appartiennent a `_EvalPoolOwnerMixin._run_checkpoint_probe`,
+        commun aux deux sondes ; ne reste ici que la cible visee et la lecture du resultat.
         """
-        from ai.bot_evaluation import evaluate_against_checkpoints
-        from ai.vec_normalize_utils import save_vec_normalize
-
-        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        os.close(fd)
-        try:
-            self.model.save(tmp_path)
-            save_vec_normalize(self.model.get_env(), tmp_path)
-            self._ensure_eval_pool()
-            try:
-                results = evaluate_against_checkpoints(
-                    model_path=tmp_path,
-                    checkpoint_archives=[(self.target_archive_path, "target")],
-                    training_config_name=self.training_config_name,
-                    rewards_config_name=self.rewards_config_name,
-                    n_episodes=n_episodes,
-                    controlled_agent=self.rewards_config_name,
-                    scenario_pool="holdout",
-                    device="cpu",
-                    # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
-                    # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
-                    # `max_in_flight`.
-                    n_workers_override=self._eval_n_workers,
-                    pool=self._eval_pool,
-                )
-            except Exception:
-                # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
-                # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
-                # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
-                # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
-                # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
-                self._shutdown_eval_pool()
-                raise
-        finally:
-            remove_model_with_companions(tmp_path)
+        results = self._run_checkpoint_probe(
+            [(self.target_archive_path, "target")], n_episodes
+        )
         if not results:
             raise RuntimeError(
                 "ExploiterProbeCallback._probe : evaluate_against_checkpoints a rendu un dict "
@@ -3048,7 +3140,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
     Synchrone (même convention que ExploiterProbeCallback) : bloque le thread d'entraînement
     le temps de l'évaluation. Ne pas utiliser avec async_eval_enabled=True côté bot-eval
-    si la latence est un problème — les deux callbacks se font en série.
+    si la latence est un problème — les deux callbacks se font en série. Ce temps-là est
+    du temps BLOQUÉ, cumulé comme tel (`_BlockingEvalClockMixin`) : il n'appartient pas à
+    l'entraînement et la colonne `moy` de la barre le retranche.
     """
 
     def __init__(
@@ -3153,37 +3247,17 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         return [(path, label) for path, label in self.pool_archives if label == self.champion_label]
 
     def _probe(self, full_pool: bool = True) -> Dict[str, float]:
-        """Sauvegarde le modèle courant et l'évalue contre les archives du tour."""
-        from ai.bot_evaluation import evaluate_against_checkpoints
-        from ai.vec_normalize_utils import save_vec_normalize
+        """Évalue le modèle courant contre les archives du tour, par label.
 
+        La sauvegarde, l'évaluation et le chronomètre du temps bloqué appartiennent à
+        `_EvalPoolOwnerMixin._run_checkpoint_probe` ; ne restent ici que le choix des archives
+        et le filtrage par label. La sonde de BASELINE (`_on_training_start`) entre elle aussi
+        dans le temps bloqué, et c'est correct : l'horloge de la barre est `global_start_time`
+        (ai/train.py), posé AVANT `learn()`, donc avant elle — le temps retranché ne peut pas
+        passer sous zéro.
+        """
         archives = self._archives_for(full_pool)
-        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        os.close(fd)
-        try:
-            self.model.save(tmp_path)
-            save_vec_normalize(self.model.get_env(), tmp_path)
-            self._ensure_eval_pool()
-            try:
-                results = evaluate_against_checkpoints(
-                    model_path=tmp_path,
-                    checkpoint_archives=archives,
-                    training_config_name=self.training_config_name,
-                    rewards_config_name=self.rewards_config_name,
-                    n_episodes=self.n_eval_episodes,
-                    controlled_agent=self.rewards_config_name,
-                    scenario_pool="holdout",
-                    device="cpu",
-                    # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
-                    n_workers_override=self._eval_n_workers,
-                    pool=self._eval_pool,
-                )
-            except Exception:
-                # Jumeau du `except` d'`ExploiterProbeCallback._probe` : voir son commentaire.
-                self._shutdown_eval_pool()
-                raise
-        finally:
-            remove_model_with_companions(tmp_path)
+        results = self._run_checkpoint_probe(archives, self.n_eval_episodes)
         return {label: float(results[label]) for _, label in archives if label in results}
 
     def _on_training_start(self) -> None:

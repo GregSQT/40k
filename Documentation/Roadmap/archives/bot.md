@@ -30,4 +30,6 @@
 | 2026-08-21 | ✅ 4 findings code-review bot_zone_direct (2026-08-21) — bot_units mort retiré, dead defaults _loss_rate, collect×5→×2 par pas, try/except focus_dist | bot · — |
 | 2026-08-21 | ✅ `bot_evaluation` simplifié : `_strip_phase_suffix` extrait + `_resolve_seat_seed` migré (2026-08-21) | bot · — |
 | 2026-08-22 | ✅ R0b : critère de compatibilité corrigé — sonde de chargement (§12.15) ; 5 archives pré-`charge_pair_net` skippées → 1 barreau réel (2026-08-22) | bot · — |
+| 2026-09-11 | ✅ R0b : critère de compatibilité rendu structurel (§12.15) — `filter_compatible_archives` compare observation_space/action_space/signature du state_dict ; le tri sur le texte « Missing key » laissait crasher l'éval entière sur les ruptures de grille des 2026-09-08/09 ; traces de skip passées en `tqdm.write` (les `logging.info` n'étaient émis nulle part) ; 4 barreaux sur 16 au 2026-09-11 | bot · — |
+| 2026-09-11 | ✅ Sortie des 12 archives pré-refonte d'observation dans `ai/models/ArmageddonAgent_x1/OLD/` (24 fichiers, zip + pkl) — l'échelle découvre 4 barreaux sur 4, plus aucune ligne CHECKPOINT_SKIP ; la paire `robust_0.9074` du 2026-09-04 est rangée sous le suffixe `_20260904`, une archive homonyme du 2026-08-30 occupant déjà le nom | bot · — |
 | 2026-08-21 | ✅ Fix seat-seed null explicite + migration `evaluate_against_bots` (2026-08-21) | bot · — |

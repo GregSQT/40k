@@ -18,17 +18,18 @@ DUAL TIER SYSTEM (41 Total Metrics):
      - reward_decomposition (5), phase_performance (4),
        aiturn_compliance (3+)
 
-⚙️ TRAINING HEALTH SYSTEM (18 metrics)
-  🔥 training_critical/ (7) - Algorithm health indicators
-     - policy_loss, value_loss, explained_variance,
-       clip_fraction, approx_kl, grad_share_policy, fps
+⚙️ TRAINING HEALTH SYSTEM
+  🔍 training_diagnostic/ (1) - ce que le writer de SB3 ne publie pas
+     - entropy_coef (injecte dans une COPIE de name_to_value)
 
-  🔍 training_diagnostic/ (6) - Hyperparameter monitoring
-     - learning_rate, entropy_coef, entropy_loss, n_updates, gradient_norm,
-       grad_clip_fraction
-  
-  🔬 training_detailed/ (5+) - Deep algorithm diagnostics
-     - advantage metrics, policy gradient details, value function analysis
+  La sante PPO se lit sinon sur 00_critical/{f,g,h,i,j,k,l,m} (axe des episodes, lissee sauf
+  l et m) et sur les train/* et diag/* que SB3 ecrit lui-meme dans le MEME dossier de run
+  (axe des pas). Douze tags recopiaient ces train/* et diag/* et ont ete supprimes le
+  2026-09-11 — le POURQUOI est dans la docstring de `log_training_metrics`, seul endroit ou
+  il est tenu a jour.
+
+ABSCISSE : ce tracker date TOUS ses scalaires en episodes. L'axe des pas appartient au seul
+writer de SB3.
 """
 
 import numpy as np
@@ -102,7 +103,7 @@ class MetricsWriter(Protocol):
     """Les QUATRE methodes que le tracker demande a son writer TensorBoard.
 
     Releve exhaustif des usages de `self.writer` (tracker) et de
-    `metrics_tracker.writer` (ai/training_callbacks.py l.958, 2149, 2231) : `add_scalar`,
+    `metrics_tracker.writer` (ai/training_callbacks.py l.940, 2043, 2110, 2216) : `add_scalar`,
     `add_custom_scalars`, `flush`, `close`. Rien d'autre — ni `add_histogram`, ni
     `add_graph`, ni `log_dir`, ni le contexte de fichier d'evenements.
 
@@ -136,10 +137,15 @@ class W40KMetricsTracker:
     Streamlined to 20 critical metrics, removing redundant calculations.
     """
 
-    #: Fenetres de lissage des courbes de PERFORMANCE. Deux fenetres par mesure, jamais une :
+    #: Fenetres de lissage des courbes de PERFORMANCE, au plus deux par mesure :
     #:   - PERF_WINDOW      : la fenetre de fond, celle qui tranche une tendance ;
-    #:   - PERF_WINDOW_FAST : le doublon reactif, tag suffixe `_100ep`, qui montre l'evolution
-    #:                        recente et repond des le centieme episode.
+    #:   - PERF_WINDOW_FAST : le doublon reactif, tag suffixe `_<PERF_WINDOW_FAST>ep`, qui
+    #:                        montre l'evolution recente et repond plus tot.
+    #: Le doublon est ETEINT depuis le 2026-09-11 par `perf_window_fast == perf_window` dans
+    #: config/agents/_training_common.json : il n'existait AUCUN tag reactif sans son jumeau de
+    #: fond (mesure sur les evenements de P1 : 51 tags `_100ep`, 0 orphelin), donc
+    #: chaque dashboard portait deux fois la meme mesure. L'extinction est le reglage prevu,
+    #: pas une suppression du mecanisme (cf. `validate_perf_windows`).
     #: AUCUN point n'est emis tant que la fenetre n'est pas PLEINE. La version precedente
     #: retournait la moyenne de TOUT l'historique sous la fenetre : les 500 premiers points de
     #: chaque courbe etaient une moyenne cumulative, qui converge en DESCENDANT depuis son
@@ -222,7 +228,6 @@ class W40KMetricsTracker:
         agent_key: str,
         log_dir: str = "./tensorboard/",
         initial_episode_count: int = 0,
-        initial_step_count: int = 0,
         show_banner: bool = True,
         *,
         perf_window: int,
@@ -283,9 +288,10 @@ class W40KMetricsTracker:
         # Per-snapshot self-play win rate tracking (label -> history list)
         self._selfplay_wins: Dict[str, List[float]] = {}
 
-        # Episode tracking
+        # Episode tracking. `self.step_count` (amorce `initial_step_count`) occupait la ligne
+        # suivante : ce tracker n'ecrit plus QUE sur l'abscisse des episodes, l'axe des pas
+        # etant celui du writer de SB3, pose sur le meme dossier de run par `attach_run_logger`.
         self.episode_count = initial_episode_count
-        self.step_count = initial_step_count
         # Troncatures : episodes coupes par le garde anti-runaway du moteur (V11 §0.61).
         # Le COMPTE comme la TRACE appartiennent a ai/truncation_log.py, parce que le mode
         # « eval seule » doit compter sans construire de tracker. Ce qui reste ici, c'est la
@@ -357,9 +363,9 @@ class W40KMetricsTracker:
         }
 
         # Compteur de captures PPO, incremente par `log_training_metrics` — donc une fois par
-        # update, la ou `hyperparameter_tracking` est alimente. `step_count` ne peut PAS servir
-        # de signal de nouveaute : `training_callbacks` l'ecrase avec `num_timesteps` a la
-        # capture (861) ET a chaque fin d'episode (1184), il bouge donc a chaque episode.
+        # update, la ou `hyperparameter_tracking` est alimente. `episode_count` ne peut PAS
+        # servir de signal de nouveaute : il avance a chaque fin d'episode, soit des dizaines
+        # de fois entre deux updates.
         self.ppo_capture_count = 0
         self._last_ppo_health_capture = -1
 
@@ -434,7 +440,7 @@ class W40KMetricsTracker:
             print(f"📊 Metric System:")
             print(f"   🎯 00_critical/ - Essential hyperparameter tuning metrics")
             print(f"   🎮 game_critical/ (5) - Core gameplay indicators")
-            print(f"   ⚙️  training_critical/ (6) - PPO algorithm health")
+            print(f"   ⚙️  train/ + diag/ (SB3, axe des pas) - PPO algorithm health")
             print(f"   💡 TIP: Start with 00_critical/ - everything you need for tuning")
     
     def _setup_custom_scalars_layout(self) -> None:
@@ -1264,24 +1270,14 @@ class W40KMetricsTracker:
                 f"abilities/{key}_exposure_rate", exposure_rate, self.episode_count
             )
 
-    def log_training_step(self, step_data: Dict[str, Any]):
-        """Log training step metrics - exploration rate and loss"""
-        self.step_count += 1
-        
-        # La courbe training_diagnostic/exploration_rate occupait cette place. exploration_rate
-        # est l'epsilon d'une politique epsilon-greedy (DQN) ; le depot n'instancie que
-        # MaskablePPO, un actor-critic qui explore par l'entropie de sa politique et n'a pas cet
-        # attribut. L'unique producteur de la cle (ai/training_callbacks.py, garde par
-        # hasattr(model, 'exploration_rate')) n'etait donc jamais entre, et a ete supprime.
+    # `log_training_step` occupait cette place, appele a CHAQUE step gym par
+    # `training_callbacks`. Ses deux seules courbes, `training_detailed/loss` et
+    # `training_diagnostic/learning_rate`, recopiaient `train/loss` et `train/learning_rate`
+    # que le logger SB3 ecrit deja dans le meme dossier de run. Elles les recopiaient de plus
+    # sur une abscisse batarde : `step_count` etait remis a `num_timesteps` a chaque fin
+    # d'episode puis incremente de 1 par step, alors que `num_timesteps` avance de `n_envs` —
+    # 50 466 points pour 145 updates sur run_20260911-062637. Supprimees avec leur appelant.
 
-        # TRAINING DETAILED: General loss - Neural network training loss
-        if 'loss' in step_data:
-            self.writer.add_scalar('training_detailed/loss', step_data['loss'], self.step_count)
-        
-        # TRAINING DIAGNOSTIC: Learning rate tracking
-        if 'learning_rate' in step_data:
-            self.writer.add_scalar('training_diagnostic/learning_rate', step_data['learning_rate'], self.step_count)
-    
     def log_reward_decomposition(self, reward_data: Dict[str, Any]):
         """Log reward decomposition for debugging reward engineering.
 
@@ -1509,69 +1505,80 @@ class W40KMetricsTracker:
     
     def log_training_metrics(self, model_stats: Dict[str, Any]):
         """
-        Log PPO hyperparameter and algorithm health metrics from stable-baselines3.
-        
-        TRAINING CRITICAL METRICS (6):
-        - training_critical/policy_loss - PPO policy gradient loss
-        - training_critical/value_loss - Value function loss component
-        - training_critical/explained_variance - Value function prediction quality
-        - training_critical/clip_fraction - Fraction of policy updates clipped
-        - training_critical/approx_kl - KL divergence between old/new policy
-        - training_critical/fps - Training speed
-        
-        TRAINING DIAGNOSTIC METRICS (6):
-        - training_diagnostic/learning_rate - Current learning rate value
-        - training_diagnostic/entropy_coef - Current entropy coefficient
-        - training_diagnostic/entropy_loss - Entropy bonus loss
-        - training_diagnostic/n_updates - Total policy updates count
-        - training_diagnostic/gradient_norm - Raw gradient magnitude, before clipping
-        - training_diagnostic/grad_clip_fraction - Share of minibatches actually clipped
-        
+        Accumule les stats PPO de stable-baselines3 et publie ce que SB3 ne publie PAS.
+
+        ABSCISSE : `episode_count`, comme tout ce que ce tracker ecrit. Douze courbes datees en
+        PAS ont ete supprimees le 2026-09-11 : les sept de `training_critical/`, quatre de
+        `training_diagnostic/` (`learning_rate`, `entropy_loss`, `gradient_norm`,
+        `grad_clip_fraction`) — onze emises ici — et `training_detailed/loss`, emise par la
+        `log_training_step` supprimee avec elles. Elles donnaient DEUX abscisses incompatibles
+        dans un meme fichier d'evenements — facteur ~110 entre les deux sur
+        run_20260911-062637. Ces douze
+        courbes etaient de surcroit la recopie EXACTE des `train/*` et `diag/*` que le logger
+        SB3 ecrit deja dans le MEME dossier de run (`attach_run_logger`), verifie valeur par
+        valeur sur les 144 points communs de ce run : zero ecart. Elles sont donc supprimees,
+        et non deplacees ; l'axe des pas appartient au seul ecrivain de SB3, celui des episodes
+        a ce tracker, ce que Documentation/Reference/training/metriques.md posait deja.
+
+        RESTE ECRIT ICI -- uniquement ce qui n'existe nulle part ailleurs :
+        - training_diagnostic/entropy_coef : `train/ent_coef` est INJECTE par
+          `training_callbacks` dans une COPIE de `name_to_value`, donc le dump de SB3 ne le voit
+          pas et ne l'ecrit pas.
+        - 00_critical/l_approx_kl_max et 00_critical/m_explained_var : valeurs BRUTES doublant
+          `train/approx_kl_max` et `train/explained_variance`, gardees parce que leur raison
+          d'etre est d'etre DANS le tableau de bord 00_critical, a cote de leurs jumelles
+          lissees `j_approx_kl` et `h_explained_variance` et sur la MEME abscisse qu'elles.
+
+        `training_critical/fps` a ete retire avec les autres : sa cle source `time/fps` n'est
+        pas presente dans `name_to_value` au dump d'update — aucun point emis sur ce tag dans
+        le fichier d'evenements du run — et SB3 publie `time/fps` lui-meme.
+
+        `training_diagnostic/n_updates` a ete retire le 2026-09-11, pour une raison DIFFERENTE
+        des douze : il n'etait pas une recopie — ce tracker en etait bien le seul ecrivain
+        possible, SB3 excluant `train/n_updates` de son propre tensorboard. Il n'avait
+        simplement AUCUN lecteur : rien dans `scripts/`, rien dans `ai/analyzer.py`, et aucune
+        entree dans le layout `add_custom_scalars`. Un tag sans ecrivain concurrent reste
+        inutile s'il n'a pas de lecteur.
+
+        Les `hyperparameter_tracking[...]` accumules ici restent : ils alimentent les courbes
+        lissees `00_critical/{f,g,h,i,j,k}` et le resume de fin de run.
+
         Args:
             model_stats: Dictionary from stable-baselines3 logger (model.logger.name_to_value)
         """
-        
-        # TRAINING DIAGNOSTIC: Learning rate (critical for convergence monitoring)
-        if 'train/learning_rate' in model_stats:
-            lr = model_stats['train/learning_rate']
-            self.hyperparameter_tracking['learning_rates'].append(lr)
-            self.writer.add_scalar('training_diagnostic/learning_rate', lr, self.step_count)
-        
-        # TRAINING CRITICAL: Policy gradient loss (PPO policy loss component)
-        if 'train/policy_gradient_loss' in model_stats:
-            policy_loss = model_stats['train/policy_gradient_loss']
-            self.hyperparameter_tracking['policy_losses'].append(policy_loss)
-            self.writer.add_scalar('training_critical/policy_loss', policy_loss, self.step_count)
-        
-        # TRAINING CRITICAL: Value function loss (critic loss component)
-        if 'train/value_loss' in model_stats:
-            value_loss = model_stats['train/value_loss']
-            self.hyperparameter_tracking['value_losses'].append(value_loss)
-            self.writer.add_scalar('training_critical/value_loss', value_loss, self.step_count)
-        
-        # TRAINING DIAGNOSTIC: Entropy loss (exploration bonus component)
-        if 'train/entropy_loss' in model_stats:
-            entropy_loss = model_stats['train/entropy_loss']
-            self.hyperparameter_tracking['entropy_losses'].append(entropy_loss)
-            self.writer.add_scalar('training_diagnostic/entropy_loss', entropy_loss, self.step_count)
 
-        # TRAINING DIAGNOSTIC: Log entropy coefficient independently from entropy_loss
-        # so schedule diagnostics remain available even if entropy_loss is missing.
+        if 'train/learning_rate' in model_stats:
+            self.hyperparameter_tracking['learning_rates'].append(
+                model_stats['train/learning_rate']
+            )
+
+        if 'train/policy_gradient_loss' in model_stats:
+            self.hyperparameter_tracking['policy_losses'].append(
+                model_stats['train/policy_gradient_loss']
+            )
+
+        if 'train/value_loss' in model_stats:
+            self.hyperparameter_tracking['value_losses'].append(model_stats['train/value_loss'])
+
+        if 'train/entropy_loss' in model_stats:
+            self.hyperparameter_tracking['entropy_losses'].append(
+                model_stats['train/entropy_loss']
+            )
+
+        # Coefficient d'entropie : seul ecrivain du depot, cf. docstring.
         if 'train/ent_coef' in model_stats:
             ent_coef = model_stats['train/ent_coef']
-            self.writer.add_scalar('training_diagnostic/entropy_coef', ent_coef, self.step_count)
-        
-        # TRAINING CRITICAL: Clip fraction (how often PPO clips policy updates)
+            self.writer.add_scalar(
+                'training_diagnostic/entropy_coef', ent_coef, self.episode_count
+            )
+
         if 'train/clip_fraction' in model_stats:
-            clip_fraction = model_stats['train/clip_fraction']
-            self.hyperparameter_tracking['clip_fractions'].append(clip_fraction)
-            self.writer.add_scalar('training_critical/clip_fraction', clip_fraction, self.step_count)
-        
-        # TRAINING CRITICAL: Approximate KL divergence (policy change magnitude)
+            self.hyperparameter_tracking['clip_fractions'].append(
+                model_stats['train/clip_fraction']
+            )
+
         if 'train/approx_kl' in model_stats:
-            approx_kl = model_stats['train/approx_kl']
-            self.hyperparameter_tracking['approx_kls'].append(approx_kl)
-            self.writer.add_scalar('training_critical/approx_kl', approx_kl, self.step_count)
+            self.hyperparameter_tracking['approx_kls'].append(model_stats['train/approx_kl'])
 
         # 00_critical: KL MAXIMALE de l'update, publiee par `ai/patched_ppo.py`. Valeur BRUTE,
         # non lissee : c'est elle qui declenche l'early-stop de PPO (> 1.5 x target_kl), donc
@@ -1581,72 +1588,50 @@ class W40KMetricsTracker:
             self.writer.add_scalar(
                 '00_critical/l_approx_kl_max',
                 float(model_stats['train/approx_kl_max']),
-                self.step_count,
+                self.episode_count,
             )
 
-        # TRAINING CRITICAL: part du gradient revenant a la POLITIQUE. Publiee par
-        # `ai/patched_ppo.py` sous `diag/grad_share_policy_mb0`, d'ou elle remonte par
-        # `name_to_value` comme toute cle enregistree sur le logger SB3. Absente si le modele
-        # n'est pas le PPO patche : la courbe reste alors vide, elle n'est pas remplie d'une
-        # valeur par defaut qui masquerait le fait qu'aucune decomposition n'a eu lieu.
+        # Part du gradient revenant a la POLITIQUE, publiee par `ai/patched_ppo.py` sous
+        # `diag/grad_share_policy_mb0`, d'ou elle remonte par `name_to_value`. Absente si le
+        # modele n'est pas le PPO patche : la serie lissee reste alors vide, elle n'est pas
+        # remplie d'une valeur par defaut qui masquerait l'absence de decomposition.
         # Le NaN que `patched_ppo` publie quand la somme des trois normes est nulle est ECARTE
         # ici, et non converti : `_calculate_smoothed_metric` fait une moyenne, donc un seul NaN
-        # accumule rendrait NaN toutes les valeurs lissees suivantes. L'ecarter laisse la courbe
-        # sans point pour cet update, ce qui est l'information exacte — la part n'existe pas
-        # quand il n'y a pas de gradient.
+        # accumule rendrait NaN toutes les valeurs lissees suivantes.
         if 'diag/grad_share_policy_mb0' in model_stats:
             grad_share_policy = float(model_stats['diag/grad_share_policy_mb0'])
             if np.isfinite(grad_share_policy):
                 self.hyperparameter_tracking['grad_share_policies'].append(grad_share_policy)
-                self.writer.add_scalar(
-                    'training_critical/grad_share_policy', grad_share_policy, self.step_count
-                )
-        
-        # TRAINING CRITICAL: Explained variance (value function quality)
+
         # Le tag 00_critical porte la valeur BRUTE de l'update ; `h_explained_variance` porte la
         # meme source lissee sur 20 updates. Les deux repondent a des questions differentes :
         # la tendance du critic, et ce qu'un update donne a pris.
         if 'train/explained_variance' in model_stats:
             explained_var = model_stats['train/explained_variance']
             self.hyperparameter_tracking['explained_variances'].append(explained_var)
-            self.writer.add_scalar('training_critical/explained_variance', explained_var, self.step_count)
-            self.writer.add_scalar('00_critical/m_explained_var', explained_var, self.step_count)
-        
-        # TRAINING DIAGNOSTIC: Total policy updates count
-        if 'train/n_updates' in model_stats:
-            n_updates = model_stats['train/n_updates']
-            self.writer.add_scalar('training_diagnostic/n_updates', n_updates, self.step_count)
-        
-        # TRAINING DIAGNOSTIC: Gradient norm (gradient explosion/vanishing check).
+            self.writer.add_scalar(
+                '00_critical/m_explained_var', explained_var, self.episode_count
+            )
+
+        # `training_diagnostic/n_updates` occupait cette place. SB3 l'exclut de son propre
+        # tensorboard (`exclude="tensorboard"`, ai/patched_ppo.py:330), ce tracker le republiait
+        # donc en tant que seul ecrivain possible — mais AUCUN lecteur n'existait : ni
+        # `scripts/`, ni `ai/analyzer.py`, ni le layout `add_custom_scalars`. Un point par update
+        # ecrit pour personne. `train/n_updates` reste LU ici comme ailleurs : c'est le marqueur
+        # sur lequel l'enveloppe de dump reconnait un update PPO (`_PPO_UPDATE_KEY`,
+        # ai/training_callbacks.py) ; seule sa RECOPIE en scalaire disparait.
+
         # Norme BRUTE publiee par `ai/patched_ppo.py` — retour de `clip_grad_norm_`, mesure avant
-        # ecretage — donc NON bornee par `max_grad_norm`. La norme apres ecretage n'a pas de tag :
-        # elle vaut min(cette valeur, max_grad_norm).
+        # ecretage — donc NON bornee par `max_grad_norm`. Conservee pour le rapport de fin de
+        # run ; la COURBE est celle de SB3 (`train/gradient_norm`).
         # Le NaN que `patched_ppo` publie quand PPO coupe les epochs avant le premier
-        # `loss.backward()` (early-stop KL) est ECARTE ici — meme doctrine que `grad_share_policy`
-        # ligne 1578. `latest_gradient_norm` reste a sa derniere valeur finie pour le rapport final.
+        # `loss.backward()` (early-stop KL) est ECARTE : `latest_gradient_norm` reste a sa
+        # derniere valeur finie.
         if 'train/gradient_norm' in model_stats:
             grad_norm = float(model_stats['train/gradient_norm'])
             if np.isfinite(grad_norm):
                 self.latest_gradient_norm = grad_norm
-                self.writer.add_scalar('training_diagnostic/gradient_norm', grad_norm, self.step_count)
 
-        # TRAINING DIAGNOSTIC: part des minibatches ou l'ecretage a mordu. A 1.0 la courbe de
-        # gradient_norm est plate au plafond et n'informe plus sur l'amplitude du pas.
-        # Meme garde isfinite que gradient_norm : NaN possible si PPO coupe avant loss.backward().
-        if 'train/grad_clip_fraction' in model_stats:
-            grad_clip_fraction = float(model_stats['train/grad_clip_fraction'])
-            if np.isfinite(grad_clip_fraction):
-                self.writer.add_scalar(
-                    'training_diagnostic/grad_clip_fraction', grad_clip_fraction, self.step_count
-                )
-        
-        # TRAINING CRITICAL: Frames per second (training efficiency)
-        if 'time/fps' in model_stats:
-            fps = model_stats['time/fps']
-            self.writer.add_scalar('training_critical/fps', fps, self.step_count)
-        
-        # Update step count for next logging
-        self.step_count += 1
         self.ppo_capture_count += 1
     
     def log_critical_dashboard(self):
@@ -1684,9 +1669,10 @@ class W40KMetricsTracker:
         - `log_bot_evaluations`, au moment de l'evaluation (attendre l'episode suivant
           publierait une valeur perimee) : 0_gap_sm-ork, a_bot_eval_combined,
           b_worst_bot_score, c_holdout_hard_mean.
-        - `log_ppo_update`, a la capture meme des stats SB3, en valeurs BRUTES :
-          l_approx_kl_max (la KL qui declenche l'early-stop, qu'un lissage effacerait) et
-          m_explained_var (jumelle non lissee de h_explained_variance).
+        - `log_training_metrics`, a la capture meme des stats SB3, en valeurs BRUTES et a
+          l'abscisse `episode_count` comme les six d'ici : l_approx_kl_max (la KL qui
+          declenche l'early-stop, qu'un lissage effacerait) et m_explained_var (jumelle non
+          lissee de h_explained_variance).
         - `training_callbacks` (BotEvaluationCallback), qui seul connait ces deux etats :
           0_eval_timeout_episodes (emis UNIQUEMENT si une eval a ete tronquee ; ce point
           d'eval n'alimente alors aucun autre signal) et o_robust_current_score.

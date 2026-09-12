@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
-from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage
+from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage, note_special_rule_usage
 from ai.analyzer_phases import claim_kill_context, died_before_phase
 from shared.data_validation import require_key
 
@@ -382,10 +382,13 @@ def handle_fight(
                     note_rule_usage(stats, "PROJ.1.4.reroll_save_fight", _target_player)
             # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
             if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
-                key = ("reroll_1_towound", fighter_unit_type)
-                stats['special_rule_usage'][key][player] += 1
-                key = ("reroll_towound_target_on_objective", fighter_unit_type)
-                stats['special_rule_usage'][key][player] += 1
+                note_special_rule_usage(
+                    stats, state, config, "reroll_1_towound", fighter_id, fighter_unit_type, player
+                )
+                note_special_rule_usage(
+                    stats, state, config, "reroll_towound_target_on_objective",
+                    fighter_id, fighter_unit_type, player,
+                )
             if fighter_unit_type:
                 limits = require_key(config.unit_attack_limits, fighter_unit_type)
                 cc_nb_by_weapon = require_key(limits, "cc_nb_by_weapon")

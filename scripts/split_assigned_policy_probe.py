@@ -5,12 +5,16 @@
 le moteur remplit-il le canal (volet A), le réseau le lit-il au sens du gradient (volet B). Un
 gradient non nul ne prouve QUE le câblage : la dérivée d'une couche linéaire par rapport à une
 entrée vaut son poids, elle est non nulle même pour une entrée toujours à zéro. La question qui
-reste — le CHOIX DE CIBLE change-t-il quand l'arme déjà engagée change de cible — se mesure sur la
-distribution d'actions, et seulement sur un modèle ENTRAÎNÉ.
+reste — la DÉCISION change-t-elle quand l'arme déjà engagée change de cible — se mesure sur la
+distribution d'actions, et seulement sur un modèle ENTRAÎNÉ. Elle se pose aux DEUX sous-états du
+tir fractionné, et la sonde les mesure SÉPARÉMENT : au sous-état ARME (« laquelle j'engage
+ensuite »), au sous-état CIBLE (« sur qui je la pointe »). Ne mesurer que le second rendrait un
+verdict portant sur la moitié du mécanisme — c'est ce que faisait cette sonde avant le
+2026-09-11, et le verdict « pas exploités » qu'elle a servi ce jour-là ne valait que pour CIBLE.
 
 MÉTHODE. Sur de vrais états de jeu (scénarios d'entraînement, actions masquées aléatoires), on
-s'arrête à chaque point d'arrêt de CIBLE du tir fractionné portant déjà au moins un couple
-arme→cible. Là, on construit un CONTREFACTUEL : le même état, à ceci près que le couple déjà
+s'arrête à chaque point d'arrêt du tir fractionné — ARME comme CIBLE — portant déjà au moins un
+couple arme→cible. Là, on construit un CONTREFACTUEL : le même état, à ceci près que le couple déjà
 commité vise une AUTRE escouade ennemie éligible. Les deux observations ne diffèrent alors que par
 les bits `split_assigned_w<i>` — c'est mesuré ici, pas supposé (`--strict` lève si une autre clé
 bouge). On compare les distributions d'actions de la politique sur ces deux observations, en
@@ -33,8 +37,12 @@ LECTURE DU VERDICT :
   TVD_split de l'ordre de TVD_référence     -> exploités.
   entre les deux                            -> à rapporter tel quel, avec les trois nombres.
 
+Le nombre d'ACTIONS LÉGALES des points mesurés est rapporté avec eux : une TVD faible sur un
+masque large peut venir de la dilution sur des actions sans rapport, et non de l'indifférence de
+la politique.
+
 La sonde n'écrit rien : ni config, ni modèle, ni state. Elle ne juge pas non plus « bon » ou
-« mauvais » — elle rend trois nombres et leur écart-type.
+« mauvais » — elle rend des nombres, par sous-état puis réunis.
 
 Usage :
     python3 scripts/split_assigned_policy_probe.py --model ai/models/<agent>/model_<agent>.zip
@@ -75,6 +83,18 @@ SPLIT_BIT_IDX: Tuple[int, ...] = tuple(
 def _tvd(p: np.ndarray, q: np.ndarray) -> float:
     """Distance de variation totale entre deux distributions d'actions."""
     return float(0.5 * np.abs(p - q).sum())
+
+
+def sous_etat_de(pending: Dict[str, Any]) -> str:
+    """« ARME » ou « CIBLE » — le sous-état du split-fire en cours.
+
+    PUBLIQUE et nommée, plutôt qu'un ternaire dans la boucle : les deux colonnes du rapport en
+    dépendent, et une inversion y échangerait les deux verdicts sans qu'aucun autre contrôle ne
+    tombe. Le test qui la verrouille l'importe d'ici au lieu de la réécrire.
+    """
+    # get allowed : `pending_weapon` armé = une arme attend sa cible, absent = l'arme suivante
+    # reste à choisir.
+    return "CIBLE" if pending.get("pending_weapon") is not None else "ARME"
 
 
 def _action_probs(dist: Any) -> np.ndarray:
@@ -228,13 +248,16 @@ def _bits_only(a: Dict[str, np.ndarray], b: Dict[str, np.ndarray]) -> bool:
     return bool(np.array_equal(x, y))
 
 
-def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str, float]]:
-    """Un épisode : un enregistrement par point d'arrêt de CIBLE portant déjà un couple."""
+def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str, Any]]:
+    """Un épisode : un enregistrement par point d'arrêt du split-fire portant déjà un couple.
+
+    Les DEUX sous-états sont visités — ARME et CIBLE — et chaque enregistrement porte le sien.
+    """
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
     obs, _info = eng.reset(seed=seed)
     rng = np.random.default_rng(seed * 7919 + 13)
-    out: List[Dict[str, float]] = []
+    out: List[Dict[str, Any]] = []
     steps = 0
     while steps < MAX_STEPS_PER_EPISODE:
         gs = eng.game_state
@@ -244,14 +267,16 @@ def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str
         if not mask.any():
             break
 
+        # LES DEUX SOUS-ÉTATS. Les bits sont posés dans l'un comme dans l'autre, et l'usage le
+        # plus direct de l'information est celui que le filtre d'origine excluait : au sous-état
+        # ARME, « quelle arme j'engage ensuite sachant ce qui est déjà parti et sur qui ». Ne
+        # mesurer que la CIBLE rendait un verdict portant sur la moitié du mécanisme.
         pending = gs.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
-        if (
-            pending is not None
-            and pending.get("pending_weapon") is not None  # get allowed : sous-état CIBLE
-            and pending.get("assignments")  # get allowed : au moins un couple commité
-        ):
-            rec = _measure(eng, policy, pending, mask, strict)
+        if pending is not None and pending.get("assignments"):  # get allowed : couple commité
+            sous_etat = sous_etat_de(pending)
+            rec = _measure(eng, policy, pending, mask, strict, sous_etat)
             if rec is not None:
+                rec["sous_etat"] = sous_etat
                 out.append(rec)
 
         obs, _r, term, trunc, _i = eng.step(int(rng.choice(np.flatnonzero(mask))))
@@ -262,7 +287,7 @@ def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str
 
 
 def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarray,
-             strict: bool) -> Optional[Dict[str, float]]:
+             strict: bool, sous_etat: str) -> Optional[Dict[str, Any]]:
     """Les trois TVD sur UN point d'arrêt. `None` si l'état ne s'y prête pas."""
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
@@ -309,33 +334,63 @@ def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarra
             )
         return {"impure": 1.0}
 
-    # RÉFÉRENCE : les deux escouades ennemies ÉCHANGENT leurs caractéristiques — toute la ligne
-    # continue ET la ligne de drapeaux, les dix bits exceptés. Un échange, et non une valeur
-    # forcée : mettre `hp_total` à 0 en laissant `alive_models`, `hp_max` et `present` intacts
-    # fabriquerait une escouade contradictoire, que le réseau n'a jamais vue à l'entraînement —
-    # l'étalon sortirait gonflé et ferait passer les bits pour inertes par comparaison. Ici les
-    # deux lignes restent des unités RÉELLES du même état, seule leur place change.
+    # RÉFÉRENCE — PROPRE AU SOUS-ÉTAT, et c'est la condition pour qu'elle veuille dire quelque
+    # chose. Un étalon doit perturber ce dont la décision EN COURS dépend :
+    #
+    #   CIBLE — les actions légales désignent des escouades ennemies. On fait ÉCHANGER leurs
+    #           caractéristiques aux deux cibles concernées, toute la ligne continue et la ligne
+    #           de drapeaux, les dix bits exceptés.
+    #   ARME  — les actions légales désignent des SLOTS DE PROFIL D'ARME
+    #           (`SHOOT_WEAPON_SEL_SLOT_j`), qui ne portent aucune identité de cible. Échanger
+    #           deux lignes ennemies n'y perturbe donc rien de ce que la décision regarde :
+    #           MESURÉ le 2026-09-11, cet étalon-là y tombait à 0,001 alors que la SATURATION y
+    #           valait 0,037, trente fois plus — l'étalon était muet, pas la politique, et la
+    #           conclusion qu'on en tirait était fausse. On échange donc deux PROFILS D'ARME de
+    #           l'escouade observatrice, ce dont le choix d'arme dépend par construction.
+    #
+    # Un échange, et non une valeur forcée : mettre `hp_total` à 0 en laissant `alive_models`,
+    # `hp_max` et `present` intacts fabriquerait une entité contradictoire, que le réseau n'a
+    # jamais vue à l'entraînement, et l'étalon sortirait gonflé.
     obs_ref = {k: np.array(v, copy=True) for k, v in obs_a.items()}
-    row = next(
-        (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == assigned),
-        None,
-    )
-    row_other = next(
-        (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == other),
-        None,
-    )
-    if row is None or row_other is None:
-        raise RuntimeError(
-            f"cible {assigned!r} ou {other!r} absente du mapping de slots ennemis de "
-            f"{squad_id!r} — l'observation ne pourrait pas porter son bit"
+    if sous_etat == "CIBLE":
+        row = next(
+            (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == assigned),
+            None,
         )
-    keep = [c for c in range(obs_ref["enemies_bin"].shape[1]) if c not in set(SPLIT_BIT_IDX)]
-    for key, cols in (("enemies_cont", None), ("enemies_bin", keep)):
-        block = obs_ref[key]
-        sel = slice(None) if cols is None else cols
-        a_row = block[row, sel].copy()
-        block[row, sel] = block[row_other, sel]
-        block[row_other, sel] = a_row
+        row_other = next(
+            (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == other),
+            None,
+        )
+        if row is None or row_other is None:
+            raise RuntimeError(
+                f"cible {assigned!r} ou {other!r} absente du mapping de slots ennemis de "
+                f"{squad_id!r} — l'observation ne pourrait pas porter son bit"
+            )
+        keep = [c for c in range(obs_ref["enemies_bin"].shape[1]) if c not in set(SPLIT_BIT_IDX)]
+        blocks: Tuple[Tuple[str, Any], ...] = (("enemies_cont", None), ("enemies_bin", keep))
+        for key, cols in blocks:
+            block = obs_ref[key]
+            sel = slice(None) if cols is None else cols
+            a_row = block[row, sel].copy()
+            block[row, sel] = block[row_other, sel]
+            block[row_other, sel] = a_row
+    else:
+        # Ligne 0 du bloc allié = l'escouade ACTIVE (contrat de l'observation), et les dix
+        # premiers emplacements d'arme sont les profils de TIR — ceux que `SHOOT_WEAPON_SEL_SLOT_j`
+        # désigne, invariant D1.
+        slot_a = int(require_key(assign, "weapon_slot"))
+        slot_b = next(
+            (j for j in range(K_WEAPONS_RANGED)
+             if j != slot_a and float(obs_a["allies_wpn_bin"][0, j, -1]) == 1.0),
+            None,
+        )
+        if slot_b is None:
+            return {"sans_second_profil": 1.0}
+        for key in ("allies_wpn_cont", "allies_wpn_bin", "allies_wpn_rule_ids"):
+            block = obs_ref[key]
+            a_row = block[0, slot_a].copy()
+            block[0, slot_a] = block[0, slot_b]
+            block[0, slot_b] = a_row
 
     # SATURATION : tout le bloc continu ennemi mis à zéro. Aucune signification tactique — c'est
     # un contrôle d'INSTRUMENT. Si même cette perturbation-là ne bouge pas la distribution, la
@@ -350,6 +405,10 @@ def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarra
     p_ref = policy.distribution(obs_ref, mask)
     p_sat = policy.distribution(obs_sat, mask)
     return {
+        # Nombre d'actions LÉGALES : sans lui, une TVD faible se lit mal — elle peut venir d'un
+        # masque large qui dilue la mesure sur des actions sans rapport avec le choix, et non de
+        # l'indifférence de la politique.
+        "n_actions_legales": float(np.count_nonzero(mask)),
         "tvd_split": _tvd(p_a, p_b),
         "tvd_plancher": _tvd(p_a, p_a2),
         "tvd_reference": _tvd(p_a, p_ref),
@@ -366,7 +425,7 @@ def main() -> int:
                     help="lève si une contrefactuelle fait bouger autre chose que les dix bits")
     args = ap.parse_args()
 
-    records: List[Dict[str, float]] = []
+    records: List[Dict[str, Any]] = []
     policy: Optional[_Policy] = None
     for scenario in SCENARIOS:
         eng = make_engine(scenario)
@@ -382,25 +441,69 @@ def main() -> int:
         ("degenere", "une seule action légale — aucune perturbation ne peut rien y changer"),
         ("sans_autre_cible", "aucune AUTRE cible éligible pour l'arme déjà assignée"),
         ("impure", "contrefactuelle impure (une autre clé bouge) — relancer avec --strict"),
+        ("sans_second_profil", "un seul profil de tir — pas d'étalon d'arme possible [ARME]"),
     )
     ecartes = {k: [r for r in records if k in r] for k, _ in motifs}
     mesures = [r for r in records if not any(k in r for k, _ in motifs)]
     print(f"points d'arrêt rencontrés : {len(records)}")
     for key, why in motifs:
-        print(f"   écartés — {why:62s} : {len(ecartes[key])}")
+        detail = "  ".join(
+            f"{se}={sum(1 for r in ecartes[key] if r.get('sous_etat') == se)}"  # get allowed
+            for se in ("ARME", "CIBLE")
+        )
+        print(f"   écartés — {why:62s} : {len(ecartes[key]):3d}  ({detail})")
     print(f"points d'arrêt mesurés    : {len(mesures)}")
     records = mesures
     if not records:
         print("AUCUN point d'arrêt informatif — rien à conclure.")
         return 1
+
+    labels = (("tvd_plancher", "PLANCHER   (obs contre elle-même)"),
+              ("tvd_split", "SPLIT      (cible déjà assignée changée)"),
+              ("tvd_reference", "RÉFÉRENCE  (étalon propre au sous-état)"),
+              ("tvd_saturation", "SATURATION (bloc ennemi continu à zéro)"))
+
+    # GARDE-FOUS PAR SOUS-ÉTAT, et AVANT le moindre tableau. Les évaluer sur les deux lots réunis
+    # laisserait un sous-état muet passer sous le maximum de l'autre : un lot ARME entièrement à
+    # `tvd_saturation == 0` resterait invisible derrière le 0,54 du lot CIBLE, et sa colonne se
+    # lirait « inexploités » alors que la sonde n'y voit rien. Les imprimer après les tableaux
+    # laisserait aussi un lecteur s'arrêter aux chiffres avant l'avertissement.
+    for sous_etat in ("ARME", "CIBLE"):
+        lot = [r for r in records if r.get("sous_etat") == sous_etat]  # get allowed
+        if not lot:
+            continue
+        if max(float(r["tvd_plancher"]) for r in lot) != 0.0:
+            print(f"\n❌ sous-état {sous_etat} — PLANCHER non nul : la sonde n'y est pas "
+                  f"déterministe, aucun de ses nombres n'est lisible.")
+            return 2
+        if max(float(r["tvd_saturation"]) for r in lot) <= 0.0:
+            print(f"\n❌ sous-état {sous_etat} — SONDE MUETTE : même le bloc ennemi entier mis à "
+                  f"zéro n'y bouge pas la distribution. Un « SPLIT nul » n'y signifierait pas "
+                  f"« inexploité » — ne rien conclure de sa colonne.")
+            return 2
+
+    # PAR SOUS-ÉTAT, et pas seulement en bloc : les bits servent à deux décisions différentes —
+    # quelle arme engager ensuite (ARME), sur qui la pointer (CIBLE). Une moyenne commune peut
+    # noyer un effet présent dans l'un sous l'indifférence de l'autre.
+    for sous_etat in ("ARME", "CIBLE"):
+        lot = [r for r in records if r.get("sous_etat") == sous_etat]  # get allowed
+        if not lot:
+            print(f"\n── sous-état {sous_etat} : AUCUN point mesuré ──")
+            continue
+        na = np.array([r["n_actions_legales"] for r in lot])
+        print(f"\n── sous-état {sous_etat} — {len(lot)} points, "
+              f"actions légales : méd={np.median(na):.0f} max={na.max():.0f} ──")
+        for key, label in labels:
+            vals = np.array([r[key] for r in lot])
+            print(f"  {label:60s} moy={vals.mean():.6f}  med={np.median(vals):.6f}  "
+                  f"max={vals.max():.6f}")
+
+    print("\n── les deux sous-états réunis ──")
     stat: Dict[str, np.ndarray] = {}
-    for key, label in (("tvd_plancher", "PLANCHER   (obs contre elle-même)"),
-                       ("tvd_split", "SPLIT      (cible déjà assignée changée)"),
-                       ("tvd_reference", "RÉFÉRENCE  (les deux cibles échangent leurs caractéristiques)"),
-                       ("tvd_saturation", "SATURATION (bloc ennemi continu à zéro)")):
+    for key, label in labels:
         vals = np.array([r[key] for r in records])
         stat[key] = vals
-        print(f"  {label:42s} moy={vals.mean():.6f}  med={np.median(vals):.6f}  "
+        print(f"  {label:60s} moy={vals.mean():.6f}  med={np.median(vals):.6f}  "
               f"max={vals.max():.6f}  écart-type={vals.std():.6f}")
 
     if float(stat["tvd_plancher"].max()) != 0.0:

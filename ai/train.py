@@ -3810,7 +3810,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         agent_key,
         model_tensorboard_dir,
         initial_episode_count=episode_offset,
-        initial_step_count=int(getattr(model, "num_timesteps", 0)),
         show_banner=not silent_chunk,
         perf_window=_perf_window,
         perf_window_fast=_perf_window_fast,
@@ -3941,14 +3940,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         async_eval_enabled=async_eval_enabled,
     )
     if extra_callbacks:
-        # Lier metrics_tracker aux callbacks exploiteur avant de les injecter, comme on le
-        # fait pour BotEvaluationCallback (cf. boucle de liaison plus bas). Leur ORIGINE
-        # d'étape ne vient PAS d'ici : `episode_offset` est l'état du modèle repris, qui après
-        # un `--resume-from` est un checkpoint de milieu d'étape ; ils la reçoivent à la
-        # construction, lue sur l'archive source de l'étape (`ai.curriculum.stage_origin`).
-        for cb in extra_callbacks:
-            if isinstance(cb, (ExploiterProbeCallback, PoolEarlyStoppingCallback)):
-                cb.metrics_tracker = metrics_tracker
+        # Liaison des états de portée RUN (tracker de métriques, dict du temps bloqué) avant
+        # injection : cf. `bind_curriculum_probe_callbacks`, qui porte le pourquoi et le verrou.
+        bind_curriculum_probe_callbacks(extra_callbacks, metrics_tracker, training_config)
         training_callbacks = list(extra_callbacks) + training_callbacks
     callback_names = [callback.__class__.__name__ for callback in training_callbacks]
     _debug_train_marker(
@@ -4367,6 +4361,42 @@ def _validate_vs_control_callback_params(callback_params: dict) -> float:
     return value
 
 
+#: Clé sous laquelle `setup_callbacks` dépose le dict d'affichage du gate dans la config du run.
+#: Il porte aussi `blocking_eval_seconds`, le temps où la boucle est ARRÊTÉE. Constante et non
+#: littéral recopié : trois sites la lisent ou l'écrivent — le dépôt dans `setup_callbacks`, la
+#: construction de `BotEvaluationCallback`, et `bind_curriculum_probe_callbacks` — et une faute de
+#: frappe dans l'un d'eux ne lèverait pas, elle rendrait juste un `None` silencieux dont la seule
+#: trace serait une colonne `moy` fausse, des heures plus tard.
+GATE_DISPLAY_STATE_KEY = "_gate_display_state"
+
+
+def bind_curriculum_probe_callbacks(extra_callbacks, metrics_tracker, training_config) -> None:
+    """Lie aux callbacks à SONDES les deux états de portée RUN qu'ils ne reçoivent pas à la construction.
+
+    Les deux sondes de curriculum sont construites dans `_run_main`, donc avant `setup_callbacks`
+    qui crée le tracker de métriques et le dict d'affichage du gate. Leur ORIGINE d'étape, elle,
+    ne passe PAS par ici : `episode_offset` est l'état du modèle repris, qui après un
+    `--resume-from` est un checkpoint de milieu d'étape ; elles la reçoivent à la construction,
+    lue sur l'archive source de l'étape (`ai.curriculum.stage_origin`).
+
+    `gate_display_state` porte `blocking_eval_seconds`, retranché de la colonne `moy` de la barre.
+    Sans cette liaison, les sondes — synchrones, donc du wall-clock où aucun épisode ne progresse
+    — sont comptées comme de l'ENTRAÎNEMENT : mesure du 2026-09-11, une étape à pool ne
+    retranchait que 53 à 57 % du temps qui figeait sa boucle, contre 87 % pour une étape sans
+    pool (cf. `_BlockingEvalClockMixin`). Fonction NOMMÉE plutôt qu'une boucle dans le corps de
+    `train_with_scenario_rotation` : c'est le seul câblage dont dépend la correction, et il n'y
+    était couvert par aucun test.
+
+    `.get` et non `require_key` : un profil sans `total_episodes` n'a pas de barre de
+    progression, donc rien à corriger — `_BlockingEvalClockMixin` traite ce `None` comme une
+    absence d'affichage, pas comme une panne.
+    """
+    for cb in extra_callbacks:
+        if isinstance(cb, (ExploiterProbeCallback, PoolEarlyStoppingCallback)):
+            cb.metrics_tracker = metrics_tracker
+            cb.gate_display_state = training_config.get(GATE_DISPLAY_STATE_KEY)
+
+
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
                    global_start_time=None, agent=None, rewards_config_name=None,
@@ -4405,7 +4435,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         # The callback will stop training when exact episode count is reached
         # This prevents drift from timestep estimation errors
         gate_display_state: Dict[str, Any] = {"label": "Gate 🧱"}
-        training_config["_gate_display_state"] = gate_display_state
+        training_config[GATE_DISPLAY_STATE_KEY] = gate_display_state
         episode_callback = EpisodeTerminationCallback(
             cycle_max_eps,  # Use cycle length, not total
             expected_timesteps,
@@ -4728,7 +4758,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             model_gating_min_worst_bot=model_gating_min_worst_bot,
             model_gating_min_worst_scenario_combined=model_gating_min_worst_scenario_combined,
             model_gating_min_vs_control=model_gating_min_vs_control,
-            gate_display_state=training_config.get("_gate_display_state"),
+            gate_display_state=training_config.get(GATE_DISPLAY_STATE_KEY),
             eval_deterministic=eval_deterministic,
             # Cible CUMULATIVE, comme `target_episode_count` dans train_model : le compteur du
             # tracker est amorce a l'offset de reprise (`initial_episode_count`).
@@ -5654,9 +5684,10 @@ def _score_stage_against_pool(
     Ils sont CONSERVES parce qu'ils ne coutent presque rien, pas parce qu'ils apportent quelque
     chose — un etat a ne pas confondre avec une justification.
 
-    CE QU'ILS COUTENT, exactement : `evaluate_against_checkpoints` sonde la compatibilite de
-    chaque archive par un `MaskablePPO.load` cote PARENT, une fois par appel. Trois appels font
-    donc deux chargements de trop par membre du pool — quatre sur P2, vingt-six sur P10. Et rien
+    CE QU'ILS COUTENT, exactement : `evaluate_against_checkpoints` trie la compatibilite de
+    chaque archive cote PARENT, une fois par appel — une lecture de zip par archive, sans
+    construction de policy depuis `filter_compatible_archives`. Trois appels font donc deux
+    lectures de trop par membre du pool — quatre sur P2, vingt-six sur P10. Et rien
     d'autre sur les quatre profils d'entrainement reels (`x1`, `x1_long`, `x5_new`, `x5_long`),
     qui portent `bot_eval_n_workers_gate` = 1 : `use_subprocess and n_workers > 1` y est FAUX et
     le gate s'execute SEQUENTIELLEMENT dans le parent — aucun pool de workers n'est monte, aucune
@@ -6622,12 +6653,23 @@ def _run_main():
                 ckpt_ratio_items,
                 discover_checkpoint_archives,
                 evaluate_against_checkpoints,
+                filter_compatible_archives,
                 write_ckpt_scalars,
             )
+            # Le compte ANNONCÉ doit être celui des barreaux qui vont jouer. `discover_*` ne
+            # filtre que la présence du pkl compagnon ; les archives d'architecture périmée sont
+            # écartées par `filter_compatible_archives` (§12.15). Annoncer le compte brut
+            # promettait « 16 barreaux » pour 4 réellement joués.
             ckpt_archives = discover_checkpoint_archives(models_root, args.agent)
+            n_ckpt_discovered = len(ckpt_archives)
+            if ckpt_archives:
+                ckpt_archives, _ = filter_compatible_archives(model_path, ckpt_archives)
             if ckpt_archives:
                 n_ckpt_episodes = max(1, (args.test_episodes or require_key(training_config, "eval_episodes")) // 2)
-                print(f"🏆 CHECKPOINT EVAL : {len(ckpt_archives)} barreau(x) × {n_ckpt_episodes} ép.")
+                print(
+                    f"🏆 CHECKPOINT EVAL : {len(ckpt_archives)} barreau(x) compatible(s) "
+                    f"sur {n_ckpt_discovered} découvert(s) — {n_ckpt_episodes} ép. chacun"
+                )
                 ckpt_results = evaluate_against_checkpoints(
                     model_path=model_path,
                     checkpoint_archives=ckpt_archives,

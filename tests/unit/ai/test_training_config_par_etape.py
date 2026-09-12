@@ -144,7 +144,8 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     assert mp["n_steps"] == 8160
     assert mp["batch_size"] == 1020
     assert mp["vf_coef"] == pytest.approx(0.17)
-    assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.6)
+    # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
+    assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
 
 
 def test_the_lineage_profile_carries_scalars_never_ramps(profil_lignee) -> None:
@@ -191,7 +192,7 @@ def test_the_cold_profile_keeps_its_ramps(profil_froid) -> None:
 
     Ce qui SÉPARE encore les deux profils : le froid exprime `ent_coef` et `learning_rate` en
     RAMPES là où la lignée pose des scalaires, et il sur-représente le siège faible (0.75 contre
-    0.6). `vf_coef` ne les sépare plus — le 0.17 mesuré le 2026-09-08 a été porté dans `x1`,
+    0.7). `vf_coef` ne les sépare plus — le 0.17 mesuré le 2026-09-08 a été porté dans `x1`,
     `x1_long` ET la lignée le même jour, la surcharge de la lignée n'étant plus qu'un rappel.
     """
     assert isinstance(profil_froid["model_params"]["ent_coef"], dict)

@@ -2,6 +2,9 @@
 
 | Date | Chantier | Détail |
 |---|---|---|
+| 2026-09-10 | ✅ **20.01 — le siège suit la question, et le bot répond pour lui-même** | source : `engine/phase_handlers/deployment_handlers.py` (`move_seat_to_pending_reserves_declaration`), `engine/w40k_core.py` (reset), `frontend/src/utils/strategicReservesUi.ts`. Le déplacement du siège vers le camp interrogé n'existait que sur le chemin gym : aucune route HTTP ne construit de masque (`grep get_squad_action_mask_and_eligible_units services/` → 0 hit), donc en partie servie par l'API `current_deployer` restait sur le joueur 1 pendant que la file alternait. En PvE, la question du bot était offerte à l'humain sans filtre de siège et le tour IA ne partait jamais. 20.01 : « **you** can select one or more friendly units ». Le siège suit la question au reset puis après chaque réponse ; la route humaine refuse une question posée à un siège modèle ; le client ne rend les boutons que sur un siège humain. **Aucune clé de save nouvelle**, aucun bump de format. Livré le 2026-09-10, complété le même jour : la route du siège modèle ne faisait pas suivre le siège (le bot répondait à la question de l'humain au tour IA suivant — mesuré), les deux routes passent par un écrivain unique `resolve_reserves_declaration_answer`, et le tour IA du client est gardé par l'écran de préparation encore ouvert — section conservée ci-dessous : [moteur.md#siege-question-2001](moteur.md#siege-question-2001) |
+| 2026-09-09 | ✅ **13.06 — le move gym peut FINIR EN HAUTEUR** | déclaration de montée sur les `CHOICE_*` existants, niveau par figurine, coût vertical facturé à celle qui monte ; livré le 2026-09-09. `obs_size` 16971 → **17055** et `GRID_CHANNELS` 11 → **12** : **`--new` obligatoire**. Rendement mesuré : 0,8 % des cellules masquées — section conservée ci-dessous : [moteur.md#verticalite-move-gym](moteur.md#verticalite-move-gym) |
+| 2026-09-08 | ✅ **13.09 — statut « caché » rafraîchi à chaque perte ET à chaque tir** | option C livrée le 2026-09-08 aux deux choke-points, un par membre de la règle ; change les parties jouées, `--new` obligatoire pour tout modèle pré-diff — section conservée ci-dessous : [moteur.md#hidden-fraicheur](moteur.md#hidden-fraicheur) |
 | 2026-09-10 | ✅ **20.01 — la déclaration de réserves passe AVANT le déploiement** | `SQUAD_ACTION_WAIT` portait la mise en réserves pendant le tour de déploiement de chaque unité : mesuré en déploiement actif, le joueur 2 gardait le slot ouvert avec quatre unités adverses déjà posées, alors que 20.01 situe la déclaration à l'étape Declare Battle Formations. File alternée figée au reset, une question par unité déclarable, `reserves_declaration` répondu par `CHOICE_i`, `deploy_commit` refusé tant que l'étape est ouverte. `obs_size` et `TOTAL_ACTION_SIZE` inchangés, mais la politique de déploiement change : les win-rates d'avant ne sont plus comparables. Suite livrée le même jour : le siège suit la question (§ `siege-question-2001`). moteur · — |
 | 2026-08-18 | Pile-in/Overrun 12.06 par-figurine | Migration par-figurine, purge du modèle par-ancre (commit `babc3234`) ; prérequis de P3-5 levé ; → `Documentation/Archives/chantiers/pile_in_overrun_par_figurine_2026-08-18.md` |
 | 2026-08-17 | INDIRECT FIRE 24.19 | 7 pièces ; `TOTAL_ACTION_SIZE` 1139→1159 ; gym+PvP+journal+analyzer ; 8 tests analyzer |
@@ -81,3 +84,163 @@
 | 2026-08-24 | ✅ fix fight weapon mask ordering (2026-08-24) — pending_cr/pending_fw vérifiés avant eligible_units dans get_squad_action_mask | moteur+ai · — |
 | 2026-08-24 | ✅ fix(P3-8) COMBI_WEAPON masque/commit divergence split-fire gym (2026-08-24) — purge_combi_siblings lève IndexError si slot hors range ; shared_utils + w40k_core + 59 tests split_fire_gym | moteur+training · — |
 | 2026-08-21 | ✅ Constante `DRAW_WINNER = -1` introduite dans `engine/constants.py`, tous les littéraux remplacés (2026-08-21) | engine · — |
+
+---
+
+## Sections archivées — chantiers livrés (texte conservé tel quel)
+
+## ✅ 20.01 — le siège suit la question, et le bot répond pour lui-même {#siege-question-2001}
+
+**Livré le 2026-09-10.** Le déplacement du siège vers le camp interrogé n'existait que sur le
+chemin gym (`arm_reserves_declaration_decision`, appelé par le seul constructeur de masque). Aucune
+route HTTP ne construit de masque — `grep get_squad_action_mask_and_eligible_units services/` : zéro
+hit — donc dans une partie servie par l'API, `current_deployer` restait sur le joueur 1 pendant
+toute l'étape pendant que la file, elle, alternait les deux camps.
+
+Conséquence en PvE : la question du bot était rendue au client sur la ligne de roster de son
+escouade, sans aucun filtre de siège, et le tour IA ne partait jamais — le déclencheur de
+`BoardWithAPI` lit `current_deployer`, et `execute_ai_turn` refuse hors `current_player == 2`.
+L'humain répondait donc à la place du bot, ou la partie n'avançait plus. 20.01 dit « **you** can
+select one or more friendly units » : la liste d'un camp se décide depuis son siège.
+
+Ce qui change, sur les deux routes et par une seule écriture
+(`move_seat_to_pending_reserves_declaration`) : le siège suit la question au reset, puis après
+chaque réponse ; la route humaine REFUSE une question posée à un siège piloté par le modèle
+(`reserves_declaration_seat_is_not_human`) ; le client ne rend plus les deux boutons que sur un
+siège humain, par la même lecture de `player_types` que l'avertissement 20.04.
+
+Le recalage au reset n'est pas décoratif : la tête de file n'est pas toujours le joueur 1, ses
+unités inéligibles (FORTIFICATION, plafond de 50 %) étant retirées sans réponse. Même raison au
+`change_roster`, TROISIÈME site où la file est (re)bâtie : elle y repart d'un autre roster alors
+que le déployeur d'avant le remplacement est restauré tel quel.
+
+**Aucune clé de save nouvelle**, donc aucun bump de format : seuls `current_deployer` et
+`current_player` — déjà sauvegardés — changent de valeur.
+
+**Complément du 2026-09-10, même chantier.** Une seule des deux routes de réponse déplaçait le
+siège : `apply_reserves_declaration_decision` (siège du modèle) fermait l'étape sans le faire
+suivre. Mesuré sur le chemin de l'API — le modèle répond à la question du joueur 2, le siège RESTE
+à 2, le client relance un tour IA, le garde `current_player == 2` d'`execute_ai_turn` (lu AVANT le
+build de masque) passe, et c'est ce build qui arme la question du JOUEUR 1 pour le modèle :
+l'unité 2 du joueur 1 partait en réserves sur décision du bot. Les deux routes passent désormais
+par un écrivain unique, `resolve_reserves_declaration_answer` — file amputée, mise en réserves,
+siège de la question suivante.
+
+Côté client, ce même recalage peut poser `current_player = 2` dès le reset alors que l'écran de
+préparation est encore ouvert (première question due appartenant au bot, file amputée des unités
+inéligibles du joueur 1). L'orchestration du tour IA de `BoardWithAPI` n'était gardée par aucun
+`deploymentStarted` : le bot répondait à 20.01 avant « Start Deployment », et `change_roster`
+était ensuite refusé sur le seul écran où l'humain peut encore choisir son armée. Le déclencheur
+lit maintenant `isPopupVisible`, miroir du filtre humain `isReservesDeclarationPendingFor`. Le
+départ différé du tour IA est de plus annulé au démontage du composant — sans quoi le timer
+survivait à la sortie de partie et lançait un tour sur un composant mort.
+
+Verrous : `tests/unit/engine/test_reserves_declaration_step_2001.py` (4 tests ajoutés, chaque
+défaut réintroduit et constaté rouge ; celui de la route modèle passe par `_process_squad_action`,
+le chemin de l'API — le step gym reconstruit le masque et masquerait le défaut),
+`frontend/src/utils/strategicReservesUi.test.ts` (siège du camp interrogé) et
+`frontend/src/components/BoardWithAPI.test.tsx` (le CÂBLAGE du composant, que le prédicat seul ne
+prouvait pas : aucun `POST /api/game/ai-turn` avant « Start Deployment », un après).
+
+---
+
+## ✅ 13.06 — le move gym peut finir en hauteur {#verticalite-move-gym}
+
+**Livré le 2026-09-09.** Le move d'escouade du pipeline gym atterrissait TOUJOURS au sol :
+`build_rigid_plan` écrivait `SQUAD_RIGID_MOVE_DESTINATION_LEVEL` pour toutes ses figurines et le
+pool d'ancre sortait avant son bloc multi-niveaux. Mesuré avant : 710 275 destinations sur 6
+épisodes, **aucune** à l'étage, alors que les deux terrains d'entraînement portent 8 étages chacun.
+
+Ce qui change : une escouade **déclare** (13.06, point de choix `ascent_declaration`, sur les
+emplacements `CHOICE_*` existants — zéro action nouvelle) qu'elle finira en hauteur, puis chaque
+figurine finit au niveau résolu à SA case d'arrivée. Une escouade à cheval sol/étage est un plan
+légal (03.03 tolère 5" de dénivelé), pas un cas limite. Le coût vertical est facturé **à la
+figurine qui monte**, dans son propre budget de trajet — jamais en forfait au bloc : la pénalité de
+descente n'en est pas le miroir (elle dépend du départ, la montée dépend de l'arrivée).
+
+**Sans déclaration, tout le pipeline est bit-à-bit celui d'avant** — c'est ce qui borne le lot.
+
+**Impose un retrain `--new`** : `obs_size` 16971 → 17055 (`max_floor_height`, `has_ground_model`,
+`elevated`) et `GRID_CHANNELS` 11 → 12 (`occupant_level`). Sans ces features la montée serait un
+état CACHÉ à effet sur la récompense (+1 BS de Plunging Fire 22.05, coût de descente au move
+suivant) — le motif d'aliasing qui a déjà coûté un run à ce projet.
+
+**Coût du point de choix, mesuré et resserré (2026-09-09)** : la question « montes-tu ? »
+consomme un step d'épisode. Armée sur la seule distance à vol d'oiseau, elle prenait **9,1 % des
+steps** (52 sur 572 joués). La borne d'armement déduit désormais le coût de montée — condition
+NÉCESSAIRE, puisque le trajet réel est toujours >= la distance à vol d'oiseau, donc elle ne peut
+écarter que des questions dont la réponse ne pouvait être que « non » : **5,3 %** (30 sur 561),
+à rendement de montée inchangé (0,8 %). Une borne fondée sur le pool de move réel a été mesurée
+et écartée : elle n'en retire que 2 sur 52, le pool de sol étant vaste — ce qui mord, c'est le
+budget vertical, pas l'accès au plancher.
+
+**Rendement mesuré, à connaître avant d'espérer** : sur 3 parties gym à x1, déclaration toujours
+acceptée, **62 cellules sur 7 408** offertes par le masque (0,8 %) mettent au moins une figurine à
+l'étage. La verticalité est désormais *jouable*, elle n'est pas *fréquente* : à x1 un socle ne tient
+que sur 34 des 72 cases d'étage de `terrain-mc1` (13.06 interdit tout débordement du bord), et la
+montée coûte 3" sur un MOVE de 6".
+
+**Correctifs de revue (2026-09-09)** : deux défauts de ce lot, corrigés avant tout retrain.
+L'érosion du masque bornait au niveau 0 une figurine qui PART d'un étage et y RESTE, quand la
+validation la borne au niveau de son plan — une figurine ennemie postée à l'étage était donc
+invisible du masque, et une ennemie au sol lui retirait des destinations légales. Les deux côtés
+lisent désormais le même niveau. Et le mémo `floor_level_by_cell`, clé par `id(terrain_areas)`,
+ne retenait pas la liste : une adresse recyclée à signature de forme identique aurait servi la
+carte de niveaux d'un autre terrain, en silence.
+
+Reste ouvert : la **charge**, le **pile-in** et la **consolidation** gardent leur destination au
+sol (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`), et **FLY + étages** reste hors périmètre — le pool
+d'ancre renvoie avant son bloc multi-niveaux quand la traversée est active, exclusion préexistante.
+
+---
+
+## ✅ 13.09 — le statut « caché » suit les pertes et les tirs {#hidden-fraicheur}
+
+**Livré le 2026-09-08 (option C).** Change les parties jouées : `--new` obligatoire pour tout modèle
+entraîné avant ce correctif.
+
+13.09 décrit un état **continu** — « a model is hidden WHILE all of the following apply » — mais le
+moteur ne posait le drapeau qu'au début de la phase de tir, et la porte 13.09 du pool de cibles
+lisait cette valeur gelée. Une escouade dont la dernière figurine exposée mourait en cours de phase
+restait ciblable au-delà de la portée de détection. Ce n'est pas un cas de bord : les pertes sont
+allouées en priorité à la figurine la plus proche de l'ennemi, donc à l'exposée.
+
+Le statut est désormais rafraîchi dans `destroy_model`, **choke-point unique** de retrait de
+figurines — donc pour les huit causes de mort, mêlée comprise, et non par un appel ajouté sur le
+chemin du tir. `compute_hidden_status_for_unit` porte le calcul d'une escouade et
+`compute_hidden_statuses` n'en est plus que la boucle : une seule implémentation des gardes 13.09,
+aucun chemin parallèle. Le placement est contraint des deux côtés — après le recalcul de l'empreinte,
+avant l'invalidation LoS qui purge le cache du pool.
+
+**DEUX déclencheurs, un par membre de la règle** — correction de périmètre du 2026-09-08 : la
+rédaction initiale n'en voyait qu'un, et s'y tenir fermait la règle à moitié.
+
+1. **Membre géométrique** (les figurines vivantes) → `destroy_model`, décrit ci-dessus.
+2. **Membre « did not make one or more ranged attacks during this turn »** →
+   `end_activation(arg3="SHOOTING")` (`generic_handlers.py`), seul site d'alimentation de
+   `units_shot` et donc seul déclencheur possible de ce membre. Sans lui, une escouade qui tirait
+   depuis une zone obscurante restait marquée cachée jusqu'à la fin de la phase — 42 activations de
+   tir sur 682 sur 20 épisodes. Le rafraîchissement passe par la fonction de règle plutôt que par
+   un `hidden = False` écrit sur place : l'issue y est déterministe, mais la coder en dur ouvrirait
+   un second endroit où vit 13.09.
+
+   **Portée exacte de ce second déclencheur**, mesurée et non extrapolée : c'est un durcissement,
+   pas la correction d'un ciblage aujourd'hui atteignable. `shooting_build_activation_pool` filtre
+   sur `current_player`, donc seul le joueur actif tire pendant sa phase et le statut périmé de ses
+   propres escouades est réécrit par le balayage complet au début de la phase adverse. Ce que le
+   déclencheur apporte : un état exact entre-temps pour les quatre lecteurs de `unit['hidden']` et
+   pour l'affichage PvP, et la clause fermée par avance pour tout tir hors de son propre tour.
+
+**Contrat D1 étendu dans le temps** : `test_d1_survives_a_loss_mid_phase`
+(`test_squad_obs_hidden_enemies.py`) vérifie que l'observation et le pool basculent ensemble après
+une perte, sans rejouer le balayage de début de phase. Le membre « a tiré » a son propre couple
+rouge/vert dans `test_hidden_1309_previous_turn.py` — `test_shooting_breaks_hidden_at_once` et sa
+contre-épreuve `test_charging_does_not_break_hidden`, qui interdit un rafraîchissement posé sur
+toute fin d'activation. Le balayage complet reste en place au début de la phase de tir et à chaque
+sérialisation PvP.
+
+**Limite connue, hors périmètre** : aucun MOUVEMENT ne rafraîchit le drapeau — il reste périmé
+pendant le move et après un pile-in adverse. C'est la raison pour laquelle l'observation continue de
+recalculer 13.09 à chaud plutôt que de lire `unit['hidden']`.
+
+---

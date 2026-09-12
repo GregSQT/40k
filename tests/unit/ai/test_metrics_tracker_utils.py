@@ -16,7 +16,7 @@ from ai.metrics_tracker import (
 )
 from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
-from tests.unit.ai._fabriques import tactical_data
+from tests.unit.ai._fabriques import ppo_update_stats, tactical_data
 
 # Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
 # rewards que `__init__` charge dans le verrou `test_stub_matches_the_attributes_of_a_real_tracker`.
@@ -45,6 +45,9 @@ def test_every_training_profile_carries_its_smoothing_windows() -> None:
     courbes `_250ep` doublant les dashboards sans etre lues), puis REACTIVE a 100 le 2026-09-07 :
     la seule courbe reactive qui restait, `game_critical/win_rate_100ep`, etait ecrite en dur par
     le callback, hors du reglage et sur l'axe des pas. La reactivation la rend au tracker.
+    DESACTIVE de nouveau le 2026-09-11, par le meme reglage et pour la meme raison : aucun tag
+    `_100ep` n'existait sans son jumeau de fond, donc chaque dashboard portait deux fois la
+    meme mesure.
     Le test ne fige aucune des deux valeurs — c'est un reglage de run — seulement leur coherence.
     """
     # L'énumération doit couvrir le fichier, sinon ce test affiche « tout va bien » sur un
@@ -139,7 +142,6 @@ def _tracker_stub() -> W40KMetricsTracker:
     t.PERF_WINDOW = 1
     t.PERF_WINDOW_FAST = 1
     t.episode_count = 12
-    t.step_count = 0
     # `log_dir=None` : comptage sans journal, le mode prevu pour qui n'a pas de dossier de run
     # (cf. ai/truncation_log.py). Ces tests verifient les courbes emises, pas la trace disque —
     # un vrai `log_dir` ferait ecrire un `truncations.jsonl` dans l'arborescence du depot.
@@ -607,7 +609,7 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
             "time/fps": 100,
         }
     )
-    assert t.step_count == 1
+    assert t.ppo_capture_count == 1
 
     t.forcing_tracking["episodes_total"] = 1
     t.log_bot_evaluations(
@@ -619,26 +621,35 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
     assert "00_critical/a_bot_eval_combined" in keys
 
 
-def test_grad_clip_fraction_emis_dans_training_diagnostic() -> None:
-    """VERROU : `training_diagnostic/grad_clip_fraction` est publie quand present dans model_stats.
+def test_log_training_metrics_ne_recopie_plus_les_courbes_de_sb3() -> None:
+    """VERROU : le tracker ne republie AUCUN `train/*` ni `diag/*` que SB3 ecrit deja.
 
-    La branche 1608-1612 de `log_training_metrics` n'etait jamais exercee par les tests existants
-    (aucun ne passait `train/grad_clip_fraction`). Un typo dans la cle ou dans le tag passerait
-    inapercue.
+    Le logger SB3 et ce tracker ecrivent dans le MEME dossier de run (`attach_run_logger`).
+    Douze tags — les sept de `training_critical/`, `training_detailed/loss`, et quatre de
+    `training_diagnostic/` (`learning_rate`, `entropy_loss`, `gradient_norm`,
+    `grad_clip_fraction`) — y recopiaient valeur pour valeur les `train/*` et `diag/*` de SB3,
+    en les datant en PAS alors que tout le reste du tracker est date en EPISODES : deux
+    abscisses incompatibles dans un meme fichier d'evenements. Verifie sur les 144 points
+    communs de run_20260911-062637 : zero ecart entre chaque recopie et son original.
+
+    Ne reste qu'`entropy_coef`, que SB3 ne publie pas : `train/ent_coef` est injecte dans une
+    COPIE de `name_to_value`, donc invisible au dump de SB3. `n_updates` tenait cette liste
+    jusqu'au 2026-09-11 — ce tracker en etait bien le seul ecrivain possible, mais le tag
+    n'avait aucun lecteur dans le depot, et un tag sans lecteur ne vaut pas d'etre ecrit.
+
+    L'assertion porte sur l'ENSEMBLE des tags `training_*` emis, et non sur une liste des noms
+    supprimes : une recopie reintroduite sous un nom neuf (`training_diagnostic/loss`,
+    `training_detailed/fps`) passerait une liste noire en vert, et cette liste devrait etre
+    tenue en miroir de `log_training_metrics`. C'est aussi ce qui fait que ce test verrouille
+    la DISPARITION de `n_updates` sans qu'on ait a la nommer.
     """
     t = _tracker_stub()
-    t.log_training_metrics(
-        {
-            "train/gradient_norm": 0.8,
-            "train/grad_clip_fraction": 0.15,
-        }
+    t.log_training_metrics(ppo_update_stats())
+    emis = {k for k, _, _ in _dw(t).scalars if k.startswith("training_")}
+    assert emis == {"training_diagnostic/entropy_coef"}, (
+        "le tracker doit n'ecrire que le seul tag dont il est l'unique ecrivain ET qui a un "
+        "lecteur ; obtenu : " + ", ".join(sorted(emis))
     )
-    keys = [k for k, _, _ in _dw(t).scalars]
-    assert "training_diagnostic/grad_clip_fraction" in keys, (
-        "training_diagnostic/grad_clip_fraction absent alors que train/grad_clip_fraction fourni"
-    )
-    vals = [v for k, v, _ in _dw(t).scalars if k == "training_diagnostic/grad_clip_fraction"]
-    assert vals == [0.15], f"valeur attendue 0.15, obtenu {vals}"
 
 
 def test_les_deux_courbes_ppo_brutes_de_00_critical_sont_emises() -> None:
@@ -677,27 +688,18 @@ def test_l_approx_kl_max_reste_muette_sans_ppo_patche() -> None:
 
 
 def test_gradient_norm_nan_est_ecarte() -> None:
-    """VERROU : un NaN dans `train/gradient_norm` ou `train/grad_clip_fraction` (early-stop KL)
-    ne pollue ni TensorBoard ni `latest_gradient_norm`.
+    """VERROU : un NaN dans `train/gradient_norm` (early-stop KL) n'ecrase pas
+    `latest_gradient_norm`, lu par le rapport de fin de run.
 
     `_grad_norm_stats` retourne (nan, nan) quand la liste de normes est vide — ce qui arrive si
-    PPO coupe les epochs avant le premier `loss.backward()`. Les deux NaN doivent etre filtres,
-    comme `diag/grad_share_policy_mb0`.
+    PPO coupe les epochs avant le premier `loss.backward()`. Le NaN doit etre filtre, comme
+    `diag/grad_share_policy_mb0`. Le volet TensorBoard a disparu avec la courbe
+    `training_diagnostic/gradient_norm` : c'est SB3 qui publie `train/gradient_norm`.
     """
     import math as _math
     t = _tracker_stub()
     t.latest_gradient_norm = 1.2  # valeur finie precedente
-    t.log_training_metrics({
-        "train/gradient_norm": float("nan"),
-        "train/grad_clip_fraction": float("nan"),
-    })
-    keys = [k for k, _, _ in _dw(t).scalars]
-    assert "training_diagnostic/gradient_norm" not in keys, (
-        "NaN publie sur training_diagnostic/gradient_norm — doit etre ecarte"
-    )
-    assert "training_diagnostic/grad_clip_fraction" not in keys, (
-        "NaN publie sur training_diagnostic/grad_clip_fraction — doit etre ecarte"
-    )
+    t.log_training_metrics({"train/gradient_norm": float("nan")})
     assert _math.isfinite(t.latest_gradient_norm), (
         f"latest_gradient_norm ecrase par NaN : {t.latest_gradient_norm}"
     )
@@ -712,16 +714,6 @@ _PPO_CURVE_TAGS: tuple[str, ...] = (
     "00_critical/k_entropy_loss",
 )
 
-_UPDATE_STATS: Dict[str, float] = {
-    "train/learning_rate": 3e-4,
-    "train/policy_gradient_loss": -0.2,
-    "train/value_loss": 0.3,
-    "train/entropy_loss": 0.05,
-    "train/clip_fraction": 0.2,
-    "train/approx_kl": 0.01,
-    "train/explained_variance": 0.4,
-    "diag/grad_share_policy_mb0": 0.235,
-}
 
 
 def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
@@ -748,11 +740,9 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     t.hyperparameter_tracking["explained_variances"] = [0.4] * 12
     t.hyperparameter_tracking["grad_share_policies"] = [0.235] * 12
 
-    # Verrou discriminabilite : si ces deux valeurs convergent, les assertions d'axe deviennent
-    # muettes — le test doit echouer si le stub est modifie de facon a les egaliser.
-    assert t.episode_count != t.step_count, (
-        f"stub invalide : episode_count={t.episode_count} == step_count={t.step_count}"
-    )
+    # Verrou discriminabilite : une abscisse a 0 rendrait muettes les assertions d'axe plus bas,
+    # un writer qui n'ecrirait rien les satisfaisant aussi bien qu'un writer correct.
+    assert t.episode_count != 0, f"stub invalide : episode_count={t.episode_count}"
 
     curve_tags = _PPO_CURVE_TAGS
     threshold_tags = (
@@ -774,13 +764,13 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     assert _counts() == {tag: 1 for tag in curve_tags} | {tag: 0 for tag in threshold_tags}
 
     # Deuxieme cycle : apres le premier update PPO (count=1), seuils et courbes s'emettent.
-    t.log_training_metrics(dict(_UPDATE_STATS))
+    t.log_training_metrics(ppo_update_stats())
     for _ in range(20):
         t.log_critical_dashboard()
     assert _counts() == {tag: 2 for tag in curve_tags} | {tag: 1 for tag in threshold_tags}
 
     # Troisieme cycle : second update PPO.
-    t.log_training_metrics(dict(_UPDATE_STATS))
+    t.log_training_metrics(ppo_update_stats())
     for _ in range(20):
         t.log_critical_dashboard()
     assert _counts() == {tag: 3 for tag in curve_tags} | {tag: 2 for tag in threshold_tags}
@@ -788,7 +778,7 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     # 60 fins d'episode pour 2 updates : ce sont bien les updates qui cadencent, pas les episodes.
     assert t.ppo_capture_count == 2
 
-    # L'abscisse de CHAQUE courbe PPO doit etre episode_count (12), pas step_count (0).
+    # L'abscisse de CHAQUE courbe PPO doit etre episode_count (12).
     # Verrou contre un remplacement accidentel de l'axe sur n'importe laquelle des cinq courbes.
     all_scalars = _dw(t).scalars
     for tag in curve_tags:
@@ -906,15 +896,10 @@ def test_log_tactical_metrics_forcing_validation_errors() -> None:
         )
 
 
-def test_log_training_step_records_optional_fields() -> None:
-    t = _tracker_stub()
-    # exploration_rate a ete retire de step_data et de log_training_step : c'est l'epsilon d'une
-    # politique epsilon-greedy (DQN), et seul MaskablePPO est instancie ici.
-    t.log_training_step({"loss": 1.3, "learning_rate": 3e-4})
-    keys = [k for k, _, _ in _dw(t).scalars]
-    assert "training_detailed/loss" in keys
-    assert "training_diagnostic/learning_rate" in keys
-    assert t.step_count == 1
+# `test_log_training_step_records_optional_fields` occupait cette place. `log_training_step` a
+# ete supprimee avec ses deux courbes, recopies de `train/loss` et `train/learning_rate` que SB3
+# publie deja dans le meme dossier de run — cf.
+# `test_log_training_metrics_ne_recopie_plus_les_courbes_de_sb3`.
 
 
 def test_log_selfplay_win_emet_par_label() -> None:
