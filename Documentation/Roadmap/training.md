@@ -198,6 +198,16 @@ et les scores de `curriculum.log` antérieurs au 2026-09-07 portent un échantil
 Si elle ne bouge pas, le régime n'a pas pris et il est inutile d'attendre. `n_steps` × 4 quadruple
 la mémoire du rollout buffer : **coût horloge et mémoire non chronométrés** à ce volume.
 
+**À faire après la fin du run P1 `run_20260912-065925`** (2026-09-12, suite 110) : le `_doc` de
+`x1_lineage` (`config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json`) affirme
+qu'« à 8160 avec batch_size 1020 et n_epochs 4 […] les quatre epochs vont désormais au bout » ;
+**réfuté** sur ce run — `train/approx_kl_max` > 0,0225 sur 761/761 updates, chaque update est
+coupée par l'early-stop KL. Le tag `train/n_minibatches_done` (doublon
+`00_critical/v_n_minibatches_done`) compte désormais les pas de gradient réellement exécutés ;
+la phrase du `_doc` se corrige avec ce comptage, et toute décision `target_kl` / `n_epochs` se
+prend dessus — jamais sur `train/time_update`. Aucun JSON de `config/` ne se touche tant que le
+run tourne.
+
 ### Six défauts de la livraison, fermés le 2026-09-07
 
 **Le premier était bloquant pour toute la chaîne.** `_apply_curriculum_model_params` posait un
