@@ -31,7 +31,14 @@ USAGE
 -----
     git worktree add /tmp/40k-avant HEAD      # une fois ; ou <commit> au lieu de HEAD
     python3 scripts/ab_bench.py --episodes 24 --paires 5
+    python3 scripts/ab_bench.py --board board/44x60x5 --gym-metric euclidean --episodes 4
     git worktree remove /tmp/40k-avant        # a la fin
+
+`--board` et `--gym-metric` sont TRANSMIS tels quels a `refactor_fingerprint.py` dans les DEUX
+arbres : c'est lui qui pose le plateau et la metrique dans son propre processus (aucune variable
+d'environnement heritee, `assert_clean_environment` reste entier). L'arbre de reference doit donc
+porter une version du script qui accepte ces options — recopier les deux scripts dans l'arbre
+`--avant` si son commit les precede (le moteur, lui, reste celui du commit de reference).
 
 Prendre au moins 24 episodes : le demarrage (imports torch, chargement des configs) coute ~3 s
 fixes, qui diluent le signal a 8 episodes (mesure : 8,3 % a 8 episodes contre 11,3 % a 24 pour le
@@ -292,12 +299,13 @@ def print_spread(couples: list) -> None:
         )
 
 
-def _run(cwd: str, episodes: int) -> tuple[float, float, str]:
-    """Un run complet ; rend (wall, cpu, compteur de masques)."""
+def _run(cwd: str, episodes: int, passthrough: list) -> tuple[float, float, str]:
+    """Un run complet ; rend (wall, cpu, compteur de masques). `passthrough` = options du plateau
+    et de la metrique, transmises a `refactor_fingerprint.py` sans passer par l'environnement."""
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started = time.perf_counter()
     proc = subprocess.run(
-        [sys.executable, "scripts/refactor_fingerprint.py", "--episodes", str(episodes)],
+        [sys.executable, "scripts/refactor_fingerprint.py", "--episodes", str(episodes), *passthrough],
         cwd=cwd, capture_output=True, text=True,
     )
     wall = time.perf_counter() - started
@@ -318,9 +326,19 @@ def main() -> int:
     # de largeur nulle (cf. `print_spread`). Le verdict median existe des 3 paires, mais rien ne
     # permet alors de savoir s'il est stable.
     parser.add_argument("--paires", type=int, default=5)
+    parser.add_argument("--board", default=None, help="plateau mesure, transmis a refactor_fingerprint.py --board")
+    parser.add_argument(
+        "--gym-metric", default=None,
+        help="metrique gym imposee EN MEMOIRE, transmise a refactor_fingerprint.py --gym-metric",
+    )
     args = parser.parse_args()
 
     assert_clean_environment()
+    passthrough: list = []
+    if args.board is not None:
+        passthrough += ["--board", args.board]
+    if args.gym_metric is not None:
+        passthrough += ["--gym-metric", args.gym_metric]
 
     if not os.path.isdir(args.avant):
         raise SystemExit(
@@ -337,11 +355,11 @@ def main() -> int:
         # ordres sont ensuite apparies par `drift_cancelled` : c'est la que le biais s'annule.
         b_first = index % 2 == 0
         if b_first:
-            wall_b, cpu_b, masks_b = _run(args.apres, args.episodes)
-            wall_a, cpu_a, masks_a = _run(args.avant, args.episodes)
+            wall_b, cpu_b, masks_b = _run(args.apres, args.episodes, passthrough)
+            wall_a, cpu_a, masks_a = _run(args.avant, args.episodes, passthrough)
         else:
-            wall_a, cpu_a, masks_a = _run(args.avant, args.episodes)
-            wall_b, cpu_b, masks_b = _run(args.apres, args.episodes)
+            wall_a, cpu_a, masks_a = _run(args.avant, args.episodes, passthrough)
+            wall_b, cpu_b, masks_b = _run(args.apres, args.episodes, passthrough)
         ratio = cpu_b / cpu_a
         print(
             f"paire {index} ({'B puis A' if b_first else 'A puis B'})"
