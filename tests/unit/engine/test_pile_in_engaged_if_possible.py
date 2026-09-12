@@ -41,8 +41,10 @@ def _gs(squad: Sequence[Cell], enemies: Sequence[Cell]) -> Dict[str, Any]:
     units = [synthetic_unit("1", 1, [{"col": c, "row": r} for c, r in squad])]
     for i, (c, r) in enumerate(enemies):
         units.append(synthetic_unit(str(2 + i), 2, [{"col": c, "row": r}]))
+    # ``fight_subphase`` : étape 12.02 (le plan_state pile-in la relit pour distinguer l'overrun 12.06).
     return synthetic_state(
         units, phase="fight", game_rules={}, inches_to_subhex=1, board_cols=44, board_rows=60,
+        fight_subphase="pile_in",
     )
 
 
