@@ -522,6 +522,30 @@ function AgentDecisionPicker({
   );
 }
 
+/** Bouton Overrun (12.06) : pile-in additionnel de 3" avant de combattre. Même bouton dans la
+ * barre fight (étape FIGHT) et dans la barre New Foes (12.08 AFTER, New Foe désengagé). */
+function OverrunButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title="Overrun (12.06) : pile-in additionnel de 3&quot; avant de combattre"
+      onClick={onClick}
+      style={{
+        border: "1px solid rgba(0,0,0,0.35)",
+        borderRadius: 6,
+        background: "#7c3aed",
+        color: "#fff",
+        cursor: "pointer",
+        fontSize: 14,
+        fontWeight: 700,
+        padding: "8px 14px",
+      }}
+    >
+      Overrun
+    </button>
+  );
+}
+
 const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
 
 export const BoardWithAPI: React.FC = () => {
@@ -3991,6 +4015,49 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
 
+      {/* New Foes to Face (12.08 AFTER) : un New Foe désengagé (son engageur est mort avant sa
+          sélection) peut faire l'overrun 12.06 — l'attaque passe par le clic-cible direct (pas
+          de plan fight local), seul le bouton Overrun est nécessaire ici. Gardé par le mode
+          select : pendant le plan overrun (pileInModelMove) un second clic rouvrirait un plan vierge. */}
+      {apiProps.gameState?.phase === "fight" &&
+        apiProps.mode === "select" &&
+        !apiProps.squadFightPlan &&
+        apiProps.consolidationNewFoes.length > 0 &&
+        apiProps.fightOverrunEligible && (
+          <div
+            className="squad-action-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#1f2937",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: 8,
+              marginTop: 0,
+              marginBottom: 2,
+            }}
+          >
+            <span
+              style={{
+                color: "#e5e7eb",
+                fontSize: 13,
+                fontWeight: 600,
+                background: "rgba(17,24,39,0.8)",
+                borderRadius: 6,
+                padding: "6px 10px",
+              }}
+            >
+              New Foe désengagé
+            </span>
+            <OverrunButton
+              onClick={() => {
+                if (!isGameOver) apiProps.onOverrunPileIn?.();
+              }}
+            />
+          </div>
+        )}
+
       {apiProps.gameState?.phase === "fight" && apiProps.squadFightPlan && (
         <div
           className="squad-action-bar"
@@ -4040,25 +4107,11 @@ export const BoardWithAPI: React.FC = () => {
           {/* Overrun 12.06 : l'unité peut faire UN pile-in additionnel avant de combattre —
               ouvre le plan par-figurine (même barre que le pile-in 12.02), puis revient ici. */}
           {apiProps.fightOverrunEligible && (
-            <button
-              type="button"
-              title="Overrun (12.06) : pile-in additionnel de 3&quot; avant de combattre"
+            <OverrunButton
               onClick={() => {
                 if (!isGameOver) apiProps.onOverrunPileIn?.();
               }}
-              style={{
-                border: "1px solid rgba(0,0,0,0.35)",
-                borderRadius: 6,
-                background: "#7c3aed",
-                color: "#fff",
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "8px 14px",
-              }}
-            >
-              Overrun
-            </button>
+            />
           )}
           <button
             type="button"
