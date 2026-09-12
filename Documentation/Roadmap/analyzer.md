@@ -105,13 +105,26 @@ profils d'un même combi dans une seule activation. Cause corrigée le 2026-09-0
 `squad_declare_shoot` (cf. `ROADMAP_INDEX.md`, correctifs hors chantier du jour) — comme tout bug
 moteur, **invisible sur un journal déjà écrit** : à re-mesurer au prochain run, attendu 0.
 
-**Ce que ce prédicat ne ferme pas, et pourquoi.** Les 7 lignes restantes ne dépendent pas d'un
+**Ce que ce prédicat ne ferme pas, et pourquoi.** Les lignes restantes ne dépendent pas d'un
 roster mais d'un ÉVÉNEMENT qui ne s'est pas produit : personne ne s'est replié PUIS n'a tiré
-(`PROJ.1.2.apres_repli`), n'a avancé PUIS chargé (`PROJ.1.3.apres_advance`), aucune unité n'est
-ressuscitée, aucune réserve n'a été détruite au 3e round. Les dire honnêtement demanderait de
-compter les occasions OFFERTES en plus des occasions JUGÉES — un second point de comptage dans
-46 endroits, deux compteurs à tenir d'accord, c'est-à-dire le défaut V16 qu'on paie déjà ailleurs.
-Écarté sciemment.
+(`PROJ.1.2.apres_repli`), aucune unité n'est ressuscitée, aucune réserve n'a été détruite au 3e
+round. Les dire honnêtement demanderait de compter les occasions OFFERTES en plus des occasions
+JUGÉES — un second point de comptage dans 46 endroits, deux compteurs à tenir d'accord,
+c'est-à-dire le défaut V16 qu'on paie déjà ailleurs. Écarté sciemment.
+
+**`PROJ.1.3.apres_advance` n'en faisait PAS partie — la prémisse « personne n'a avancé PUIS
+chargé » était fausse (corrigé le 2026-09-12).** Mesuré sur le run holdout du 2026-09-11 : 114
+unités avaient avancé puis lancé leur jet de charge, toutes orkes, toutes en FAILED CHARGE. Le
+site d'exercice ne vivait que dans la branche CHARGED (`ai/analyzer_phases/charge_handler.py`) ;
+la branche FAILED CHARGE ne contrôlait que les bornes du jet. Or 11.02 : la DÉCLARATION précède
+le jet — un jet raté est une déclaration au même titre. Le verdict est désormais UNIQUE
+(`def _judge_charge_after_advance`) pour les deux issues, et RE-DÉRIVÉ de l'état plutôt que lu
+sur le marqueur `[WAAAGH!]` que le moteur écrit lui-même (et que FAILED CHARGE ne porte pas) :
+capacité de datasheet `charge_after_advance` sur les socles vivants (19.04), sinon Waaagh! actif
+pour le camp (`T{n} EFFECTS:`) ET mot-clé ORKS du type (`rule_to_units["waaagh"]`), sinon
+`charge_invalid.advanced`. Le marqueur est contre-contrôlé : `[WAAAGH!]` sans Waaagh! actif est
+une incohérence entre deux sorties du moteur (`parse_errors`). Verrou :
+`tests/unit/ai/test_analyzer_charge_apres_advance.py`.
 
 ---
 

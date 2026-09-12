@@ -80,6 +80,101 @@ def _check_charge_roll_range(
         note_rule_usage(stats, "PROJ.1.3.charge_roll_bonus", player)
 
 
+_WAAAGH_MARKER_RE = re.compile(r'\[WAAAGH!\]', re.IGNORECASE)
+
+
+def _charge_after_advance_source(
+    state: "AnalyzerState",
+    config: "AnalyzerConfig",
+    charge_unit_id: str,
+    charge_unit_type: str,
+    player: int,
+) -> "str | None":
+    """Ce qui rend LÉGALE une déclaration de charge après Advance, ou ``None`` = faute.
+
+    11 Charge phase : « rules that prevent a unit from being eligible to declare a charge: … It
+    made an advance or fall-back move this turn. » Deux sources d'exemption, dans l'ordre où le
+    moteur les consulte (`unit_can_charge_after_advance`, `engine/game_state.py`) :
+      - `charge_after_advance`, capacité de DATASHEET, jugée sur les socles vivants (19.04,
+        `unit_effect_in_force`) et, quand ils sont inconnus, sur la datasheet de l'escouade ;
+      - le Waaagh! (`Armageddon/Waaagh!.txt` : « units from your army with this ability are
+        eligible to declare a charge in a turn in which they Advanced »), capacité de FACTION
+        qui ne vit dans aucun `unit_rules` : elle se lit dans l'ÉTAT — `T{n} EFFECTS:` dit qu'il
+        est actif pour ce camp, et `rule_to_units["waaagh"]` dit que ce type porte le mot-clé.
+
+    RE-DÉRIVÉ, jamais lu sur la ligne : le marqueur `[WAAAGH!]` que le moteur écrit sur CHARGED
+    est une sortie du moteur qu'on contrôle, et la ligne FAILED CHARGE n'en porte aucun — c'est
+    ce qui laissait la moitié des jets de charge après Advance sans verdict (mesuré sur le run
+    du 2026-09-11 : 114 unités avancées puis en FAILED CHARGE, 0 jugée).
+    """
+    from ai.analyzer_perfig import unit_effect_in_force
+
+    in_force = unit_effect_in_force(state, config, charge_unit_id, "charge_after_advance")
+    if in_force is None:
+        # Socles inconnus (journal sans `[MODELS:]`, escouade jamais vue) : la datasheet de
+        # l'escouade est la seule composition connue — c'est le verdict d'avant 19.04, pas un
+        # repli anti-erreur.
+        in_force = "charge_after_advance" in require_key(config.unit_rules_by_type, charge_unit_type)
+    if in_force:
+        return "charge_after_advance"
+    waaagh_on = state.active_effects.get(player, {}).get("waaagh") == "on"  # get allowed
+    if waaagh_on and charge_unit_type in config.rule_to_units.get("waaagh", set()):  # get allowed
+        return "waaagh"
+    return None
+
+
+def _judge_charge_after_advance(
+    state: "AnalyzerState",
+    config: "AnalyzerConfig",
+    line: str,
+    action_desc: str,
+    charge_unit_id: str,
+    player: int,
+    turn: int,
+) -> None:
+    """Juge UNE déclaration de charge d'une unité qui a avancé — CHARGED comme FAILED CHARGE.
+
+    11.02 : la déclaration précède le jet, donc un jet raté est une déclaration au même titre
+    qu'une charge réussie, et une déclaration illégale l'est quel que soit le dé. Un seul site
+    de verdict pour les deux issues : écrit deux fois, l'une des deux branches aurait fini par
+    juger autrement — c'est ce qui s'est produit, la branche FAILED ne jugeant rien du tout.
+
+    Ne fait rien pour une unité qui n'a pas avancé : ce contrôle ne regarde pas ces lignes.
+    """
+    if charge_unit_id not in state.units_advanced:
+        return
+    stats = state.stats
+    charge_unit_type = require_key(state.unit_types, charge_unit_id)
+    # Occasion jugée : le type est résolu et le verdict à trois issues suit sans renoncement.
+    note_rule_usage(stats, "PROJ.1.3.apres_advance", player)
+    source = _charge_after_advance_source(state, config, charge_unit_id, charge_unit_type, player)
+    if source is not None:
+        note_special_rule_usage(
+            stats, state, config, source, charge_unit_id, charge_unit_type, player
+        )
+    else:
+        stats['charge_invalid'][player]['advanced'] += 1
+        if stats['first_error_lines']['charge_invalid'][player] is None:
+            stats['first_error_lines']['charge_invalid'][player] = {
+                'episode': state.current_episode_num, 'line': line.strip()
+            }
+    # Contre-contrôle du marqueur moteur : `[WAAAGH!]` sur une ligne dont l'état ne connaît
+    # aucun Waaagh! actif pour ce camp, ou sur une unité qui n'en porte pas le mot-clé, est une
+    # incohérence entre deux sorties du moteur (la ligne et `T{n} EFFECTS:`), pas un vieux format.
+    if _WAAAGH_MARKER_RE.search(action_desc) and source != "waaagh":
+        stats['parse_errors'].append({
+            'episode': state.current_episode_num,
+            'turn': turn,
+            'phase': 'charge',
+            'line': line.strip(),
+            'error': (
+                f"marqueur [WAAAGH!] sur une charge de l'unité {charge_unit_id} "
+                f"({charge_unit_type}, P{player}) alors que l'état ne le justifie pas "
+                f"(verdict : {source})"
+            ),
+        })
+
+
 def handle_charge(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -132,34 +227,10 @@ def handle_charge(
         # 11.02 + Primitive A : bornes du jet imprimé. AVANT le contrôle de budget ci-dessous,
         # qui PART de ce jet — un jet faux y passerait pour un budget légitime.
         _check_charge_roll_range(state, config, line, action_desc, charge_unit_id, player)
-        if charge_unit_id in state.units_advanced:
-            charge_unit_type = require_key(state.unit_types, charge_unit_id)
-            unit_rules = require_key(config.unit_rules_by_type, charge_unit_type)
-            # Occasion jugée : le type et les règles de datasheet viennent d'être résolus, et
-            # le verdict à trois issues (Waaagh! 08.04 / capacité déclarée / faute) suit sans
-            # renoncement. Plus haut, on compterait des charges d'unités qui n'ont jamais
-            # avancé — des occasions sur lesquelles ce contrôle ne regarde rien.
-            note_rule_usage(stats, "PROJ.1.3.apres_advance", player)
-            # Waaagh! (08.04) : DEUXIÈME source d'éligibilité à la charge après Advance, à côté
-            # de la capacité de datasheet — et elle ne vit dans AUCUN `unit_rules` (capacité de
-            # FACTION, cf. Documentation/Reference/jeu/regles_unites.md). Le seul témoin dans le journal est le
-            # marqueur que le moteur écrit sur la ligne. Sans cette lecture, toute charge orke
-            # après avance remonte en `charge_invalid.advanced` : une faute inventée, sur un
-            # coup parfaitement légal.
-            _waaagh_charge = re.search(r'\[WAAAGH!\]', action_desc, re.IGNORECASE) is not None
-            if _waaagh_charge:
-                note_special_rule_usage(
-                    stats, state, config, "waaagh", charge_unit_id, charge_unit_type, player
-                )
-            elif "charge_after_advance" in unit_rules:
-                note_special_rule_usage(
-                    stats, state, config, "charge_after_advance",
-                    charge_unit_id, charge_unit_type, player,
-                )
-            else:
-                stats['charge_invalid'][player]['advanced'] += 1
-                if stats['first_error_lines']['charge_invalid'][player] is None:
-                    stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+        # Charge après Advance : verdict PARTAGÉ avec la branche FAILED CHARGE, re-dérivé de
+        # l'état (capacité sur les socles vivants, Waaagh! actif pour le camp) et non lu sur le
+        # marqueur que le moteur écrit ici — qui n'est que contre-contrôlé.
+        _judge_charge_after_advance(state, config, line, action_desc, charge_unit_id, player, turn)
         # reroll_charge — capacité exercée si [REROLLED:] présent dans la ligne CHARGED.
         if re.search(r'\[REROLLED:\d+\]', action_desc):
             _reroll_type = require_key(state.unit_types, charge_unit_id)
@@ -449,9 +520,15 @@ def handle_charge(
             # JUMEAU de la branche CHARGED : un jet raté porte les mêmes bornes et le même token,
             # et c'est la MOITIÉ des jets de charge d'une partie. Ne contrôler que les charges
             # réussies laisserait la moitié du dé hors de toute vérification.
+            _failed_unit_id = failed_charge_match.group(1)
             _check_charge_roll_range(
-                state, config, line, action_desc, failed_charge_match.group(1), player
+                state, config, line, action_desc, _failed_unit_id, player
             )
+            # 11.02 : la DÉCLARATION précède le jet. Une unité qui a avancé et lance son jet a
+            # déclaré une charge, légale ou non, que le dé soit bon ou pas — même verdict que
+            # sur CHARGED. Mesuré sur le run du 2026-09-11 : 114 déclarations après Advance
+            # n'aboutissaient qu'en FAILED CHARGE, et aucune n'était jugée.
+            _judge_charge_after_advance(state, config, line, action_desc, _failed_unit_id, player, turn)
             if not stats['sample_actions']['charge']:
                 stats['sample_actions']['charge'] = line.strip()
         else:

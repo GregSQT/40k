@@ -71,14 +71,16 @@ def test_verrou_le_marqueur_waaagh_ne_rend_pas_la_charge_invisible(tmp_path):
     assert stats["charge_invalid"][1]["distance_over_roll"] == 0
 
 
-def test_verrou_une_charge_apres_advance_sous_waaagh_n_est_pas_une_faute(tmp_path):
-    """VERROU RÈGLE : le Waaagh! autorise la charge après Advance (08.04) et ne vit dans AUCUN
-    `unit_rules` — c'est une capacité de FACTION. Le seul témoin dans le journal est le marqueur.
+def test_verrou_le_marqueur_waaagh_ne_blanchit_pas_a_lui_seul(tmp_path):
+    """VERROU RÈGLE : le Waaagh! autorise la charge après Advance et ne vit dans AUCUN
+    `unit_rules` — c'est une capacité de FACTION, « units from your army WITH THIS ABILITY ».
 
-    Sans sa lecture, l'Intercessor de la fixture (aucune capacité `charge_after_advance`) fait
-    remonter une faute `charge_invalid.advanced` sur un coup parfaitement légal. La
-    CONTRE-ÉPREUVE, sans marqueur, doit au contraire compter la faute : sinon ce test passerait
-    aussi avec un contrôle désactivé.
+    Le verdict se re-dérive de l'ÉTAT (`T{n} EFFECTS:` + mot-clé ORKS du type), jamais du
+    marqueur que le moteur écrit lui-même — cf. `test_analyzer_charge_apres_advance.py` pour le
+    cas légal (Boyz sous Waaagh! actif). Ici l'Intercessor de la fixture n'est pas ork et aucun
+    Waaagh! n'est actif : la charge est fautive AVEC comme SANS marqueur, et le marqueur seul est
+    une incohérence entre deux sorties du moteur (parse_error). Une version précédente
+    blanchissait sur le marqueur : ce test-là restait vert avec un Intercessor `[WAAAGH!]`.
     """
     body = _advance_line("(55,50)", "1#0@(55,50)") + _charge_line(
         "(70,50)", 7, "1#0@(70,50)", token=" [WAAAGH!]"
@@ -88,10 +90,10 @@ def test_verrou_une_charge_apres_advance_sous_waaagh_n_est_pas_une_faute(tmp_pat
     stats = an.parse_step_log(str(log))
 
     assert stats["charge_invalid"][1]["total"] == 1, "premisse : la charge doit etre vue"
-    assert stats["charge_invalid"][1]["advanced"] == 0, "faute inventee sur une charge legale"
-    assert stats["special_rule_usage"][("waaagh", "Intercessor")][1] == 1
+    assert stats["charge_invalid"][1]["advanced"] == 1, "le marqueur seul ne blanchit pas"
+    assert any("[WAAAGH!]" in e["error"] for e in stats["parse_errors"]), stats["parse_errors"]
 
-    # Contre-épreuve : même charge, marqueur retiré → la faute est bien signalée.
+    # Contre-épreuve : même charge, marqueur retiré → même faute, sans incohérence.
     body_sans = _advance_line("(55,50)", "1#0@(55,50)") + _charge_line(
         "(70,50)", 7, "1#0@(70,50)"
     )
@@ -100,6 +102,7 @@ def test_verrou_une_charge_apres_advance_sous_waaagh_n_est_pas_une_faute(tmp_pat
     stats_sans = an.parse_step_log(str(log_sans))
 
     assert stats_sans["charge_invalid"][1]["advanced"] == 1
+    assert not stats_sans["parse_errors"], stats_sans["parse_errors"]
 
 
 def test_le_jet_de_charge_est_converti_a_l_echelle_du_run(tmp_path):
