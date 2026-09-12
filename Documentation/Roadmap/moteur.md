@@ -133,20 +133,26 @@ aucun `--new`, `--append` tient.** `finalize_reserves_declaration` est l'écriva
 pour les deux sièges, `settle_reserves_declaration_step` la suite commune des trois gestes humains
 (clôture, siège, sortie de phase).
 
-**Conséquence assumée, verrouillée par test** : un camp qui réserve sa DERNIÈRE escouade déclarable
-se fige d'office, sans repasser par Validate, et ne peut plus défaire ce choix. Garder un tel camp
-ouvert « pour annuler » ouvrait un état sans question posable sur lequel l'armement du masque levait
-(reproduit sur un roster pré-déclarant ses réserves jusqu'au plafond), et le prédicat ne peut pas
-distinguer les sièges — `player_types` marque le joueur 1 « human » jusqu'en entraînement gym.
+**Le camp humain ne se ferme QUE par Validate** — y compris après avoir réservé sa dernière
+escouade déclarable ou sur un roster pré-déclarant ses réserves jusqu'au plafond : il garde la main
+et peut encore annuler. Le camp machine, lui, se ferme à sa dernière question (il n'a aucune action
+d'annulation ; le garder ouvert armerait un masque sans question posable et
+`next_reserves_declaration_question` lèverait — reproduit). La distinction passe par
+`is_programmatic_owner` (`shared_utils.py`), SOURCE UNIQUE du prédicat « piloté par la machine »,
+vrai pour tout camp en `gym_training_mode` — où `player_types` marque pourtant les deux camps
+« human » — sinon `player_types == "ai"`. Une première écriture avait fermé tout camp sans question
+posable, siège ignoré, et documenté ce coût comme « conséquence assumée » : c'était un défaut, pas
+une contrainte — le discriminateur existait.
 
-**Trois défauts de ma propre écriture, trouvés par relecture et revue avant livraison, chacun
-rouge→vert** : (1) le crash ci-dessus ; (2) la sortie de phase déplacée dans la seule route de
-validation — deux camps d'une escouade chacun, tous deux en réserves : pools vides, étape jamais
-close, partie figée en déploiement ; (3) `/code-review` : le point commun clôturait mais ne
-déplaçait pas le siège quand un camp se fige sans Validate — en PvE le tour IA était refusé
-(`not_ai_player_turn`) et l'humain ne pouvait pas poser, partie figée. Les deux tests de sortie de
-phase avaient été SUPPRIMÉS à la réécriture du fichier de tests pendant que le code qu'ils gardaient
-déménageait : réintroduits.
+**Quatre défauts de l'écriture initiale, trouvés par relecture, revue et session parallèle avant
+livraison, chacun rouge→vert** : (1) le crash du camp machine saturé ; (2) la sortie de phase
+déplacée dans la seule route de validation — deux camps d'une escouade chacun, tous deux en
+réserves : pools vides, étape jamais close, partie figée ; (3) `/code-review` : le point commun
+clôturait sans déplacer le siège — en PvE `not_ai_player_turn` pour le bot,
+`reserves_declaration_still_open` pour l'humain, partie figée ; (4) la fermeture d'office du camp
+humain, ci-dessus. Les deux tests de sortie de phase avaient été SUPPRIMÉS à la réécriture du
+fichier pendant que le code qu'ils gardaient déménageait : réintroduits. Verrous à double sens :
+fermer d'office → 4 tests humains rouges ; ignorer le siège → 4 tests machine (gym et `ai`) rouges.
 
 **API** (`services/api_server.py`) : `pending_declaration` remplacé par `declaring_player`,
 `declarable`, `cancellable` — listes publiées par le moteur, jamais recalculées par le client, parce
