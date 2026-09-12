@@ -1255,27 +1255,39 @@ def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if "points_limit" not in game_state:  # état non initialisé (pas de partie en cours)
         return {}
     from engine.phase_handlers.deployment_handlers import (
-        next_reserves_declaration_entry,
+        current_reserves_declarer,
+        reserves_cancellable_squads,
+        reserves_declarable_squads,
         strategic_reserves_usage,
     )
     from engine.phase_handlers.movement_handlers import STRATEGIC_RESERVES_LAST_ROUND
 
-    # Hors phase de déploiement il n'y a plus aucune question 20.01 : `deployment_state` peut être
-    # absent (moteur nu, partie chargée en cours) et il n'y a alors rien à demander, ce qui est la
+    # Hors phase de déploiement l'étape 20.01 est finie : `deployment_state` peut être absent
+    # (moteur nu, partie chargée en cours) et il n'y a alors plus rien à déclarer, ce qui est la
     # vérité — pas un repli masquant.
     deployment_state = game_state.get("deployment_state")  # get allowed (phase déjà terminée)
-    pending_entry = (
-        next_reserves_declaration_entry(game_state)
+    declaring_player = (
+        current_reserves_declarer(game_state)
         if isinstance(deployment_state, dict)
         and str(game_state.get("phase")) == "deployment"  # get allowed (état non initialisé)
         else None
     )
     summary: Dict[str, Any] = {
         "last_round": int(STRATEGIC_RESERVES_LAST_ROUND),
-        "pending_declaration": (
-            None
-            if pending_entry is None
-            else {"player": int(pending_entry[0]), "unitId": str(pending_entry[1])}
+        # Le camp qui compose sa déclaration MAINTENANT, et les deux listes sur lesquelles ses
+        # boutons s'accrochent. Rendues par le MOTEUR et non recalculées côté client : le plafond
+        # de 50 % bouge à chaque geste, et deux éligibilités concurrentes afficheraient un bouton
+        # que la route refuserait — l'écart que `strategic_reserves_usage` existe pour interdire.
+        "declaring_player": None if declaring_player is None else int(declaring_player),
+        "declarable": (
+            []
+            if declaring_player is None
+            else reserves_declarable_squads(game_state, declaring_player)
+        ),
+        "cancellable": (
+            []
+            if declaring_player is None
+            else reserves_cancellable_squads(game_state, declaring_player)
         ),
     }
     for player in (1, 2):
@@ -4734,12 +4746,10 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     #
     # Remise à zéro par L'ÉCRIVAIN UNIQUE du moteur, jamais clé par clé ici : celui du reset
     # d'épisode, donc l'étape repart d'un état identique des deux côtés. Écrites à la main, les
-    # trois clés avaient déjà divergé — `reserves_declaration_started` n'était posée qu'au reset,
-    # et rien ne le voyait. Elle est ici toujours fausse (le verrou plus haut refuse le
-    # remplacement dès la première réponse), donc la remettre à faux ne change aucun état.
-    deployment_handlers.reset_reserves_declaration_state(
-        deployment_state, rebuilt_deployable_units
-    )
+    # clés avaient déjà divergé — `reserves_declaration_started` n'était posée qu'au reset, et rien
+    # ne le voyait. Elle est ici toujours fausse (le verrou plus haut refuse le remplacement dès le
+    # premier geste de déclaration), donc la remettre à faux ne change aucun état.
+    deployment_handlers.reset_reserves_declaration_state(deployment_state)
 
     deployment_state["current_deployer"] = current_deployer
     game_state["current_player"] = current_deployer

@@ -115,6 +115,16 @@ _log = logging.getLogger(__name__)
 # La question à se poser n'est donc pas « ajout ou retrait ? » mais « un lecteur consulte-t-il
 # encore cette clé, sous quelque forme que ce soit ? ». Si oui : bump.
 #
+# TL09 = TL08 moins `reserves_declaration_queue`, plus `reserves_declaration_declined` et
+# `reserves_declaration_validated` dans `deployment_state`. L'étape Declare Battle Formations ne
+# fige plus une file alternée escouade par escouade : chaque camp déclare pour toute son armée,
+# donc l'état porte désormais les refus et les validations PAR JOUEUR. Un RETRAIT et deux ajouts,
+# et les trois bumpent pour la même raison que TL08 : une row TL08 restitue `deployment_state` EN
+# BLOC, donc sans les deux nouvelles clés, et `reserves_declaration_step_is_open` — atteint dès la
+# première sérialisation d'état — lève après que le chargement a déjà écrasé la partie en cours.
+# La file retirée ne sauve pas la mise : sa présence dans une row TL08 ne dit rien des deux clés
+# que le code vivant attend.
+#
 # LA CLÉ QUI DEVIENT STATIQUE NE BUMPE PLUS (2026-09-09). Elle le devait tant que
 # `game_snapshots.rebuild_game_state` ré-attachait les statiques du live PUIS faisait
 # `update(captured["game_state"])` : la valeur PÉRIMÉE de la row écrasait la valeur vivante, et le
@@ -125,7 +135,7 @@ _log = logging.getLogger(__name__)
 # ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
 # statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
 # tests/unit/services/test_game_snapshots_static_keys.py.
-_MAGIC = b"W40KTL08"
+_MAGIC = b"W40KTL09"
 #: Formats PÉRIMÉS, et ce que chacun n'a PAS. UNE table pour les deux moitiés, parce qu'elles
 #: doivent tomber ensemble : la magic qui fait refuser le fichier, et la clause qui l'explique au
 #: joueur. Écrites séparément — un `frozenset` ici, une f-string de quinze lignes dans
@@ -156,6 +166,12 @@ _LEGACY_LOSSES: Dict[bytes, str] = {
         "sans `reserves_declaration_started` dans `deployment_state`, le marqueur qui dit si "
         "l'étape Declare Battle Formations 20.01 a commencé — sans lui le changement d'armée "
         "lève au lieu d'être refusé"
+    ),
+    b"W40KTL08": (
+        "sans `reserves_declaration_declined` ni `reserves_declaration_validated` dans "
+        "`deployment_state` — l'étape Declare Battle Formations 20.01 se déclare désormais par "
+        "camp et non plus par une file alternée d'escouades, et sans ces deux clés le premier "
+        "lecteur de l'étape lève une fois la partie en cours déjà écrasée"
     ),
 }
 _LEGACY_MAGICS = frozenset(_LEGACY_LOSSES)

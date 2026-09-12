@@ -25,7 +25,9 @@ import type { DeploymentState, UnitId } from "../types/game";
 import { filterOathTargets } from "../utils/oathTargetSelection";
 import {
   canSelectReserveUnitForIngress,
-  isReservesDeclarationPendingFor,
+  humanReservesDeclarer,
+  isUnitListedForDeclaration,
+  readReservesDeclaration,
   selectReserveUnits,
 } from "../utils/strategicReservesUi";
 import {
@@ -51,7 +53,8 @@ import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
 import {
-  ReservesDeclarationPrompt,
+  ReserveButton,
+  ReservesDeclarationBanner,
   ResetPlacementButton,
   StrategicReservesContainer,
 } from "./StrategicReservesContainer";
@@ -873,8 +876,8 @@ export const BoardWithAPI: React.FC = () => {
 
   // ÉCRAN DE PRÉPARATION OUVERT — la partie n'a pas commencé. Lu par l'auto-application des
   // rosters ET par l'orchestration du tour IA : tant que ce voile est là, PERSONNE ne joue, ni
-  // l'humain (le moteur ne lui pose la question 20.01 qu'après « Start Deployment », cf.
-  // `isReservesDeclarationPendingFor`) ni le bot. Les trois conditions de phase comptent : sans
+  // l'humain (la déclaration 20.01 ne lui est ouverte qu'après « Start Deployment », cf.
+  // `humanReservesDeclarer`) ni le bot. Les trois conditions de phase comptent : sans
   // elles, une partie PvE à déploiement `fixed` — où l'écran ne s'ouvre jamais et
   // `testDeploymentStarted` reste faux — gèlerait le bot pour toujours.
   const isPopupVisible =
@@ -1758,13 +1761,13 @@ export const BoardWithAPI: React.FC = () => {
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
     // `!isPopupVisible` : l'écran de préparation est le SEUL moment où le joueur peut encore
-    // changer d'armée, et le moteur refuse ce changement dès la première réponse 20.01
-    // (`change_roster_locked_after_reserves_declaration`). Le siège suivant la question depuis le
-    // reset (`move_seat_to_pending_reserves_declaration`), `current_player` vaut 2 dès que la
-    // première question due est celle du bot — file amputée des unités du joueur 1 inéligibles
-    // (FORTIFICATION, plafond de 50 %). Sans ce garde, le bot répondait à 20.01 pendant que
-    // l'écran de préparation était encore affiché, et le bouton « Change Roster » de l'humain
-    // partait en refus. Miroir exact du filtre humain (`isReservesDeclarationPendingFor`).
+    // changer d'armée, et le moteur refuse ce changement dès le premier geste 20.01
+    // (`change_roster_locked_after_reserves_declaration`). Le siège suivant le camp déclarant
+    // depuis le reset (`move_seat_to_pending_reserves_declaration`), `current_player` vaut 2
+    // dès que le premier camp déclarant est celui du bot — joueur 1 sans aucune escouade
+    // éligible (FORTIFICATION, plafond de 50 %). Sans ce garde, le bot déclarait 20.01 pendant
+    // que l'écran de préparation était encore affiché, et le bouton « Change Roster » de
+    // l'humain partait en refus. Miroir exact du filtre humain (`humanReservesDeclarer`).
     const shouldTriggerAI =
       isAiEnabled &&
       isAITurn &&
@@ -2010,6 +2013,21 @@ export const BoardWithAPI: React.FC = () => {
   /** Alignement explicite avec le hook : l’union inférée peut omettre des clés côté serveur TS du workspace. */
   const engineApiBlink = apiProps as UseEngineAPIBlinkBoardProps;
 
+  // 20.01 — l'étape Declare Battle Formations, lue du moteur : QUI compose sa déclaration, et
+  // les deux listes sur lesquelles ses boutons s'accrochent. Tant qu'un camp déclare, aucune
+  // pose n'est possible pour PERSONNE (l'étape précède le déploiement, et le moteur refuse
+  // `deploy_commit`) : la liste de pose devient inerte, sauf celle du camp humain qui déclare,
+  // dont les lignes se SÉLECTIONNENT pour faire apparaître `Reserve`. Hissé ici parce que deux
+  // rendus le lisent : le panneau de pose (bandeau, `Reserve`) et les conteneurs (`Cancel`).
+  const reservesDeclaration = readReservesDeclaration(apiProps.gameState?.strategic_reserves);
+  const reservesDeclarer = humanReservesDeclarer({
+    phase: apiProps.gameState?.phase,
+    declaringPlayer: reservesDeclaration.declaringPlayer,
+    deploymentStarted: testDeploymentStarted,
+    playerTypes: apiProps.gameState?.player_types,
+  });
+  const isDeclarationStepOpen = reservesDeclaration.declaringPlayer != null;
+
   const deploymentPanel = (() => {
     if (!apiProps.gameState) {
       return null;
@@ -2030,6 +2048,15 @@ export const BoardWithAPI: React.FC = () => {
     const isTestSetupLocked = isTestDeploymentMode && !testDeploymentStarted;
     return (
       <div className="deployment-panel deployment-panel--dual">
+        {reservesDeclarer != null && (
+          <ReservesDeclarationBanner
+            playerLabel={reservesDeclarer === 1 ? p1DisplayName : p2DisplayName}
+            onValidate={() => {
+              setDeploymentTooltip(null);
+              apiProps.onValidateReservesDeclaration();
+            }}
+          />
+        )}
         {players.map((player) => {
           const deployableIdsRaw = deploymentState.deployable_units?.[String(player)] || [];
           const deployableUnits = deployableIdsRaw
@@ -2047,14 +2074,13 @@ export const BoardWithAPI: React.FC = () => {
           const canChangeRoster = isTestDeploymentMode
             ? !testDeploymentStarted
             : isCurrentDeployer && !hasDeployedByPlayer;
-          // 20.01 — QUESTION en attente de l'étape Declare Battle Formations, lue du moteur. Tant
-          // qu'elle existe, aucune pose n'est possible pour PERSONNE (l'étape précède le
-          // déploiement, et le moteur refuse `deploy_commit`) : la liste devient donc inerte,
-          // sauf la ligne interrogée qui porte les deux réponses.
-          const reservesPendingDeclaration =
-            apiProps.gameState?.strategic_reserves?.pending_declaration ?? null;
-          const canInteractDeployment =
-            isCurrentDeployer && !isTestSetupLocked && reservesPendingDeclaration === null;
+          // 20.01 — pendant l'étape, SEUL le camp humain qui déclare a des lignes vivantes, et
+          // elles ne servent qu'à sélectionner (la sélection porte `Reserve`, cf. `trailing`). Hors
+          // de l'étape, la règle habituelle : le déployeur courant, écran de préparation fermé.
+          const isDeclaringHere = reservesDeclarer === player;
+          const canInteractDeployment = isDeclarationStepOpen
+            ? isDeclaringHere
+            : isCurrentDeployer && !isTestSetupLocked;
 
           return (
             <div
@@ -2124,17 +2150,15 @@ export const BoardWithAPI: React.FC = () => {
                       de réserves (`UnitRosterRow`). */}
                   {deployableSorted.map((unit) => {
                     const isSelected = apiProps.selectedUnitId === unit.id;
-                    // 20.01 — la question de l'étape Declare Battle Formations, s'il y en a une
-                    // et si elle porte sur CETTE escouade. Elle ne dépend PAS de la sélection :
-                    // c'est le moteur qui désigne l'escouade interrogée, et l'étape précède toute
-                    // mise en place, donc rien n'est encore « en main ».
-                    const isPendingDeclaration = isReservesDeclarationPendingFor({
-                      phase: apiProps.gameState?.phase,
-                      unitId: unit.id,
-                      pending: reservesPendingDeclaration,
-                      deploymentStarted: testDeploymentStarted,
-                      playerTypes: apiProps.gameState?.player_types,
-                    });
+                    // 20.01 — CETTE escouade peut-elle partir en réserves MAINTENANT ? Le moteur
+                    // publie la liste (plafond de 50 %, FORTIFICATION, encore à poser, camp qui a
+                    // la main) ; le client ne rejoue rien, il regarde si l'id y est.
+                    const isDeclarable =
+                      isDeclaringHere &&
+                      isUnitListedForDeclaration({
+                        unitId: unit.id,
+                        list: reservesDeclaration.declarable,
+                      });
                     return (
                       <UnitRosterRow
                         key={`deploy-unit-${player}-${unit.id}`}
@@ -2156,27 +2180,27 @@ export const BoardWithAPI: React.FC = () => {
                         borderColor={rosterRowBorderColor(player)}
                         haloGlow={HALO_GLOW}
                         trailing={(() => {
-                          // 20.01 PASSE AVANT LA SÉLECTION : tant que le moteur interroge cette
-                          // escouade, aucune pose n'est possible (il refuse `deploy_commit`), donc
-                          // la seule chose à offrir ici est la réponse — sélectionnée ou non.
-                          if (isPendingDeclaration) {
+                          if (!isSelected) return undefined;
+                          // 20.01 — escouade SÉLECTIONNÉE pendant l'étape, et déclarable : le seul
+                          // geste possible est `Reserve`. Pas de `Deploy` en face — ne pas
+                          // réserver, c'est déployer, et ça n'a rien à déclarer. Une escouade
+                          // sélectionnée mais NON déclarable (plafond restant trop bas) ne porte
+                          // rien : le moteur refuserait, et un bouton grisé dirait « tu pourrais »
+                          // alors que non.
+                          if (isDeclarationStepOpen) {
+                            if (!isDeclarable) return undefined;
                             return (
-                              <ReservesDeclarationPrompt
-                                onDeclare={() => {
-                                  // Une réponse DÉMONTE cette ligne ou la question : aucun
-                                  // `mouseleave` ne sera émis, donc le tooltip resterait figé à
-                                  // l'écran. On le ferme avec la ligne.
+                              <ReserveButton
+                                onReserve={() => {
+                                  // La réserve DÉMONTE cette ligne : aucun `mouseleave` ne sera
+                                  // émis, donc le tooltip resterait figé à l'écran. On le ferme
+                                  // avec la ligne.
                                   setDeploymentTooltip(null);
-                                  apiProps.onDeployToStrategicReserves(unit.id, true);
-                                }}
-                                onKeep={() => {
-                                  setDeploymentTooltip(null);
-                                  apiProps.onDeployToStrategicReserves(unit.id, false);
+                                  apiProps.onDeployToStrategicReserves(unit.id);
                                 }}
                               />
                             );
                           }
-                          if (!isSelected) return undefined;
                           // Escouade posée EN PROVISOIRE : l'emplacement passe au `Reset`.
                           if (apiProps.deployPlan?.placed) {
                             return (
@@ -2518,6 +2542,8 @@ export const BoardWithAPI: React.FC = () => {
           }
           onCancelPlacement={apiProps.onCancelDeploy}
           phase={apiProps.gameState?.phase}
+          cancellableUnitIds={reservesDeclarer === 1 ? reservesDeclaration.cancellable : []}
+          onCancelReserve={apiProps.onCancelStrategicReserves}
         />
       </ErrorBoundary>
 
@@ -2568,6 +2594,8 @@ export const BoardWithAPI: React.FC = () => {
           }
           onCancelPlacement={apiProps.onCancelDeploy}
           phase={apiProps.gameState?.phase}
+          cancellableUnitIds={reservesDeclarer === 2 ? reservesDeclaration.cancellable : []}
+          onCancelReserve={apiProps.onCancelStrategicReserves}
         />
       </ErrorBoundary>
     </>

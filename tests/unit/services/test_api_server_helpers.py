@@ -565,22 +565,32 @@ def test_strategic_reserves_summary_asks_only_about_a_unit_the_engine_would_acce
         ],
         "phase": "deployment",
         "deployment_state": {
-            "deployable_units": {1: ["2", "3", "4"], 2: []},
-            # Ordre VOLONTAIREMENT défavorable : les deux entrées que la règle refuse sont en
-            # tête. Le résumé doit rendre la première REELLEMENT interrogeable, pas la première.
-            "reserves_declaration_queue": [[1, "3"], [1, "4"], [1, "2"]],
-            "reserves_declaration_closed": False,
+            # Ordre VOLONTAIREMENT défavorable : les deux escouades que la règle refuse sont en
+            # tête du pool. Le résumé ne doit proposer QUE celle qui tient réellement.
+            "deployable_units": {1: ["3", "4", "2"], 2: []},
         },
     }
+    from engine.phase_handlers.deployment_handlers import reset_reserves_declaration_state
+
+    reset_reserves_declaration_state(game_state["deployment_state"])
     game_state["unit_by_id"] = {u["id"]: u for u in game_state["units"]}
     summary = api_server._strategic_reserves_summary(game_state)
-    assert summary["pending_declaration"] == {"player": 1, "unitId": "2"}
+
+    assert summary["declaring_player"] == 1
+    assert summary["declarable"] == ["2"], (
+        "le resume propose une escouade que le moteur refuserait : 131 pts ne tient pas sous les "
+        "130 restants, et une FORTIFICATION ne tient jamais"
+    )
+    # Deja en reserves au depart : c'est elle, et elle seule, que le bouton Cancel doit viser.
+    assert summary["cancellable"] == ["1"]
 
 
 def test_strategic_reserves_summary_asks_nothing_once_deployment_is_over() -> None:
-    """Hors déploiement il n'y a plus aucune question 20.01 : `null`, pas une clé absente."""
+    """Hors déploiement il n'y a plus aucun camp déclarant : `null`, pas une clé absente."""
     summary = api_server._strategic_reserves_summary({"points_limit": 500, "units": []})
-    assert summary["pending_declaration"] is None
+    assert summary["declaring_player"] is None
+    assert summary["declarable"] == []
+    assert summary["cancellable"] == []
 
 
 def test_strategic_reserves_summary_closes_the_rule_without_battle_size() -> None:
@@ -645,7 +655,7 @@ def test_pvp_deployment_scenario_asks_the_reserves_question() -> None:
     assert points_limit is not None, "scenario_pvp.json ne declare pas de 'scale' (20.01)"
 
     units = loaded["units"]
-    from engine.phase_handlers.deployment_handlers import build_reserves_declaration_queue
+    from engine.phase_handlers.deployment_handlers import reset_reserves_declaration_state
 
     deployable_units = {
         player: [str(u["id"]) for u in units if int(u["player"]) == player]
@@ -657,22 +667,26 @@ def test_pvp_deployment_scenario_asks_the_reserves_question() -> None:
         "units": units,
         "deployment_state": {
             "deployable_units": deployable_units,
-            # La file est bâtie par LE constructeur du moteur, pas recopiée à la main : c'est son
-            # ordre alterné qui décide de la première question, et un ordre inventé ici testerait
-            # autre chose que ce que le joueur verra.
-            "reserves_declaration_queue": build_reserves_declaration_queue(deployable_units),
-            "reserves_declaration_closed": False,
         },
         "unit_by_id": {str(u["id"]): u for u in units},
     }
+    # L'etat de l'etape est pose par L'ECRIVAIN UNIQUE du moteur, pas recopie cle par cle : c'est
+    # lui qui decide de quoi l'etape part, et un etat invente ici testerait autre chose que ce que
+    # le joueur verra.
+    reset_reserves_declaration_state(game_state["deployment_state"])
+
     summary = api_server._strategic_reserves_summary(game_state)
     for player in ("1", "2"):
         # VERT VACANT : sans ceci, un pool de deployables vide ferait passer le test.
         assert deployable_units[int(player)], player
         assert summary[player]["cap_points"] > 0, player
-    assert summary["pending_declaration"] is not None, (
-        "aucune question 20.01 posee sur le scenario PvP : le conteneur resterait inerte"
+    assert summary["declaring_player"] == 1, (
+        "aucun camp declarant sur le scenario PvP : le conteneur resterait inerte"
     )
+    assert summary["declarable"], (
+        "le camp declarant n'a aucune escouade proposable : les boutons Reserve resteraient morts"
+    )
+    assert summary["cancellable"] == [], "rien n'est encore en reserves au depart de l'etape"
 
 
 def test_maybe_precompute_ingress_pools_is_a_noop_outside_move_phase() -> None:

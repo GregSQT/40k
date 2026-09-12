@@ -1368,7 +1368,7 @@ def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
 
     def _rearm_deployment() -> None:
         from engine.phase_handlers.deployment_handlers import (
-            RESERVES_DECLARATION_CLOSED_KEY, RESERVES_DECLARATION_QUEUE_KEY,
+            reset_reserves_declaration_state,
         )
 
         gs["phase"] = "deployment"
@@ -1377,9 +1377,9 @@ def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
         gs["deployment_state"]["current_deployer"] = 1
         gs["deployment_state"]["deployable_units"][1] = [squad_id]
         # L'étape Declare Battle Formations est ROUVERTE avec elle : le dépôt 20.01 n'existe que
-        # pendant cette étape, la file est donc ce qui le rend possible.
-        gs["deployment_state"][RESERVES_DECLARATION_QUEUE_KEY] = [[1, squad_id]]
-        gs["deployment_state"][RESERVES_DECLARATION_CLOSED_KEY] = False
+        # pendant cette étape. Par l'écrivain unique du moteur, pour repartir de l'état exact d'un
+        # début d'étape — refus vides, aucune validation, étape non close.
+        reset_reserves_declaration_state(gs["deployment_state"])
         _unit(gs, squad_id)["deployed_on_turn"] = None
         _unit(gs, squad_id)["in_strategic_reserves"] = False
 
@@ -1387,7 +1387,7 @@ def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
     # passeraient même si l'action n'existait pas du tout.
     _rearm_deployment()
     eng.execute_semantic_action(
-        {"action": "deploy_strategic_reserves", "unitId": squad_id, "declare": True}
+        {"action": "deploy_strategic_reserves", "unitId": squad_id}
     )
     assert _unit(gs, squad_id)["in_strategic_reserves"] is True, (
         "le dépôt doit aboutir DANS la phase de déploiement"
@@ -1397,7 +1397,7 @@ def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
         _rearm_deployment()
         gs["phase"] = phase
         eng.execute_semantic_action(
-            {"action": "deploy_strategic_reserves", "unitId": squad_id, "declare": True}
+            {"action": "deploy_strategic_reserves", "unitId": squad_id}
         )
         assert _unit(gs, squad_id)["in_strategic_reserves"] is False, (
             f"20.01 : une unité a été mise en réserves depuis la phase {phase}"

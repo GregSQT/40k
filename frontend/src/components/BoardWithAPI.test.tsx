@@ -441,17 +441,24 @@ function makeUnit(id: number, player: 1 | 2) {
   };
 }
 
-/** État de déploiement ACTIF portant la question 20.01 sur `pendingUnitId`, du camp `pendingPlayer`. */
+/** État de déploiement ACTIF où le camp `pendingPlayer` compose sa déclaration 20.01 ; sa seule
+ *  escouade (`pendingUnitId`) est déclarable. */
 function makeDeclarationState(o: {
   pendingPlayer: 1 | 2;
   pendingUnitId: string;
   seat2: "human" | "ai";
+  /** Escouades déjà en réserves et annulables par le camp déclarant (défaut : aucune). */
+  cancellable?: string[];
 }) {
+  const cancellable = o.cancellable ?? [];
+  const units = [makeUnit(7, 1), makeUnit(11, 2)].map((u) =>
+    cancellable.includes(String(u.id)) ? { ...u, in_strategic_reserves: true } : u
+  );
   return makeGameState({
     phase: "deployment",
     deployment_type: "active",
     player_types: { "1": "human", "2": o.seat2 },
-    units: [makeUnit(7, 1), makeUnit(11, 2)],
+    units,
     units_cache: { "7": {}, "11": {} },
     // `current_player` ET `current_deployer` : le moteur écrit TOUJOURS les deux ensemble pendant
     // 20.01 (`move_seat_to_pending_reserves_declaration`), et un état qui n'en porterait qu'un
@@ -460,13 +467,18 @@ function makeDeclarationState(o: {
     current_player: o.pendingPlayer,
     deployment_state: {
       current_deployer: o.pendingPlayer,
-      deployable_units: { "1": ["7"], "2": ["11"] },
+      deployable_units: {
+        "1": cancellable.includes("7") ? [] : ["7"],
+        "2": cancellable.includes("11") ? [] : ["11"],
+      },
       deployed_units: [],
       deployment_complete: false,
     },
     strategic_reserves: {
       last_round: 3,
-      pending_declaration: { player: o.pendingPlayer, unitId: o.pendingUnitId },
+      declaring_player: o.pendingPlayer,
+      declarable: cancellable.includes(o.pendingUnitId) ? [] : [o.pendingUnitId],
+      cancellable,
       "1": { used_points: 0, cap_points: 500 },
       "2": { used_points: 0, cap_points: 500 },
     },
@@ -525,10 +537,10 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
     return { aiTurnCalls: () => aiTurnCalls };
   }
 
-  it("écran de préparation : la question n'est pas posée, elle l'est au démarrage", async () => {
+  it("écran de préparation : la déclaration n'est pas ouverte, elle l'est au démarrage", async () => {
     // `deploymentStarted` est CÂBLÉ ici, pas seulement testé dans le prédicat : l'écran de
     // préparation est la seule fenêtre où le joueur peut encore changer d'armée, et le moteur
-    // refuse ce changement dès la première réponse 20.01.
+    // refuse ce changement dès le premier geste 20.01.
     await renderDeclaration({
       mode: "pvp",
       pendingPlayer: 1,
@@ -536,10 +548,43 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
       seat2: "human",
     });
 
-    expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
-    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-declaration-banner")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-validate")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declaration-banner")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.getByTestId("strategic-reserves-validate")).toBeTruthy();
+  });
+
+  it("`Reserve` n'apparaît qu'à la SÉLECTION d'une escouade déclarable, jamais `Deploy`", async () => {
+    // 20.01 : « select one or more friendly units to place in strategic reserves. Instead of
+    // setting up these units on the battlefield » — ne pas réserver, c'est déployer ; il n'y a
+    // rien à déclarer pour ça, donc pas de bouton. La version précédente posait une question
+    // fermée à deux boutons sur l'escouade que le moteur désignait ; la règle ne porte ni la
+    // question, ni l'ordre.
+    await renderDeclaration({
+      mode: "pvp",
+      pendingPlayer: 1,
+      pendingUnitId: "7",
+      seat2: "human",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declaration-banner")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    // Sans sélection : rien sur la ligne. C'est la sélection qui porte le geste.
+    expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("roster-row-select-7"));
 
     await waitFor(
       () => {
@@ -547,13 +592,36 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
       },
       { timeout: 5000 }
     );
-    expect(screen.getByTestId("strategic-reserves-keep")).toBeTruthy();
+    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
   });
 
-  it("siège piloté par le modèle : la question du bot n'est jamais offerte à l'humain", async () => {
-    // 20.01 : « you can select one or more friendly units » — c'est le camp interrogé qui décide.
-    // Le moteur refuse d'ailleurs cette route pour un siège non humain
-    // (`reserves_declaration_seat_is_not_human`) : les deux boutons ne pourraient que revenir en
+  it("`Cancel` n'apparaît que sur une escouade que le moteur dit annulable", async () => {
+    // Le conteneur de réserves porte `Cancel` sur les escouades de `strategic_reserves.cancellable`
+    // — celles du camp déclarant, tant qu'il n'a pas validé. Ni éligibilité ni règle rejouée ici.
+    await renderDeclaration({
+      mode: "pvp",
+      pendingPlayer: 1,
+      pendingUnitId: "7",
+      seat2: "human",
+      cancellable: ["7"],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-cancel")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    // VERT VACANT : la même escouade, dans le conteneur, n'est PAS proposée à la réserve — elle y
+    // est déjà. Sans cette assertion, un bouton `Reserve` égaré dans le conteneur passerait.
+    expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
+  });
+
+  it("siège piloté par le modèle : la déclaration du bot n'est jamais offerte à l'humain", async () => {
+    // 20.01 : « you can select one or more friendly units » — c'est le camp qui déclare qui
+    // décide. Le moteur refuse d'ailleurs cette route pour un siège non humain
+    // (`reserves_declaration_seat_is_not_human`) : les boutons ne pourraient que revenir en
     // erreur.
     await renderDeclaration({
       mode: "pve",
@@ -570,13 +638,14 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
       },
       { timeout: 5000 }
     );
+    expect(screen.queryByTestId("strategic-reserves-declaration-banner")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-validate")).toBeNull();
     expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
-    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
   });
 
-  it("siège humain sur la même escouade : la question EST posée", async () => {
+  it("siège humain sur le même camp : la déclaration EST ouverte", async () => {
     // VERT VACANT du test précédent : sans ce cas, un panneau muet pour une tout autre raison
-    // rendrait l'absence verte pour rien. Même escouade, même camp, seul le siège change.
+    // rendrait l'absence verte pour rien. Même camp, même escouade, seul le siège change.
     await renderDeclaration({
       mode: "pvp",
       pendingPlayer: 2,
@@ -588,7 +657,7 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
 
     await waitFor(
       () => {
-        expect(screen.getByTestId("strategic-reserves-declare")).toBeTruthy();
+        expect(screen.getByTestId("strategic-reserves-declaration-banner")).toBeTruthy();
       },
       { timeout: 5000 }
     );
@@ -668,6 +737,13 @@ describe("BoardWithAPI — bandeau de refus", () => {
       { timeout: 5000 }
     );
     fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declaration-banner")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    fireEvent.click(screen.getByTestId("roster-row-select-7"));
     await waitFor(
       () => {
         expect(screen.getByTestId("strategic-reserves-declare")).toBeTruthy();
