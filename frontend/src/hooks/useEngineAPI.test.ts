@@ -1064,12 +1064,13 @@ interface OverrunScenario {
   label: string;
   subphase: "fight" | "consolidate";
   attacker: number;
+  /** Joueur de l'attaquant ; l'ennemi appartient à l'autre joueur. */
+  attackerPlayer: 1 | 2;
   foe: number;
   attackerCell: [number, number];
   foeCell: [number, number];
-  /** Mode UI attendu hors move : plan fight (FIGHT) ou sélection directe (New Foes). */
+  /** Mode UI attendu hors move : plan fight local (FIGHT) ou sélection directe (New Foes). */
   expectedMode: "attackPreview" | "select";
-  hasFightPlan: boolean;
   /** Clés propres à l'état d'attente New Foes (absentes en étape FIGHT). */
   waitExtras: Record<string, unknown>;
 }
@@ -1079,22 +1080,22 @@ const OVERRUN_SCENARIOS: OverrunScenario[] = [
     label: "étape FIGHT",
     subphase: "fight",
     attacker: 1,
+    attackerPlayer: 1,
     foe: 2,
     attackerCell: [20, 20],
     foeCell: [23, 20],
     expectedMode: "attackPreview",
-    hasFightPlan: true,
     waitExtras: {},
   },
   {
     label: "New Foe désengagé (12.08 AFTER)",
     subphase: "consolidate",
     attacker: 3,
+    attackerPlayer: 2,
     foe: 4,
     attackerCell: [27, 20],
     foeCell: [31, 20],
     expectedMode: "select",
-    hasFightPlan: false,
     waitExtras: {
       consolidation_new_foes: ["3"],
       consolidation_new_foes_for_unit: "1",
@@ -1108,14 +1109,16 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
   const atk = String(sc.attacker);
   const foe = String(sc.foe);
   const atkModel = `${atk}#0`;
+  /** Plan fight local posé ssi le mode attendu est attackPreview (étape FIGHT). */
+  const hasFightPlan = sc.expectedMode === "attackPreview";
 
   function overrunGameState(active: string | null) {
-    const attacker = makeUnit(sc.attacker, sc.subphase === "fight" ? 1 : 2, {
+    const attacker = makeUnit(sc.attacker, sc.attackerPlayer, {
       col: sc.attackerCell[0],
       row: sc.attackerCell[1],
       ATTACK_LEFT: 1,
     });
-    const enemy = makeUnit(sc.foe, sc.subphase === "fight" ? 2 : 1, {
+    const enemy = makeUnit(sc.foe, sc.attackerPlayer === 1 ? 2 : 1, {
       col: sc.foeCell[0],
       row: sc.foeCell[1],
       ATTACK_LEFT: 1,
@@ -1173,6 +1176,25 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
     action: "wait",
   };
 
+  /** Siège de l'unité active hors move : même unité sélectionnée, aucun plan pile-in, plan fight
+   * posé (FIGHT) ou état New Foes sans plan (consolidate). Vaut après activation comme après
+   * commit / abandon du pile-in additionnel. */
+  function expectSeat(
+    result: { current: ReturnType<typeof useEngineAPI> },
+    overrunEligible: boolean
+  ) {
+    expect(result.current.mode).toBe(sc.expectedMode);
+    expect(result.current.selectedUnitId).toBe(sc.attacker);
+    expect(result.current.pileInMovePlan).toBeNull();
+    if (hasFightPlan) {
+      expect(result.current.squadFightPlan?.unitId).toBe(sc.attacker);
+    } else {
+      expect(result.current.squadFightPlan).toBeNull();
+      expect(result.current.consolidationNewFoes).toEqual([atk]);
+    }
+    expect(result.current.fightOverrunEligible).toBe(overrunEligible);
+  }
+
   /** Active l'unité (sans cible, overrun possible), puis ouvre l'overrun. */
   async function ouvreOverrun(bodies: Array<Record<string, unknown>>) {
     server.use(
@@ -1219,16 +1241,7 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
       await result.current.onSelectUnit(sc.attacker);
     });
     expect(bodies.at(-1)).toMatchObject({ action: "activate_unit", unitId: atk });
-    expect(result.current.mode).toBe(sc.expectedMode);
-    expect(result.current.fightOverrunEligible).toBe(true);
-    if (sc.hasFightPlan) {
-      expect(result.current.squadFightPlan?.unitId).toBe(sc.attacker);
-    } else {
-      // État New Foes : sélection posée, clic-cible direct, AUCUN plan fight local.
-      expect(result.current.selectedUnitId).toBe(sc.attacker);
-      expect(result.current.consolidationNewFoes).toEqual([atk]);
-      expect(result.current.squadFightPlan).toBeNull();
-    }
+    expectSeat(result, true);
 
     await act(async () => {
       await result.current.onOverrunPileIn();
@@ -1246,23 +1259,6 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
     return result;
   }
 
-  /** Après commit / abandon : même unité active, plan fight rouvert (FIGHT) ou non (New Foes). */
-  function expectBackToSeat(
-    result: { current: ReturnType<typeof useEngineAPI> },
-    overrunEligible: boolean
-  ) {
-    expect(result.current.mode).toBe(sc.expectedMode);
-    expect(result.current.selectedUnitId).toBe(sc.attacker);
-    expect(result.current.pileInMovePlan).toBeNull();
-    if (sc.hasFightPlan) {
-      expect(result.current.squadFightPlan?.unitId).toBe(sc.attacker);
-    } else {
-      expect(result.current.squadFightPlan).toBeNull();
-      expect(result.current.consolidationNewFoes).toEqual([atk]);
-    }
-    expect(result.current.fightOverrunEligible).toBe(overrunEligible);
-  }
-
   it("commit du pile-in additionnel → retour au siège de la même unité, cibles recalculées", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const result = await ouvreOverrun(bodies);
@@ -1271,7 +1267,7 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
       await result.current.onCommitPileInPlan();
     });
     expect(bodies.at(-1)).toMatchObject({ action: "commit_pile_in_plan", plan: [] });
-    expectBackToSeat(result, false);
+    expectSeat(result, false);
     expect(result.current.error).toBeNull();
   });
 
@@ -1283,6 +1279,6 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
       await result.current.onCancelPileInModelMove();
     });
     expect(bodies.at(-1)).toMatchObject({ action: "skip" });
-    expectBackToSeat(result, true);
+    expectSeat(result, true);
   });
 });

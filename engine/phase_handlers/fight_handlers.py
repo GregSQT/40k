@@ -24,7 +24,7 @@ from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 #: ne porte pas le moteur, et le jet (`W40KEngine._check_and_trigger_exhortation_de_rage`) a
 #: besoin de lui pour reprendre le combat. Le handler ARME donc la capacité sous cette clé au
 #: moment où l'unité est sélectionnée, et `W40KEngine._process_fight_phase` la consomme dans la
-#: même requête. Valeur : `{"squad_id": <id>, "regime": <EXHORTATION_REGIME_*>}`.
+#: même requête. Valeur : l'id de l'escouade armée (régime manuel par construction).
 FIGHT_SELECTION_EXHORTATION_KEY = "_fight_selection_exhortation"
 #: Régimes de REPRISE du combat après le jet — deux flux d'activation, deux reprises :
 #: gym (`_continue_squad_fight_after_selection`, siège programmatique : politique en gym, bot en
@@ -2526,64 +2526,30 @@ def _fight_pile_in_closest_tier_ids(
     return tier
 
 
-def _fight_others_config(
-    game_state: Dict[str, Any], model_id: str, others: Dict[str, Tuple[int, int, int]]
-) -> List[Dict[str, Any]]:
-    """Entrées de cohésion des AUTRES figurines de l'escouade à leurs positions ``others``
-    ({mid: (col, row, level)}) — construites UNE fois par configuration, réutilisées pour chaque
-    case candidate de ``model_id`` (`_fight_model_config_coherent`). Lecture pure."""
-    models_cache = require_key(game_state, "models_cache")
-    return [
-        {**models_cache[str(mid)], "col": int(oc), "row": int(orow)}
-        for mid, (oc, orow, _olv) in others.items()
-        if str(mid) != str(model_id)
-    ]
-
-
 def _fight_model_config_coherent(
     game_state: Dict[str, Any], model: Dict[str, Any], col: int, row: int,
     others_config: List[Dict[str, Any]],
 ) -> bool:
-    """Cohésion 03.03 (`coherency_violation_flags`, source unique) de la configuration où
-    ``model`` est en (col, row) et les autres figurines aux entrées ``others_config``
-    (`_fight_others_config`). Lecture pure."""
-    from .shared_utils import coherency_violation_flags
+    """Cohésion 03.03 (`_positions_in_coherency`, source unique) de la configuration où ``model``
+    est en (col, row) et les AUTRES figurines de l'escouade aux entrées ``others_config``
+    (``{**models_cache[mid], "col", "row"}``, construites UNE fois par configuration et
+    réutilisées pour chaque case candidate). Lecture pure."""
+    from .shared_utils import _positions_in_coherency
 
-    config = [{**model, "col": int(col), "row": int(row)}, *others_config]
-    return not any(coherency_violation_flags(config, game_state))
-
-
-def _fight_model_destination_feasible(
-    game_state: Dict[str, Any],
-    squad_id: str,
-    model_id: str,
-    col: int,
-    row: int,
-    level: int,
-    others_config: List[Dict[str, Any]],
-    start_engaged: List[Dict[str, Any]],
-) -> bool:
-    """Une destination de ``model_id`` est FAISABLE si, les AUTRES figurines de l'escouade étant à
-    leurs entrées ``others_config`` (`_fight_others_config`), la configuration respecte la
-    cohésion 03.03 (`_fight_model_config_coherent`) ET si la figurine y conserve chacun de ses
-    engagements de départ ``start_engaged`` (`_fight_model_keeps_engagements`, 12.03 / 12.08
-    Ongoing AFTER). C'est le sens retenu de « possible » dans « engaged with it if possible » /
-    « within range […] if possible ». Lecture pure."""
-    model = require_key(game_state, "models_cache")[str(model_id)]
-    return _fight_model_config_coherent(
-        game_state, model, col, row, others_config
-    ) and _fight_model_keeps_engagements(
-        game_state, squad_id, model, col, row, level, start_engaged
+    return _positions_in_coherency(
+        [{**model, "col": int(col), "row": int(row)}, *others_config], game_state
     )
 
 
 def _fight_plan_keeps_engagements(
-    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int, int]]
+    game_state: Dict[str, Any], squad_id: str, plan: List[Tuple[str, int, int, int]],
+    *, ez: int, metric: str,
 ) -> bool:
     """AFTER par figurine d'un plan normalisé ``(mid, col, row, level)`` : chaque figurine engagée
     AU DÉPART (`_fight_model_start_engaged_entries`, étage courant) reste engagée avec CHAQUE
     unité de départ à son arrivée (`_fight_model_keeps_engagements`, étage planifié). Figurine
-    absente du cache (morte) ignorée. Lecture pure."""
+    absente du cache (morte) ignorée. ``ez``/``metric`` : mesure déjà dérivée par l'appelant.
+    Lecture pure."""
     models_cache = require_key(game_state, "models_cache")
     for mid, c, r, lv in plan:
         m = models_cache.get(mid)
@@ -2591,7 +2557,8 @@ def _fight_plan_keeps_engagements(
             continue
         if not _fight_model_keeps_engagements(
             game_state, squad_id, m, int(c), int(r), int(lv),
-            _fight_model_start_engaged_entries(game_state, squad_id, m),
+            _fight_model_start_engaged_entries(game_state, squad_id, m, ez=ez, metric=metric),
+            ez=ez, metric=metric,
         ):
             return False
     return True
@@ -2611,24 +2578,40 @@ def _fight_model_legal_destinations(
 
     ``pool`` = sortie d'un builder par-figurine ({"closer", "engaged"}, engaged ⊆ closer ; pour
     l'Objective, « engaged » = empreinte dans la zone). S'il existe AU MOINS une case « engaged »
-    faisable (`_fight_model_destination_feasible` : cohésion de la configuration + engagements de
-    départ de la figurine), seules ces cases sont légales ; sinon « closer » suffit.
+    FAISABLE — la configuration respecte la cohésion 03.03 (`_fight_model_config_coherent`) ET
+    la figurine y conserve chacun de ses engagements de départ (`_fight_model_keeps_engagements`,
+    12.03 / 12.08 Ongoing AFTER), sens retenu de « possible » dans « engaged with it if possible »
+    / « within range […] if possible » — seules ces cases sont légales ; sinon « closer » suffit.
 
     SOURCE UNIQUE pour : le pool exposé au front (plan_state), ``per_model`` des deux preview_plan,
     et le repli de l'auto-placement. Le verdict porte sur la configuration finale (les autres
     figurines à ``others``), comme la cohésion 03 « Ending a move ». Lecture pure.
     """
+    from engine.spatial_relations import engagement_distance_metric
+    from .shared_utils import get_engagement_zone
+
     closer = pool["closer"]
     engaged = pool["engaged"]
     if not engaged:
         return closer
-    model = require_key(game_state, "models_cache")[str(model_id)]
-    start_engaged = _fight_model_start_engaged_entries(game_state, squad_id, model)
-    others_config = _fight_others_config(game_state, model_id, others)
+    models_cache = require_key(game_state, "models_cache")
+    model = models_cache[str(model_id)]
+    ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
+    start_engaged = _fight_model_start_engaged_entries(
+        game_state, squad_id, model, ez=ez, metric=metric
+    )
+    others_config = [
+        {**models_cache[str(mid)], "col": int(oc), "row": int(orow)}
+        for mid, (oc, orow, _olv) in others.items()
+        if str(mid) != str(model_id)
+    ]
     feasible = [
         [int(c), int(r)] for c, r in engaged
-        if _fight_model_destination_feasible(
-            game_state, squad_id, model_id, int(c), int(r), int(level), others_config, start_engaged
+        if _fight_model_config_coherent(game_state, model, int(c), int(r), others_config)
+        and _fight_model_keeps_engagements(
+            game_state, squad_id, model, int(c), int(r), int(level), start_engaged,
+            ez=ez, metric=metric,
         )
     ]
     return feasible if feasible else closer
@@ -2653,14 +2636,10 @@ def _fight_pile_in_preview_plan(
 
     Retour : {per_model, coherency_ok, unit_engaged, kept_engagements, can_validate}.
     """
-    from engine.hex_utils import min_distance_between_sets
     from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import (
         get_engagement_zone,
         coherency_violation_flags,
-    )
-    from .charge_handlers import (
-        _candidate_footprint_charge,
     )
 
     unit = require_unit_by_id(game_state, str(squad_id))
@@ -2735,7 +2714,9 @@ def _fight_pile_in_preview_plan(
     )
     # Départ = étage COURANT de la figurine, arrivée = étage PLANIFIÉ : comparer les deux
     # engagements au même niveau ferait perdre/gagner un engagement par pur effet vertical.
-    kept_engagements = _fight_plan_keeps_engagements(game_state, squad_id, norm)
+    kept_engagements = _fight_plan_keeps_engagements(
+        game_state, squad_id, norm, ez=ez, metric=metric
+    )
 
     can_validate = bool(
         all(per_model.values()) and coherency_ok and unit_engaged and kept_engagements
@@ -2782,12 +2763,12 @@ def _fight_pile_in_model_plan_state(
         str(m): (int(v[0]), int(v[1]), int(v[2]) if len(v) >= 3 and v[2] is not None else _vl)
         for m, v in (provisional_plan or {}).items()
     }
-    alive, origin, full_plan = _fight_full_plan_from_provisional(game_state, squad_id, prov)
+    origin, full_plan = _fight_full_plan_from_provisional(game_state, squad_id, prov)
 
     targets = _fight_v11_pile_in_targets(game_state, unit)
     closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, targets) if targets else []
 
-    unplaced = [m for m in alive if m not in prov]
+    unplaced = [m for m in origin if m not in prov]
     eligible: List[str] = []
     for m in unplaced:
         if _fight_pile_in_build_model_pool(
@@ -2797,7 +2778,7 @@ def _fight_pile_in_model_plan_state(
 
     pool: List[List[int]] = []
     mask_loops: List[List[List[float]]] = []
-    if selected_model is not None and str(selected_model) in alive:
+    if selected_model is not None and str(selected_model) in origin:
         sel = str(selected_model)
         sel_prov = {k: v for k, v in prov.items() if k != sel}
         # Pool exposé = destinations LÉGALES de la fig sélectionnée (clause « if possible » :
@@ -2809,11 +2790,11 @@ def _fight_pile_in_model_plan_state(
                 game_state, sel, closest_tier, provisional_plan=sel_prov, view_level=_vl
             ),
             _vl,
-            {m: (sel_prov[m] if m in sel_prov else origin[m]) for m in alive if m != sel},
+            {m: (sel_prov[m] if m in sel_prov else origin[m]) for m in origin if m != sel},
         )
         if pool:
             # Le pool est celui de la figurine SELECTIONNEE : son voile se mesure a SON socle.
-            _m_sel = require_key(game_state, "models_cache")[sel]
+            _m_sel = models_cache[sel]
             fp_pair = _fight_model_fp_pair(game_state, _m_sel)
             fp_zone: Set[Tuple[int, int]] = set()
             for cc, rr in pool:
@@ -2831,7 +2812,7 @@ def _fight_pile_in_model_plan_state(
     target_entries = [units_cache[t] for t in targets if t in units_cache]
     engaged_models: List[str] = []
     for m, c, r, _lv in full_plan:
-        _m_fp = require_key(game_state, "models_cache")[str(m)]
+        _m_fp = models_cache[str(m)]
         synth = _synth_model_entry(
             game_state, squad_id, _m_fp, int(c), int(r), level=int(_lv)
         )
@@ -3100,25 +3081,14 @@ def pile_in_autoplace_plan(
     def _model_fp(mid: str, c: int, r: int) -> Set[Tuple[int, int]]:
         return _charge_model_footprint(game_state, models_cache[mid], c, r)
 
-    def _engages_focus(mid: str, c: int, r: int) -> bool:
-        # ILP horizontal : la figurine garde son étage QUAND le slot en porte un (§13.06) — sinon
-        # elle y est au sol. L'engagement se mesure au niveau EFFECTIF du slot, jamais à celui du
-        # départ : une fig à l'étage n'engage pas un ennemi trois étages plus bas, et un slot hors
-        # plancher n'est pas « à l'étage ».
-        synth = _synth_model_entry(
-            game_state, squad_id, models_cache[mid], c, r,
-            level=_fight_effective_level_at(
-                game_state, models_cache[mid], c, r, int(require_key(models_cache[mid], "level"))
-            ),
-        )
-        return unit_entries_within_engagement_zone(
-            synth, focus_entry, ez, metric=metric)
-
     _slot_level_cache: Dict[Tuple[str, int, int], int] = {}
 
     def _slot_level(mid: str, c: int, r: int) -> int:
-        """Niveau EFFECTIF de la figurine posée en (c, r) — celui de `_engages_focus`. Mémoïsé :
-        chaque case est relue par `_engages_tier`, `_keeps_start_engagements` et le repli."""
+        """Niveau EFFECTIF de la figurine posée en (c, r). ILP horizontal : la figurine garde son
+        étage QUAND le slot en porte un (§13.06) — sinon elle y est au sol. L'engagement se mesure
+        à ce niveau, jamais à celui du départ : une fig à l'étage n'engage pas un ennemi trois
+        étages plus bas, et un slot hors plancher n'est pas « à l'étage ». Mémoïsé : chaque case
+        est relue par `_engages_focus`, `_engages_tier`, `_keeps_start_engagements` et le repli."""
         key = (mid, c, r)
         lvl = _slot_level_cache.get(key)
         if lvl is None:
@@ -3127,6 +3097,13 @@ def pile_in_autoplace_plan(
             )
             _slot_level_cache[key] = lvl
         return lvl
+
+    def _engages_focus(mid: str, c: int, r: int) -> bool:
+        synth = _synth_model_entry(
+            game_state, squad_id, models_cache[mid], c, r, level=_slot_level(mid, c, r)
+        )
+        return unit_entries_within_engagement_zone(
+            synth, focus_entry, ez, metric=metric)
 
     def _engages_tier(mid: str, c: int, r: int) -> bool:
         """Empreinte à ≤ EZ d'une cible du PALIER le plus proche (12.03 WHILE « engaged with it »)
@@ -3312,7 +3289,9 @@ def pile_in_autoplace_plan(
     def _start_engagements(mid: str) -> List[Dict[str, Any]]:
         cached = _start_eng_cache.get(mid)
         if cached is None:
-            cached = _fight_model_start_engaged_entries(game_state, squad_id, models_cache[mid])
+            cached = _fight_model_start_engaged_entries(
+                game_state, squad_id, models_cache[mid], ez=ez, metric=metric
+            )
             _start_eng_cache[mid] = cached
         return cached
 
@@ -3322,7 +3301,8 @@ def pile_in_autoplace_plan(
         """AFTER 12.03 : la figurine posée en (c, r) reste engagée avec CHAQUE ennemi de
         ``start_eng`` — même mesure que ``kept_engagements`` du dry-run."""
         return _fight_model_keeps_engagements(
-            game_state, squad_id, models_cache[mid], c, r, _slot_level(mid, c, r), start_eng
+            game_state, squad_id, models_cache[mid], c, r, _slot_level(mid, c, r), start_eng,
+            ez=ez, metric=metric,
         )
 
     # « engaged with it if possible » (12.03 WHILE) du côté ILP. Le validateur n'admet une case
@@ -3450,7 +3430,7 @@ def pile_in_autoplace_plan(
     # Figs mobiles non posées par l'ILP : repli PAR FIGURINE (12.03 WHILE).
     #   1. « engaged with it if possible » : s'il existe une case ENGAGÉE avec le palier le plus
     #      proche et FAISABLE (cohésion 03.03 de la configuration + engagements de départ de la
-    #      figurine — `_fight_model_destination_feasible`, même prédicat que le validateur), la
+    #      figurine — même prédicat que le validateur `_fight_model_legal_destinations`), la
     #      figurine en prend une ; départage = mode (offensif → au plus près du focus, défensif →
     #      au plus loin) ;
     #   2. sinon rapprochement au max : strictement plus proche du palier, au plus près du focus,
@@ -3470,14 +3450,16 @@ def pile_in_autoplace_plan(
             out.append(_socle(om, *provisional.get(om, starts[om])))  # get allowed (non posée = départ)
         return out
 
-    def _others_now(mid: str) -> Dict[str, Tuple[int, int, int]]:
-        others: Dict[str, Tuple[int, int, int]] = {}
+    def _others_config_now(mid: str) -> List[Dict[str, Any]]:
+        """Entrées de cohésion (`_fight_model_config_coherent`) des AUTRES figurines, à leur
+        position posée (``provisional``) ou de départ."""
+        out: List[Dict[str, Any]] = []
         for om in alive:
             if om == mid:
                 continue
             oc, orow = provisional.get(om, (int(models_cache[om]["col"]), int(models_cache[om]["row"])))  # get allowed (non posée = départ)
-            others[om] = (int(oc), int(orow), eff_level[om])
-        return others
+            out.append({**models_cache[om], "col": int(oc), "row": int(orow)})
+        return out
 
     def _fallback_pick(mid: str) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
         """(meilleure case engagée-faisable, meilleure case « closer ») pour ``mid`` dans l'état
@@ -3487,7 +3469,7 @@ def pile_in_autoplace_plan(
         if sm <= 0:
             return None, None
         obstacles = _other_socles_now(mid, level)
-        others_config = _fight_others_config(game_state, mid, _others_now(mid))
+        others_config = _others_config_now(mid)
         start_eng = _start_engagements(mid)
         best_closer: Optional[Tuple[int, int]] = None
         best_closer_score: Optional[int] = None
@@ -3510,7 +3492,7 @@ def pile_in_autoplace_plan(
             if best_closer_score is None or d_focus < best_closer_score:
                 best_closer_score = d_focus
                 best_closer = (cc, rr)
-            # Faisabilité du validateur (`_fight_model_destination_feasible`) : les engagements
+            # Faisabilité du validateur (`_fight_model_legal_destinations`) : les engagements
             # de départ sont DÉJÀ acquis ci-dessus, reste la cohésion de la configuration.
             if _engages_tier(mid, cc, rr) and _fight_model_config_coherent(
                 game_state, models_cache[mid], cc, rr, others_config
@@ -4044,7 +4026,6 @@ def _fight_consolidation_preview_plan(
     ⚠️ ``can_validate=False`` si la cible (tous les ciblés / la zone) est inatteignable : le
     « closer if not » du WHILE ne valide pas le move (move optionnel → on ne bouge pas). Lecture pure.
     """
-    from engine.hex_utils import min_distance_between_sets
     from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import (
         get_engagement_zone,
@@ -4153,7 +4134,9 @@ def _fight_consolidation_preview_plan(
         # ennemie doit rester engagée avec CETTE unité après le move (pas au niveau unité).
         # Départ = étage COURANT de la figurine (miroir strict du pile-in) : le comparer au sol
         # ferait perdre/gagner un engagement par pur effet vertical.
-        kept_engagements = _fight_plan_keeps_engagements(game_state, squad_id, norm)
+        kept_engagements = _fight_plan_keeps_engagements(
+            game_state, squad_id, norm, ez=ez, metric=metric
+        )
         after_ok = kept_engagements
     elif mode == "engaging":
         selected = [str(e) for e in tier]
@@ -4220,7 +4203,7 @@ def _fight_consolidation_model_plan_state(
         str(m): (int(v[0]), int(v[1]), int(v[2]) if len(v) >= 3 and v[2] is not None else _vl)
         for m, v in (provisional_plan or {}).items()
     }
-    alive, origin, full_plan = _fight_full_plan_from_provisional(game_state, squad_id, prov)
+    origin, full_plan = _fight_full_plan_from_provisional(game_state, squad_id, prov)
 
     mode, tier = _fight_v11_consolidation_targets(game_state, unit)
     engaging_candidates = (
@@ -4264,7 +4247,7 @@ def _fight_consolidation_model_plan_state(
     else:
         closest_tier = []
 
-    unplaced = [m for m in alive if m not in prov]
+    unplaced = [m for m in origin if m not in prov]
     eligible: List[str] = []
     for m in unplaced:
         if _fight_consolidation_build_model_pool(
@@ -4275,7 +4258,7 @@ def _fight_consolidation_model_plan_state(
 
     pool: List[List[int]] = []
     mask_loops: List[List[List[float]]] = []
-    if selected_model is not None and str(selected_model) in alive:
+    if selected_model is not None and str(selected_model) in origin:
         sel = str(selected_model)
         sel_prov = {k: v for k, v in prov.items() if k != sel}
         # Pool exposé = destinations LÉGALES de la fig sélectionnée (clause « if possible » :
@@ -4287,11 +4270,11 @@ def _fight_consolidation_model_plan_state(
                 lock_base_contact=lock_base_contact, provisional_plan=sel_prov, view_level=_vl,
             ),
             _vl,
-            {m: (sel_prov[m] if m in sel_prov else origin[m]) for m in alive if m != sel},
+            {m: (sel_prov[m] if m in sel_prov else origin[m]) for m in origin if m != sel},
         )
         if pool:
             # Le pool est celui de la figurine SELECTIONNEE : son voile se mesure a SON socle.
-            _m_sel = require_key(game_state, "models_cache")[sel]
+            _m_sel = models_cache[sel]
             fp_pair = _fight_model_fp_pair(game_state, _m_sel)
             fp_zone: Set[Tuple[int, int]] = set()
             for cc, rr in pool:
@@ -4313,7 +4296,7 @@ def _fight_consolidation_model_plan_state(
     if tier_kind == "enemy":
         target_entries = [units_cache[t] for t in closest_tier if t in units_cache]
         for m, c, r, _lv in full_plan:
-            _m_fp = require_key(game_state, "models_cache")[str(m)]
+            _m_fp = models_cache[str(m)]
             synth = _synth_model_entry(
                 game_state, squad_id, _m_fp, int(c), int(r), level=int(_lv)
             )
@@ -4325,7 +4308,7 @@ def _fight_consolidation_model_plan_state(
     else:
         zone_set: Set[Tuple[int, int]] = set(tier)
         for m, c, r, _lv in full_plan:
-            _m_fp = require_key(game_state, "models_cache")[str(m)]
+            _m_fp = models_cache[str(m)]
             fp = _candidate_footprint_charge(
                 int(c), int(r), _m_fp, game_state, _fight_model_fp_pair(game_state, _m_fp)
             )
@@ -5164,26 +5147,24 @@ PILE_IN_MODEL_PLAN_ACTIONS = ("pile_in_plan_state", "pile_in_autoplace", "commit
 
 def _fight_full_plan_from_provisional(
     game_state: Dict[str, Any], squad_id: str, prov: Dict[str, Tuple[int, int, int]]
-) -> Tuple[List[str], Dict[str, Tuple[int, int, int]], List[Tuple[str, int, int, int]]]:
-    """``(alive, origin, full_plan)`` d'un plan par-figurine PROVISOIRE ``prov``
-    ({mid: (col, row, level)}, figurines posées) : ``alive`` = figurines vivantes de l'escouade,
-    ``origin`` = leur position/étage courants, ``full_plan`` = entrée ``(mid, col, row, level)``
-    pour CHAQUE vivante — posée selon ``prov``, sinon laissée à l'origine. SOURCE UNIQUE des
-    plan_state (pile-in, consolidation) et des commits (plan step, consolidation manuelle)."""
+) -> Tuple[Dict[str, Tuple[int, int, int]], List[Tuple[str, int, int, int]]]:
+    """``(origin, full_plan)`` d'un plan par-figurine PROVISOIRE ``prov`` ({mid: (col, row,
+    level)}, figurines posées) : ``origin`` = position/étage courants de CHAQUE figurine vivante
+    de l'escouade (ordre de ``squad_models`` ; ses clés sont la liste des vivantes),
+    ``full_plan`` = entrée ``(mid, col, row, level)`` pour chacune — posée selon ``prov``, sinon
+    laissée à l'origine. SOURCE UNIQUE des plan_state (pile-in, consolidation) et des commits
+    (plan step, consolidation manuelle)."""
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    alive = [str(m) for m in require_key(squad_models, squad_id) if str(m) in models_cache]
     origin = {
-        m: (int(models_cache[m]["col"]), int(models_cache[m]["row"]),
-            int(models_cache[m].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
-        for m in alive
+        str(m): (int(models_cache[str(m)]["col"]), int(models_cache[str(m)]["row"]),
+                 int(models_cache[str(m)].get("level", 0)))  # get allowed (champ optionnel : level absent = sol)
+        for m in require_key(squad_models, squad_id) if str(m) in models_cache
     }
     full_plan: List[Tuple[str, int, int, int]] = [
-        (m, prov[m][0], prov[m][1], prov[m][2]) if m in prov
-        else (m, origin[m][0], origin[m][1], origin[m][2])
-        for m in alive
+        (m, *prov[m]) if m in prov else (m, *origin[m]) for m in origin
     ]
-    return alive, origin, full_plan
+    return origin, full_plan
 
 
 def _fight_v11_pile_in_model_plan_step(
@@ -5235,7 +5216,7 @@ def _fight_v11_pile_in_model_plan_step(
 
     # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
     prov = _prov_from_action()
-    _alive, origin, full_plan = _fight_full_plan_from_provisional(game_state, act_uid, prov)
+    origin, full_plan = _fight_full_plan_from_provisional(game_state, act_uid, prov)
     targets = _fight_v11_pile_in_targets(game_state, u)
     closest = _fight_pile_in_closest_tier_ids(game_state, u, targets) if targets else []
     prev = _fight_pile_in_preview_plan(game_state, act_uid, full_plan, closest)
@@ -5869,7 +5850,7 @@ def _fight_v11_manual_step(
             # Invariant post-guard : mode/tier sont renseignés (None ⇒ blocked, déjà retourné).
             assert mode is not None and tier is not None
             prov = _prov_from_action()
-            _alive, origin, full_plan = _fight_full_plan_from_provisional(game_state, act_uid, prov)
+            origin, full_plan = _fight_full_plan_from_provisional(game_state, act_uid, prov)
             tier_kind = "zone" if mode == "objective" else "enemy"
             lock_base_contact = mode == "ongoing"
             closest = _fight_pile_in_closest_tier_ids(game_state, u, list(tier)) if tier_kind == "enemy" else []
