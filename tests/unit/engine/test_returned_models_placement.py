@@ -88,9 +88,11 @@ def _state(
     """Escouade alignée en colonne autour de (6,5) — positions DISTINCTES, état jouable."""
     units = [
         {
-            "id": _SQUAD, "player": 1, "col": 6, "row": 5,
+            # `unitType` et `displayName` : ce que porte toute unité de production, et ce que la
+            # ligne `RETURNED` du journal exige (datasheet de repli, nom de la capacité).
+            "id": _SQUAD, "player": 1, "col": 6, "row": 5, "unitType": "Boyz",
             "UNIT_KEYWORDS": ["INFANTRY"], "FACTION_KEYWORDS": ["TYRANIDS"],
-            "UNIT_RULES": [{"ruleId": "return_destroyed_models"}],
+            "UNIT_RULES": [{"ruleId": "return_destroyed_models", "displayName": "Grot Orderly"}],
         }
     ]
     models_cache: Dict[str, Any] = {}
@@ -417,6 +419,74 @@ def test_restored_models_are_full_health_and_distinct_ids() -> None:
         model = gs["models_cache"][mid]
         assert model["HP_CUR"] == model["HP_MAX"]
         assert model["id"] == mid, "l'identifiant du template ne doit pas être recopié"
+
+
+def test_the_returned_line_declares_each_restored_model_datasheet() -> None:
+    """La ligne `RETURNED` porte la DATASHEET de chaque socle rendu — grammaire 10.
+
+    ROUGE avant le fix : `return_destroyed_models` n'était dans aucune entrée de
+    `_STEP_LOG_TYPE_MAP` (type sans formateur, écarté en silence) et l'action_log ne portait ni
+    message, ni position, ni datasheet. Les ids `#r` n'apparaissaient dans step.log qu'au détour
+    du `[MODELS:]` d'une ligne suivante, sans datasheet — et `living_datasheets` (analyzer)
+    s'abstenait de tout verdict 19.04 pour l'escouade (mesuré le 2026-09-11 : 6 ids `#r`,
+    0 déclaré). 19.04 : « Should those models later be revived, those abilities will once more
+    apply » — le socle rendu est exactement celui dont la datasheet compte.
+
+    Deux profils archivés distincts (Boyz, PainBoy) : la datasheet vient de la figurine rendue,
+    pas de l'escouade.
+    """
+    from ai.step_logger import StepLogger
+    from engine.w40k_core import W40KEngine
+
+    gs = _state(
+        n_alive=3, n_destroyed=2, enemy_at=None,
+        destroyed_profiles=[("Boyz", 10), ("PainBoy", 60)],
+    )
+    # Deux profils distincts posent une décision `returned_models_profile` en amont : on appelle
+    # l'ÉCRIVAIN directement, avec les deux figurines de l'archive et deux cases légales.
+    apply_returned_models_placement(gs, _SQUAD, [(6, 7), (6, 8)], [0, 1], d3=2, destroyed=2)
+    logs = [e for e in gs["action_logs"] if e["type"] == "return_destroyed_models"]
+    assert len(logs) == 1, logs
+    entry = logs[0]
+    restored = [mid for mid in gs["squad_models"][_SQUAD] if "#r" in mid]
+    assert entry["restored"] == len(restored) and restored, entry
+    assert set(entry["restoredModelTypes"]) == set(restored), entry
+    for mid in restored:
+        assert entry["restoredModelTypes"][mid] == gs["models_cache"][mid]["unitType"]
+    assert {"Boyz", "PainBoy"} >= set(entry["restoredModelTypes"].values())
+    assert entry["abilityDisplayName"].upper() == "GROT ORDERLY"
+    assert entry["unitId"] == _SQUAD and entry["phase"] == "command"
+    assert "RETURNED" in entry["message"] and "[GROT ORDERLY]" in entry["message"]
+
+    # CHEMIN DE PRODUCTION du journal : traduction des clés puis formateur.
+    assert "return_destroyed_models" in W40KEngine._STEP_LOG_TYPE_MAP
+    assert "return_destroyed_models" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES, (
+        "une restitution n'est pas un step d'agent"
+    )
+    eng = W40KEngine.__new__(W40KEngine)
+    eng.game_state = gs
+    details = eng._build_step_log_details(entry, pre_action_turn=1)
+    logger = StepLogger(output_file="/dev/null", enabled=False, buffer_size=1)
+    msg = logger._format_replay_style_message(_SQUAD, "returned_models", details)
+    assert msg.startswith(f"Unit {_SQUAD}({entry['col']},{entry['row']}) RETURNED {len(restored)} models [GROT ORDERLY] (D3="), msg
+    assert "[MODEL_TYPES: " in msg, msg
+    for mid in restored:
+        assert f"{mid}={gs['models_cache'][mid]['unitType']}" in msg, msg
+    # Le segment [MODELS:] (positions des socles vivants, socles rendus compris) suit la ligne.
+    assert details["models_segment"], "la ligne RETURNED doit porter [MODELS:]"
+    for mid in restored:
+        assert f"{mid}@(" in details["models_segment"], details["models_segment"]
+
+
+def test_a_squad_without_named_ability_cannot_return_models() -> None:
+    """Le nom de la capacité est exigé (T1) : une restitution par une escouade qui ne porte pas
+    `return_destroyed_models` est une incohérence d'état, pas une ligne sans tag."""
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None)
+    for unit in gs["units"]:
+        if unit["id"] == _SQUAD:
+            unit["UNIT_RULES"] = []
+    with pytest.raises(ValueError, match="sans capacite"):
+        apply_returned_models_placement(gs, _SQUAD, [(6, 7)], [0], d3=1, destroyed=2)
 
 
 # ---------------------------------------------------------------------------

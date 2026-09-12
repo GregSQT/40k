@@ -6910,6 +6910,9 @@ class W40KEngine(gym.Env):
         "waaagh_call", "oath_selection",
         # Mort par-figurine : pas une action d'agent, pas un step gym.
         "dead",
+        # Figurines RENDUES (Grot Orderly, phase de commandement) : evenement moteur qui suit
+        # les decisions `returned_models_*`, pas un step d'agent.
+        "return_destroyed_models",
         # V11 §9.3 P2 — RELEVE d'une decision agent resolue (`_record_agent_decision_action_log`).
         # Non-incrementant, et ce n'est PAS un choix par defaut : le step gym consomme par
         # `CHOICE_i` est deja compte par la ligne d'EFFET du meme step quand le type en produit
@@ -7002,6 +7005,12 @@ class W40KEngine(gym.Env):
         # Non-incrementants : décisions hors-step de command phase, pas des actions gym.
         "waaagh_call": "waaagh_call",
         "oath_selection": "oath_selection",
+        # Figurines RENDUES (`apply_returned_models_placement`) : la ligne qui introduit un id
+        # `<escouade>#r<n>` et sa DATASHEET. Sans cette entree, l'evenement tombait sur le
+        # `continue` « type sans formateur » : le socle rendu n'apparaissait dans step.log
+        # qu'au detour du `[MODELS:]` d'une ligne suivante, sans datasheet — et l'analyzer
+        # s'abstenait de tout verdict 19.04 sur l'escouade.
+        "return_destroyed_models": "returned_models",
         # Mort par-figurine explicite (toute cause). Emis par destroy_model pour rendre visible
         # chaque suppression dans step.log — sans cet event, une figurine peut disparaître de
         # [MODELS:] d'une action ultérieure sans aucun signal intermédiaire (flush LIVE post-mort).
@@ -7166,10 +7175,12 @@ class W40KEngine(gym.Env):
         faux — c'est ce qui produisait les faux « Attacks over CC_NB » de l'analyzer (voir le
         commentaire du site d'écriture dans `ai/step_logger.py`).
 
-        Écrit UNE fois, dans l'entête d'épisode : la composition ne change pas en cours de partie
-        (une figurine meurt, elle ne change pas de datasheet). Les figurines sans type propre
-        portent celui de l'escouade — explicitement, plutôt que par une règle implicite que
-        chaque lecteur devrait redécouvrir.
+        Écrit dans l'entête d'épisode pour la composition de DÉPART (une figurine meurt, elle ne
+        change pas de datasheet) ; une figurine RENDUE en cours de partie (Grot Orderly) reçoit un
+        id neuf et sa datasheet est déclarée par la ligne `RETURNED` qui l'introduit
+        (`apply_returned_models_placement`, même lecture `unitType`-sinon-escouade). Les figurines
+        sans type propre portent celui de l'escouade — explicitement, plutôt que par une règle
+        implicite que chaque lecteur devrait redécouvrir.
 
         ⚠️ CLÉ `unitType`, camelCase — c'est celle que `models_cache` écrit
         (`shared_utils._build_models_cache_entry`, « "unitType": spec.get("unit_type") or … » :
@@ -7681,6 +7692,15 @@ class W40KEngine(gym.Env):
         _trigger = raw_log.get("abilityTriggerRoll")  # get allowed : absent hors capacites a seuil
         if _trigger is not None:
             details["ability_trigger_roll"] = _trigger
+        # Figurines RENDUES : datasheet par socle rendu, nombre, capacite. Le formateur exige
+        # les trois (`require_key`) — un socle rendu sans datasheet est exactement le trou que
+        # cette ligne existe pour fermer.
+        _restored_types = raw_log.get("restoredModelTypes")  # get allowed : absent hors restitution
+        if _restored_types is not None:
+            details["restored_model_types"] = _restored_types
+            details["restored_count"] = require_key(raw_log, "restored")
+            details["ability_display_name"] = require_key(raw_log, "abilityDisplayName")
+            details["d3_roll"] = require_key(raw_log, "d3Roll")
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:

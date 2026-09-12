@@ -132,22 +132,28 @@ def special_rule_usage_is_valid(
 
 
 def living_datasheets(
-    state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str
+    state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str,
+    *, exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
 ) -> Optional[Set[str]]:
     """Datasheets des socles VIVANTS de `unit_id`, ou `None` si la composition ne tranche pas.
+
+    `exclude_mids` : socles à IGNORER bien que vivants. Sert au relevé de la ligne `RETURNED`
+    elle-même : les socles qu'elle rend sont déjà recalés comme vivants quand l'usage est jugé,
+    alors que la capacité s'est exercée sur la composition d'AVANT — un PainBoy mort qui se
+    rendrait lui-même ressortirait VALIDE, c'est-à-dire que le seul cas illégal que la ligne
+    doit rendre jugeable serait celui qu'elle ne signale jamais.
 
     `unit_model_hp[unit_id]` est l'effectif par socle tenu par `_resync_living_models` : un socle
     mort en sort, donc la datasheet qu'il portait disparaît d'ici avec lui — c'est l'échéance
     exacte de 19.04. `model_types` donne la datasheet de chaque socle, écrite une fois à l'entête.
 
     `None` = ABSTENTION, jamais une faute inventée. Deux cas :
-      - un socle VIVANT dont la datasheet n'est pas déclarée. C'est le cas des figurines RENDUES
-        (`apply_returned_models_placement`, engine/phase_handlers/command_handlers.py), qui
-        reçoivent un id neuf `<escouade>#r<n>` qu'aucune entête ne porte — mesuré sur le step.log
-        du 2026-09-11 : 6 ids `#r`, 0 déclaré. Or 19.04 les réhabilite explicitement (« Should
-        those models later be revived, those abilities will once more apply ») : les écarter
-        aurait compté INVALID un usage parfaitement légal, et aurait tout compté comme faute
-        pour une escouade dont tous les survivants sont des socles rendus ;
+      - un socle VIVANT dont la datasheet n'est pas déclarée. Depuis la grammaire 10, une
+        figurine RENDUE (`apply_returned_models_placement`, id neuf `<escouade>#r<n>`) est
+        déclarée par sa ligne `RETURNED` — 19.04 la réhabilite explicitement (« Should those
+        models later be revived, those abilities will once more apply ») et le verdict se rend.
+        Sur un journal antérieur (mesuré le 2026-09-11 : 6 ids `#r`, 0 déclaré) l'abstention
+        demeure : les écarter aurait compté INVALID un usage parfaitement légal ;
       - aucun socle vivant connu alors que l'entête a déclaré une composition.
 
     `{unit_type}` quand l'entête ne déclare AUCUNE composition (grammaire antérieure à
@@ -161,7 +167,10 @@ def living_datasheets(
     if not declared:
         return {unit_type}
     model_types = state.model_types
-    vivants = state.unit_model_hp.get(unit_id, {})  # get allowed : unité jamais vue
+    vivants = [
+        mid for mid in state.unit_model_hp.get(unit_id, {})  # get allowed : unité jamais vue
+        if mid not in exclude_mids
+    ]
     if any(mid not in model_types for mid in vivants):
         return None
     present = {model_types[mid] for mid in vivants}
@@ -176,8 +185,13 @@ def note_special_rule_usage(
     unit_id: str,
     unit_type: str,
     player: int,
+    *,
+    exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
 ) -> None:
     """Relève un usage de règle §1.7 ET tranche sa validité 19.04 À CET INSTANT.
+
+    `exclude_mids` : cf. `living_datasheets` — les socles rendus par la ligne `RETURNED` dont
+    l'usage est relevé, pour juger la restitution sur la composition d'AVANT.
 
     SITE UNIQUE d'écriture de `special_rule_usage`. Le verdict ne peut pas se rendre a
     posteriori sur la clé `(règle, type d'escouade)` : cette clé ignore QUELLE escouade a
@@ -193,7 +207,7 @@ def note_special_rule_usage(
     sur le run du 2026-09-11 : 0 relevé sur 94 tombe après la mort de son porteur.
     """
     require_key(stats, 'special_rule_usage')[(rule_id, unit_type)][int(player)] += 1
-    present = living_datasheets(state, stats, unit_id, unit_type)
+    present = living_datasheets(state, stats, unit_id, unit_type, exclude_mids=exclude_mids)
     if present is None:
         return  # composition non concluante : on s'abstient plutôt que d'inventer une faute
     if not special_rule_usage_is_valid(rule_id, unit_type, present, config.rule_to_units):

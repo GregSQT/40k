@@ -2025,6 +2025,9 @@ def parse_step_log(filepath: str) -> Dict:
         # le rayon de 6", pas un par figurine détruite). Valeur positive attendue quand une figurine
         # avec la règle deadly_demise est détruite ET que des unités sont à portée.
         'deadly_demise_triggers': {1: 0, 2: 0},
+        # Grot Orderly (`return_destroyed_models`) — compteur d'EXERCICE : figurines RENDUES,
+        # lues sur la ligne `RETURNED` (grammaire 10). L'usage §1.7 est relevé à part.
+        'returned_models': {1: 0, 2: 0},
         # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
         # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
         # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
@@ -3693,6 +3696,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # une datasheet et que la figurine meurt à portée d'autres unités.
     _dd = require_key(stats, 'deadly_demise_triggers')
     _table_row("Declenchements DEADLY DEMISE (24.08):", _fmt_count(_dd[1]), _fmt_count(_dd[2]))
+    _rm = require_key(stats, 'returned_models')
+    _table_row("Figurines RENDUES (Grot Orderly, 19.04 Revived):", _fmt_count(_rm[1]), _fmt_count(_rm[2]))
 
     _table_row("MW HAZARDOUS auto-infligees (24.15):", _fmt_count(_hz_mw[1]), _fmt_count(_hz_mw[2]))
     _table_row("  ↳ jets Roll:1 (tir) — doit = MW si aucune figurine morte au jet:",

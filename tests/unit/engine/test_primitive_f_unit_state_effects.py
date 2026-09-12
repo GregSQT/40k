@@ -36,6 +36,9 @@ def _unit(uid: str, player: int, unit_rules: Optional[List[Dict[str, Any]]] = No
     return {
         "id": uid,
         "player": player,
+        # Datasheet de l'escouade, comme toute unité de production : la ligne `RETURNED` du
+        # journal la lit en repli pour un socle rendu sans type propre.
+        "unitType": "Boyz",
         "UNIT_RULES": unit_rules or [],
         "battle_shocked": False,
         "OC": 2,
