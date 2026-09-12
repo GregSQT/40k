@@ -1038,8 +1038,9 @@ le modèle + LoS 3D est le vrai chantier.
       > (cf. mémoire `project_pile_in_par_figurine`). Aujourd'hui le pile-in du siège programmatique
       > (driver `_fight_v11_gym_settle`, [w40k_core.py](../../../engine/w40k_core.py)) délègue au plan
       > **par-figurine** `fight_pile_in_plan` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py))
-      > et l'**overrun** à `_fight_overrun_pile_in_plan` (shared_utils, plan par-figurine en 4-uplets
-      > `(mid,col,row,level)` — la limite « un overrun ne peut pas finir en hauteur » est levée).
+      > et l'**overrun** au MÊME `fight_pile_in_plan` (plan par-figurine en 4-uplets
+      > `(mid,col,row,level)` — la limite « un overrun ne peut pas finir en hauteur » est levée ;
+      > `_fight_overrun_pile_in_plan`, sa copie à cibles ≤5" fixes, est supprimée le 2026-09-12).
       > `_fight_apply_pile_in_move`, `_fight_v11_auto_overrun_pile_in` et `_fight_v11_pile_in_present`
       > n'existent plus. **Mise à jour 2026-09-08** : `pile_in_move_destinations_12_03` a été
       > SUPPRIMÉ à son tour (plus aucun appelant de production, le modèle par-ancre étant condamné

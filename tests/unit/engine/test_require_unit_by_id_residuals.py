@@ -160,25 +160,6 @@ def test_reactive_move_moved_unit_absent_unit_by_id():
 
 
 # ---------------------------------------------------------------------------
-# 8. shared_utils._fight_overrun_pile_in_plan — squad absent
-# ---------------------------------------------------------------------------
-
-def test_fight_overrun_pile_in_plan_absent_unit_by_id():
-    """squad_id absent de unit_by_id (avec figurine vivante) → ConfigurationError (was: KeyError)."""
-    from engine.phase_handlers.shared_utils import _fight_overrun_pile_in_plan
-    m = {"id": "m1", "squad_id": "u1", "col": 0, "row": 0, "level": 0,
-         "BASE_SIZE": 1, "BASE_SHAPE": "round", "player": 1}
-    gs = _base_gs(
-        models_cache={"m1": m},
-        squad_models={"u1": ["m1"]},
-        units_cache={"u1": _cache_entry()},
-        unit_by_id={},
-    )
-    with pytest.raises(ConfigurationError, match="u1"):
-        _fight_overrun_pile_in_plan(gs, "u1")
-
-
-# ---------------------------------------------------------------------------
 # 9. shooting_handlers — phase start (unit de units_cache absent de unit_by_id)
 # ---------------------------------------------------------------------------
 

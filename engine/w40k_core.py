@@ -6560,11 +6560,12 @@ class W40KEngine(gym.Env):
         l index de cible dans le mapping slot ennemi (None = combat à vide).
         """
         from engine.phase_handlers.fight_handlers import (
+            OVERRUN_PILE_IN_DONE_KEY,
             _fight_build_valid_target_pool,
-            _fight_v11_engaged_now,
+            fight_v11_can_overrun_pile_in,
         )
         from engine.phase_handlers.shared_utils import (
-            _fight_overrun_pile_in_plan,
+            fight_pile_in_plan,
             get_enemy_slot_mapping,
         )
         units_cache = require_key(self.game_state, "units_cache")
@@ -6573,10 +6574,18 @@ class W40KEngine(gym.Env):
             raise KeyError(f"Squad {squad_id} absent de units_cache pour _continue_squad_fight_after_selection")
         unit = require_unit_by_id(self.game_state, squad_id)
         _did_overrun = False
-        if not _fight_v11_engaged_now(self.game_state, unit):
-            _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
+        # Overrun 12.06 : MÊME prédicat que le siège manuel (`fight_v11_can_overrun_pile_in`) — les
+        # DEUX cas d'éligibilité (non engagée maintenant ; ou non engagée au snapshot 12.04 mais
+        # engagée depuis, p. ex. par le pile-in overrun d'un ennemi) et la garde « one additional
+        # pile-in move » (`OVERRUN_PILE_IN_DONE_KEY`). `not _fight_v11_engaged_now` ne couvrait que
+        # le premier cas : l'unité engagée par l'adversaire restait où il l'avait mise. MÊME plan
+        # que le pile-in 12.02 (`fight_pile_in_plan`) : les cibles sont celles de 12.03 BEFORE
+        # MOVING (engagée → ses ennemis engagés ; sinon ≤ pile_in_target_range).
+        if fight_v11_can_overrun_pile_in(self.game_state, unit):
+            _ov_plan = fight_pile_in_plan(self.game_state, squad_id)
             if _ov_plan is not None:
                 self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
+                require_key(self.game_state, OVERRUN_PILE_IN_DONE_KEY).add(str(squad_id))
                 unit = require_unit_by_id(self.game_state, squad_id)
                 _did_overrun = True
         _commit_enemy_slots = get_enemy_slot_mapping(

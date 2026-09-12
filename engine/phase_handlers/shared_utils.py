@@ -13447,72 +13447,6 @@ def fight_pile_in_plan(
     return plan
 
 
-def _fight_overrun_pile_in_plan(
-    game_state: Dict[str, Any], squad_id: str
-) -> Optional[List[Tuple[str, int, int, int]]]:
-    """Plan pile-in additionnel overrun 12.06 (par-figurine, atomique).
-
-    Variante de fight_pile_in_plan pour les unités NON engagées au moment de leur
-    sélection : les cibles sont restreintes aux ennemis à ≤ pile_in_target_range (5")
-    conformément à 12.03 BEFORE MOVING (cas non engagé). L'unité DOIT finir engagée.
-
-    Returns List[(model_id, col, row, level)] ou None.
-    """
-    from engine.phase_handlers.fight_handlers import pile_in_targets_within_range
-    from engine.game_utils import get_unit_by_id
-
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
-    if not mids:
-        return None
-
-    our_unit = require_unit_by_id(game_state, squad_id)
-
-    # Cibles restreintes à ≤ 5" (12.03 BEFORE MOVING, unité non engagée).
-    within_ids = pile_in_targets_within_range(game_state, our_unit)
-    if not within_ids:
-        return None
-
-    enemy_positions: List[Tuple[int, int]] = []
-    for esid in within_ids:
-        enemy_positions.extend(_squad_model_positions(game_state, esid))
-    if not enemy_positions:
-        return None
-
-    ish = int(require_key(game_state, "inches_to_subhex"))
-    chosen = _assign_cells_toward_enemies(
-        game_state, squad_id, mids, enemy_positions, 3 * ish
-    )
-    plan: List[Tuple[str, int, int, int]] = [
-        (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
-        for mid in mids
-    ]
-
-    plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
-    if not _validate_plan_coherency(plan_positions, game_state):
-        return None
-    from engine.spatial_relations import unit_entries_within_engagement_zone
-    ez = get_engagement_zone(game_state)
-    within_entries = [
-        require_unit_from_cache(esid, game_state, "_fight_overrun_pile_in_plan/enemy")
-        for esid in within_ids
-    ]
-    in_er = any(
-        any(
-            unit_entries_within_engagement_zone(
-                _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=lv),
-                ee, ez, game_state=game_state,
-            )
-            for ee in within_entries
-        )
-        for mid, c, r, lv in plan
-    )
-    if not in_er:
-        return None
-    return plan
-
-
 def get_fighting_models(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -15349,7 +15283,7 @@ def build_squad_action_mask(
         # son eligibilite -> boucle infinie. Le pool est la source unique.
         from engine.phase_handlers.fight_handlers import (
             _fight_build_valid_target_pool,
-            _fight_v11_engaged_now,
+            fight_v11_can_overrun_pile_in,
             fight_v11_fight_selection_pool,
         )
         if squad_id in fight_v11_fight_selection_pool(game_state):
@@ -15359,58 +15293,61 @@ def build_squad_action_mask(
             # donc exactement « qui je peux frapper », la ou il ne disait que « je peux frapper ».
             unit = require_unit_by_id(game_state, squad_id)
             fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
+            # Overrun 12.06 : le commit (`_continue_squad_fight_after_selection`) execute le
+            # pile-in additionnel AVANT de tester le pool des que `fight_v11_can_overrun_pile_in`
+            # — les DEUX cas d'eligibilite (non engagee ; ou engagee depuis le snapshot 12.04),
+            # pas seulement « pool vide ». Le masque reflechit donc l'etat POST-plan (meme plan
+            # deterministe que le commit, `fight_pile_in_plan`) pour rester en parite : un plan
+            # existant REMPLACE le pool pre-move, car le commit frappe depuis les positions
+            # d'arrivee et une cible pre-move peut ne plus y etre adjacente.
+            if fight_v11_can_overrun_pile_in(game_state, unit):
+                ov_plan = fight_pile_in_plan(game_state, squad_id)
+                if ov_plan is not None:
+                    from engine.spatial_relations import (
+                        get_engagement_zone as _gez,
+                        unit_entries_within_engagement_zone as _uiez,
+                    )
+                    models_cache = game_state.get("models_cache", {})  # get allowed
+                    ez = _gez(game_state)
+                    fight_targets = set()
+                    for esid in enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]:
+                        if esid is None:
+                            continue
+                        target_entry = units_cache.get(str(esid))
+                        if target_entry is None or not entry_is_on_battlefield(target_entry):
+                            continue
+                        if any(
+                            _uiez(
+                                _synth_model_entry(
+                                    game_state, squad_id, models_cache[mid], c, r, level=lv
+                                ),
+                                target_entry, ez,
+                            )
+                            for mid, c, r, lv in ov_plan
+                            if mid in models_cache
+                        ):
+                            fight_targets.add(str(esid))
             opened = 0
             for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
                 if esid is not None and str(esid) in fight_targets:
                     mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = 1
                     opened += 1
             if opened == 0:
-                # Pool vide sur la position actuelle. En overrun 12.06 (a charge, non engagee),
-                # le commit execute d abord une pile-in avant de tester le pool — le masque doit
-                # reflechir l etat POST-pile-in pour rester en parite masque/commit.
-                if not fight_targets and not _fight_v11_engaged_now(game_state, unit):
-                    ov_plan = _fight_overrun_pile_in_plan(game_state, squad_id)
-                    if ov_plan is not None:
-                        from engine.spatial_relations import (
-                            get_engagement_zone as _gez,
-                            unit_entries_within_engagement_zone as _uiez,
-                        )
-                        models_cache = game_state.get("models_cache", {})  # get allowed
-                        ez = _gez(game_state)
-                        for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
-                            if esid is None:
-                                continue
-                            target_entry = units_cache.get(str(esid))
-                            if target_entry is None or not entry_is_on_battlefield(target_entry):
-                                continue
-                            if any(
-                                _uiez(
-                                    _synth_model_entry(
-                                        game_state, squad_id, models_cache[mid], c, r, level=lv
-                                    ),
-                                    target_entry, ez,
-                                )
-                                for mid, c, r, lv in ov_plan
-                                if mid in models_cache
-                            ):
-                                mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = 1
-                                opened += 1
-                if opened == 0:
-                    if fight_targets:
-                        # Slots tous occupes par des ennemis hors EZ : meme infra que le elif
-                        # ci-dessous (cibles legales mais infrappables faute de slot). Ne pas
-                        # ouvrir FIGHT_NO_TARGET — le commit trouverait des cibles et crasherait.
-                        from engine.game_utils import add_debug_file_log
-                        add_debug_file_log(
-                            game_state,
-                            f"[SLOTS] escouade {squad_id} : {len(fight_targets)} cibles de melee "
-                            f"12.05 mais 0 slot ennemi mappe — cible(s) infrappable(s).",
-                        )
-                    else:
-                        # Aucune cible meme apres pile-in overrun : combat a vide (12.04/12.06).
-                        # L'escouade DOIT pouvoir se declarer, sans quoi elle resterait eligible
-                        # sans action et la sous-phase ne se draine jamais.
-                        mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
+                if fight_targets:
+                    # Slots tous occupes par des ennemis hors EZ : meme infra que le elif
+                    # ci-dessous (cibles legales mais infrappables faute de slot). Ne pas
+                    # ouvrir FIGHT_NO_TARGET — le commit trouverait des cibles et crasherait.
+                    from engine.game_utils import add_debug_file_log
+                    add_debug_file_log(
+                        game_state,
+                        f"[SLOTS] escouade {squad_id} : {len(fight_targets)} cibles de melee "
+                        f"12.05 mais 0 slot ennemi mappe — cible(s) infrappable(s).",
+                    )
+                else:
+                    # Aucune cible meme apres pile-in overrun : combat a vide (12.04/12.06).
+                    # L'escouade DOIT pouvoir se declarer, sans quoi elle resterait eligible
+                    # sans action et la sous-phase ne se draine jamais.
+                    mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
             elif opened < len(fight_targets):
                 # Une cible legale sans slot serait INFRAPPABLE : troncature silencieuse interdite.
                 from engine.game_utils import add_debug_file_log
