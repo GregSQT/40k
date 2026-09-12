@@ -123,6 +123,21 @@ def test_double_declaration_refuse(monkeypatch):
     assert stepped == [(gs, SHOOT_CTX)]
 
 
+def test_lot_epuise_refuse(monkeypatch):
+    """Garde de lot courant : l index de lot pointe au-dela du dernier lot (allocation epuisee),
+    aucune declaration n est possible et l allocation n est pas relancee."""
+    gs = _gs()
+    gs[SHOOT_CTX.alloc_key]["current_batch_index"] = 1
+    stepped: List[Any] = []
+    monkeypatch.setattr(su, "_manual_allocation_step", lambda g, ctx: stepped.append((g, ctx)) or {"ok": True})
+
+    with pytest.raises(ValueError, match="aucun lot courant"):
+        _declare(gs, [NW, NH, CW, CH])
+
+    assert gs[SHOOT_CTX.alloc_key]["batches"][0]["declared_order"] is None
+    assert stepped == []
+
+
 # ── Defenseur programmatique : _auto_declared_order ───────────────────────────
 
 
