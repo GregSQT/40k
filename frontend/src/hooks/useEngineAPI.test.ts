@@ -1138,3 +1138,177 @@ describe("useEngineAPI — overrun 12.06 (pile-in additionnel)", () => {
     expect(result.current.fightOverrunEligible).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// New Foes to Face (12.08 AFTER) + overrun 12.06 : un New Foe DÉSENGAGÉ (son engageur est mort
+// avant sa sélection) porte ``overrun_eligible`` sur l'état New Foes (sous-phase consolidate).
+// Le bouton Overrun s'appuie sur l'unité fight active (pas de plan fight local en New Foes :
+// l'attaque passe par le clic-cible direct) ; le commit / l'abandon ramènent à l'état New Foes
+// (sélection posée, mode select), sans rouvrir de plan fight.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — overrun 12.06 d'un New Foe désengagé", () => {
+  function newFoesGameState(active: string | null) {
+    const foe = makeUnit(3, 2, { col: 27, row: 20, ATTACK_LEFT: 1 });
+    const target = makeUnit(4, 1, { col: 31, row: 20, ATTACK_LEFT: 1 });
+    return makeGameState({
+      phase: "fight",
+      fight_subphase: "consolidate",
+      fight_eligible_units: ["3"],
+      active_fight_unit: active,
+      move_activation_pool: [],
+      units: [foe, target],
+      units_cache: {
+        "3": { occupied_hexes_by_model: { "3#0": [27, 20] } },
+        "4": { occupied_hexes_by_model: { "4#0": [31, 20] } },
+      },
+    });
+  }
+
+  function newFoesWait(active: string | null, validTargets: string[], overrunEligible: boolean) {
+    return {
+      phase: "fight",
+      fight_subphase: "consolidate",
+      consolidation_new_foes: ["3"],
+      consolidation_new_foes_for_unit: "1",
+      fight_selector: 2,
+      fight_eligible_units: ["3"],
+      active_fight_unit: active,
+      valid_targets: validTargets,
+      overrun_eligible: overrunEligible,
+      waiting_for_player: true,
+      action: "wait",
+    };
+  }
+
+  const overrunPlanState = {
+    phase: "fight",
+    fight_subphase: "consolidate",
+    pile_in_model_move: true,
+    overrun_pile_in: true,
+    unitId: "3",
+    active_fight_unit: "3",
+    origin_models: { "3#0": [27, 20] },
+    provisional: {},
+    eligible_models: ["3#0"],
+    selected_model: null,
+    pool: [],
+    footprint_mask_loops: [],
+    unplaced: ["3#0"],
+    can_validate: true,
+    per_model_valid: { "3#0": true },
+    coherency_ok: true,
+    unit_engaged: true,
+    kept_engagements: true,
+    engaged_models: ["3#0"],
+    pile_in_targets: ["4"],
+    waiting_for_player: true,
+    action: "wait",
+  };
+
+  async function ouvreOverrunNewFoe(bodies: Array<Record<string, unknown>>) {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: newFoesGameState(null) })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.action === "activate_unit") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: newFoesWait("3", [], true),
+          });
+        }
+        if (body.action === "overrun_pile_in") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: overrunPlanState,
+          });
+        }
+        if (body.action === "commit_pile_in_plan") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: newFoesWait("3", ["4"], false),
+          });
+        }
+        if (body.action === "skip") {
+          return HttpResponse.json({
+            success: true,
+            game_state: newFoesGameState("3"),
+            result: newFoesWait("3", [], true),
+          });
+        }
+        throw new Error(`action inattendue ${String(body.action)}`);
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+        expect(result.current.maxTurns).not.toBeNull();
+      },
+      { timeout: 5000 }
+    );
+
+    await act(async () => {
+      await result.current.onSelectUnit(3);
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "activate_unit", unitId: "3" });
+    // État New Foes : sélection posée, mode select (clic-cible direct), AUCUN plan fight local.
+    expect(result.current.mode).toBe("select");
+    expect(result.current.selectedUnitId).toBe(3);
+    expect(result.current.consolidationNewFoes).toEqual(["3"]);
+    expect(result.current.squadFightPlan).toBeNull();
+    expect(result.current.fightOverrunEligible).toBe(true);
+
+    await act(async () => {
+      await result.current.onOverrunPileIn();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "overrun_pile_in", unitId: "3" });
+    expect(result.current.mode).toBe("pileInModelMove");
+    expect(result.current.pileInMovePlan).toMatchObject({
+      unitId: 3,
+      overrun: true,
+      canValidate: true,
+      pileInTargets: ["4"],
+    });
+    return result;
+  }
+
+  it("commit du pile-in additionnel → retour à l'état New Foes du même New Foe, sans plan fight", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await ouvreOverrunNewFoe(bodies);
+
+    await act(async () => {
+      await result.current.onCommitPileInPlan();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "commit_pile_in_plan", plan: [] });
+    expect(result.current.mode).toBe("select");
+    expect(result.current.selectedUnitId).toBe(3);
+    expect(result.current.pileInMovePlan).toBeNull();
+    expect(result.current.squadFightPlan).toBeNull();
+    expect(result.current.consolidationNewFoes).toEqual(["3"]);
+    expect(result.current.fightOverrunEligible).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("abandon du pile-in additionnel (skip) → le New Foe reste actif et peut encore l'ouvrir", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await ouvreOverrunNewFoe(bodies);
+
+    await act(async () => {
+      await result.current.onCancelPileInModelMove();
+    });
+    expect(bodies.at(-1)).toMatchObject({ action: "skip" });
+    expect(result.current.mode).toBe("select");
+    expect(result.current.selectedUnitId).toBe(3);
+    expect(result.current.pileInMovePlan).toBeNull();
+    expect(result.current.squadFightPlan).toBeNull();
+    expect(result.current.fightOverrunEligible).toBe(true);
+  });
+});

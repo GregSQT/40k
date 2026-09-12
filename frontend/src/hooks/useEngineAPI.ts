@@ -3072,6 +3072,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const af = data.result.active_fight_unit ?? data.game_state.active_fight_unit;
             setSelectedUnitId(af != null ? parseInt(String(af), 10) : null);
             setMode("select");
+            // New Foe désengagé (son engageur est mort avant sa sélection) → overrun 12.06.
+            setFightOverrunEligible(data.result.overrun_eligible === true);
           }
           // Fight : sous-phase pile_in SANS unité active (présentation paresseuse).
           // Le moteur expose seulement le pool éligible (sélection libre) ; on nettoie
@@ -7569,9 +7571,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setPileInMovePlan(null);
       if (plan.overrun) {
         // Overrun 12.06 : « one additional pile-in move, THEN fights » — la réponse est l'état
-        // d'attente FIGHT de la même unité (mode attackPreview posé à la réception, cibles
-        // recalculées à sa nouvelle position) ; on rouvre son plan fight au lieu de désélectionner.
-        openSquadFightPlan(plan.unitId);
+        // d'attente de la même unité, cibles recalculées à sa nouvelle position. Étape FIGHT :
+        // mode attackPreview posé à la réception, on rouvre son plan fight au lieu de
+        // désélectionner. New Foes (sous-phase consolidate) : la réception a déjà posé la
+        // sélection en mode select, l'attaque passe par le clic-cible direct (pas de plan).
+        if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
+          openSquadFightPlan(plan.unitId);
+        }
         return;
       }
       setSelectedUnitId(null);
@@ -7580,7 +7586,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[PILE-IN] commit FAILED", e);
       setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan]);
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan, gameState]);
 
   /** Bouton Annuler : renonce à piler l'unité active (skip), nettoie le plan local. Pile-in
    * groupé : skip la consomme (12.02). Overrun : skip renonce seulement au move additionnel,
@@ -7600,35 +7606,48 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("Cancel pile-in model move (skip) failed:", e);
     }
     if (overrunUnitId != null) {
-      openSquadFightPlan(overrunUnitId);
+      // Même partage que le commit : plan fight en étape FIGHT, clic-cible direct en New Foes.
+      if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
+        openSquadFightPlan(overrunUnitId);
+      }
       return;
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction, noteActionOutcome, openSquadFightPlan]);
+  }, [executeAction, noteActionOutcome, openSquadFightPlan, gameState]);
 
   /** Bouton Overrun (12.06) : ouvre le pile-in ADDITIONNEL par-figurine de l'unité fight active.
    * Le plan fight local est purgé le temps du move (le handler capture fight intercepterait les
    * clics de pose) ; la réponse ``pile_in_model_move`` + ``overrun_pile_in`` pose le mode. */
   const handleOverrunPileIn = useCallback(async () => {
+    // Étape FIGHT : l'unité du plan fight local (purgé le temps du move). New Foes (12.08
+    // AFTER, sous-phase consolidate) : pas de plan, l'unité est l'active du moteur.
     const plan = squadFightPlanRef.current;
-    if (!plan) return;
+    const activeStr = getActiveFightUnitIdString(
+      latestGameStateRef.current as ActivationPointerGameState | null,
+      (latestGameStateRef.current ?? gameState) as ActivationPointerGameState
+    );
+    const unitId = plan ? plan.unitId : activeStr ? parseInt(activeStr, 10) : null;
+    if (unitId == null) return;
     setSquadFightPlan(null);
+    const reopen = () => {
+      if (plan) openSquadFightPlan(unitId);
+    };
     try {
       const data = await executeAction({
         action: "overrun_pile_in",
-        unitId: String(plan.unitId),
+        unitId: String(unitId),
         level: currentLevelRef?.current ?? 0,
       });
       if (noteActionOutcome(data, "Overrun").kind !== "ok") {
-        openSquadFightPlan(plan.unitId);
+        reopen();
       }
     } catch (e) {
       console.error("[OVERRUN] overrun_pile_in FAILED", e);
       setError(`Overrun failed: ${formatApiConnectionError(e)}`);
-      openSquadFightPlan(plan.unitId);
+      reopen();
     }
-  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan]);
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan, gameState]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). active_fight_unit posée
