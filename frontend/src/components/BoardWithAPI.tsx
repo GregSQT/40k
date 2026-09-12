@@ -1185,6 +1185,10 @@ export const BoardWithAPI: React.FC = () => {
   };
 
   const isGameOver = apiProps.gameState?.game_over === true;
+  // Overrun 12.06 : même bouton sur la barre New Foe désengagé et sur la barre du plan fight.
+  const handleOverrunClick = () => {
+    if (!isGameOver) apiProps.onOverrunPileIn?.();
+  };
   const activeRuleChoicePrompt = (apiProps.ruleChoicePrompt as RuleChoicePrompt | null) ?? null;
   const pendingRuleChoiceQueue = (
     (apiProps.gameState as (GameState & { pending_rule_choice_queue?: RuleChoicePrompt[] }) | null)
@@ -4050,11 +4054,7 @@ export const BoardWithAPI: React.FC = () => {
             >
               New Foe désengagé
             </span>
-            <OverrunButton
-              onClick={() => {
-                if (!isGameOver) apiProps.onOverrunPileIn?.();
-              }}
-            />
+            <OverrunButton onClick={handleOverrunClick} />
           </div>
         )}
 
@@ -4106,13 +4106,7 @@ export const BoardWithAPI: React.FC = () => {
           </button>
           {/* Overrun 12.06 : l'unité peut faire UN pile-in additionnel avant de combattre —
               ouvre le plan par-figurine (même barre que le pile-in 12.02), puis revient ici. */}
-          {apiProps.fightOverrunEligible && (
-            <OverrunButton
-              onClick={() => {
-                if (!isGameOver) apiProps.onOverrunPileIn?.();
-              }}
-            />
-          )}
+          {apiProps.fightOverrunEligible && <OverrunButton onClick={handleOverrunClick} />}
           <button
             type="button"
             disabled={!apiProps.squadFightPlan.canValidate}

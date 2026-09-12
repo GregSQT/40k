@@ -19,7 +19,7 @@ engagées = (9,8) (10,8) (11,8), toutes cohérentes avec S#1 en (10,9).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence
 
 from engine.phase_handlers.fight_handlers import (
     _fight_pile_in_build_model_pool,
@@ -27,9 +27,11 @@ from engine.phase_handlers.fight_handlers import (
     _fight_pile_in_model_plan_state,
     _fight_pile_in_preview_plan,
 )
-from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
-
-Cell = Tuple[int, int]
+from tests.unit.engine._state_builders import (
+    Cell,
+    fight_squad_vs_enemies_state,
+    ground_plan as _plan,
+)
 
 SQUAD: List[Cell] = [(10, 6), (10, 9)]
 ENEMY: Cell = (10, 10)
@@ -38,18 +40,7 @@ ENGAGED: Cell = (10, 8)       # engagée avec E (2), cohérente avec S#1 (10,9)
 
 
 def _gs(squad: Sequence[Cell], enemies: Sequence[Cell]) -> Dict[str, Any]:
-    units = [synthetic_unit("1", 1, [{"col": c, "row": r} for c, r in squad])]
-    for i, (c, r) in enumerate(enemies):
-        units.append(synthetic_unit(str(2 + i), 2, [{"col": c, "row": r}]))
-    # ``fight_subphase`` : étape 12.02 (le plan_state pile-in la relit pour distinguer l'overrun 12.06).
-    return synthetic_state(
-        units, phase="fight", game_rules={}, inches_to_subhex=1, board_cols=44, board_rows=60,
-        fight_subphase="pile_in",
-    )
-
-
-def _plan(*entries: Tuple[str, Cell]) -> List[Tuple[str, int, int, int]]:
-    return [(mid, c, r, 0) for mid, (c, r) in entries]
+    return fight_squad_vs_enemies_state(squad, enemies, fight_subphase="pile_in")
 
 
 def test_geometry_precondition_engaged_cells_exist():

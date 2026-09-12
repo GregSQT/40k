@@ -13,7 +13,7 @@ par ``_config_helpers.ACTIVE_DEPLOYMENT_SCENARIO`` (cf. le VERT VACANT document�
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from engine.phase_handlers.shared_utils import build_units_cache
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -129,6 +129,40 @@ def synthetic_state(
     state.update(overrides)
     build_units_cache(state)
     return state
+
+
+Cell = Tuple[int, int]
+
+
+def fight_squad_vs_enemies_state(
+    squad: Sequence[Cell], enemies: Sequence[Cell], *, fight_subphase: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Phase fight, règles RÉELLES (EZ 2, cohésion 2, ``inches_to_subhex`` = 1), plateau 44×60 :
+    l'escouade « 1 » (joueur 1) aux cases ``squad``, un ennemi mono-figurine « 2 », « 3 », … (joueur
+    2) par case de ``enemies``. ``fight_subphase`` : étape courante quand le test en dépend
+    (``"pile_in"`` : le plan_state pile-in la relit pour distinguer l'overrun 12.06)."""
+    units = [synthetic_unit("1", 1, [{"col": c, "row": r} for c, r in squad])]
+    for i, (c, r) in enumerate(enemies):
+        units.append(synthetic_unit(str(2 + i), 2, [{"col": c, "row": r}]))
+    overrides: Dict[str, Any] = {}
+    if fight_subphase is not None:
+        overrides["fight_subphase"] = fight_subphase
+    return synthetic_state(
+        units, phase="fight", game_rules={}, inches_to_subhex=1, board_cols=44, board_rows=60,
+        **overrides,
+    )
+
+
+def ground_plan(*entries: Tuple[str, Cell]) -> List[Tuple[str, int, int, int]]:
+    """Plan par-figurine normalisé ``(mid, col, row, level)`` au sol (niveau 0)."""
+    return [(mid, c, r, 0) for mid, (c, r) in entries]
+
+
+def squad_model_cells(gs: Dict[str, Any], squad_id: str) -> Dict[str, Cell]:
+    """``{model_id: (col, row)}`` courant des figurines de l'escouade (``squad_models`` →
+    ``models_cache``) — comparaison avant/après d'un move."""
+    mc = gs["models_cache"]
+    return {m: (int(mc[m]["col"]), int(mc[m]["row"])) for m in gs["squad_models"][squad_id]}
 
 
 def gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> Dict[str, Any]:

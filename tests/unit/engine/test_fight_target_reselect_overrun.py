@@ -49,6 +49,7 @@ class _FakeEngine:
     )
     _fight_resolve_with_target = wcore.W40KEngine._fight_resolve_with_target
     _process_squad_action = wcore.W40KEngine._process_squad_action
+    _pending_manual_alloc_ctx = wcore.W40KEngine._pending_manual_alloc_ctx
 
     def __init__(self, gs: Dict[str, Any]) -> None:
         self.game_state = gs
