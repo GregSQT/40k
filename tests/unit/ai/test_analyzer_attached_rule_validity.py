@@ -109,7 +109,28 @@ _HOLD_STILL_UNITE_5 = (
 )
 
 
-def _parse(tmp_path, monkeypatch, units: str, rule_to_units, body: str = _HOLD_STILL):
+#: Grammaire 10 : la figurine rendue est INTRODUITE par sa ligne `RETURNED`, qui déclare sa
+#: datasheet. Ici c'est le PainBoy lui-même qui revient (« Should those models later be
+#: revived, those abilities will once more apply »).
+_PAINBOY_RENDU = (
+    "[10:00:01] E1 T2 P1 COMMAND : Unit 1(20,20) RETURNED 1 models [GROT ORDERLY] (D3=1) "
+    "[MODEL_TYPES: 1#r0=PainBoy] [MODELS: 1#0@(20,20,z0) 1#r0@(20,21,z0)] [SUCCESS]\n"
+)
+#: Relevé en grammaire 10 : la ligne nomme le socle alloué (`[ALLOC_MODEL:]`, exigible dès la
+#: grammaire 2).
+_HOLD_STILL_G10 = (
+    "[10:00:02] E1 T2 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
+)
+#: Même ligne, mais c'est un Boy qui revient : la source (PainBoy) reste morte.
+_BOY_RENDU = (
+    "[10:00:01] E1 T2 P1 COMMAND : Unit 1(20,20) RETURNED 1 models [GROT ORDERLY] (D3=1) "
+    "[MODEL_TYPES: 1#r0=Boyz] [MODELS: 1#0@(20,20,z0) 1#r0@(20,21,z0)] [SUCCESS]\n"
+)
+
+
+def _parse(tmp_path, monkeypatch, units: str, rule_to_units, body: str = _HOLD_STILL,
+           log_grammar=None):
     import ai.analyzer as an
     import ai.analyzer_config as ac_mod
 
@@ -125,6 +146,7 @@ def _parse(tmp_path, monkeypatch, units: str, rule_to_units, body: str = _HOLD_S
         board="cols=40 rows=40",
         objectives=_OBJECTIVES,
         units=units,
+        log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -213,8 +235,42 @@ def test_une_escouade_attachee_ne_blanchit_pas_son_homonyme(tmp_path, monkeypatc
     ][1] == 1
 
 
+def test_socle_rendu_declare_par_sa_ligne_rend_le_verdict(tmp_path, monkeypatch):
+    """Grammaire 10 — 19.04 : « Should those models later be revived, those abilities will once
+    more apply ». La ligne `RETURNED` déclare la datasheet du socle rendu : le verdict se rend.
+
+    ROUGE avant le fix : la datasheet du socle `1#r0` était inconnue et l'analyzer s'abstenait,
+    que la source soit revenue ou non. Deux jumeaux : le PainBoy rendu → usage VALIDE ; un Boy
+    rendu → la source reste morte, usage INVALID.
+    """
+    import ai.analyzer as an
+
+    stats = _parse(
+        tmp_path, monkeypatch, _UNITS_ATTACHEE,
+        {"mortal_wounds_on_critical_wound": {"PainBoy"}, "return_destroyed_models": {"PainBoy"}},
+        body=_PAINBOY_MORT + _PAINBOY_RENDU + _HOLD_STILL_G10, log_grammar=10,
+    )
+    assert not stats["parse_errors"], stats["parse_errors"]
+    assert stats["returned_models"][1] == 1, "la ligne RETURNED n'est pas lue"
+    assert stats["special_rule_usage"][("mortal_wounds_on_critical_wound", "Boyz")][1] == 1
+    assert an.error_totals(stats)["special_rules_invalid"] == 0, (
+        "le PainBoy est revenu : sa capacité s'applique de nouveau (19.04)"
+    )
+
+    stats = _parse(
+        tmp_path, monkeypatch, _UNITS_ATTACHEE,
+        {"mortal_wounds_on_critical_wound": {"PainBoy"}, "return_destroyed_models": {"PainBoy"}},
+        body=_PAINBOY_MORT + _BOY_RENDU + _HOLD_STILL_G10, log_grammar=10,
+    )
+    assert not stats["parse_errors"], stats["parse_errors"]
+    assert stats["special_rule_usage_invalid"][("mortal_wounds_on_critical_wound", "Boyz")][1] == 1, (
+        "un Boy rendu ne ramène pas le PainBoy : la source est morte, l'usage est fautif"
+    )
+
+
 def test_socle_rendu_de_datasheet_inconnue_suspend_le_verdict(tmp_path, monkeypatch):
-    """19.04 : « Should those models later be revived, those abilities will once more apply ».
+    """JOURNAL ANTÉRIEUR à la grammaire 10 — 19.04 : « Should those models later be revived,
+    those abilities will once more apply ».
 
     Une figurine rendue reçoit un id `1#r0` absent de `[MODEL_TYPES:]` : sa datasheet est
     inconnue, donc l'analyzer ne peut pas dire si la source est de retour. Il s'abstient — la

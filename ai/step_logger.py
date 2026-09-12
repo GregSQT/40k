@@ -69,9 +69,17 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       (`mw_ability_dice_mismatch`), jamais un vieux format. Verrou :
 #:       test_step_log_mortal_wounds_ability.py et test_analyzer_mw_ability_dice.py.
 #:
+#:  10 — toute figurine RENDUE en cours de partie (Grot Orderly, `return_destroyed_models`)
+#:       est introduite par une ligne « Unit N(c,r) RETURNED k models [<capacite>] (D3=n)
+#:       [MODEL_TYPES: <mid>=<datasheet> …] [MODELS: …] » qui declare sa DATASHEET, comme
+#:       l entete le fait pour la composition de depart. Sur un journal log_grammar>=10, un id
+#:       `<escouade>#r<n>` vu dans un `[MODELS:]` sans avoir ete declare est une panne du
+#:       producteur, jamais un socle « de datasheet inconnue » sur lequel s abstenir. Verrou :
+#:       test_step_log_returned_models.py et test_analyzer_returned_models.py.
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 9
+LOG_GRAMMAR_VERSION = 10
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1154,6 +1162,24 @@ class StepLogger:
             if not isinstance(removed, list) or not removed:
                 raise KeyError("Coherency_removal action missing required removed_models")
             return f"{unit_label} COHERENCY REMOVED {' '.join(str(m) for m in removed)} (03.03)"
+
+        elif action_type == "returned_models":
+            # Grot Orderly (`return_destroyed_models`) — la ligne qui INTRODUIT les socles rendus
+            # et declare leur datasheet. `[MODEL_TYPES:]` ici ne porte QUE les socles rendus :
+            # ceux de depart sont deja declares par l entete, et l analyzer fusionne (grammaire
+            # 10). Le verbe `RETURNED` n est porte par aucune autre ligne ; les aiguillages de
+            # l analyzer le testent entoure d espaces, comme ` MOVED ` ou ` FLED `.
+            restored = require_key(details, "restored_model_types")
+            count = int(require_key(details, "restored_count"))
+            ability = str(require_key(details, "ability_display_name")).upper()
+            d3 = int(require_key(details, "d3_roll"))
+            if not isinstance(restored, dict) or len(restored) != count or count <= 0:
+                raise ValueError(
+                    f"returned_models: {count} figurine(s) annoncee(s) pour "
+                    f"{len(restored) if isinstance(restored, dict) else '?'} datasheet(s) declaree(s)"
+                )
+            types_seg = " ".join(f"{mid}={mtype}" for mid, mtype in restored.items())
+            return f"{unit_label} RETURNED {count} models [{ability}] (D3={d3}) [MODEL_TYPES: {types_seg}]"
 
         elif action_type == "strategic_reserves_timeout":
             # 20.04 — destruction fin de 3e round. L'escouade est ENTIEREMENT detruite : le

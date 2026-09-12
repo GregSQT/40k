@@ -141,13 +141,12 @@ def living_datasheets(
     exacte de 19.04. `model_types` donne la datasheet de chaque socle, écrite une fois à l'entête.
 
     `None` = ABSTENTION, jamais une faute inventée. Deux cas :
-      - un socle VIVANT dont la datasheet n'est pas déclarée. C'est le cas des figurines RENDUES
-        (`apply_returned_models_placement`, engine/phase_handlers/command_handlers.py), qui
-        reçoivent un id neuf `<escouade>#r<n>` qu'aucune entête ne porte — mesuré sur le step.log
-        du 2026-09-11 : 6 ids `#r`, 0 déclaré. Or 19.04 les réhabilite explicitement (« Should
-        those models later be revived, those abilities will once more apply ») : les écarter
-        aurait compté INVALID un usage parfaitement légal, et aurait tout compté comme faute
-        pour une escouade dont tous les survivants sont des socles rendus ;
+      - un socle VIVANT dont la datasheet n'est pas déclarée. Depuis la grammaire 10, une
+        figurine RENDUE (`apply_returned_models_placement`, id neuf `<escouade>#r<n>`) est
+        déclarée par sa ligne `RETURNED` — 19.04 la réhabilite explicitement (« Should those
+        models later be revived, those abilities will once more apply ») et le verdict se rend.
+        Sur un journal antérieur (mesuré le 2026-09-11 : 6 ids `#r`, 0 déclaré) l'abstention
+        demeure : les écarter aurait compté INVALID un usage parfaitement légal ;
       - aucun socle vivant connu alors que l'entête a déclaré une composition.
 
     `{unit_type}` quand l'entête ne déclare AUCUNE composition (grammaire antérieure à

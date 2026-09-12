@@ -328,9 +328,56 @@ def _count_faction_activations(state: AnalyzerState, new_effects: "Dict[int, Dic
 #: position d'arrivée par-figurine : les six déplacements de la matrice plus le déploiement. Une
 #: ligne de tir ou d'attaque porte aussi `[MODELS:]`, mais elle ne termine aucun déplacement —
 #: la contrôler ferait remonter la MÊME formation à chaque salve.
+#: `RETURNED` (Grot Orderly) : « Models returned to a unit on the battlefield must be set up …
+#: In coherency with models in that unit that started that phase on the battlefield »
+#: (25 Rules appendix, Revived) — une mise en place, donc soumise au même contrôle.
 _COHERENCY_LINE_VERBS = (
     " MOVED ", " ADVANCED ", " FLED ", " CHARGED ", " PILED IN ", " CONSOLIDATED ", " DEPLOYED ",
+    " RETURNED ",
 )
+
+_MODEL_TYPES_SEGMENT_RE = re.compile(r'\[MODEL_TYPES: ([^\]]+)\]')
+_RETURNED_RE = re.compile(r'RETURNED\s+(\d+)\s+models\s+\[([^\]]+)\]\s+\(D3=(\d+)\)')
+
+
+def _absorb_model_types(state: AnalyzerState, stats: Dict[str, Any], line: str) -> int:
+    """Lit le segment `[MODEL_TYPES: <mid>=<datasheet> …]` d'une ligne, s'il y en a un.
+
+    DEUX émetteurs, UN lecteur : l'entête d'épisode déclare la composition de DÉPART, la ligne
+    `RETURNED` (Grot Orderly, grammaire 10) déclare chaque figurine RENDUE sous son id neuf
+    `<escouade>#r<n>`. Lu ligne par ligne, AVANT le recalage des socles vivants
+    (`_resync_living_models`) : c'est ce qui donne au socle rendu ses PV pleins de datasheet et
+    non ceux de l'escouade, et qui rend au verdict 19.04 (`living_datasheets`) une composition
+    entièrement connue là où il s'abstenait.
+
+    Rend le nombre de socles déclarés (0 si la ligne n'en porte pas).
+    """
+    m = _MODEL_TYPES_SEGMENT_RE.search(line)
+    if m is None:
+        return 0
+    declared = 0
+    for _pair in m.group(1).split():
+        _mid, _sep, _mtype = _pair.partition("=")
+        if not _sep:
+            continue
+        state.model_types[_mid] = _mtype
+        declared += 1
+        # Les datasheets PORTEUSES entrent dans les types vus, au même titre que celle de
+        # l'escouade : c'est `unit_types_seen` qui décide des paires (règle, arme) que le
+        # tableau §1.8 ATTEND. Sans elles, l'arme d'un sergent ou d'un personnage rattaché
+        # (règle 19) n'était ni attendue ni comptée — donc invisible des deux côtés à la fois.
+        require_key(stats, 'unit_types_seen').add(_mtype)
+        # Composition DÉCLARÉE PAR ESCOUADE, pour le verdict §1.7 (19.04). Indexée par
+        # `unit_id` et NON par type : deux escouades du même type n'ont pas la même
+        # composition (`Unit 4 (Intercessor)` mène un `Librarian`, `Unit 5 (Intercessor)` un
+        # `CaptainRelicShield`), et une union par type blanchissait la règle d'un character
+        # pour toutes ses homonymes, les deux camps confondus. Sert de témoin « composition
+        # déclarée » ; le VIVANT, lui, se lit dans `unit_model_hp` au moment du relevé
+        # (`living_datasheets`).
+        require_key(stats, 'model_types_by_unit_id').setdefault(
+            _mid.partition("#")[0], set()
+        ).add(_mtype)
+    return declared
 
 
 def _check_line_coherency(state: AnalyzerState, line: str) -> None:
@@ -706,6 +753,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             _line_models, _line_heights = parse_models_and_heights(line)
             state.current_line_models = _line_models or {}
             state.current_line_heights = _line_heights or {}
+            # Datasheet des socles RENDUS (ligne `RETURNED`, grammaire 10) : absorbée ICI, avant
+            # le recalage des socles vivants qui suit, pour que le socle neuf entre à SES PV
+            # pleins. L'entête d'épisode passe par le même lecteur, plus bas.
+            if '[MODEL_TYPES:' in line and ' RETURNED ' in line:
+                _absorb_model_types(state, stats, line)
             # Socles TUÉS et pas encore retirés — appliqués à la FIN DE L'ACTIVATION, c'est-à-dire
             # dès qu'une AUTRE unité agit. Ni plus tôt, ni plus tard, et les deux bornes ont été
             # payées :
@@ -751,6 +803,21 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # Réparer l'incohérence unit_positions/unit_hp créée par une "mort"
                     # d'ancre (HP_MAX squad = 1) alors que l'escouade a encore des figurines.
                     if _uid in state.unit_player:
+                        # Grammaire 10 : un socle RENDU (`<escouade>#r<n>`) est toujours déclaré
+                        # par sa ligne `RETURNED` avant d'apparaître dans un `[MODELS:]`. Le
+                        # rencontrer sans datasheet est une panne du producteur, pas un socle
+                        # « de datasheet inconnue » sur lequel s'abstenir.
+                        if state.log_grammar >= 10:
+                            for _mid in _models:
+                                if '#r' in _mid and _mid not in state.model_types:
+                                    # `situe=False` : ce contrôle précède la lecture du tour et
+                                    # de la phase de la ligne courante.
+                                    _parse_error(
+                                        f"socle rendu {_mid} present dans [MODELS:] sans "
+                                        f"datasheet declaree par une ligne RETURNED "
+                                        f"(grammaire {state.log_grammar})",
+                                        situe=False,
+                                    )
                         # [MODELS:] = source de vérité des socles VIVANTS de _uid : effectif,
                         # PV par socle et miroir scalaire sont recalés d'un seul geste, sur la
                         # même source. Les PV déjà connus sont CONSERVÉS — c'est la correction
@@ -957,32 +1024,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 if base_token_match:
                     from ai.analyzer_perfig import parse_base_token
                     state.unit_base[unit_id] = parse_base_token(base_token_match.group(0))
-                # Datasheet par figurine : écrite UNE fois, dans l'entête (la composition ne
-                # change pas en cours de partie — une figurine meurt, elle ne change pas de
-                # datasheet). Cf. `AnalyzerState.model_types`.
-                model_types_match = re.search(r'\[MODEL_TYPES: ([^\]]+)\]', line)
-                if model_types_match:
-                    for _pair in model_types_match.group(1).split():
-                        _mid, _sep, _mtype = _pair.partition("=")
-                        if _sep:
-                            state.model_types[_mid] = _mtype
-                            # Les datasheets PORTEUSES entrent dans les types vus, au même titre
-                            # que celle de l'escouade : c'est `unit_types_seen` qui décide des
-                            # paires (règle, arme) que le tableau §1.8 ATTEND. Sans elles, l'arme
-                            # d'un sergent ou d'un personnage rattaché (règle 19) n'était ni
-                            # attendue ni comptée — donc invisible des deux côtés à la fois.
-                            require_key(stats, 'unit_types_seen').add(_mtype)
-                            # Composition DÉCLARÉE PAR ESCOUADE, pour le verdict §1.7 (19.04).
-                            # Indexée par `unit_id` et NON par type : deux escouades du même
-                            # type n'ont pas la même composition (`Unit 4 (Intercessor)` mène un
-                            # `Librarian`, `Unit 5 (Intercessor)` un `CaptainRelicShield`), et
-                            # une union par type blanchissait la règle d'un character pour
-                            # toutes ses homonymes, les deux camps confondus. Sert de témoin
-                            # « composition déclarée » ; le VIVANT, lui, se lit dans
-                            # `unit_model_hp` au moment du relevé (`living_datasheets`).
-                            require_key(stats, 'model_types_by_unit_id').setdefault(
-                                unit_id, set()
-                            ).add(_mtype)
+                # Datasheet par figurine : composition de DÉPART, déclarée par l'entête. Une
+                # figurine RENDUE en cours de partie est déclarée par sa ligne `RETURNED`, lue
+                # par le même lecteur (`_absorb_model_types`). Cf. `AnalyzerState.model_types`.
+                _absorb_model_types(state, stats, line)
                 # PV PAR SOCLE (cf. `unit_model_hp`). Posés ICI et pas plus haut : ils ont besoin
                 # de `[MODEL_TYPES:]`, que la même ligne d'entête vient seulement de fournir.
                 # À l'entête, aucune figurine n'est entamée : PV pleins par datasheet.
@@ -2121,6 +2166,35 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         else:
                             stats['coherency_removals'][player] += len(_removed.group(1).split())
                             note_rule_usage(stats, "03.03", player)
+                elif " RETURNED " in action_desc and (
+                    _ret_match := _RETURNED_RE.search(action_desc)
+                ) is not None:
+                        # Grot Orderly (`return_destroyed_models`, grammaire 10) : la ligne qui
+                        # introduit les socles rendus. Leur datasheet a déjà été absorbée plus
+                        # haut (avant le recalage des socles vivants) ; ici on relève l'USAGE
+                        # §1.7 sur l'escouade — 19.04 s'y applique comme à toute capacité d'un
+                        # personnage replié — et on contrôle que la ligne déclare exactement
+                        # autant de datasheets qu'elle annonce de figurines.
+                        action_type = 'returned_models'
+                        _ret_count = int(_ret_match.group(1))
+                        _ret_uid = _dmg_actor_id
+                        _ret_types = _MODEL_TYPES_SEGMENT_RE.search(action_desc)
+                        _ret_declared = len(_ret_types.group(1).split()) if _ret_types else 0
+                        if _ret_uid is None:
+                            _parse_error("ligne RETURNED sans 'Unit N(' en tête d'action")
+                        elif _ret_declared != _ret_count:
+                            _parse_error(
+                                f"ligne RETURNED : {_ret_count} figurine(s) annoncee(s), "
+                                f"{_ret_declared} datasheet(s) declaree(s) dans [MODEL_TYPES:]"
+                            )
+                        else:
+                            stats['returned_models'][player] += _ret_count
+                            _ret_type = state.unit_types.get(_ret_uid)  # get allowed
+                            if _ret_type:
+                                note_special_rule_usage(
+                                    stats, state, config, "return_destroyed_models",
+                                    _ret_uid, _ret_type, player,
+                                )
                 elif " RESERVES TIMEOUT " in action_desc:
                         # 20.04 — destruction en fin de 3e round des unités restées en réserves
                         # stratégiques. L'escouade est entièrement détruite : contrairement à

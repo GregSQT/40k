@@ -15,7 +15,7 @@ from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
 from .shared_utils import (
     _build_enemy_adjacent_hexes_all_players, _enemy_squad_ids, _squad_mode_level,
-    deployed_friendly_squad_ids,
+    _get_source_unit_rule_display_name_for_effect, deployed_friendly_squad_ids,
 )
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
@@ -1060,9 +1060,11 @@ def apply_returned_models_placement(
     selected = list(selected)[:len(cells)]
 
     counter = require_key(game_state, "_restored_model_counter")
+    restored_mids: List[str] = []
     for (col, row), archive_index in zip(cells, selected):
         new_mid = f"{squad_id}#r{counter}"
         counter += 1
+        restored_mids.append(new_mid)
         # COPIE PROFONDE : le profil archivé porte des structures partagées au build (armes,
         # règles, keywords). Une copie superficielle ferait muter le profil d'une figurine rendue
         # à travers une autre — le motif d'aliasing déjà rencontré sur les observations.
@@ -1088,9 +1090,8 @@ def apply_returned_models_placement(
     _recompute_squad_cache(game_state, squad_id)
     _recompute_squad_occupied_hexes(game_state, squad_id)
     squad_total = _recompute_squad_hp_total(game_state, squad_id)
-    uc = units_cache.get(squad_id)
-    if uc is not None:
-        uc["HP_CUR"] = squad_total
+    uc = require_key(units_cache, squad_id)
+    uc["HP_CUR"] = squad_total
     game_state.setdefault("return_destroyed_models_used", set()).add(squad_id)
 
     episode = game_state.get("episode_number", "?")
@@ -1100,13 +1101,46 @@ def apply_returned_models_placement(
         f"[GROT ORDERLY] E{episode} T{turn} unit={squad_id} restored={len(cells)} "
         f"(D3={d3}, destroyed={destroyed}) cells={list(cells)}"
     )
+    # DATASHEET de chaque socle rendu, portee par la ligne qui l'introduit. L'entete d'episode
+    # (`[MODEL_TYPES:]`) ne connait que les ids de depart ; un id `<escouade>#r<n>` n'y figure
+    # jamais, et sans cette declaration l'analyzer ne pouvait plus trancher 19.04 pour une
+    # escouade qui compte un socle rendu (mesure sur le step.log du 2026-09-11 : 6 ids `#r`,
+    # 0 declare, 2 escouades sur 10 sans verdict). Or 19.04 dit « Should those models later be
+    # revived, those abilities will once more apply » : le socle rendu est exactement celui dont
+    # la datasheet compte. Meme lecture que `_model_types_segment_for_unit` (w40k_core) :
+    # `unitType` de la figurine, sinon celui de l'escouade.
+    from engine.game_utils import require_unit_by_id
+    squad_unit = require_unit_by_id(game_state, squad_id)
+    squad_unit_type = str(require_key(squad_unit, "unitType"))
+    restored_model_types = {
+        mid: str(models_cache[mid].get("unitType") or squad_unit_type)  # get allowed
+        for mid in restored_mids
+    }
+    ability_display_name = _get_source_unit_rule_display_name_for_effect(
+        squad_unit, "return_destroyed_models"
+    )
+    if ability_display_name is None:
+        raise ValueError(
+            f"apply_returned_models_placement: unit {squad_id} rend des figurines sans "
+            "capacite `return_destroyed_models` nommee dans ses UNIT_RULES"
+        )
+    anchor_col, anchor_row = int(require_key(uc, "col")), int(require_key(uc, "row"))
     append_action_log(game_state, {
         "type": "return_destroyed_models",
+        "message": (
+            f"Unit {squad_id}({anchor_col},{anchor_row}) RETURNED {len(cells)} models "
+            f"[{ability_display_name.upper()}] (D3={d3})"
+        ),
         "unitId": squad_id,
-        "player": int(require_key(require_key(units_cache, squad_id), "player")),
+        "player": int(require_key(uc, "player")),
         "phase": "command",
         "turn": require_key(game_state, "turn"),
+        "col": anchor_col,
+        "row": anchor_row,
         "restored": len(cells),
+        "restoredModelTypes": restored_model_types,
+        "abilityDisplayName": ability_display_name,
+        "d3Roll": int(d3),
     })
 
 
