@@ -63,7 +63,9 @@ from engine.hex_utils import (
     round_base_radius_norm,
     socle_is_single_hex,
 )
-from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable_multilevel_field
+from engine.phase_handlers.geodesic_move import (
+    _euclidean_move_field, multilevel_target_within_straight_bound, reachable_multilevel_field,
+)
 # Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Alias court : ce
 # module la lit dans des boucles chaudes (pool d'ancre, éligibilité), pas seulement en préambule.
 from engine.spatial_relations import geometry_is_hex as _geometry_is_hex
@@ -4034,6 +4036,15 @@ def _model_multilevel_reachable_field(
                     f"ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — hauteur globale par niveau non supportée"
                 )
             height_by_level[lv] = hn
+
+    # PRÉ-CHECK de portée (perf, résultat identique) : si aucune cellule d'aucun niveau cible ne
+    # tient dans le budget même en ligne droite + dénivelé, le champ serait vide sur ces niveaux —
+    # on le rend sans construire obstacles ni lancer le Dijkstra (jumeau : pool d'ancre et charge).
+    if not multilevel_target_within_straight_bound(
+        start_pos, start_level, target_levels, floor_hexes_by_level, height_by_level,
+        budget * ENGAGEMENT_NORM_HEX_WIDTH,
+    ):
+        return {lv: {} for lv in target_levels}
 
     obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: set(ground_obstacles)}
     occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
