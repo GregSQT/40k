@@ -36,6 +36,10 @@ def _gs():
         "pending_agent_decision": None,
         "models_cache": {},
         "squad_models": {_SQUAD_ID: []},
+        # `fight_v11_can_overrun_pile_in` (12.06) : engagée au snapshot → NORMAL fight, pas
+        # d'overrun ; garde « one additional pile-in move » présente comme en production.
+        "engaged_at_fight_step_start": {_SQUAD_ID: True},
+        "overrun_pile_in_done": set(),
     }
 
 
@@ -160,6 +164,8 @@ def _gs_alive_enemy_out_of_pool():
         "pending_agent_decision": None,
         "models_cache": {},
         "squad_models": {_SQUAD_ID: [], _ALIVE_ENEMY: []},
+        "engaged_at_fight_step_start": {_SQUAD_ID: True},
+        "overrun_pile_in_done": set(),
     }
 
 
