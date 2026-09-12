@@ -247,3 +247,47 @@ def test_pve_auto_le_de_est_joue_puis_l_unite_combat(monkeypatch):
     assert "1" in gs["units_selected_to_fight"]
     assert gs["fight_exhortation_done"] == {"1"}
     assert FIGHT_SELECTION_EXHORTATION_KEY not in gs
+
+
+# ---------------------------------------------------------------------------
+# PvE, Chaplain du siège IA (régime gym, `_process_squad_action`) : personne ne répondrait à la
+# décision — le sélecteur 12.04 est déjà passé à l'humain, `execute_ai_turn` refuse et le front
+# ne relance pas le bot. Tranchée immédiatement, comme le mouvement réactif.
+# ---------------------------------------------------------------------------
+
+def test_pve_siege_ia_la_decision_est_tranchee_sur_le_champ(monkeypatch):
+    """ROUGE avant le fix : `pending_agent_decision` posée au siège IA et jamais résolue ; toute
+    action humaine refusée (`mortal_wounds_target_pending`)."""
+    chap = _unit_cfg(5, 2, 20, 20)
+    chap["UNIT_RULES"] = [_EXHORT_RULE]
+    eng = _engine("pve", "ai", [
+        chap,
+        _unit_cfg(2, 1, 21, 20),
+        _unit_cfg(3, 1, 20, 21),
+    ])
+    gs = eng.game_state
+    eng.gym_training_mode = False
+    import engine.phase_handlers.fight_handlers as fh
+    monkeypatch.setattr(fh, "_ai_select_fight_target", lambda gs_, uid, targets: "3")
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    resumed: List[Any] = []
+    eng._continue_fight_after_exhortation = (  # type: ignore[method-assign]
+        lambda squad_id, target_slot, regime: resumed.append((squad_id, target_slot, regime))
+        or (True, {"action": "squad_fight", "squad_id": squad_id})
+    )
+
+    result = eng._check_and_trigger_exhortation_de_rage("5", eng._get_unit_by_id("5"), 1)
+    assert result is not None
+    ok, out = result
+    assert ok is True, out
+    assert gs["pending_agent_decision"] is None, "siège IA hors gym : rien ne doit rester posé"
+    assert gs.get("_pending_exhortation_fight") is None
+    lines = _mw_lines(gs)
+    assert len(lines) == 1 and lines[0]["unitId"] == "3" and lines[0]["hazardousMortalWounds"] == 3
+    # Défenseur HUMAIN : l'attribution lui revient (HAZARD_CTX), puis la reprise GYM du bot.
+    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
+    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "3", "modelId": "3#0"})
+    assert ok is True, out
+    assert resumed == [("5", 1, "gym")]
+    # Une action humaine n'est plus refusée : la décision n'existe plus.
+    assert eng._reject_action_while_exhortation_pending({"action": "activate_unit"}) is None

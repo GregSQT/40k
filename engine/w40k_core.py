@@ -6936,6 +6936,19 @@ class W40KEngine(gym.Env):
                 "waiting_for_agent_decision": True,
                 "decision_type": "mortal_wounds_target",
             }
+        if not self.gym_training_mode and not self._is_player_human(player):
+            # Siège IA HORS gym (PvE) : personne ne répondrait. `_fight_v11_register_selection` a
+            # déjà passé la main à l'adversaire, donc `execute_ai_turn` refuse (`not_ai_player_turn`,
+            # pool du joueur humain) et le front ne relance pas le bot ; la décision resterait
+            # posée, le combat du Chaplain perdu, et toute action humaine refusée par
+            # `_reject_action_while_exhortation_pending`. Même règle que le mouvement réactif
+            # (`_resolve_reactive_move_decision_for_ai_seats`) : tranchée ICI, immédiatement, par
+            # le MÊME chemin que la réponse humaine ou agent, avec le sélecteur de cible que le
+            # régime auto applique déjà à ce siège.
+            chosen = _ai_select_fight_target(self.game_state, squad_id, _offered)
+            return self._handle_agent_decision_action(
+                {"action": "agent_decision", "option_index": _offered.index(chosen)}
+            )
         return True, {
             "action": "squad_fight",
             "squad_id": squad_id,

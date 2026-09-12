@@ -97,6 +97,9 @@ class _FakeEngine:
     _fight_v11_gym_settle = wcore.W40KEngine._fight_v11_gym_settle
     _mortal_wounds_target_metrics = wcore.W40KEngine._mortal_wounds_target_metrics
 
+    # Régime gym : les deux sièges répondent par le masque, la décision reste posée.
+    gym_training_mode = True
+
     def __init__(self, gs):
         self.game_state = gs
 
