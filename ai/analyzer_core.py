@@ -1066,9 +1066,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
-                # Attaques perdues inter-armes : verdict par groupe, donc à la clôture seulement
-                # — le dernier groupe de l'épisode n'est complet qu'ici.
-                flush_cross_weapon_lost(state, stats)
 
                 # Save turn distribution for this episode
                 if state.episode_turn > 0:
@@ -2375,8 +2372,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         # Save turn distribution for last episode
         if state.episode_turn > 0:
             stats['turns_distribution'][state.episode_turn] += 1
-        # Dernier épisode sans `EPISODE END` (journal lu pendant un entraînement, ou tronqué) :
-        # ses groupes de tir sont complets, le verdict tombe ici comme aux deux autres
-        # frontières (`EPISODE END`, `handle_episode_start`).
-        flush_cross_weapon_lost(state, stats)
+    # Attaques perdues inter-armes : verdict par groupe, clé portant l'épisode — rendu une
+    # seule fois, journal entièrement lu (dernier épisode sans `EPISODE END` compris).
+    flush_cross_weapon_lost(state, stats)
 

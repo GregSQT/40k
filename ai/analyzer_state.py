@@ -39,6 +39,11 @@ class SelectTargetsFreeze(NamedTuple):
     wounded_enemies: FrozenSet[str]
 
 
+#: (épisode, tour, tireur, arme, cible, signature `shoot_group_signature`) — cf.
+#: `AnalyzerState.shoot_alloc_groups`.
+ShootAllocKey = Tuple[int, int, str, str, str, Tuple[str, str, str]]
+
+
 @dataclass
 class ShootAllocGroup:
     """Bilan d'allocation d'un groupe de tir (arme × cible d'une activation), cf.
@@ -249,8 +254,9 @@ class AnalyzerState:
     #: groupe entier (`flush_cross_weapon_lost`), jamais ligne à ligne : dans un lot, l'ordre
     #: des lignes est l'ordre des tirs, pas celui de l'allocation (pool trié par sauvegarde
     #: croissante, 05.04), donc une ligne non allouée du tueur peut précéder sa première
-    #: ligne de dégâts. Vidé à chaque frontière d'épisode.
-    shoot_alloc_groups: Dict[Tuple[int, int, str, str, str, Tuple[str, str, str]], ShootAllocGroup] = field(default_factory=dict)
+    #: ligne de dégâts. L'épisode est dans la clé : l'accumulateur couvre tout le journal et
+    #: n'est jugé qu'une fois, en fin de lecture — pas de remise à zéro par épisode.
+    shoot_alloc_groups: Dict[ShootAllocKey, ShootAllocGroup] = field(default_factory=dict)
     #: Dernière unité dont un SHOT a déclenché un marqueur d'activation SHOOT (frontière
     #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT et au changement
     #: de tour. Mis à jour uniquement sur les lignes SHOT (pas sur les actions non-tir).
