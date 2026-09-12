@@ -38,6 +38,7 @@ import pytest
 from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
 from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 from engine.game_utils import require_unit_by_id
+from engine.phase_handlers.charge_handlers import charge_phase_start
 from engine.phase_handlers.fight_handlers import (
     _fight_v11_consolidation_resolve_new_foes,
     fight_phase_start,
@@ -242,6 +243,38 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     assert gs["fight_selector"] == 1 and fight_v11_expected_seat(gs) == 1
     assert out["action"] == "wait" and out["fight_eligible_units"] == ["1"], out
     assert gs["fight_eligible_units"] == ["1"]
+
+
+# ---------------------------------------------------------------------------
+# Cascade charge → fight par l'action du bot : le pool client est rafraîchi sans exception
+# ---------------------------------------------------------------------------
+
+def test_la_cascade_charge_vers_fight_par_le_bot_rafraichit_le_pool_client():
+    """ROUGE avant le fix : `fight_v11_client_pool` était importé DANS le bloc
+    `if current_phase == "fight":` d'`execute_ai_turn` et utilisé après l'action ; entré en phase
+    charge, le nom était local non lié → `UnboundLocalError` avalée en `ai_decision_failed`."""
+    eng = _engine(
+        [_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 21, 20), _unit_cfg(3, 1, 30, 30), _unit_cfg(4, 2, 30, 34)],
+        current_player=2,
+        actions=[{"action": "squad_wait", "squad_id": "4"}],
+    )
+    gs = eng.game_state
+    gs["phase"] = "charge"
+    charge_phase_start(gs)
+    assert gs["charge_activation_pool"] == ["4"], gs["charge_activation_pool"]
+
+    ok, out = _ai_turn(eng)
+    # Le `squad_wait` vide le pool charge → cascade vers fight dans la même requête.
+    assert gs["phase"] == "fight", (gs["phase"], out)
+    assert gs["fight_subphase"] is not None
+    assert gs["pile_in_done"] == {"2"}, "pile-in du bot résolu par le driver, groupe humain suivant"
+    # Pool lu par le client rafraîchi après la cascade : c'est à l'humain (unité 1).
+    assert gs["fight_eligible_units"] == fight_v11_current_pool(gs) == ["1"]
+    assert ok is True and out["action"] == "squad_wait" and out["activation_ended"] is True, out
+    # Relance du client sur ce pool : rien à jouer pour le bot, aucune exception.
+    ok, out = _ai_turn(eng)
+    assert ok is False and out["reason"] == "no_eligible_ai_units_in_pool", out
+    assert out["pool_checked"] == ["1"]
 
 
 # ---------------------------------------------------------------------------
