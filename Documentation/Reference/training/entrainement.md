@@ -747,6 +747,7 @@ tensorboard --logdir=./tensorboard/
 - `game_critical/win_rate_<perf_window_fast>ep` — tendance récente (doublon réactif du tag nu, lissé sur `perf_window_fast`)
 - `00_critical/j_approx_kl` — stabilité de la politique (<0.02 = sain)
 - `00_critical/l_approx_kl_max` — KL **maximale** de l'update : au-dessus de 0.0225, PPO a coupé ses epochs
+- `00_critical/v_n_minibatches_done` — pas de gradient **réellement exécutés** dans l'update : sous le plan `n_epochs × minibatches`, c'est là que la coupure est tombée
 - `00_critical/k_entropy_loss` — niveau d'exploration (doit décroître progressivement)
 - `00_critical/h_explained_variance` — qualité de la value function (cible : >0.70 tôt, >0.85 tard)
 

@@ -1,4 +1,4 @@
-"""`train/approx_kl_max` — tag KL maximum par update.
+"""`train/approx_kl_max` et `train/n_minibatches_done` — tags de coupure KL par update.
 
 Quand `target_kl` est actif, `approx_kl_divs` accumule le KL de chaque mini-lot.
 La valeur déclenchante du break est ajoutée à la liste AVANT le test (ligne 270 de
@@ -7,9 +7,18 @@ Sans break, tous les mini-lots sont sous le seuil par construction, donc le max 
 
 Deux sens nécessaires : un tag constamment élevé passerait le seul test de break.
 
+`n_minibatches_done` compte les `optimizer.step()` réellement exécutés : `approx_kl_max` dit
+SI l'update a été coupée, ce compteur dit OÙ. Sans coupure il vaut exactement
+`n_epochs × ceil(n_steps / batch_size)` ; avec coupure il est strictement inférieur, parce que
+le mini-lot déclencheur fait `break` AVANT son backward et n'est donc jamais compté.
+
 PREUVE PAR MUTATION :
   Remplacer `np.max` par `np.min` → ROUGE `test_approx_kl_max_exceeds_threshold`.
   Supprimer le `logger.record` → ROUGE les deux tests de présence.
+  Supprimer `n_minibatches_done += 1` → ROUGE `test_n_minibatches_done_counts_every_step`.
+  Déplacer l'incrément avant le test d'early-stop → ROUGE
+  `test_n_minibatches_done_stops_at_first_step_when_early_stopped` (target_kl infime :
+  coupure au mini-lot 0 ou 1, compteur attendu ≤ 1, obtenu 2).
   Restaurer → VERT.
   Purger `__pycache__` si la mutation est de même longueur que l'original.
 """
@@ -48,14 +57,21 @@ class _TinyMaskedEnv(gymnasium.Env):
         return np.ones(2, dtype=bool)
 
 
+_N_STEPS = 8
+_BATCH_SIZE = 4
+_N_EPOCHS = 4
+#: Pas de gradient d'un update dont aucune epoch n'est coupée.
+_N_MINIBATCHES_PLANNED = _N_EPOCHS * (_N_STEPS // _BATCH_SIZE)
+
+
 def _train_once(target_kl: float | None) -> dict[str, float]:
     """Un update PPO complet ; retourne les scalaires posés sur le logger."""
     model = PatchedMaskablePPO(
         "MlpPolicy",
         _TinyMaskedEnv(),
-        n_steps=8,
-        batch_size=4,
-        n_epochs=4,
+        n_steps=_N_STEPS,
+        batch_size=_BATCH_SIZE,
+        n_epochs=_N_EPOCHS,
         target_kl=target_kl,
         seed=0,
         device="cpu",
@@ -114,4 +130,39 @@ def test_approx_kl_max_below_threshold_when_no_early_stop() -> None:
     assert recorded["train/approx_kl_max"] < threshold, (
         f"approx_kl_max={recorded['train/approx_kl_max']:.2e} ≥ seuil {threshold:.2e} — "
         "break déclenché avec target_kl=100.0 ? (tag renvoie une valeur incorrecte)"
+    )
+
+
+def test_n_minibatches_done_counts_every_step_when_no_early_stop() -> None:
+    """Sans coupure, le compteur vaut EXACTEMENT le plan `n_epochs × minibatches`.
+
+    Égalité stricte, pas `>= 1` : un compteur qui s'arrêterait à la première epoch, ou qui
+    compterait les epochs au lieu des mini-lots, passerait un test de simple présence.
+    """
+    recorded = _train_once(target_kl=None)
+
+    assert "train/n_minibatches_done" in recorded, "train/n_minibatches_done absent du dump"
+    assert recorded["train/n_minibatches_done"] == _N_MINIBATCHES_PLANNED, (
+        f"n_minibatches_done={recorded['train/n_minibatches_done']} ≠ plan "
+        f"{_N_MINIBATCHES_PLANNED} ({_N_EPOCHS} epochs × {_N_STEPS // _BATCH_SIZE} mini-lots) "
+        "alors qu'aucune coupure n'est possible sans target_kl"
+    )
+
+
+def test_n_minibatches_done_stops_at_first_step_when_early_stopped() -> None:
+    """`target_kl` infime : au plus UN pas de gradient est exécuté.
+
+    Le mini-lot 0 évalue la politique qui a collecté le rollout : son KL vaut 0 exactement (ou
+    le bruit float32), donc la coupure tombe au mini-lot 0 ou, après le premier pas, au mini-lot
+    1 — jamais plus tard, tout KL d'une politique qui a bougé dépassant 1,5e-20. Le mini-lot
+    déclencheur fait `break` avant `loss.backward()` et ne doit pas être compté : un incrément
+    placé avant le test d'early-stop rendrait 2 ici (mesuré : 1 avec l'incrément après `step()`).
+    """
+    recorded = _train_once(target_kl=1e-20)
+
+    assert recorded["train/approx_kl_max"] > 1.5e-20, "pré-condition : la coupure doit avoir eu lieu"
+    done = recorded["train/n_minibatches_done"]
+    assert 0 <= done <= 1, (
+        f"n_minibatches_done={done} après une coupure au mini-lot 0 ou 1 — le mini-lot "
+        "déclencheur a été compté, ou la coupure est arrivée plus tard que prévu"
     )

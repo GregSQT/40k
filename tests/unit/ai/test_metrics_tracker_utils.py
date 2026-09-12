@@ -687,6 +687,31 @@ def test_l_approx_kl_max_reste_muette_sans_ppo_patche() -> None:
     assert "00_critical/m_explained_var" in keys, "m ne depend pas du PPO patche"
 
 
+def test_v_n_minibatches_done_porte_le_compte_brut_de_l_update() -> None:
+    """VERROU : `v_n_minibatches_done` recopie `train/n_minibatches_done` tel quel, en entier.
+
+    C'est le complement de `l_approx_kl_max` : elle dit SI l'early-stop a coupe l'update,
+    ce compte dit apres combien de pas de gradient. Un lissage masquerait exactement la
+    variation d'un update a l'autre qu'on lui demande de montrer.
+    """
+    t = _tracker_stub()
+    t.log_training_metrics(ppo_update_stats(**{"train/n_minibatches_done": 5}))
+
+    scalars = _dw(t).scalars
+    assert [v for k, v, _ in scalars if k == "00_critical/v_n_minibatches_done"] == [5]
+
+
+def test_v_n_minibatches_done_reste_muette_sans_ppo_patche() -> None:
+    """VERROU : pas de `train/n_minibatches_done` -> pas de courbe, PAS un 0 ni un plan."""
+    t = _tracker_stub()
+    stats = ppo_update_stats()
+    del stats["train/n_minibatches_done"]
+    t.log_training_metrics(stats)
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "00_critical/v_n_minibatches_done" not in keys
+
+
 def test_gradient_norm_nan_est_ecarte() -> None:
     """VERROU : un NaN dans `train/gradient_norm` (early-stop KL) n'ecrase pas
     `latest_gradient_norm`, lu par le rapport de fin de run.
