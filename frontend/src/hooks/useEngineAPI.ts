@@ -500,51 +500,41 @@ export interface ManualOrderGroup {
   has_wounded: boolean;
 }
 
+/** Familles d'allocation manuelle (05.03/05.04, 06.02), préfixe d'action `squad_<famille>_…`. */
+const MANUAL_PROMPT_KINDS = ["fight", "hazard", "shoot"] as const;
+type ManualPromptKind = (typeof MANUAL_PROMPT_KINDS)[number];
+
 /**
- * Payload d'ATTENTE d'allocation manuelle des pertes (défenseur humain, 05.03/05.04, 06.02) tel
- * que le moteur le rend sur `/game/action` comme sur `/game/ai-turn` (attaquant bot en PvE) :
- * `{ action: squad_*_manual_alloc, waiting_for_player: true, allocation }`. Rend l'allocation
- * typée (avec sa famille) ou `null` si le payload n'en est pas une.
+ * Payload d'ATTENTE du défenseur humain tel que le moteur le rend sur `/game/action` comme sur
+ * `/game/ai-turn` (attaquant bot en PvE) : `{ action: squad_<famille>_<suffix>,
+ * waiting_for_player: true, [payloadKey]: … }`. Rend le payload typé avec sa famille, ou `null`
+ * si le résultat n'en est pas un. Lecteur UNIQUE des deux attentes (allocation, ordre).
  */
-export function readManualAllocationPrompt(result: unknown): ManualAllocation | null {
+function readManualPrompt<T extends { kind?: ManualPromptKind }>(
+  result: unknown,
+  suffix: "manual_alloc" | "declare_order",
+  payloadKey: "allocation" | "order_request"
+): T | null {
   if (!result || typeof result !== "object") return null;
-  const r = result as { action?: unknown; waiting_for_player?: unknown; allocation?: unknown };
-  if (r.waiting_for_player !== true || !r.allocation || typeof r.allocation !== "object") {
-    return null;
-  }
-  const kind =
-    r.action === "squad_fight_manual_alloc"
-      ? "fight"
-      : r.action === "squad_hazard_manual_alloc"
-        ? "hazard"
-        : r.action === "squad_shoot_manual_alloc"
-          ? "shoot"
-          : null;
-  if (kind === null) return null;
-  return { ...(r.allocation as ManualAllocation), kind };
+  const r = result as { action?: unknown; waiting_for_player?: unknown } & Record<string, unknown>;
+  const payload = r[payloadKey];
+  if (r.waiting_for_player !== true || !payload || typeof payload !== "object") return null;
+  const kind = MANUAL_PROMPT_KINDS.find((k) => r.action === `squad_${k}_${suffix}`);
+  if (kind === undefined) return null;
+  return { ...(payload as T), kind };
+}
+
+/** Attente d'allocation manuelle des pertes : `{ action: squad_*_manual_alloc, allocation }`. */
+export function readManualAllocationPrompt(result: unknown): ManualAllocation | null {
+  return readManualPrompt<ManualAllocation>(result, "manual_alloc", "allocation");
 }
 
 /**
- * Payload d'ATTENTE de déclaration de l'ordre des groupes d'allocation (05.03, cible hétérogène /
- * CHARACTER) — même double provenance que `readManualAllocationPrompt` :
- * `{ action: squad_*_declare_order, waiting_for_player: true, order_request }`.
+ * Attente de déclaration de l'ordre des groupes d'allocation (05.03, cible hétérogène /
+ * CHARACTER) : `{ action: squad_*_declare_order, order_request }`.
  */
 export function readManualOrderPrompt(result: unknown): ManualOrderRequest | null {
-  if (!result || typeof result !== "object") return null;
-  const r = result as { action?: unknown; waiting_for_player?: unknown; order_request?: unknown };
-  if (r.waiting_for_player !== true || !r.order_request || typeof r.order_request !== "object") {
-    return null;
-  }
-  const kind =
-    r.action === "squad_fight_declare_order"
-      ? "fight"
-      : r.action === "squad_hazard_declare_order"
-        ? "hazard"
-        : r.action === "squad_shoot_declare_order"
-          ? "shoot"
-          : null;
-  if (kind === null) return null;
-  return { ...(r.order_request as ManualOrderRequest), kind };
+  return readManualPrompt<ManualOrderRequest>(result, "declare_order", "order_request");
 }
 
 export interface ManualOrderRequest {
@@ -3853,15 +3843,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const startDeploySquadRef = useRef<((unitId: number | string) => void) | null>(null);
 
   // Event handlers aligned with backend
-  /** Pose le plan fight local (menu cible-d'abord + barre Cancel/Fight) de l'unité fight active.
-   * Figs lues depuis le cache. Appelé à l'activation en étape FIGHT et au retour du pile-in
-   * additionnel de l'overrun (le plan est purgé pendant ce move, sinon le handler capture fight
-   * intercepterait les clics de pose). */
+  /** Pose le plan fight local (menu cible-d'abord + barre Cancel/Fight) de l'unité fight active,
+   * UNIQUEMENT en étape FIGHT : en pile_in / consolidate (move par-figurine) et en New Foes
+   * (clic-cible direct), aucun plan — sinon le handler capture fight intercepterait les clics de
+   * pose. Figs lues depuis le cache. Appelé à l'activation et au retour du pile-in additionnel de
+   * l'overrun (le plan est purgé pendant ce move). */
   const openSquadFightPlan = useCallback(
     (unitId: number) => {
       const gsModels = (latestGameStateRef.current ?? gameState) as {
+        fight_subphase?: string;
         units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, unknown> }>;
       };
+      if (gsModels?.fight_subphase !== "fight") return;
       const fightModels = Object.keys(
         gsModels.units_cache?.[String(unitId)]?.occupied_hexes_by_model ?? {}
       );
@@ -4022,12 +4015,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               ) {
                 return;
               }
-              // Flux manuel par arme/figurine : initialise le plan local UNIQUEMENT en étape FIGHT.
-              // En pile_in / consolidate (move par-figurine), ne PAS poser squadFightPlan — sinon le
-              // handler capture fight intercepterait les clics de pose.
-              if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
-                openSquadFightPlan(numericUnitId);
-              }
+              // Flux manuel par arme/figurine : plan local (étape FIGHT seulement, garde interne).
+              openSquadFightPlan(numericUnitId);
             } finally {
               activationInProgressRef.current = false;
               setActivationPendingUnitId(null);
@@ -7574,10 +7563,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // d'attente de la même unité, cibles recalculées à sa nouvelle position. Étape FIGHT :
         // mode attackPreview posé à la réception, on rouvre son plan fight au lieu de
         // désélectionner. New Foes (sous-phase consolidate) : la réception a déjà posé la
-        // sélection en mode select, l'attaque passe par le clic-cible direct (pas de plan).
-        if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
-          openSquadFightPlan(plan.unitId);
-        }
+        // sélection en mode select, l'attaque passe par le clic-cible direct (pas de plan —
+        // `openSquadFightPlan` ne pose rien hors étape FIGHT).
+        openSquadFightPlan(plan.unitId);
         return;
       }
       setSelectedUnitId(null);
@@ -7586,7 +7574,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[PILE-IN] commit FAILED", e);
       setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan, gameState]);
+  }, [executeAction, currentLevelRef, noteActionOutcome, openSquadFightPlan]);
 
   /** Bouton Annuler : renonce à piler l'unité active (skip), nettoie le plan local. Pile-in
    * groupé : skip la consomme (12.02). Overrun : skip renonce seulement au move additionnel,
@@ -7607,14 +7595,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     }
     if (overrunUnitId != null) {
       // Même partage que le commit : plan fight en étape FIGHT, clic-cible direct en New Foes.
-      if ((latestGameStateRef.current ?? gameState)?.fight_subphase === "fight") {
-        openSquadFightPlan(overrunUnitId);
-      }
+      openSquadFightPlan(overrunUnitId);
       return;
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction, noteActionOutcome, openSquadFightPlan, gameState]);
+  }, [executeAction, noteActionOutcome, openSquadFightPlan]);
 
   /** Bouton Overrun (12.06) : ouvre le pile-in ADDITIONNEL par-figurine de l'unité fight active.
    * Le plan fight local est purgé le temps du move (le handler capture fight intercepterait les

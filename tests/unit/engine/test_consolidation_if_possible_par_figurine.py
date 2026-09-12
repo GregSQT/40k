@@ -26,7 +26,7 @@ Géométries MESURÉES (règles réelles : EZ = 2, cohésion 2, ``inches_to_subh
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Set, Tuple
+from typing import Any, Dict, List, Set
 
 from engine.combat_utils import calculate_hex_distance
 from engine.phase_handlers.fight_handlers import (
@@ -34,25 +34,14 @@ from engine.phase_handlers.fight_handlers import (
     _fight_consolidation_model_plan_state,
     _fight_consolidation_preview_plan,
 )
-from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
-
-Cell = Tuple[int, int]
+from tests.unit.engine._state_builders import (
+    Cell,
+    fight_squad_vs_enemies_state as _gs,
+    ground_plan as _plan,
+)
 ENEMY: Cell = (10, 10)
 FAR_ENEMY: Cell = (30, 30)
 OBJECTIVE_CENTER: Cell = (10, 10)
-
-
-def _gs(squad: Sequence[Cell], enemies: Sequence[Cell]) -> Dict[str, Any]:
-    units = [synthetic_unit("1", 1, [{"col": c, "row": r} for c, r in squad])]
-    for i, (c, r) in enumerate(enemies):
-        units.append(synthetic_unit(str(2 + i), 2, [{"col": c, "row": r}]))
-    return synthetic_state(
-        units, phase="fight", game_rules={}, inches_to_subhex=1, board_cols=44, board_rows=60,
-    )
-
-
-def _plan(*entries: Tuple[str, Cell]) -> List[Tuple[str, int, int, int]]:
-    return [(mid, c, r, 0) for mid, (c, r) in entries]
 
 
 def _zone() -> Set[Cell]:

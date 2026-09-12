@@ -6376,7 +6376,6 @@ def allocate_mortal_wounds(
 
     Retourne le nombre de mortal wounds réellement attribués.
     """
-    models_cache = require_key(game_state, "models_cache")
     sid = str(squad_id)
     remaining = int(n_wounds)
     applied = 0
@@ -6393,26 +6392,41 @@ def allocate_mortal_wounds(
                 "allocate_mortal_wounds: chemin humain non supporté ici "
                 "(utiliser build_manual_hazard_allocation pour le défenseur humain)"
             )
-        target = eligibles[0]
-        col = int(require_key(models_cache[target], "col"))
-        row = int(require_key(models_cache[target], "row"))
-        # Feel No Pain (24.12) : jet D6 par blessure mortelle avant application.
-        if _fnp_ths and _roll_fnp_sequential(1, _fnp_ths) == 0:
-            # L12 — FNP mortal wounds : journaliser la sauvegarde dans details_sink.
-            details_sink.append({"modelId": str(target), "col": col, "row": row, "died": False, "fnpSaved": True})
-            remaining -= 1
-            continue
-        new_hp = int(models_cache[target]["HP_CUR"]) - 1
-        if new_hp <= 0:
-            destroy_model(game_state, target, reason="hazard")
-            died = True
-        else:
-            update_model_hp(game_state, target, new_hp)
-            died = False
-        details_sink.append({"modelId": str(target), "col": col, "row": row, "died": died})
-        applied += 1
+        rec = _inflict_one_mortal_wound(game_state, eligibles[0], _fnp_ths, details_sink)
+        if not rec.get("fnpSaved"):  # get allowed : absent = blessure non sauvee
+            applied += 1
         remaining -= 1
     return applied
+
+
+def _inflict_one_mortal_wound(
+    game_state: Dict[str, Any], model_id: str, fnp_ths: List[int],
+    details_sink: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Inflige 1 blessure mortelle (06.02) a ``model_id`` et rend son record.
+
+    RESOLVEUR UNIQUE des deux regimes — AUTO (`allocate_mortal_wounds`) et manuel
+    (`_resolve_one_mortal_wound`) : 1 PV, AUCUNE sauvegarde (armure ET invulnerable ignorees,
+    10e), FNP « mortal » (24.12, seuils ``fnp_ths`` deja collectes), `destroy_model
+    (reason="hazard")` a 0 PV. Le record ``{modelId, col, row, died[, fnpSaved]}`` est ajoute a
+    ``details_sink`` (la liste ``hazardDetails`` de la ligne `SUFFERS N Mortal Wounds`) ; position
+    capturee AVANT destroy, REQUISE : elle alimente l analyse et le replay."""
+    models_cache = require_key(game_state, "models_cache")
+    m = models_cache[model_id]
+    col = int(require_key(m, "col"))
+    row = int(require_key(m, "row"))
+    rec: Dict[str, Any] = {"modelId": str(model_id), "col": col, "row": row, "died": False}
+    if fnp_ths and _roll_fnp_sequential(1, fnp_ths) == 0:
+        rec["fnpSaved"] = True  # L12 — FNP mortal wounds : journaliser la sauvegarde.
+    else:
+        new_hp = int(m["HP_CUR"]) - 1
+        rec["died"] = new_hp <= 0
+        if rec["died"]:
+            destroy_model(game_state, model_id, reason="hazard")
+        else:
+            update_model_hp(game_state, model_id, new_hp)
+    details_sink.append(rec)
+    return rec
 
 
 def _strength_measure(unit_id: str, game_state: Dict[str, Any]) -> Tuple[int, int]:
@@ -6900,6 +6914,55 @@ def _synth_model_entry(
         }
         synth["MODEL_HEIGHT"] = _model_height_of(model_entry, squad_entry)
     return synth
+
+
+def _fight_model_start_engaged_entries(
+    game_state: Dict[str, Any], squad_id: str, model: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Entrées ennemies avec lesquelles ``model`` est engagée à SON départ (position et étage
+    courants du ``models_cache``). Base des clauses AFTER « must still be engaged with that
+    enemy unit » (12.03 / 12.08 Ongoing). SOURCE UNIQUE du validateur PvP, de l'auto-placement
+    ILP et du plan gym (`_assign_cells_toward_enemies`). Lecture pure."""
+    from engine.spatial_relations import engagement_distance_metric
+
+    ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
+    units_cache = require_key(game_state, "units_cache")
+    player = int(model["player"])
+    synth_start = _synth_model_entry(
+        game_state, str(squad_id), model, int(model["col"]), int(model["row"]),
+        level=int(require_key(model, "level")),
+    )
+    return [
+        ce for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=str(squad_id))
+        if unit_entries_within_engagement_zone(synth_start, ce, ez, metric=metric)
+    ]
+
+
+def _fight_model_keeps_engagements(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    model: Dict[str, Any],
+    col: int,
+    row: int,
+    level: int,
+    start_engaged: List[Dict[str, Any]],
+) -> bool:
+    """AFTER 12.03 / 12.08 Ongoing : ``model`` posée en (col, row) au niveau ``level`` reste
+    engagée avec CHAQUE entrée de ``start_engaged`` (`_fight_model_start_engaged_entries`).
+    Vide → rien à conserver, sans mesure. SOURCE UNIQUE de la mesure (validateur, ILP, gym)."""
+    if not start_engaged:
+        return True
+    from engine.spatial_relations import engagement_distance_metric
+
+    ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
+    synth_end = _synth_model_entry(
+        game_state, str(squad_id), model, int(col), int(row), level=int(level)
+    )
+    return all(
+        unit_entries_within_engagement_zone(synth_end, ce, ez, metric=metric) for ce in start_engaged
+    )
 
 
 CHARGE_THRESHOLD_INCHES = 12
@@ -12352,41 +12415,14 @@ def _apply_batch_mortal_wounds(
             f"capacite de blessures mortelles sans tag de journal : {ability!r} — "
             f"attendu l un de {sorted(HAZARD_CONTEXT_TAGS)}"
         )
-    col, row = require_unit_position(target_sid, game_state)
     details: List[Dict[str, Any]] = []
     # Ligne emise AVANT l attribution, comme le jet [HAZARDOUS] : `append_action_log` mute
     # l entree en place, donc `details` vient completer CETTE ligne pendant l attribution
     # (figurine allouee, FNP) au lieu d en creer une seconde.
-    append_action_log(game_state, {
-        "type": "mortal_wounds_ability",
-        # [FROM:<unite>] : ces blessures mortelles viennent d'un ADVERSAIRE, la ou [HAZARDOUS]
-        # et [DESPERATE ESCAPE] sont auto-infligees. Sans ce token, l'analyzer crediterait la
-        # victime de ses propres morts et le tableau des kills serait faux.
-        "message": (
-            f"Unit {target_sid}({col},{row}) SUFFERS {total} Mortal Wounds "
-            f"{HAZARD_CONTEXT_TAGS[ability]} [FROM:{alloc['attacker_squad_id']}]"
-        ),
-        "turn": require_key(game_state, "turn"),
-        "phase": require_key(game_state, "phase"),
-        "unitId": target_sid,
-        "player": int(require_key(
-            require_key(game_state, "units_cache")[target_sid], "player")),
-        "col": col,
-        "row": row,
-        "hazardousMortalWounds": total,
-        # Cle DISTINCTE de `hazardousDiceRolls` : la, `Roll:` designe les des de HASARD de
-        # 24.15 (1-2 = echec), ici les D6 qui donnent le NOMBRE de blessures mortelles. Deux
-        # sens sous une meme cle auraient fait sommer les seconds par le controle de validite
-        # que l'analyzer applique aux premiers.
-        "mortalWoundDice": dice,
-        # Unite SOURCE, rendue `[FROM:<id>]` par le formateur : ces blessures mortelles viennent
-        # d'un ADVERSAIRE, la ou [HAZARDOUS] 24.15 et [DESPERATE ESCAPE] 09.07 sont
-        # auto-infligees. Sans elle, l'analyzer crediterait la victime de ses propres morts.
-        "mortalWoundSourceId": str(alloc["attacker_squad_id"]),
-        "hazardContext": ability,
-        "hazardDetails": details,
-        "result": f"{total} MW",
-    })
+    append_action_log(game_state, mortal_wounds_ability_log_entry(
+        game_state, target_sid, str(alloc["attacker_squad_id"]), total, ability, details,
+        dice=dice,
+    ))
     if ctx.auto_decider is None or not ctx.auto_decider(game_state, target_sid):
         # Defenseur humain : le lot mortel prend la suite du lot courant. Les items n ont
         # aucun `rec` d attaque — `_mark_manual_overkill_wasted` n a rien a y marquer, et
@@ -12398,6 +12434,63 @@ def _apply_batch_mortal_wounds(
         return
     allocate_mortal_wounds(game_state, target_sid, total, True, details)
     _count_mortal_details_in_summary(alloc["summary"], details)
+
+
+def mortal_wounds_ability_log_entry(
+    game_state: Dict[str, Any], target_sid: str, source_sid: str, total: int, ability: str,
+    details: List[Dict[str, Any]], *,
+    dice: Optional[List[int]] = None,
+    trigger_roll: Optional[int] = None,
+    message_suffix: str = "",
+) -> Dict[str, Any]:
+    """Ligne `mortal_wounds_ability` d une capacite qui inflige des blessures mortelles (06.02) —
+    SOURCE UNIQUE de sa forme pour Hold Still (`_apply_batch_mortal_wounds`) et l Exhortation of
+    Rage (`W40KEngine._apply_exhortation_de_rage`) : deux producteurs d un meme journal ne
+    peuvent pas diverger (`_STEP_LOG_TYPE_MAP`, `useGameLog`, analyzer).
+
+    - L unite de la ligne est celle QUI ENCAISSE, comme sur toute ligne SUFFERS :
+      `_build_step_log_details` en tire `unit_with_coords`, et l analyzer y lit la cible a qui
+      retirer les points de vie. La source vit dans `mortalWoundSourceId` (rendue `[FROM:<id>]`) —
+      aucune autre cle d unite, sinon `useGameLog` prefere `attackerId` a `unitId`. Sans ce
+      token, l analyzer crediterait la victime de ses propres morts.
+    - ``dice`` (`mortalWoundDice`) : des qui se SOMMENT pour donner le compte. Cle DISTINCTE de
+      `hazardousDiceRolls` (des de HASARD 24.15, 1-2 = echec) : deux sens sous une meme cle
+      auraient fait sommer les seconds par le controle de validite de l analyzer.
+    - ``trigger_roll`` (`abilityTriggerRoll`) : de de DECLENCHEMENT compare a un seuil, rendu
+      `Trigger:<n>` dans le message avec `MW:<d3>` pour les des. Cle DISTINCTE de
+      `mortalWoundDice`, sinon l analyzer additionnerait un jet de seuil a une quantite.
+    - ``details`` : la liste `hazardDetails`, completee PAR REFERENCE pendant l attribution.
+    """
+    col, row = require_unit_position(target_sid, game_state)
+    roll_seg = ""
+    if trigger_roll is not None:
+        roll_seg = f" Trigger:{trigger_roll}" + (f" MW:{dice[0]}" if dice else "")
+    entry: Dict[str, Any] = {
+        "type": "mortal_wounds_ability",
+        "message": (
+            f"Unit {target_sid}({col},{row}) SUFFERS {total} Mortal Wounds "
+            f"{HAZARD_CONTEXT_TAGS[ability]}{roll_seg} [FROM:{source_sid}]{message_suffix}"
+        ),
+        "turn": require_key(game_state, "turn"),
+        "phase": require_key(game_state, "phase"),
+        "unitId": target_sid,
+        "player": int(require_key(
+            require_key(game_state, "units_cache")[target_sid], "player")),
+        "col": col,
+        "row": row,
+        "hazardousMortalWounds": total,
+    }
+    if trigger_roll is not None:
+        entry["abilityTriggerRoll"] = trigger_roll
+    entry.update({
+        "mortalWoundSourceId": str(source_sid),
+        "hazardContext": ability,
+        "hazardDetails": details,
+        "result": f"{total} MW",
+    })
+    if dice is not None:
+        entry["mortalWoundDice"] = dice
+    return entry
 
 
 def _batch_is_mortal(ctx: ManualAllocCtx, batch: Dict[str, Any]) -> bool:
@@ -12425,7 +12518,7 @@ def _new_mortal_batch(
     `_resolve_one_mortal_wound` complete figurine par figurine. None sur le lot HAZARD_CTX,
     dont le contexte porte le puits (`alloc["hazard_details"]`, cf. `_resolve_one_hazard_wound`).
     """
-    batch: Dict[str, Any] = {
+    return {
         "target_sid": str(target_sid),
         "weapon_group_idx": None,
         "defender_player": int(defender_player),
@@ -12436,7 +12529,6 @@ def _new_mortal_batch(
         "pending_mortal_wounds": None,
         "mortal_details": mortal_details,
     }
-    return batch
 
 
 def _count_mortal_details_in_summary(summary: Dict[str, Any], details: List[Dict[str, Any]]) -> None:
@@ -12455,38 +12547,22 @@ def _resolve_one_mortal_wound(
 ) -> Dict[str, Any]:
     """Resout 1 blessure mortelle sur `batch["current_model_id"]` et rend son record.
 
-    RESOLVEUR UNIQUE du chemin manuel, pour les deux puits : `alloc["hazard_details"]`
-    (HAZARD_CTX — 24.15, 09.07, Exhortation) et `batch["mortal_details"]` (lot mortel de
-    capacite 06.02). Meme regle que `allocate_mortal_wounds` (regime AUTO) : 1 PV, AUCUNE
-    sauvegarde (armure ET invulnerable ignorees, 10e), FNP « mortal » (24.12),
-    `destroy_model(reason="hazard")` a 0 PV. Le record `{modelId, col, row, died[, fnpSaved]}`
-    va dans `details` — la liste que la ligne `SUFFERS N Mortal Wounds` deja emise porte par
-    reference — donc meme journal, meme analyzer. Position capturee AVANT destroy, mais REQUISE :
-    elle alimente `hazardDetails`, donc l analyse et le replay.
+    Chemin MANUEL, pour les deux puits : `alloc["hazard_details"]` (HAZARD_CTX — 24.15, 09.07,
+    Exhortation) et `batch["mortal_details"]` (lot mortel de capacite 06.02). La blessure
+    elle-meme est celle de `_inflict_one_mortal_wound` (meme resolveur que le regime AUTO) ; le
+    record va dans `details` — la liste que la ligne `SUFFERS N Mortal Wounds` deja emise porte
+    par reference — donc meme journal, meme analyzer.
 
     Une figurine tuee n a pas a etre retiree de `current_model_id` ici : la boucle
     d allocation re-selectionne des qu elle n est plus dans `models_cache`.
     """
-    models_cache = require_key(game_state, "models_cache")
     cur = batch["current_model_id"]
-    m = models_cache[cur]
-    col = int(require_key(m, "col"))
-    row = int(require_key(m, "row"))
-    rec: Dict[str, Any] = {"modelId": str(cur), "col": col, "row": row, "died": False}
+    m = require_key(game_state, "models_cache")[cur]
     # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
     # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent ici.
     _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
     _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False)
-    if _fnp_ths and _roll_fnp_sequential(1, _fnp_ths) == 0:
-        rec["fnpSaved"] = True  # L12 — FNP mortal wounds : journaliser la sauvegarde.
-    else:
-        new_hp = int(m["HP_CUR"]) - 1
-        rec["died"] = new_hp <= 0
-        if rec["died"]:
-            destroy_model(game_state, cur, reason="hazard")
-        else:
-            update_model_hp(game_state, cur, new_hp)
-    details.append(rec)
+    rec = _inflict_one_mortal_wound(game_state, cur, _fnp_ths, details)
     _count_mortal_details_in_summary(alloc["summary"], [rec])
     batch["pool_index"] += 1
     return rec
@@ -13230,38 +13306,16 @@ def _assign_cells_toward_enemies(
     # COURANT de la figurine, depart et arrivee, contre TOUTES les unites ennemies posees — pas
     # seulement les cibles. Sans ce filtre, une figurine engagee avec A et B finissait bord-a-bord
     # avec B et hors de la zone de A, plan que le PvP refuse (`kept_engagements=False`).
-    from engine.spatial_relations import engagement_distance_metric
-
-    _ez = int(get_engagement_zone(game_state))
-    _metric = engagement_distance_metric(game_state)
-    _enemy_entries = [
-        ce for _eid, ce in enemy_entries_on_battlefield(
-            units_cache, _pile_player, exclude_id=str(squad_id)
-        )
-    ]
-    _start_engaged: Dict[str, List[Dict[str, Any]]] = {}
-    for mid in movers:
-        _synth_start = _synth_model_entry(
-            game_state, str(squad_id), models_cache[mid], origins[mid][0], origins[mid][1],
-            level=int(require_key(models_cache[mid], "level")),
-        )
-        _start_engaged[mid] = [
-            ce for ce in _enemy_entries
-            if unit_entries_within_engagement_zone(_synth_start, ce, _ez, metric=_metric)
-        ]
+    _start_engaged: Dict[str, List[Dict[str, Any]]] = {
+        mid: _fight_model_start_engaged_entries(game_state, str(squad_id), models_cache[mid])
+        for mid in movers
+    }
 
     def _keeps_start_engagements(mid: str, col: int, row: int) -> bool:
         """True si la figurine placee en (col,row) reste engagee avec CHAQUE unite de depart."""
-        kept = _start_engaged[mid]
-        if not kept:
-            return True
-        _synth_end = _synth_model_entry(
+        return _fight_model_keeps_engagements(
             game_state, str(squad_id), models_cache[mid], col, row,
-            level=int(require_key(models_cache[mid], "level")),
-        )
-        return all(
-            unit_entries_within_engagement_zone(_synth_end, ce, _ez, metric=_metric)
-            for ce in kept
+            int(require_key(models_cache[mid], "level")), _start_engaged[mid],
         )
 
     # 2. Cellules bord-a-bord atteignables (legalite hors-plan uniquement).
@@ -13283,16 +13337,17 @@ def _assign_cells_toward_enemies(
         )
         _model_closest_ep[_mid] = _cep
         _model_orig_dist[_mid] = calculate_hex_distance(_oc, _orow, _cep[0], _cep[1])
-    # Admissibilite PAR FIGURINE, independante du plan (trajet + AFTER + WHILE) : calculee UNE
-    # fois, le point fixe ci-dessous ne fait varier que `blocked`.
+    # Admissibilite PAR FIGURINE, independante du plan (trajet + WHILE + AFTER) : calculee UNE
+    # fois, le point fixe ci-dessous ne fait varier que `blocked`. AFTER en dernier : la mesure
+    # d'engagement est la plus couteuse des trois, ne la payer que sur une case deja plus proche.
     admissible: Dict[str, List[Tuple[int, int]]] = {
         mid: sorted(
             cell for cell in b2b_cells
             if _reach_by_mid[mid](cell[0], cell[1])
-            and _keeps_start_engagements(mid, cell[0], cell[1])
             and calculate_hex_distance(
                 cell[0], cell[1], _model_closest_ep[mid][0], _model_closest_ep[mid][1]
             ) < _model_orig_dist[mid]
+            and _keeps_start_engagements(mid, cell[0], cell[1])
         )
         for mid in movers
     }
@@ -13344,11 +13399,11 @@ def _assign_cells_toward_enemies(
                     cand_d = calculate_hex_distance(nc, nr, tc, tr)
                     if cand_d >= orig_dist:
                         continue
-                    # AFTER avant le test de proximite : la mesure d'engagement est la plus
-                    # couteuse des trois, ne la payer que sur une case deja plus proche.
-                    if not _keeps_start_engagements(mid, nc, nr):
-                        continue
-                    if best is None or cand_d < best[0]:
+                    if best is not None and cand_d >= best[0]:
+                        continue  # ne peut pas ameliorer `best` : pas de mesure d'engagement
+                    # AFTER en dernier : la mesure d'engagement est la plus couteuse des trois,
+                    # ne la payer que sur une case deja plus proche ET meilleure.
+                    if _keeps_start_engagements(mid, nc, nr):
                         best = (cand_d, nc, nr)
             if best is not None:
                 break
@@ -13857,7 +13912,7 @@ def squad_declare_fight(
 
 
 def squad_consolidate_plan(
-    game_state: Dict[str, Any], squad_id: str
+    game_state: Dict[str, Any], squad_id: str, *, mode: Optional[str] = None
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan Consolidation (12.08, 3" max par fig) — cascade obligatoire ongoing→engaging→objective.
 
@@ -13866,6 +13921,10 @@ def squad_consolidate_plan(
       (2) Engaging : 1+ ennemi a ≤ consolidation_trigger_range (3") → vers ces ennemis.
       (3) Objective: 1+ objectif a ≤3" → chaque fig vers la zone de cet objectif.
       (4) None     : aucune branche → pas de Consolidation.
+
+    ``mode`` : cascade DEJA constatee par l appelant (`fight_v11_consolidation_mode`, que le
+    driver gym lit AVANT le move pour geler les New Foes) ; ``None`` = la constater ici. Le
+    passer evite de rejouer les trois predicats d engagement sur le chemin gym.
 
     Validations finales (coherency toujours ; ER pour (1)/(2) ; zone pour (3)).
     Retourne plan ou None si impossible. Atomic.
@@ -13888,7 +13947,8 @@ def squad_consolidate_plan(
     our_entry = require_unit_from_cache(squad_id, game_state, "squad_consolidate_plan")
     # `player` requis par `unit_within_engagement_zone_footprints` (via `fight_v11_consolidation_mode`).
     unit_ref: Dict[str, Any] = {"id": squad_id, "player": int(require_key(our_entry, "player"))}
-    mode = fight_v11_consolidation_mode(game_state, unit_ref)
+    if mode is None:
+        mode = fight_v11_consolidation_mode(game_state, unit_ref)
     if mode is None:
         return None
 
@@ -15347,7 +15407,6 @@ def build_squad_action_mask(
             # hors pool. Un slot est ouvert ssi l'escouade qu'il designe y figure : le masque dit
             # donc exactement « qui je peux frapper », la ou il ne disait que « je peux frapper ».
             unit = require_unit_by_id(game_state, squad_id)
-            fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
             # Overrun 12.06 : le commit (`_continue_squad_fight_after_selection`) execute le
             # pile-in additionnel AVANT de tester le pool des que `fight_v11_can_overrun_pile_in`
             # — les DEUX cas d'eligibilite (non engagee ; ou engagee depuis le snapshot 12.04),
@@ -15355,33 +15414,35 @@ def build_squad_action_mask(
             # deterministe que le commit, `fight_pile_in_plan`) pour rester en parite : un plan
             # existant REMPLACE le pool pre-move, car le commit frappe depuis les positions
             # d'arrivee et une cible pre-move peut ne plus y etre adjacente.
-            if fight_v11_can_overrun_pile_in(game_state, unit):
-                ov_plan = fight_pile_in_plan(game_state, squad_id)
-                if ov_plan is not None:
-                    from engine.spatial_relations import (
-                        get_engagement_zone as _gez,
-                        unit_entries_within_engagement_zone as _uiez,
-                    )
-                    models_cache = game_state.get("models_cache", {})  # get allowed
-                    ez = _gez(game_state)
-                    fight_targets = set()
-                    for esid in enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]:
-                        if esid is None:
-                            continue
-                        target_entry = units_cache.get(str(esid))
-                        if target_entry is None or not entry_is_on_battlefield(target_entry):
-                            continue
-                        if any(
-                            _uiez(
-                                _synth_model_entry(
-                                    game_state, squad_id, models_cache[mid], c, r, level=lv
-                                ),
-                                target_entry, ez,
-                            )
-                            for mid, c, r, lv in ov_plan
-                            if mid in models_cache
-                        ):
-                            fight_targets.add(str(esid))
+            ov_plan = (
+                fight_pile_in_plan(game_state, squad_id)
+                if fight_v11_can_overrun_pile_in(game_state, unit) else None
+            )
+            if ov_plan is None:
+                fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
+            else:
+                from engine.spatial_relations import (
+                    get_engagement_zone as _gez,
+                    unit_entries_within_engagement_zone as _uiez,
+                )
+                models_cache = game_state.get("models_cache", {})  # get allowed
+                ez = _gez(game_state)
+                # Entrees synthetiques des figurines a leur position d'ARRIVEE, une fois pour
+                # tous les slots (elles ne dependent pas de la cible testee).
+                plan_synths = [
+                    _synth_model_entry(game_state, squad_id, models_cache[mid], c, r, level=lv)
+                    for mid, c, r, lv in ov_plan
+                    if mid in models_cache
+                ]
+                fight_targets = set()
+                for esid in enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]:
+                    if esid is None:
+                        continue
+                    target_entry = units_cache.get(str(esid))
+                    if target_entry is None or not entry_is_on_battlefield(target_entry):
+                        continue
+                    if any(_uiez(synth, target_entry, ez) for synth in plan_synths):
+                        fight_targets.add(str(esid))
             opened = 0
             for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
                 if esid is not None and str(esid) in fight_targets:

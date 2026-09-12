@@ -116,9 +116,11 @@ def _tailles_d_empreinte_vues(monkeypatch) -> List[int]:
 
     `_candidate_footprint_charge` est patchée sur `charge_handlers` (les pools de combat
     l'importent LOCALEMENT, donc le module source est relu à chaque appel) ; `_synth_model_entry`
-    l'est sur les deux modules consommateurs, qui la lient au chargement.
+    l'est sur les deux modules consommateurs, qui la lient au chargement, ET sur son module
+    source `shared_utils`, dont les helpers d'engagement (`_fight_model_keeps_engagements`,
+    `_fight_model_start_engaged_entries`) la lisent par global au moment de l'appel.
     """
-    from engine.phase_handlers import charge_handlers, fight_handlers
+    from engine.phase_handlers import charge_handlers, fight_handlers, shared_utils
 
     vues: List[int] = []
     original = charge_handlers._candidate_footprint_charge
@@ -139,6 +141,7 @@ def _tailles_d_empreinte_vues(monkeypatch) -> List[int]:
 
     monkeypatch.setattr(fight_handlers, "_synth_model_entry", espion_synth)
     monkeypatch.setattr(charge_handlers, "_synth_model_entry", espion_synth)
+    monkeypatch.setattr(shared_utils, "_synth_model_entry", espion_synth)
     return vues
 
 

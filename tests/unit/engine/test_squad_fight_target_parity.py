@@ -79,6 +79,7 @@ def _setup_fight_phase_charged(
     gs["fight_step"] = "fights_first"
     gs["fight_selector"] = our_player
     gs["engaged_at_fight_step_start"] = {}
+    gs["overrun_pile_in_done"] = set()
     gs["units_charged"] = {squad_id}
     gs["units_selected_to_fight"] = set()
     gs["units_fought"] = set()
@@ -401,6 +402,7 @@ def test_overrun_mask_opens_fight_slot_not_no_target():
         fight_step="fights_first",
         fight_selector=1,
         engaged_at_fight_step_start={},
+        overrun_pile_in_done=set(),
         units_charged={"1"},
         units_selected_to_fight=set(),
         units_fought=set(),
@@ -458,6 +460,7 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
         fight_step="fights_first",
         fight_selector=1,
         engaged_at_fight_step_start={},
+        overrun_pile_in_done=set(),
         units_charged={"1"},
         units_selected_to_fight=set(),
         units_fought=set(),
@@ -537,6 +540,7 @@ def test_overrun_post_pilin_uses_per_model_base_size_x5():
         fight_step="fights_first",
         fight_selector=1,
         engaged_at_fight_step_start={},
+        overrun_pile_in_done=set(),
         units_charged={"atk"},
         units_selected_to_fight=set(),
         units_fought=set(),

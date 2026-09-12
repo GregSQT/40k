@@ -32,6 +32,7 @@ from tests.unit.engine._config_helpers import (
     _fall_back_make_engine as _make_engine,
     _fall_back_unit_cfg as _unit_cfg,
 )
+from tests.unit.engine._state_builders import squad_model_cells
 
 
 def _engine(units: List[Dict[str, Any]], charged: List[str]) -> W40KEngine:
@@ -51,13 +52,6 @@ def _engine(units: List[Dict[str, Any]], charged: List[str]) -> W40KEngine:
     return eng
 
 
-def _positions(gs: Dict[str, Any], uid: str) -> Dict[str, tuple]:
-    return {
-        m: (int(gs["models_cache"][m]["col"]), int(gs["models_cache"][m]["row"]))
-        for m in gs["squad_models"][uid]
-    }
-
-
 def _move_logs(gs: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
     return [e for e in gs["action_logs"] if e.get("type") == kind]
 
@@ -73,7 +67,7 @@ def test_overrun_pile_in_puis_combat_pour_une_unite_sans_cible():
         _unit_cfg(2, 2, 23, 20),   # ennemi à 3" (≤ 5"), atteignable par un pile-in de 3"
     ], charged=["1"])
     gs = eng.game_state
-    origin = _positions(gs, "1")
+    origin = squad_model_cells(gs, "1")
 
     ok, out = eng.execute_semantic_action({"action": "activate_unit", "unitId": "1"})
     assert ok is True and out["active_fight_unit"] == "1", out
@@ -100,7 +94,7 @@ def test_overrun_pile_in_puis_combat_pour_une_unite_sans_cible():
     assert out["active_fight_unit"] == "1" and out["valid_targets"] == ["2"], out
     assert out["overrun_eligible"] is False, "« one additional pile-in move » : un seul"
     assert OVERRUN_PILE_IN_UNIT_KEY not in gs and gs[OVERRUN_PILE_IN_DONE_KEY] == {"1"}
-    assert _positions(gs, "1") != origin, "les figurines ont bougé"
+    assert squad_model_cells(gs, "1") != origin, "les figurines ont bougé"
     assert "1" not in gs["units_selected_to_fight"], "pas encore combattu"
     logs = _move_logs(gs, "overrun_pile_in")
     assert len(logs) == 1 and logs[0]["unitId"] == "1", logs
@@ -127,7 +121,7 @@ def test_abandon_du_pile_in_additionnel_laisse_l_unite_active():
         _unit_cfg(2, 2, 23, 20),
     ], charged=["1"])
     gs = eng.game_state
-    origin = _positions(gs, "1")
+    origin = squad_model_cells(gs, "1")
     eng.execute_semantic_action({"action": "activate_unit", "unitId": "1"})
     eng.execute_semantic_action({"action": "overrun_pile_in", "unitId": "1"})
     assert gs[OVERRUN_PILE_IN_UNIT_KEY] == "1"
@@ -138,7 +132,7 @@ def test_abandon_du_pile_in_additionnel_laisse_l_unite_active():
     assert OVERRUN_PILE_IN_UNIT_KEY not in gs
     assert out["active_fight_unit"] == "1" and out["valid_targets"] == [], out
     assert out["overrun_eligible"] is True, "renoncer n'épuise pas le droit au pile-in additionnel"
-    assert _positions(gs, "1") == origin
+    assert squad_model_cells(gs, "1") == origin
     assert "1" not in gs["units_selected_to_fight"]
 
     # Hors plan, le même clic droit reprend son sens d'avant : passer une unité sans cible.
@@ -250,7 +244,7 @@ def test_new_foe_desengage_overrun_puis_combat_et_verrou():
     `overrun_eligible` absent du payload New Foes."""
     eng = _engine_at_new_foes_engager_dead()
     gs = eng.game_state
-    origin = _positions(gs, "3")
+    origin = squad_model_cells(gs, "3")
 
     out = _new_foes_state(eng)
     assert out["fight_subphase"] == "consolidate" and set(out["consolidation_new_foes"]) == {"3", "5"}, out
@@ -276,7 +270,7 @@ def test_new_foe_desengage_overrun_puis_combat_et_verrou():
     assert out["active_fight_unit"] == "3" and out["valid_targets"] == ["4"], out
     assert out["overrun_eligible"] is False, "« one additional pile-in move » : un seul"
     assert OVERRUN_PILE_IN_UNIT_KEY not in gs and "3" in gs[OVERRUN_PILE_IN_DONE_KEY]
-    assert _positions(gs, "3") != origin
+    assert squad_model_cells(gs, "3") != origin
     logs = _move_logs(gs, "overrun_pile_in")
     assert len(logs) == 1 and logs[0]["unitId"] == "3", logs
 
@@ -294,7 +288,7 @@ def test_new_foe_desengage_overrun_puis_combat_et_verrou():
 def test_new_foe_renonce_au_pile_in_additionnel_reste_actif():
     eng = _engine_at_new_foes_engager_dead()
     gs = eng.game_state
-    origin = _positions(gs, "3")
+    origin = squad_model_cells(gs, "3")
     _new_foes_state(eng)
     eng.execute_semantic_action({"action": "overrun_pile_in", "unitId": "3"})
     assert gs[OVERRUN_PILE_IN_UNIT_KEY] == "3"
@@ -304,13 +298,13 @@ def test_new_foe_renonce_au_pile_in_additionnel_reste_actif():
     assert OVERRUN_PILE_IN_UNIT_KEY not in gs
     assert out["active_fight_unit"] == "3" and out["valid_targets"] == [], out
     assert out["overrun_eligible"] is True, "renoncer n'épuise pas le droit au pile-in additionnel"
-    assert _positions(gs, "3") == origin
+    assert squad_model_cells(gs, "3") == origin
     assert "3" not in gs["units_selected_to_fight"]
     # Sans overrun, le New Foe sans cible reste « sélectionné sans attaque » (clic sur le plateau).
     ok, out = eng.execute_semantic_action({"action": "left_click", "unitId": "3"})
     assert ok is True, out
     assert "3" in gs["units_selected_to_fight"] and gs["active_fight_unit"] is None
-    assert _positions(gs, "3") == origin
+    assert squad_model_cells(gs, "3") == origin
 
 
 def test_new_foe_sans_ennemi_a_5_pouces_n_a_pas_d_overrun_utile():

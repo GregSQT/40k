@@ -81,6 +81,7 @@ def _gs():
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,
+        "phase": "fight",
         "pending_agent_decision": None,
         # Defenseur PROGRAMMATIQUE (joueur 0 = les cibles) : attribution AUTO des blessures
         # mortelles. Le siege humain a son propre test (`test_defenseur_humain_…`).

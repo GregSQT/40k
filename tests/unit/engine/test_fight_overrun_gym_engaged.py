@@ -30,7 +30,7 @@ from engine.phase_handlers.shared_utils import (
     init_enemy_slot_mapping,
 )
 
-from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+from tests.unit.engine._state_builders import squad_model_cells, synthetic_state, synthetic_unit
 
 
 _OURS = "1"
@@ -91,11 +91,6 @@ def _gs(*, engaged_at_start: bool, extra_foes: Tuple[Dict[str, Any], ...] = ()) 
     return gs
 
 
-def _model_cells(gs: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
-    mc = gs["models_cache"]
-    return {m: (int(mc[m]["col"]), int(mc[m]["row"])) for m in gs["squad_models"][_OURS]}
-
-
 def _dist_to_foe(cell: Tuple[int, int]) -> int:
     return calculate_hex_distance(cell[0], cell[1], _FOE_CELL[0], _FOE_CELL[1])
 
@@ -103,7 +98,7 @@ def _dist_to_foe(cell: Tuple[int, int]) -> int:
 def test_unit_engaged_during_phase_gets_additional_pile_in():
     """Second cas 12.06 : engagée maintenant, non engagée au snapshot → pile-in additionnel."""
     gs = _gs(engaged_at_start=False)
-    before = _model_cells(gs)
+    before = squad_model_cells(gs, _OURS)
     assert any(_dist_to_foe(c) > 2 for c in before.values()), "VERT VACANT : une fig doit être hors EZ"
     slot = get_enemy_slot_mapping(gs, 1).index(_FOE)
     eng = _FakeEngine(gs)
@@ -112,7 +107,7 @@ def test_unit_engaged_during_phase_gets_additional_pile_in():
 
     assert ok is True
     assert [(sid, kind) for sid, kind, _p in eng.moves] == [(_OURS, "overrun_pile_in")]
-    after = _model_cells(gs)
+    after = squad_model_cells(gs, _OURS)
     assert after != before, "le plan commité doit avoir déplacé au moins une figurine"
     assert all(_dist_to_foe(after[m]) <= _dist_to_foe(before[m]) for m in before)
     assert all(_dist_to_foe(c) <= 2 for c in after.values()), (
@@ -125,7 +120,7 @@ def test_unit_engaged_during_phase_gets_additional_pile_in():
 def test_unit_engaged_at_step_start_makes_normal_fight():
     """Contrôle : engagée au snapshot → NORMAL fight 12.05, aucun pile-in additionnel."""
     gs = _gs(engaged_at_start=True)
-    before = _model_cells(gs)
+    before = squad_model_cells(gs, _OURS)
     slot = get_enemy_slot_mapping(gs, 1).index(_FOE)
     eng = _FakeEngine(gs)
 
@@ -133,7 +128,7 @@ def test_unit_engaged_at_step_start_makes_normal_fight():
 
     assert ok is True
     assert eng.moves == []
-    assert _model_cells(gs) == before
+    assert squad_model_cells(gs, _OURS) == before
     assert _OURS not in gs[OVERRUN_PILE_IN_DONE_KEY]
     assert eng.resolved == [(_OURS, _FOE)]
 

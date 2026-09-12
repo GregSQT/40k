@@ -21,7 +21,6 @@ from shared.data_validation import (
     require_positive_int,
     require_present,
     HAZARD_CONTEXT_EXHORTATION,
-    HAZARD_CONTEXT_TAGS,
 )
 from engine.constants import (
     DRAW_WINNER,
@@ -45,6 +44,7 @@ from engine.phase_handlers.fight_handlers import (
     exhortation_regime_of,
     fight_exhortation_engaged_targets,
     fight_v11_client_pool,
+    fight_v11_expected_seat,
     fight_v11_pending_selection_squad,
 )
 
@@ -54,7 +54,10 @@ from engine.phase_handlers.shared_utils import (
     PENDING_REACTIVE_MOVE_KEY,
     HAZARD_CTX,
     SHOOT_CTX,
+    ManualAllocCtx,
+    _squad_owner_player,
     manual_allocation_waiting_payload,
+    mortal_wounds_ability_log_entry,
     model_datasheet_name,
     drive_reactive_move_window,
     build_units_cache,
@@ -3869,9 +3872,8 @@ class W40KEngine(gym.Env):
             fight_subphase = self.game_state.get("fight_subphase")
             if fight_subphase is None:
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": None, "reason": "fight_machine_off"}
-            for _pending_ctx in _PENDING_ALLOC_CTXS:
-                if self.game_state.get(_pending_ctx.alloc_key) is not None:
-                    return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "manual_allocation_pending"}
+            if self._pending_manual_alloc_ctx() is not None:
+                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "manual_allocation_pending"}
             # Selection de la politique en cours (arme, re-selection de cible) : `squad_fight` a
             # deja enregistre l escouade et passe le selecteur — le pool 12.04 est a l humain,
             # mais c est encore au bot de finir SA selection. Ni drain ni fin de phase ici.
@@ -3933,20 +3935,24 @@ class W40KEngine(gym.Env):
         quand il reste quelque chose a jouer (a l humain ou au bot). Jumeau de
         `_fight_v11_manual_state`, qui complete la phase quand c est l humain qui vide la
         derniere etape."""
-        from engine.phase_handlers.fight_handlers import (
-            fight_v11_grouped_next,
-            fight_v11_new_foes_pool,
-        )
         gs = self.game_state
         if gs.get("phase") != "fight" or gs.get("fight_subphase") != "consolidate":
             return None
-        if fight_v11_pending_selection_squad(gs) is not None:
+        if self._pending_manual_alloc_ctx() is not None:
             return None
-        if any(gs.get(ctx.alloc_key) is not None for ctx in _PENDING_ALLOC_CTXS):
-            return None
-        if fight_v11_new_foes_pool(gs) or fight_v11_grouped_next(gs, "consolidate") is not None:
+        # Selection de politique en cours, New Foe 12.08 ou groupe de consolidation restant :
+        # la machine attend encore un siege (`fight_v11_expected_seat`, source unique).
+        if fight_v11_expected_seat(gs) is not None:
             return None
         return self._process_semantic_action({"action": "advance_phase", "from": "fight"})
+
+    def _pending_manual_alloc_ctx(self) -> Optional[ManualAllocCtx]:
+        """Contexte de l allocation manuelle des pertes EN ATTENTE d un defenseur humain
+        (`_PENDING_ALLOC_CTXS`), ou ``None`` — une seule vit a la fois dans `game_state`."""
+        for ctx in _PENDING_ALLOC_CTXS:
+            if self.game_state.get(ctx.alloc_key) is not None:
+                return ctx
+        return None
 
     def _initialize_rule_choice_runtime_state(self) -> None:
         """Initialize in-memory state for timing-based rule choices."""
@@ -6796,7 +6802,6 @@ class W40KEngine(gym.Env):
         contre les des au lieu de le croire.
         """
         from engine.phase_handlers.shared_utils import allocate_mortal_wounds, is_programmatic_defender
-        units_cache = require_key(self.game_state, "units_cache")
         d6 = random.randint(1, 6)
         # D3 jete seulement sur 4-5 ; sur 6 le compte est fixe (3), sur 1-3 nul.
         d3: Optional[int] = None
@@ -6808,48 +6813,20 @@ class W40KEngine(gym.Env):
             d3 = random.randint(1, 3)
             mw_count = d3
         _exhort_details: List[Dict[str, Any]] = []
-        suffix = " [auto: sans choix de joueur]" if auto else ""
-        # MEME type et MEME forme de ligne que Hold Still (`_apply_batch_mortal_wounds`) : deux
-        # capacites qui infligent des blessures mortelles (06.02) ne peuvent pas se journaliser
-        # differemment. Le type `exhortation_de_rage` qui vivait ici n'etait dans aucune entree
-        # de `_STEP_LOG_TYPE_MAP` : la ligne etait ecartee du journal en silence, et les
-        # blessures ne laissaient derriere elles qu'un event `dead` sans cause.
-        _tgt_col, _tgt_row = require_unit_position(str(target_eid), self.game_state)
-        _mw_seg = f" MW:{d3}" if d3 is not None else ""
-        log_entry: Dict[str, Any] = {
-            "type": "mortal_wounds_ability",
-            # Meme texte que la ligne step.log (`Trigger:` puis `MW:`), pour que le Game Log et
-            # le journal disent la meme chose du meme jet.
-            "message": (
-                f"Unit {target_eid}({_tgt_col},{_tgt_row}) SUFFERS {mw_count} Mortal Wounds "
-                f"{HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]} Trigger:{d6}{_mw_seg}"
-                f" [FROM:{squad_id}]{suffix}"
-            ),
-            "turn": self.game_state.get("turn", 0),  # get allowed
-            "phase": "fight",
-            # L'unite de la ligne est celle QUI ENCAISSE, comme sur toute ligne SUFFERS :
-            # `_build_step_log_details` en tire `unit_with_coords`, et l'analyzer y lit la
-            # cible a qui retirer les points de vie. La source vit dans `mortalWoundSourceId`,
-            # comme sur la ligne jumelle de Hold Still — aucune autre cle d'unite, sinon
-            # `useGameLog` (front) prefere `attackerId` a `unitId` et les deux producteurs
-            # divergent.
-            "unitId": target_eid,
-            "player": int(require_key(units_cache[str(target_eid)], "player")),
-            "col": _tgt_col,
-            "row": _tgt_row,
-            "hazardousMortalWounds": mw_count,
-            # De de DECLENCHEMENT, compare a un seuil (4+) : cle DISTINCTE de `mortalWoundDice`,
-            # dont les des se SOMMENT pour donner le compte. Sous une meme cle, l'analyzer
-            # additionnerait un jet de seuil a une quantite.
-            "abilityTriggerRoll": d6,
-            "mortalWoundSourceId": str(squad_id),
-            "hazardContext": HAZARD_CONTEXT_EXHORTATION,
-            "hazardDetails": _exhort_details,
-            "result": f"{mw_count} MW",
-        }
-        if d3 is not None:
-            # Liste : contrat de `mortalWoundDice` partage avec Hold Still (des qui se SOMMENT).
-            log_entry["mortalWoundDice"] = [d3]
+        # MEME type et MEME forme de ligne que Hold Still (`mortal_wounds_ability_log_entry`,
+        # source unique) : deux capacites qui infligent des blessures mortelles (06.02) ne
+        # peuvent pas se journaliser differemment. Le type `exhortation_de_rage` qui vivait ici
+        # n'etait dans aucune entree de `_STEP_LOG_TYPE_MAP` : la ligne etait ecartee du journal
+        # en silence, et les blessures ne laissaient derriere elles qu'un event `dead` sans cause.
+        # Meme texte que la ligne step.log (`Trigger:` puis `MW:`), pour que le Game Log et le
+        # journal disent la meme chose du meme jet ; `[d3]` : des qui se SOMMENT, absent sur 1-3 et 6.
+        log_entry = mortal_wounds_ability_log_entry(
+            self.game_state, str(target_eid), str(squad_id), mw_count,
+            HAZARD_CONTEXT_EXHORTATION, _exhort_details,
+            dice=[d3] if d3 is not None else None,
+            trigger_roll=d6,
+            message_suffix=" [auto: sans choix de joueur]" if auto else "",
+        )
         append_action_log(self.game_state, log_entry)
         if mw_count > 0:
             if is_programmatic_defender(self.game_state, target_eid):
@@ -6900,21 +6877,18 @@ class W40KEngine(gym.Env):
             # Attaquant tué par la cascade (24.08) : plus dans le pool, `_fight_v11_manual_state`
             # rend la main sur le choix d'une autre unité.
             return _fight_v11_manual_state(self.game_state)
-        # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
-        # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
-        attacker_alive = squad_id in require_key(self.game_state, "units_cache")
-        if regime == EXHORTATION_REGIME_GYM:
-            if not attacker_alive:
-                self._fight_v11_gym_settle()
-                return True, {
-                    "action": "squad_fight",
-                    "unitId": squad_id,
-                    "squad_id": squad_id,
-                    "target_squad_id": None,
-                    "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
-                }
-            return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
-        raise ValueError(f"_continue_fight_after_exhortation: régime inconnu {regime!r}")
+        # Régime gym. §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à
+        # ≤6"). Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
+        if squad_id not in require_key(self.game_state, "units_cache"):
+            self._fight_v11_gym_settle()
+            return True, {
+                "action": "squad_fight",
+                "unitId": squad_id,
+                "squad_id": squad_id,
+                "target_squad_id": None,
+                "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
+            }
+        return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
 
     def _check_and_trigger_exhortation_de_rage(
         self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int],
@@ -6949,7 +6923,7 @@ class W40KEngine(gym.Env):
             return self._apply_exhortation_de_rage(
                 squad_id, engaged[0], target_slot, auto=True, regime=regime
             )
-        player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+        player = _squad_owner_player(self.game_state, squad_id)
         if not self.gym_training_mode and not self._is_player_human(player):
             return self._apply_exhortation_de_rage(
                 squad_id, _ai_select_fight_target(self.game_state, squad_id, engaged),
@@ -8224,15 +8198,17 @@ class W40KEngine(gym.Env):
                     unit = require_unit_by_id(gs, str(uid))
                     # Mode 12.08 constate AVANT le move : apres, une engaging reussie est engagee.
                     mode = fight_v11_consolidation_mode(gs, unit)
-                    plan = squad_consolidate_plan(gs, str(uid))
+                    plan = squad_consolidate_plan(gs, str(uid), mode=mode)
                     if plan is not None:
                         self._gym_commit_fight_move(
                             gs, str(uid), plan, "consolidation", consolidation_mode=mode
                         )
                     require_key(gs, "consolidation_done").add(str(uid))
-                    if plan is not None and mode == "engaging":
-                        if fight_v11_consolidation_freeze_new_foes(gs, unit):
-                            break  # les New Foes combattent AVANT la conso suivante (§8.C)
+                    if (
+                        plan is not None and mode == "engaging"
+                        and fight_v11_consolidation_freeze_new_foes(gs, unit)
+                    ):
+                        break  # les New Foes combattent AVANT la conso suivante (§8.C)
                 continue
 
             raise ValueError(f"fight_subphase inattendu dans le chemin gym: {sub!r}")
@@ -8343,9 +8319,9 @@ class W40KEngine(gym.Env):
         # l allocation en cours (une seule vit dans `game_state`) : le defenseur cliquait dans
         # une allocation qui n existait plus. Atteignable des l Exhortation sur un defenseur
         # humain, qui suspend le tour IA au milieu d une selection de combat.
-        for _pending_ctx in _PENDING_ALLOC_CTXS:
-            if self.game_state.get(_pending_ctx.alloc_key) is not None:
-                return True, manual_allocation_waiting_payload(self.game_state, _pending_ctx)
+        _pending_ctx = self._pending_manual_alloc_ctx()
+        if _pending_ctx is not None:
+            return True, manual_allocation_waiting_payload(self.game_state, _pending_ctx)
 
         current_phase = self.game_state["phase"]
         success = True
@@ -9693,12 +9669,14 @@ class W40KEngine(gym.Env):
         armed = self.game_state.pop(FIGHT_SELECTION_EXHORTATION_KEY, None)
         if armed is None:
             return success, result
-        armed_squad_id = str(require_key(armed, "squad_id"))
+        armed_squad_id = str(armed)
+        # Régime MANUEL par construction : la machine manuelle est celle du siège humain (PvP
+        # comme PvE), le siège programmatique passe par `_process_squad_action`.
         exhort = self._check_and_trigger_exhortation_de_rage(
             armed_squad_id,
             require_unit_by_id(self.game_state, armed_squad_id),
             None,
-            regime=exhortation_regime_of(require_key(armed, "regime"), "_process_fight_phase"),
+            regime=EXHORTATION_REGIME_MANUAL,
         )
         if exhort is None:
             raise RuntimeError(
