@@ -164,6 +164,15 @@ log (`↩️ --resume-from annulé`).
 Un checkpoint sans son `.pkl` de stats n'est **pas** reprenable : la commande échoue
 explicitement plutôt que de servir les stats d'un autre modèle (V11 §0.35).
 
+**Les checkpoints périodiques sont de l'historique** (décision 2026-09-12) : seule la rotation
+(`max_checkpoints`, sur les checkpoints écrits par le run courant) en borne le nombre ; aucun chemin
+d'entraînement ne les retire en fin de run réussi, et `--new` ne les archive pas. Ils sont le seul
+point de reprise d'un run terminé dont la politique s'avère mauvaise, et sous `save_best_robust` la
+seule trace des poids de fin de run (le canonique est l'instantané robuste). Ceux d'un run précédent
+restent donc en place : les distinguer par leur nombre de pas et leur date avant un `--resume-from`
+est à la charge de l'opérateur — la promotion repose le contrat courant sur le checkpoint promu sans
+vérifier sa lignée.
+
 ### Key Paths
 - **Training Configs**: `config/agents/<agent_name>/<agent_name>_training_config.json`
 - **Reward Configs**: `config/agents/<agent_name>/<agent_name>_rewards_config.json` (par agent)

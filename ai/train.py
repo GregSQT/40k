@@ -2056,13 +2056,19 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
     `<prefix>_vecnormalize_<n>_steps.pkl`, un nom que `get_vec_normalize_path` ne resout pas.
 
     L'instance tient la liste des zips qu'elle a ELLE-MEME ecrits (`written_checkpoints`, ordre
-    d'ecriture) : c'est sur cette liste — jamais sur un balayage du dossier — que portent la
-    rotation (`RotatingCheckpointCallback`) et le retrait de fin de run reussi
-    (`discard_written_checkpoints`). Un balayage `<prefix>_*_steps.zip` frappait les checkpoints
-    des runs precedents, qui sont l'historique et restent en place (cf. le contrat des artefacts
-    canoniques et `test_scored_and_checkpoint_models_are_NOT_archived`). L'ordre d'ecriture est
-    l'ordre en pas : `num_timesteps` est monotone dans un processus, et l'instance survit aux
-    tranches `learn()` successives (`n_calls` n'est pas remis a zero par `init_callback`).
+    d'ecriture) : c'est sur cette liste — jamais sur un balayage du dossier — que porte la
+    rotation (`RotatingCheckpointCallback`). L'ordre d'ecriture est l'ordre en pas :
+    `num_timesteps` est monotone dans un processus, et l'instance survit aux tranches `learn()`
+    successives (`n_calls` n'est pas remis a zero par `init_callback`).
+
+    Les checkpoints sont de l'HISTORIQUE : seule la rotation en borne le nombre, aucun chemin
+    d'entrainement ne les retire en fin de run reussi (decision du 2026-09-12). Ils sont le seul
+    point de reprise (`--resume-from`) d'un run termine dont la politique s'avere mauvaise, et
+    sous `save_best_robust` la seule trace des poids de fin de run, le canonique etant
+    l'instantane robuste. Un balayage `<prefix>_*_steps.zip` en fin de run frappait aussi ceux
+    des runs precedents et laissait orphelin leur compte d'episodes ; le chemin de rotation n'en
+    a jamais eu (cf. le contrat des artefacts canoniques et
+    `test_scored_and_checkpoint_models_are_NOT_archived`).
     """
 
     #: Compteur d'episodes GLOBAL, pose apres construction — le tracker de metriques n'existe pas
@@ -2090,18 +2096,6 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
                 self.written_checkpoints.remove(checkpoint_path)
             self.written_checkpoints.append(checkpoint_path)
         return continue_training
-
-    def discard_written_checkpoints(self) -> List[str]:
-        """Retire les checkpoints de CE run, compagnons compris, et rend les chemins retires.
-
-        Appele apres un entrainement REUSSI : le modele canonique est publie, les checkpoints
-        periodiques du run n'ont plus d'usage. Ceux des runs precedents ne sont pas touches.
-        """
-        discarded = list(self.written_checkpoints)
-        for checkpoint_path in discarded:
-            remove_model_with_companions(checkpoint_path)
-        self.written_checkpoints.clear()
-        return discarded
 
 
 class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
@@ -4877,11 +4871,9 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         
         # Les callbacks arrivent de `setup_callbacks`, appelee AVANT que ce tracker n'existe :
         # c'est ici que le compteur d'episodes rejoint les checkpoints (cf. ai/run_state.py).
-        checkpoint_callbacks = [
-            callback for callback in callbacks if isinstance(callback, VecNormalizeCheckpointCallback)
-        ]
-        for checkpoint_callback in checkpoint_callbacks:
-            checkpoint_callback.metrics_tracker = metrics_tracker
+        for callback in callbacks:
+            if isinstance(callback, VecNormalizeCheckpointCallback):
+                callback.metrics_tracker = metrics_tracker
 
         all_callbacks = callbacks + [metrics_callback]
         enhanced_callbacks = CallbackList(all_callbacks)
@@ -4912,17 +4904,10 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
             publish_canonical_model(model, model_path, int(metrics_tracker.episode_count))
         
-        # Le run reussi retire SES checkpoints periodiques : le canonique est publie, ils n'ont
-        # plus d'usage. Ceux des runs precedents restent (cf. `discard_written_checkpoints`).
-        discarded_checkpoints = [
-            path
-            for checkpoint_callback in checkpoint_callbacks
-            for path in checkpoint_callback.discard_written_checkpoints()
-        ]
-        if discarded_checkpoints:
-            print(f"\n🧹 {len(discarded_checkpoints)} checkpoint(s) de ce run retire(s)")
-        
-        # Le `_interrupted` d'un Ctrl-C precedent part avec ses compagnons, meme regle.
+        # Les checkpoints periodiques du run RESTENT : ils sont l'historique reprenable (cf.
+        # `VecNormalizeCheckpointCallback`), comme sur le chemin de rotation. Seul le
+        # `_interrupted` d'un Ctrl-C precedent part, avec ses compagnons : le run qui aboutit
+        # remplace la tentative abandonnee.
         interrupted_path = _interrupted_model_path(model_path)
         if os.path.exists(interrupted_path):
             remove_model_with_companions(interrupted_path)
