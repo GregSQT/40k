@@ -148,9 +148,14 @@ rouge/vert par mutation sur les cinq défauts réintroduits).
 **Config** : `config/agents/ArmageddonAgent_x1_entnorm/` = copie complète de
 `config/agents/ArmageddonAgent_x1/` (`inherits_from` inutilisable : `config_loader.py` résout
 **tout** vers l'agent de base, profils compris), fichiers et clé de récompense renommés.
-`x1_long` inchangé = bras de **contrôle** (verrou : égal au `x1_long` de base). `x1_long_entnorm`
-(`extends: x1_long`) = bras **traité** : clé active + `ent_coef` {0,5 → 0,05, `decay_fraction`
-0,4}, soit ×5 ≈ ln n moyen du mouvement : pression inchangée sur les états de mouvement
+`x1_long` inchangé (verrou : égal au `x1_long` de base). Bras de **contrôle** `x1_40k`
+(`extends: x1_long`) : **40 000** épisodes et `bot_eval_intermediate` 30, rien d'autre — décision
+du 2026-09-12 : sur P1 la stagnation se lit en 30 à 40 000 épisodes (sonde vs P0 0,547 → 0,601
+entre 60 000 et 120 000, plateau sous 0,65), et 100 000 par bras aurait coûté ~25 h ; les rampes
+sont en fraction du run (entropie → 16 000, learning rate → 36 000), `bot_eval_final` 300 garde
+la précision publiée. Ces bras se comparent **entre eux**, jamais à la référence `x1_long` 100k.
+`x1_40k_entnorm` (`extends: x1_40k`) = bras **traité** : clé active + `ent_coef` {0,5 → 0,05,
+`decay_fraction` 0,4}, soit ×5 ≈ ln n moyen du mouvement : pression inchangée sur les états de mouvement
 (5/5,07), relevée de 5/ln n sur les têtes courtes (charge ×5,8, shoot ×3,2, deploy ×2,6, oath ×3,1,
 fight ×3,7). Aucun JSON existant de `config/` n'est modifié (P1 en cours). La copie est un
 **bras d'expérience** : à supprimer ou à réabsorber à la clôture, jamais à faire diverger.
@@ -163,9 +168,10 @@ politique **neuve** n'est PAS uniforme sur les têtes pointées (`shoot_slot` 0,
 `shoot_weapon_sel_slot` 1,04 / 1,39, `deploy_slot` 1,76 / 1,95) — d'où le plancher uniforme et non
 « non entraînée ». Verrous : `tests/unit/scripts/test_family_entropy_probe.py`.
 
-**Runs, uniquement après la fin du run `--etape P1` en cours (un seul run GPU)** :
-1. Contrôle : `python3 ai/train.py --agent ArmageddonAgent_x1_entnorm --training-config x1_long --scenario bot --resolution 1 --new`
-2. Traité : `python3 ai/train.py --agent ArmageddonAgent_x1_entnorm --training-config x1_long_entnorm --scenario bot --resolution 1 --new` — ce second `--new` **écarte** les artefacts du contrôle sous horodatage (`archive_canonical_artifacts_for_new_run`) : noter le nom archivé, c'est le modèle final du contrôle.
+**Runs (P1 arrêté le 2026-09-12 à 70 000 épisodes d'étape sur décision utilisateur — plateau ;
+un seul run GPU)**, enchaînés par une chaîne détachée (`logs/entnorm_chain.log`) :
+1. Contrôle : `python3 ai/train.py --agent ArmageddonAgent_x1_entnorm --training-config x1_40k --scenario bot --resolution 1 --new`
+2. Traité : `python3 ai/train.py --agent ArmageddonAgent_x1_entnorm --training-config x1_40k_entnorm --scenario bot --resolution 1 --new` — ce second `--new` **écarte** les artefacts du contrôle sous horodatage (`archive_canonical_artifacts_for_new_run`) : noter le nom archivé, c'est le modèle final du contrôle.
 
 Sur les deux : `diag/grad_norm_entropy_mb0`, `diag/grad_share_policy_mb0`, `train/n_minibatches_done`,
 `train/entropy_loss` (brut), `train/entropy_loss_normalized`.

@@ -318,23 +318,45 @@ def test_curriculum_refuses_a_non_bool_key_like_the_constructor(monkeypatch: pyt
 # Config de l'expérience : config/agents/ArmageddonAgent_x1_entnorm/
 # ---------------------------------------------------------------------------
 
-def test_entnorm_control_profile_is_x1_long_of_the_base_agent() -> None:
-    """Bras de CONTRÔLE = `x1_long` de la copie, identique au `x1_long` de ArmageddonAgent_x1."""
+def test_entnorm_x1_long_is_x1_long_of_the_base_agent() -> None:
+    """La copie n'a pas dérivé : son `x1_long` est identique au `x1_long` de ArmageddonAgent_x1."""
     from config_loader import get_config_loader
 
     loader = get_config_loader()
     base = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
-    control = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_long")
-    assert control == base
+    assert loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_long") == base
 
 
-def test_entnorm_treated_profile_is_x1_long_plus_two_overrides() -> None:
-    """`x1_long_entnorm` = `x1_long` + entropy_normalize_by_legal + ent_coef ×5, rien d'autre."""
+def test_entnorm_control_profile_is_x1_long_shortened_to_40k() -> None:
+    """Bras de CONTRÔLE `x1_40k` = `x1_long` + 40 000 épisodes + évals intermédiaires à 30, rien d'autre.
+
+    40 000 : la stagnation de P1 se lit en 30 à 40 000 épisodes (décision du 2026-09-12) ; les
+    rampes sont en fraction du run, donc inchangées. Le chiffre publié (`bot_eval_final` 300)
+    reste celui de `x1_long`.
+    """
     from config_loader import get_config_loader
 
     loader = get_config_loader()
-    control = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_long")
-    treated = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_long_entnorm")
+    long_ = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_long")
+    control = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_40k")
+
+    top_diff = {k for k in set(long_) | set(control) if long_.get(k) != control.get(k)}
+    assert top_diff == {"type", "_doc", "total_episodes", "callback_params"}, top_diff
+    assert control["total_episodes"] == 40_000
+    cb_l, cb_c = long_["callback_params"], control["callback_params"]
+    assert {k for k in set(cb_l) | set(cb_c) if cb_l.get(k) != cb_c.get(k)} == {"bot_eval_intermediate"}
+    assert cb_c["bot_eval_intermediate"] == 30
+    assert cb_c["bot_eval_final"] == 300 and cb_c["bot_eval_freq"] == 10_000
+    assert control["model_params"] == long_["model_params"]
+
+
+def test_entnorm_treated_profile_is_control_plus_two_overrides() -> None:
+    """`x1_40k_entnorm` = `x1_40k` + entropy_normalize_by_legal + ent_coef ×5, rien d'autre."""
+    from config_loader import get_config_loader
+
+    loader = get_config_loader()
+    control = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_40k")
+    treated = loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1_40k_entnorm")
 
     top_diff = {k for k in set(control) | set(treated) if control.get(k) != treated.get(k)}
     assert top_diff == {"type", "_doc", "model_params"}, top_diff

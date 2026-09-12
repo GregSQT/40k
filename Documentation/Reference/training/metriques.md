@@ -220,7 +220,7 @@ pas d'entropie analytique (jamais le cas de `PointerMaskablePolicy`).
 et non `train/entropy_loss`, qui entre dans la loss (`ent_coef × entropy_loss_normalized`) et dans
 `diag/grad_norm_entropy_mb0`. Le gradient d'entropie de chaque état est divisé par ln n_i : à
 `ent_coef` égal, la pression sur un état de mouvement est divisée par ~5 et celle sur une tête à
-deux actions multipliée par 1,44. Le profil `x1_long_entnorm`
+deux actions multipliée par 1,44. Le profil `x1_40k_entnorm`
 (`config/agents/ArmageddonAgent_x1_entnorm/`) compense par `ent_coef` ×5 (0,5 → 0,05) : pression
 inchangée sur le mouvement, relevée de 5/ln n sur les têtes courtes. Clé absente = terme de loss
 strictement inchangé (verrou : `tests/unit/ai/test_entropy_normalize_by_legal.py`).

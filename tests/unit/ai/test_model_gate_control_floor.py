@@ -234,14 +234,24 @@ def test_bot_eval_weights_non_dict_raises_value_error() -> None:
 
 @pytest.mark.parametrize("config_path", _active_training_configs(), ids=lambda p: p.parent.name)
 def test_every_profile_declares_the_control_floor(config_path: Path) -> None:
-    """La cle est OBLIGATOIRE dans CHAQUE profil : `train.py` la lit sans aucun repli."""
+    """La cle est OBLIGATOIRE dans CHAQUE profil : `train.py` la lit sans aucun repli.
+
+    Profils RESOLUS par le loader de production, pas le JSON brut : un profil qui herite
+    (`extends`) ne redeclare qu'une partie de `callback_params`, et c'est le profil resolu que
+    `train.py` lit. Le brut faisait passer `x1_40k` (qui ne surcharge que
+    `bot_eval_intermediate`) pour un profil sans plancher.
+    """
+    from config_loader import get_config_loader
+
     with config_path.open(encoding="utf-8-sig") as handle:
         config = json.load(handle)
-
+    loader = get_config_loader()
+    agent = config_path.parent.name
     profiles = [
-        (name, cfg["callback_params"])
+        (name, loader.load_agent_training_config(agent, name)["callback_params"])
         for name, cfg in config.items()
-        if isinstance(cfg, dict) and "callback_params" in cfg
+        if isinstance(cfg, dict) and not str(name).startswith("_")
+        and "callback_params" in loader.load_agent_training_config(agent, name)
     ]
     assert profiles, f"{config_path.name} : aucun profil avec callback_params"
     for name, params in profiles:

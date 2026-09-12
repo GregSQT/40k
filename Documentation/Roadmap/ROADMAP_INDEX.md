@@ -129,8 +129,10 @@ mouvement. Option B retenue deux fois : normalisation **par l'état** (`−mean(
 `model_params.entropy_normalize_by_legal`, `ai/patched_ppo.py`) plutôt qu'un poids par phase ; et
 un **témoin même code** (`x1_long` sur la clé dédiée `ArmageddonAgent_x1_entnorm`, copie complète
 de la config) plutôt que P0 du 2026-09-10, invalide comme témoin après 70 commits moteur/IA.
-Bras traité : profil `x1_long_entnorm` = `x1_long` + clé + `ent_coef` ×5 (0,5 → 0,05). Les deux
-runs se lancent **après la fin de P1** (un seul run GPU). Métrique décisive : win-rate holdout
+Bras : `x1_40k` (= `x1_long` à **40 000** épisodes, décision du 2026-09-12 : la stagnation de P1
+se lit en 30 à 40 000 épisodes, 100 000 par bras aurait coûté ~25 h) et `x1_40k_entnorm` (= `x1_40k`
++ clé + `ent_coef` ×5, 0,5 → 0,05). P1 arrêté à 70 000 épisodes d'étape (plateau vs P0 ~0,60 sous
+le seuil 0,65) ; les deux runs s'enchaînent sur le GPU libéré. Métrique décisive : win-rate holdout
 final (300 ép./bot, IC95 ±5,7 par bras) ; écart < ~10 points = second run traité, pas de verdict.
 Détail : [training.md#entropie-normalisee](training.md#entropie-normalisee).
 
