@@ -500,12 +500,14 @@ class TestExhortationMortalWoundsTargetRewardPath:
     shooterId ni unit_id.
     """
 
+    # Le payload ne porte plus de dé : la cible est choisie AVANT le jet (datasheet, « select
+    # one enemy unit … and roll one D6 »), donc rien n'est encore lancé quand il est rendu.
     @pytest.mark.parametrize("result", [
         {"action": "squad_fight", "squad_id": "101", "waiting_for_agent_decision": True,
-         "decision_type": "mortal_wounds_target", "exhortation_d6_roll": 6, "mw_count": 3},
+         "decision_type": "mortal_wounds_target"},
         {"action": "squad_fight", "squad_id": "42", "waiting_for_agent_decision": True,
-         "decision_type": "mortal_wounds_target", "exhortation_d6_roll": 4, "mw_count": 2},
-    ], ids=["d6_roll_6", "d6_roll_4"])
+         "decision_type": "mortal_wounds_target"},
+    ], ids=["squad_101", "squad_42"])
     def test_mortal_wounds_target_returns_zero(self, result: dict) -> None:
         """waiting_for_agent_decision → reward 0, pas de ValueError."""
         rc = _rc_desp()

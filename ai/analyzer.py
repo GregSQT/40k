@@ -1627,6 +1627,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_double_pile_in')
             # 24.15 HAZARDOUS : déclenchements en mêlée seulement (tir dans le total shooting).
             + _pair('hazardous_no_hazardous_weapon_fight')
+            # 06.02 par capacité : les deux capacités du corpus se déclenchent en mêlée.
+            + _pair('mw_ability_dice_mismatch')
             # 24.37 / 24.23 : miroir mêlée des compteurs de tir ci-dessus.
             + _pair('torrent_wrong_hit_fight')
             + _pair('lethal_hits_wrong_wound_fight')
@@ -2012,6 +2014,10 @@ def parse_step_log(filepath: str) -> Dict:
         'hazardous_mortal_wounds': {1: 0, 2: 0},
         'hazardous_no_hazardous_weapon': {1: 0, 2: 0},
         'hazardous_no_hazardous_weapon_fight': {1: 0, 2: 0},
+        # 06.02 par CAPACITÉ (Hold Still and Say Aargh, Exhortation of Rage), grammaire 9 :
+        # compte de blessures mortelles qui ne suit pas les dés de sa ligne (`MW:` sommés,
+        # `Trigger:` comparé à 4+). ERREUR moteur, au camp de la source.
+        'mw_ability_dice_mismatch': {1: 0, 2: 0},
         # Jets Roll:1 lus sur les lignes SHOT (tir seul — FOUGHT ne porte pas ce token).
         # Doit correspondre à `hazardous_mortal_wounds` (hors figurines déjà mortes au jet).
         'hazardous_roll1_count': {1: 0, 2: 0},
@@ -2238,6 +2244,7 @@ def parse_step_log(filepath: str) -> Dict:
             },
             'hazardous_no_hazardous_weapon': {1: None, 2: None},
             'hazardous_no_hazardous_weapon_fight': {1: None, 2: None},
+            'mw_ability_dice_mismatch': {1: None, 2: None},
             'reserves_too_early': {1: None, 2: None},
             'torrent_wrong_hit': {1: None, 2: None},
             'torrent_wrong_hit_fight': {1: None, 2: None},
@@ -3691,6 +3698,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _table_row("  ↳ jets Roll:1 (tir) — doit = MW si aucune figurine morte au jet:",
                _fmt_count(_hz_roll1[1]), _fmt_count(_hz_roll1[2]))
     _table_row("  ↳ sans arme HAZARDOUS en armurerie (erreur):", _fmt_count(_hz_nw_total[1]), _fmt_count(_hz_nw_total[2]))
+    _mwa_dice = require_key(stats, 'mw_ability_dice_mismatch')
+    _table_row("MW de capacite 06.02 : compte ≠ des MW:/Trigger: (erreur):",
+               _fmt_count(_mwa_dice[1]), _fmt_count(_mwa_dice[2]))
+    for _pl in (1, 2):
+        if _mwa_dice[_pl] > 0:
+            _first_mwa = stats['first_error_lines']['mw_ability_dice_mismatch'][_pl]
+            if _first_mwa:
+                log_print(f"  First P{_pl} occurrence (Episode {_first_mwa['episode']}): {_first_mwa['line']}")
     for _pl in (1, 2):
         if _hz_nw_total[_pl] > 0:
             _first_hz = stats['first_error_lines']['hazardous_no_hazardous_weapon'][_pl]

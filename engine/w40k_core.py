@@ -4666,12 +4666,11 @@ class W40KEngine(gym.Env):
                     "l etat a ete efface entre la pose de la decision et sa resolution."
                 )
             target_eid = str(require_key(require_key(selected_option, "payload"), "target_eid"))
-            mw_count = int(require_key(pending_exhort, "mw_count"))
             exhort_squad_id = str(require_key(pending_exhort, "squad_id"))
             target_slot_stored: Optional[int] = pending_exhort.get("target_slot")  # get allowed
             clear_pending_agent_decision(self.game_state)
-            d6_roll = int(require_key(pending_exhort, "d6_roll"))
-            return self._apply_exhortation_de_rage(exhort_squad_id, target_eid, mw_count, d6_roll, target_slot_stored)
+            # Le D6 se lance MAINTENANT, cible connue : « select one enemy unit … and roll one D6 ».
+            return self._apply_exhortation_de_rage(exhort_squad_id, target_eid, target_slot_stored)
 
         if decision_type != "rule_choice":
             raise NotImplementedError(
@@ -6636,12 +6635,37 @@ class W40KEngine(gym.Env):
         return wounded, value
 
     def _apply_exhortation_de_rage(
-        self, squad_id: str, target_eid: str, mw_count: int, d6: int,
+        self, squad_id: str, target_eid: str,
         target_slot: Optional[int], auto: bool = False,
     ) -> Tuple[bool, Dict[str, Any]]:
+        """Jet D6 d'Exhortation of Rage sur la cible DEJA choisie, puis reprise du combat.
+
+        Datasheet (`Datasheets - Space Marines.pdf`, Chaplain with Jump Pack) : « you can select
+        one enemy unit it is engaged with and roll one D6, and on a result of: 4-5: That enemy
+        unit suffers D3 mortal wounds. 6: That enemy unit suffers 3 mortal wounds. » La cible est
+        donc choisie AVANT le jet — c'est ici que le de est lance, apres la decision
+        `mortal_wounds_target` ou le choix automatique de la cible unique. Une version
+        precedente jetait le D6 d'abord et ne posait la decision que sur 4+ : l'agent choisissait
+        sa cible en connaissant deja le nombre de blessures, information que la regle ne lui
+        donne pas, et un jet rate ne laissait aucune trace.
+
+        TOUT jet laisse sa ligne, echec compris (`SUFFERS 0 Mortal Wounds … Trigger:<n>`) : le
+        journal porte le de de declenchement (`abilityTriggerRoll`) et, sur 4-5, le D3 qui a
+        donne le compte (`mortalWoundDice`), si bien que l'analyzer peut controler le compte
+        contre les des au lieu de le croire.
+        """
         from engine.phase_handlers.shared_utils import allocate_mortal_wounds
         from engine.action_log_utils import append_action_log
         units_cache = require_key(self.game_state, "units_cache")
+        d6 = random.randint(1, 6)
+        mw_dice: Optional[List[int]] = None
+        if d6 <= 3:
+            mw_count = 0
+        elif d6 == 6:
+            mw_count = 3
+        else:
+            mw_dice = [random.randint(1, 3)]
+            mw_count = mw_dice[0]
         _exhort_details: List[Dict[str, Any]] = []
         suffix = " [auto: cible unique]" if auto else ""
         # MEME type et MEME forme de ligne que Hold Still (`_apply_batch_mortal_wounds`) : deux
@@ -6650,30 +6674,43 @@ class W40KEngine(gym.Env):
         # de `_STEP_LOG_TYPE_MAP` : la ligne etait ecartee du journal en silence, et les
         # blessures ne laissaient derriere elles qu'un event `dead` sans cause.
         _tgt_col, _tgt_row = require_unit_position(str(target_eid), self.game_state)
-        append_action_log(self.game_state, {
+        _mw_seg = f" MW:{mw_dice[0]}" if mw_dice is not None else ""
+        log_entry: Dict[str, Any] = {
             "type": "mortal_wounds_ability",
+            # Meme texte que la ligne step.log (`Trigger:` puis `MW:`), pour que le Game Log et
+            # le journal disent la meme chose du meme jet.
             "message": (
                 f"Unit {target_eid}({_tgt_col},{_tgt_row}) SUFFERS {mw_count} Mortal Wounds "
-                f"{HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]} [FROM:{squad_id}]"
-                f" (D6={d6}){suffix}"
+                f"{HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]} Trigger:{d6}{_mw_seg}"
+                f" [FROM:{squad_id}]{suffix}"
             ),
             "turn": self.game_state.get("turn", 0),  # get allowed
             "phase": "fight",
             # L'unite de la ligne est celle QUI ENCAISSE, comme sur toute ligne SUFFERS :
             # `_build_step_log_details` en tire `unit_with_coords`, et l'analyzer y lit la
-            # cible a qui retirer les points de vie. L'attaquant garde sa cle a part.
+            # cible a qui retirer les points de vie. La source vit dans `mortalWoundSourceId`,
+            # comme sur la ligne jumelle de Hold Still — aucune autre cle d'unite, sinon
+            # `useGameLog` (front) prefere `attackerId` a `unitId` et les deux producteurs
+            # divergent.
             "unitId": target_eid,
-            "attackerId": squad_id,
             "player": int(require_key(units_cache[str(target_eid)], "player")),
             "col": _tgt_col,
             "row": _tgt_row,
             "hazardousMortalWounds": mw_count,
+            # De de DECLENCHEMENT, compare a un seuil (4+) : cle DISTINCTE de `mortalWoundDice`,
+            # dont les des se SOMMENT pour donner le compte. Sous une meme cle, l'analyzer
+            # additionnerait un jet de seuil a une quantite.
+            "abilityTriggerRoll": d6,
             "mortalWoundSourceId": str(squad_id),
             "hazardContext": HAZARD_CONTEXT_EXHORTATION,
             "hazardDetails": _exhort_details,
             "result": f"{mw_count} MW",
-        })
-        allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+        }
+        if mw_dice is not None:
+            log_entry["mortalWoundDice"] = mw_dice
+        append_action_log(self.game_state, log_entry)
+        if mw_count > 0:
+            allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
         # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
         # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
         if squad_id not in units_cache:
@@ -6692,8 +6729,10 @@ class W40KEngine(gym.Env):
     ) -> Optional[Tuple[bool, Dict[str, Any]]]:
         """Vérifie et déclenche l'Exhortation de Rage (mortal_wounds_on_fight_activation).
 
-        Retourne None si la règle n'est pas présente, si le D6 ne trigger pas (1-3), ou si
-        aucun ennemi engagé n'est disponible. Retourne le payload waiting si décision posée.
+        Retourne None si la règle n'est pas présente ou si aucun ennemi engagé n'est disponible.
+        Cible unique : le jet est fait tout de suite (`_apply_exhortation_de_rage`). Plusieurs
+        cibles : la décision `mortal_wounds_target` est posée AVANT tout jet — la datasheet dit
+        « select one enemy unit … and roll one D6 », dans cet ordre — et le jet suit la réponse.
         """
         from engine.phase_handlers.fight_handlers import (
             _unit_has_rule, _fight_build_valid_target_pool,
@@ -6706,18 +6745,12 @@ class W40KEngine(gym.Env):
         engaged = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
         if not engaged:
             return None
-        d6 = random.randint(1, 6)
-        if d6 <= 3:
-            return None
-        mw_count = 3 if d6 == 6 else random.randint(1, 3)
         if len(engaged) == 1:
-            # Cible unique : aucune décision à poser, application directe.
-            return self._apply_exhortation_de_rage(squad_id, engaged[0], mw_count, d6, target_slot, auto=True)
+            # Cible unique : aucune décision à poser, jet et application directs.
+            return self._apply_exhortation_de_rage(squad_id, engaged[0], target_slot, auto=True)
         self.game_state["_pending_exhortation_fight"] = {
             "squad_id": squad_id,
-            "mw_count": mw_count,
             "target_slot": target_slot,
-            "d6_roll": d6,
         }
         player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
         _offered = engaged[:MAX_DECISION_OPTIONS]
@@ -6756,8 +6789,6 @@ class W40KEngine(gym.Env):
             "squad_id": squad_id,
             "waiting_for_agent_decision": True,
             "decision_type": "mortal_wounds_target",
-            "exhortation_d6_roll": d6,
-            "mw_count": mw_count,
         }
 
 
@@ -7644,6 +7675,11 @@ class W40KEngine(gym.Env):
         _mw_src = raw_log.get("mortalWoundSourceId")  # get allowed : absent hors capacites 06.02
         if _mw_src is not None:
             details["mortal_wound_source_id"] = _mw_src
+        # De de DECLENCHEMENT d'une capacite a seuil (Exhortation of Rage : 4+). Sans lui, le
+        # journal ne dit jamais pourquoi la ligne porte 0, D3 ou 3 blessures.
+        _trigger = raw_log.get("abilityTriggerRoll")  # get allowed : absent hors capacites a seuil
+        if _trigger is not None:
+            details["ability_trigger_roll"] = _trigger
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:
@@ -8733,9 +8769,10 @@ class W40KEngine(gym.Env):
             # son eligibilite a la consolidation (12.08, « was eligible to fight this phase »).
             _fight_v11_register_selection(self.game_state, squad_id)
 
-            # Exhortation de Rage (mortal_wounds_on_fight_activation, chantier 06 Passe 4) :
-            # « At the start of the Fight step, roll one D6 : on a 4+, the chosen enemy unit
-            # suffers D3 (4-5) or 3 (6) mortal wounds. »
+            # Exhortation of Rage (mortal_wounds_on_fight_activation, chantier 06 Passe 4) :
+            # « In the Fight phase, when this unit is selected to fight, you can select one enemy
+            # unit it is engaged with and roll one D6, and on a result of: 4-5: That enemy unit
+            # suffers D3 mortal wounds. 6: That enemy unit suffers 3 mortal wounds. »
             # AVANT overrun/cible : la selection se fait AVANT que les attaques soient resolues.
             target_slot_from_semantic: Optional[int] = (
                 int(semantic["target_slot"]) if "target_slot" in semantic else None

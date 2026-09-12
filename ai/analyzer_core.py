@@ -12,7 +12,7 @@ from shared.data_validation import (
     require_key, require_present,
     HAZARD_CONTEXT_EXHORTATION, HAZARD_CONTEXT_HOLD_STILL, HAZARD_CONTEXT_TAGS,
 )
-from ai.analyzer_rules import note_rule_usage, note_special_rule_usage
+from ai.analyzer_rules import mw_ability_dice_error, note_rule_usage, note_special_rule_usage
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
 from ai.analyzer_state import AnalyzerState
@@ -2317,6 +2317,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     stats, state, config, _mwa_rule,
                                     _mwa_src, _mwa_src_type, int(_mwa_player),
                                 )
+                            # Grammaire 9 : le compte se CONTRÔLE contre les dés de la ligne
+                            # (`MW:` sommés, `Trigger:` comparé à 4+). Sur un journal antérieur
+                            # les dés ne sont pas garantis : absence = vieux format, pas faute.
+                            # La faute est au camp de la SOURCE, dont c'est la capacité.
+                            if state.log_grammar >= 9:
+                                _mwa_err = mw_ability_dice_error(
+                                    _mwa_rule, int(_mwa_match.group(1)), action_desc
+                                )
+                                if _mwa_err is not None:
+                                    _mwa_err_pl = int(_mwa_player) if _mwa_player is not None else player
+                                    stats['mw_ability_dice_mismatch'][_mwa_err_pl] += 1
+                                    if stats['first_error_lines']['mw_ability_dice_mismatch'][_mwa_err_pl] is None:
+                                        stats['first_error_lines']['mw_ability_dice_mismatch'][_mwa_err_pl] = {
+                                            'episode': state.current_episode_num,
+                                            'line': f"{line.strip()} — {_mwa_err}",
+                                        }
                             if _mwa_mw > 0:
                                 _apply_damage_and_handle_death(
                                     _mwa_unit_id, _mwa_src, _mwa_mw,
