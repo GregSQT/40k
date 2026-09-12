@@ -1256,7 +1256,7 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 
 ### V11 COMPLIANCE MATRIX — SHOOTING PHASE
 
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/shooting_handlers.py`, `engine/phase_handlers/shared_utils.py`, `engine/combat_utils.py`, `config/weapon_rules.json`).
+> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/shooting_handlers.py`, `engine/phase_handlers/shared_utils.py`, `engine/phase_handlers/attack_sequence.py`, `config/weapon_rules.json`) ; lignes 10.06, 10.07, 04.03, 05.01–05.04 et la table Weapon abilities re-vérifiées le 2026-09-12 (PDF 24 relu).
 
 **Phase & séquence d'attaque**
 
@@ -1267,15 +1267,15 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 | 10.03 | End of Shooting phase | ✅ | transition → charge |
 | 10.04 | Normal shooting (unengaged, pas d'advance ce tour ; après : pas d'action) | ✅ | éligibilité `shooting_handlers` |
 | 10.05 | Assault shooting (unengaged + advance + arme [ASSAULT] ; seules armes [ASSAULT]) | ✅ | `_can_unit_shoot_after_advance_with_weapon`, `weapon_helpers.weapon_has_rule(weapon, "ASSAULT")` |
-| 10.06 | Close-quarters shooting (engaged, pas d'advance ; arme [CLOSE-QUARTERS]/[CLOSE_QUARTERS] ou MONSTER/VEHICLE ; cible unités engagées) | 🟡 | `weapon_has_rule(weapon, "CLOSE_QUARTERS")` + `_unit_shoots_as_monster_or_vehicle` (chemin squad) ; [CLOSE_QUARTERS] ≡ [CLOSE-QUARTERS] (24.27) ; malus −1 to hit MONSTER/VEHICLE → chemin squad uniquement (cf. bandeau V11 T-B), ⚠️ à vérifier côté mono |
-| 10.07 | Indirect shooting (unengaged, pas d'advance, arme [INDIRECT FIRE] ; cible non-visible, cover forcé, échec 1-5 sauf stationnaire visible → 1-3, pas de re-roll) | ⛔ + ⚠️ | `INDIRECT_FIRE` reconnu au registry mais effets (cible non-visible, cover forcé, seuils 1-5/1-3) **non appliqués** en résolution |
+| 10.06 | Close-quarters shooting (engaged, pas d'advance ; arme [CLOSE-QUARTERS]/[CLOSE_QUARTERS] ou MONSTER/VEHICLE ; cible unités engagées) | ✅ (re-vérifié 2026-09-12) | type de tir `resolve_squad_shooting_type` → `SHOOTING_TYPE_CLOSE_QUARTERS` (arme `CLOSE_QUARTERS` ou figurine MONSTER/VEHICLE, `_unit_shoots_as_monster_or_vehicle`) ; [CLOSE_QUARTERS] ≡ [CLOSE-QUARTERS] (24.27) ; malus −1 to hit MONSTER/VEHICLE hors arme CQ sur cible engagée : `_manual_roll_intent` (`_cq_malus_applied`, token `point_blank_malus`), test `test_close_quarters_monster_vehicle_mono.py`. Un seul rouleur de tir existe (`_manual_roll_intent`) : l'ancienne réserve « côté mono » n'a plus d'objet |
+| 10.07 | Indirect shooting (unengaged, pas d'advance, arme [INDIRECT FIRE] ; cible non-visible, cover forcé, échec 1-5 sauf stationnaire visible → 1-3, pas de re-roll) | ✅ (re-vérifié 2026-09-12) | prédicat partagé ciblage/résolution `indirect_shooting_applies` ; plancher d'échec `indirect_fire_fail_below` → `hit_fail_below` de `roll_attack_pool` ; couvert forcé sauf [IGNORES COVER] (24.18 prime) ; « cannot re-roll hit rolls » : `hit_any_fail` coupé quand le plancher joue (`_manual_roll_intent`). Tests `test_indirect_shooting_{choice_10_02,eligibility_10_07,targeting_10_07,resolution_10_07}.py` |
 | 04.01 | Select weapons (≥1 arme ranged par modèle) | ✅ | `weapon_selection` |
 | 04.02 | Select targets (visible 06.01, à portée, unengaged) | ✅ | LOS/portée/`valid_target_pool` ; cible unengaged sauf close-quarters |
-| 04.03 | Resolve attacks (gather A dés, identical attacks, par unité) | ✅ | `_roll_squad_shot_sequence` |
-| 05.01 | Hit rolls (≥ BS ; 6 = critical hit ; 1 = échec) | 🟡 | seuil BS appliqué ; **critical hit non géré** (base de Lethal/Sustained) |
-| 05.02 | Wound rolls (table S vs T ; 6 = critical wound) | 🟡 | `wound_threshold` (valeurs conformes) ; **critical wound non géré** (base d'Anti/Devastating) |
-| 05.03 | Save rolls (Sv modifiée par AP, ou InSv ; groupes d'allocation, CHARACTER en dernier, blessés en premier) | 🟡 | `save_threshold` (AP + invuln OK) ; ordre d'allocation par groupes/CHARACTER → ⚠️ à vérifier |
-| 05.04 | Inflict damage (perte = D ; Feel No Pain) | 🟡 | dégâts = D OK ; **Feel No Pain (24.12) non appliqué** |
+| 04.03 | Resolve attacks (gather A dés, identical attacks, par unité) | ✅ | `_build_manual_allocation` : lots par (cible × profil d'arme), jets par `_manual_roll_intent` → `roll_attack_pool` |
+| 05.01 | Hit rolls (≥ BS ; 6 = critical hit ; 1 = échec) | ✅ (re-vérifié 2026-09-12) | `attack_sequence._evaluate_roll` : 6 non modifié = critique (`criticalHit` au record, base de Lethal/Sustained), 1 non modifié = échec ; test `test_weapon_rules_attack_sequence.py` |
+| 05.02 | Wound rolls (table S vs T ; 6 = critical wound) | ✅ (re-vérifié 2026-09-12) | `wound_threshold` (valeurs conformes) ; 6 non modifié = critique (`crit_wound_on`, abaissé par [ANTI], `criticalWound` au record, base de Devastating) |
+| 05.03 | Save rolls (Sv modifiée par AP, ou InSv ; groupes d'allocation, CHARACTER en dernier, blessés en premier) | ✅ (re-vérifié 2026-09-12) | `save_threshold` (AP + invuln) ; groupes `_build_alloc_groups` (1 par CHARACTER, 1 par triplet W/Sv/InSv) ; ordre déclaré par le défenseur et validé par `apply_manual_shoot_declare_order` (non-CHARACTER blessé d'abord, aucun CHARACTER avant un non-CHARACTER, CHARACTER blessé avant CHARACTER sain), ordre auto `_auto_declared_order` pour un défenseur programmatique |
+| 05.04 | Inflict damage (perte = D ; Feel No Pain) | ✅ (re-vérifié 2026-09-12) | pool trié save croissant, figurine blessée forcée dans le groupe courant (`_manual_allocation_step`) ; dégâts = D ; Feel No Pain 24.12 appliqué dans `_resolve_one_manual_wound` (`_collect_fnp_thresholds` → `_roll_fnp_sequential`, `fnpSaves` au record) — tir ET mêlée (même résolveur) ; tests `test_feel_no_pain.py`, `test_feel_no_pain_conditional.py` |
 
 **Weapon abilities (24.03-24.38) — reconnu au registry vs appliqué en résolution**
 
@@ -1283,38 +1283,38 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 >
 > (2026-07-29 — cet avertissement citait auparavant un stub pass-through `_apply_single_rule` ; la classe `WeaponRulesApplier` qui le portait a été SUPPRIMÉE, cf. la pierre tombale dans `engine/weapons/rules.py`. L'avertissement reste valable, sa cause était juste ailleurs.)
 
-> ⚠️ **FRAÎCHEUR (2026-08-10).** Seules les lignes RAPID FIRE et CLEAVE ont été re-mesurées à
-> cette date, en travaillant sur les règles additives. Elles portaient toutes deux ⛔ « non
-> appliqué » alors que le moteur les applique depuis longtemps. Les autres ⛔ ci-dessous n'ont
-> PAS été revérifiées et sont probablement périmées de la même façon : la mémoire projet note
-> « V11 P1 : toutes les règles d'armes du PDF 24 vives (tir+mêlée) », et `weapon_rule_log_tokens`
-> émet bien des tokens pour [MELTA], [SUSTAINED HITS], [LETHAL HITS], [DEVASTATING WOUNDS] et
-> [TWIN-LINKED] — ce qu'il ne ferait pas si les règles ne jouaient pas. Ne pas se fier à un ⛔ de
-> ce tableau sans lire le code : c'est un audit à refaire, pas un état vérifié.
+> Audit complet du 2026-09-12 (PDF 24 relu) : la table ci-dessous a été recalée ligne par ligne
+> sur le code. Socle commun tir/mêlée `attack_sequence.py` (`build_weapon_attack_profile` +
+> `roll_attack_pool`) : touches/blessures critiques, [TORRENT], [SUSTAINED HITS], [LETHAL HITS],
+> [TWIN-LINKED], [ANTI-X], [DEVASTATING WOUNDS]. Restent chez l'appelant (`_manual_roll_intent`
+> au tir, `_manual_roll_fight_intent` en mêlée) : pool d'attaques ([BLAST]/[RAPID FIRE]/[CLEAVE]/
+> [EXTRA ATTACKS]), seuil de touche (couvert, [HEAVY], [PSYCHIC], 10.06/10.07), [MELTA], AP,
+> allocation ([PRECISION]) et [HAZARDOUS] post-attaques. L'ancien avertissement FRAÎCHEUR du
+> 2026-08-10 (⛔ « probablement périmés ») est levé : ils l'étaient tous.
 
 | Ability | Registry | Appliqué | Note |
 |---|---|---|---|
 | BLAST 24.05 | ✅ | ✅ | +1 dé / 5 figs (`weapon_has_rule(weapon, "BLAST")`, `_blast_extra_dice_per_five`) |
-| ANTI 24.03 | ✅ | 🟡 | crit wound conditionnel — partiel, à vérifier |
+| ANTI 24.03 | ✅ | ✅ | `_anti_crit_wound_threshold` : seuil Y+ si la cible porte le keyword X, instance la plus basse retenue (24.02), abaisse `crit_wound_on` ; tests `test_weapon_rules_attack_sequence.py` (5 cas), `test_urty_syringe_anti_infantry.py` |
 | AP / InSv (05.03) | — | ✅ | `save_threshold` |
 | ASSAULT 24.04 | ✅ | ✅ | éligibilité tir post-advance |
 | CLOSE_QUARTERS / CLOSE-QUARTERS 24.27 / 24.07 | ✅ | ✅ | tir en état engaged |
 | RAPID FIRE 24.30 | ✅ | ✅ | +X dés à demi-portée : `n_attacks += _rf_x` (`shared_utils.py`), test `test_rapid_fire_shoot.py`. Le X APPLIQUÉ entre dans la clé de groupe 04.03 (« same *applicable* rules ») ; le token `[RAPID FIRE:X]` porte le X DÉCLARÉ (2026-08-10) |
 | CLEAVE 24.06 | ✅ | ✅ | +X dés / 5 figs si mono-cible : `n_attacks += _cleave_extra_dice` (`fight_handlers.py`), test `test_blast_cleave.py`. Jumeau mêlée de [BLAST] ; son X appliqué est dans la clé de groupe depuis le 2026-08-10 |
-| MELTA 24.25 | ✅ | ⛔ | +X D à demi-portée non appliqué |
-| SUSTAINED HITS 24.36 | ✅ | ⛔ | dépend du critical hit (non géré) |
-| LETHAL HITS 24.23 | ✅ | ⛔ | dépend du critical hit (non géré) |
-| DEVASTATING WOUNDS 24.10 | ✅ | ⛔ | dépend du critical wound (non géré) |
-| TWIN-LINKED 24.38 | ✅ | ⛔ | re-roll wound non appliqué |
-| TORRENT 24.37 | ✅ | ⛔ | auto-hit non appliqué |
-| HEAVY 24.16 | ✅ | ⛔ | +1 hit si quasi-stationnaire non appliqué |
-| IGNORES COVER 24.18 | ✅ | ⛔ | non appliqué |
-| HAZARDOUS 24.15 | ✅ | 🟡 | `roll_hazard_for_unit` existe ; application post-tir à vérifier |
-| EXTRA ATTACKS 24.11 | ✅ | ⚠️ | melee → voir section Fight |
+| MELTA 24.25 | ✅ | ✅ | `dmg_bonus = X` si cible à demi-portée au Select Targets (`_target_within_half_range`, verdict partagé avec RAPID FIRE — `_manual_roll_intent`), token `meltaApplied` ; test `test_melta_shoot.py` |
+| SUSTAINED HITS 24.36 | ✅ | ✅ | X touches additionnelles sur critique, jamais critiques elles-mêmes (`roll_attack_pool`, `sustainedHit`) ; test `test_weapon_rules_attack_sequence.py` ; mêlée : aussi octroyé par `grant_weapon_rule_melee` (Primitive B) |
+| LETHAL HITS 24.23 | ✅ | ✅ | auto-blessure sur critique, choix réel « you can » tranché par espérance (`lethal_hits_auto_wound_is_better`, perd DEVASTATING si auto) ; test `test_weapon_rules_attack_sequence.py` |
+| DEVASTATING WOUNDS 24.10 | ✅ | ✅ | blessure critique → aucune sauvegarde faite, D blessures mortelles infligées après les dégâts normaux (`attack_sequence.roll_attack_pool` pose `pending_wounds[].devastating`, puis `shared_utils._apply_batch_mortal_wounds`) ; test `test_devastating_wounds_shoot.py` |
+| TWIN-LINKED 24.38 | ✅ | ✅ | relance des échecs de blessure, un seul reroll par dé (cause `twin_linked` au record) ; test `test_weapon_rules_attack_sequence.py` |
+| TORRENT 24.37 | ✅ | ✅ | touche automatique sans dé (donc jamais critique), `autoHit` au record ; test `test_weapon_rules_attack_sequence.py` |
+| HEAVY 24.16 | ✅ | ✅ | +1 to hit si unengaged, pas posé ce tour (`deployed_on_turn`) et aucune figurine >3" (`moved_distance_by_model`) — `_manual_roll_intent`, token [HEAVY] ; test `test_heavy_shoot.py` |
+| IGNORES COVER 24.18 | ✅ | ✅ | court-circuit en tête de `_cover_worsened_bs` (aucun malus, LoS non calculée) ; prime sur le couvert forcé de 10.07 ; test `test_ignores_cover.py` |
+| HAZARDOUS 24.15 | ✅ | ✅ | après résolution de toutes les attaques de l'activation (`_finalize_manual_allocation`) : `roll_hazard_for_unit` × nombre d'armes HAZARDOUS sélectionnées (`_count_selected_hazardous_weapons`), tir (`SHOOT_CTX.hazard_origin="shoot"`) et mêlée (`FIGHT_CTX.hazard_origin="fight"`) ; défenseur humain → allocation manuelle des MW ; tests `test_hazardous.py`, `test_pvp_resume_after_hazard.py` |
+| EXTRA ATTACKS 24.11 | ✅ | ✅ | mêlée seulement → voir section Fight (`_select_fight_weapon_indices_for_fig`) |
 | LANCE 24.21 | ⛔ | ⛔ | absent du registry |
 | ONE SHOT 24.26 | ⛔ | ⛔ | absent du registry |
-| PRECISION 24.28 | ⛔ | ⛔ | absent du registry |
-| PSYCHIC 24.29 | ⛔ | ⛔ | absent du registry |
+| PRECISION 24.28 | ✅ | ✅ | au début de l'Allocation Order : groupe CHARACTER visible imposé comme groupe courant (`shared_utils._apply_precision_allocation_override`, tir avec test de visibilité à portée, mêlée = contact) ; test `test_precision.py` |
+| PSYCHIC 24.29 | ✅ | ✅ | modificateur défavorable ignoré (malus de couvert, `_cover_worsened_bs` — le bonus [HEAVY] est conservé, « any or all ») ; attaque psychique → FNP vs psychic (`_collect_fnp_thresholds`, `is_psychic`) ; tests `test_psychic_shoot.py`, `test_librarian_terminator_psychic_hood.py` |
 
 **Limites techniques (moteur 2D / hex) :**
 - **LOS / cover** en 2D via `compute_unit_los` (ratio de visibilité) ; pas de blocage par hauteur verticale.
@@ -1609,7 +1609,7 @@ riposte possible).
 
 ### V11 COMPLIANCE MATRIX — FIGHT PHASE
 
-> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/fight_handlers.py`, `engine/phase_handlers/shared_utils.py`) ; lignes 12.03/12.04/12.06/12.08 re-vérifiées le 2026-08-27. La séquence d'attaque mêlée réutilise Making Attacks (04) / Attack Sequence (05) — **mêmes lacunes que la matrice Shooting** (critical hit/wound, Feel No Pain, Lethal/Sustained/Devastating/Twin-Linked/Anti non appliqués).
+> Source de vérité : `Documentation/40k_rules`. Statut établi par lecture du code (`engine/phase_handlers/fight_handlers.py`, `engine/phase_handlers/shared_utils.py`) ; lignes 12.03/12.04/12.06/12.08 re-vérifiées le 2026-08-27 ; séquence d'attaque et abilities re-vérifiées le 2026-09-12. La séquence d'attaque mêlée est la même que celle du tir : `_manual_roll_fight_intent` → `build_weapon_attack_profile(…, is_melee=True)` + `roll_attack_pool` (`engine/phase_handlers/attack_sequence.py`) puis allocation par `_build_manual_allocation(…, FIGHT_CTX)` — critical hit/wound, [SUSTAINED HITS], [LETHAL HITS], [DEVASTATING WOUNDS], [TWIN-LINKED], [ANTI-X], Feel No Pain (même `_resolve_one_manual_wound`) et [HAZARDOUS] appliqués, cf. matrice Shooting (tests `test_weapon_rules_fight.py`, `test_hazardous.py`).
 
 | Règle | Contenu | Statut moteur | Mapping / notes |
 |---|---|---|---|
@@ -1620,17 +1620,17 @@ riposte possible).
 | 12.05 | Normal fight (engaged) | ✅ | |
 | 12.06 | Overrun fight (unengaged devenu engaged → pile-in additionnel) | ✅ (re-vérifié 2026-09-12) | `fight_v11_is_overrun_eligible` (« was unengaged at the start of the Fight step » = négation du snapshot). AUTO/gym : pile-in additionnel automatique `_fight_overrun_pile_in_plan` (unité non engagée → cibles ≤5"). PvP humain (2026-09-12) : action `overrun_pile_in` sur l'unité active (bouton « Overrun », `fight_v11_can_overrun_pile_in` = éligible et pas déjà fait), AVANT le choix de cible → même plan par-figurine que le pile-in 12.02 (`_fight_v11_pile_in_model_plan_step`, cibles `_fight_v11_pile_in_targets` : engagées si engagée, sinon ≤5" ; AFTER : l'unité finit engagée) ; le commit (log `overrun_pile_in`) rend la main au combat de l'unité, cibles recalculées, et la VERROUILLE (`_fight_v11_activation_locked`, même verrou que l'Exhortation : « one additional pile-in move, THEN fights », le joueur ne peut plus lui préférer une autre unité avant qu'elle ait combattu) ; `skip` sous plan = renoncer au move sans passer l'unité. Même flux sur les New Foes to Face (12.08 AFTER, sous-phase consolidate) : un New Foe dont l'engageur est mort avant sa sélection est désengagé → `overrun_eligible` sur l'état New Foes, action `overrun_pile_in` via la source unique `_fight_v11_overrun_step` (bouton « Overrun » de la barre New Foes, attaque ensuite par clic-cible direct) |
 | 12.07 | Consolidate (les deux joueurs) | ✅ | étape groupée `consolidate` (`fight_v11_enter_consolidate`) |
-| 12.08 | Consolidation move (3″ ; 3 modes : Ongoing / Engaging / Objective ; Engaging peut tirer de nouvelles unités au combat) | ✅ (re-vérifié 2026-09-12 : clause « if possible » livrée côté PvP) | cascade `fight_v11_consolidation_mode` : `ongoing` (engagée) → `engaging` (ennemi dans `consolidation_trigger_range`, 3″) → `objective` (objectif dans 3″) ; AFTER Engaging « New Foes to Face » : ennemis engagés non sélectionnés gelés par `fight_v11_consolidation_freeze_new_foes` (sélecteur = adversaire du propriétaire de l'unité), combattus in-place sur pool restreint (`fight_v11_fight_selection_pool`, source du masque FIGHT et du commit `squad_fight`) sur les trois chemins — PvP (`_fight_v11_consolidation_new_foes_step`), gym (`_fight_v11_gym_settle` rend la main au siège adverse), auto PvE (`_fight_v11_auto_step`) — 2026-09-12 ; AFTER Ongoing (engagements de départ conservés par figurine) : même filtre gym que 12.03 (`_assign_cells_toward_enemies`, 2026-09-12) ; WHILE « engaged with it if possible » (Ongoing/Engaging) et « within range of the selected objective if possible, or closer to it if not » (Objective) : PvP par figurine (`_fight_model_legal_destinations`, même source que 12.03 — `per_model` de `_fight_consolidation_preview_plan`, pool exposé au front — 2026-09-12) ; gym : `_assign_cells_toward_enemies` (Ongoing/Engaging, candidats bord-à-bord en priorité ; non re-vérifié dans cette livraison) |
+| 12.08 | Consolidation move (3″ ; 3 modes : Ongoing / Engaging / Objective ; Engaging peut tirer de nouvelles unités au combat) | ✅ (re-vérifié 2026-09-12 : clause « if possible » livrée côté PvP) | cascade `fight_v11_consolidation_mode` : `ongoing` (engagée) → `engaging` (ennemi dans `consolidation_trigger_range`, 3″) → `objective` (objectif dans 3″) ; AFTER Engaging « New Foes to Face » : ennemis engagés non sélectionnés gelés par `fight_v11_consolidation_freeze_new_foes` (sélecteur = adversaire du propriétaire de l'unité), combattus in-place sur pool restreint (`fight_v11_fight_selection_pool`, source du masque FIGHT et du commit `squad_fight`) sur les deux chemins — manuel (`_fight_v11_consolidation_new_foes_step`) et programmatique (`_fight_v11_gym_settle` rend la main au siège adverse ; bot PvE et politique gym, cf. bloc « Qui conduit la machine — par SIÈGE ») — 2026-09-12 ; AFTER Ongoing (engagements de départ conservés par figurine) : même filtre gym que 12.03 (`_assign_cells_toward_enemies`, 2026-09-12) ; WHILE « engaged with it if possible » (Ongoing/Engaging) et « within range of the selected objective if possible, or closer to it if not » (Objective) : PvP par figurine (`_fight_model_legal_destinations`, même source que 12.03 — `per_model` de `_fight_consolidation_preview_plan`, pool exposé au front — 2026-09-12) ; gym : `_assign_cells_toward_enemies` (Ongoing/Engaging, candidats bord-à-bord en priorité ; non re-vérifié dans cette livraison) |
 | 12.09 | End of Fight phase | ✅ | fin de phase → transition `next_phase: "command"` du joueur suivant (et `turn += 1` après le joueur 2) |
 
-**Abilities mêlée (24) :** EXTRA ATTACKS 24.11 (registry ✅, application ⚠️ à vérifier) ;
+**Abilities mêlée (24) :** EXTRA ATTACKS 24.11 (✅ — `squad_declare_fight` sélectionne via `_select_fight_weapon_indices_for_fig` toutes les armes [EXTRA ATTACKS] EN PLUS de l'arme principale choisie parmi les autres, « if possible » ; test `test_extra_attacks_fight.py`) ;
 FIGHTS FIRST 24.13 (✅ via `is_fights_first` / flag `fights_first` du cache) ; LANCE 24.21
 (⛔ absent du registry) ; CLEAVE 24.06 (✅ appliqué — `_cleave_extra_dice`,
 `test_blast_cleave.py`, cf. table Weapon abilities de la matrice Shooting).
 
 **Limites techniques (moteur 2D / hex) :**
 - Distances pile-in / consolidation 3″ = 3 × `inches_to_subhex` ; base-contact ≈ adjacence hex.
-- Séquence d'attaque mêlée = mêmes limites que la séquence de tir (cf. matrice Shooting).
+- Séquence d'attaque mêlée = même socle que le tir (`attack_sequence.py`, cf. matrice Shooting) ; seuls diffèrent le pool d'attaques ([CLEAVE]/[EXTRA ATTACKS] au lieu de [BLAST]/[RAPID FIRE]) et l'absence de couvert/[HEAVY]/[MELTA]/10.07.
 
 ---
 
