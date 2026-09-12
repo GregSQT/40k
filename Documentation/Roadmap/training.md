@@ -22,35 +22,29 @@ python3 -m ai.training_contract --init --agent ArmageddonAgent_x1
 Un `--new` n'a rien à faire : il écrit le contrat lui-même. Les **valeurs** de récompense ne sont
 pas comparées — régler un poids reste libre, seule la disparition d'une clé arrête un run.
 
-**Migration du 2026-09-12 (suite 114), à faire une fois le run en cours terminé** : le contrat est
-devenu un **compagnon par modèle** (`<stem>_training_contract.json`), et `--resume-from` installe
-celui du modèle promu — un artefact sans contrat n'est plus promouvable. **Règle** : dans chaque
-dossier d'agent, renommer `training_contract.json` en `model_<agent>_training_contract.json`, puis
-copier ce contrat sous le nom de chaque artefact reprenable **de la même lignée** (modèles d'étape
-`_P<n>`, `ppo_checkpoint_*`, `_interrupted`) — y compris ceux que le run **en cours** écrit encore
-sous l'ancien code d'ici sa fin : refaire l'inventaire au moment de migrer. État vérifié le
-2026-09-12 :
+**Migration du 2026-09-12 (suite 115)** : le contrat est devenu un **compagnon par modèle**
+(`<stem>_training_contract.json`), et `--resume-from` installe celui du modèle promu — un artefact
+sans contrat n'est plus promouvable. **Règle** : dans chaque dossier d'agent, renommer
+`training_contract.json` en `model_<agent>_training_contract.json`, puis copier ce contrat sous le
+nom de chaque artefact reprenable **de la même lignée** (modèles d'étape `_P<n>`, `ppo_checkpoint_*`,
+`_interrupted`).
 
-```bash
-cd ai/models/ArmageddonAgent_x1
-mv training_contract.json model_ArmageddonAgent_x1_training_contract.json
-for stem in model_ArmageddonAgent_x1_P0 model_ArmageddonAgent_x1_P1 model_ArmageddonAgent_x1_P2 \
-            ppo_checkpoint_24309576_steps ppo_checkpoint_24549576_steps ppo_checkpoint_24789576_steps; do
-  cp model_ArmageddonAgent_x1_training_contract.json "${stem}_training_contract.json"
-done
-cd ../ArmageddonAgent_x1_entnorm
-mv training_contract.json model_ArmageddonAgent_x1_entnorm_training_contract.json
-cp model_ArmageddonAgent_x1_entnorm_training_contract.json ppo_checkpoint_240000_steps_training_contract.json
-```
+**Fait le 2026-09-12** : `ArmageddonAgent_x1/` (canonique renommé ; copies pour `P0`, `P1`, `P2` et
+les trois `ppo_checkpoint_*` — 7 fichiers identiques octet pour octet, `--agent ArmageddonAgent_x1`
+répond « contrat inchangé ») et `ArmageddonAgent_x1_entnorm/` (canonique renommé, « contrat
+inchangé »).
+
+🟡 **Reste à faire, run entnorm terminé** (PID en cours sous l'ancien code, dont la rotation ne
+retire pas un contrat compagnon — copier maintenant laisserait des orphelins) : copier
+`model_ArmageddonAgent_x1_entnorm_training_contract.json` sous le nom des checkpoints survivants
+(`ppo_checkpoint_<n>_steps_training_contract.json`, trois attendus) et du canonique s'il n'en a pas.
 
 `model_ArmageddonAgent_x1_P00.zip` (1er septembre, `obs_size` antérieur) n'est pas de cette lignée :
-ne pas lui donner ce contrat. `CoreAgent/` n'a jamais eu de contrat : inchangé (sa reprise demande
-`--init`, comme avant). Les `training_contract_<stamp>.json` et
-`training_contract_pre_resume_<stamp>.json` déjà écartés décrivent les archives
-`model_ArmageddonAgent_x1_<stamp>.zip` / `_pre_resume_<stamp>.zip` du même horodatage : les renommer
-en `<stem de l'archive>_training_contract.json` seulement si l'on compte reprendre une de ces
-archives. Sans migration : `--etape P3 from:P2` et tout `--resume-from` s'arrêtent sur « contrat
-d'entrainement absent » ; `--new` n'a rien à faire.
+pas de contrat. `CoreAgent/` n'a jamais eu de contrat : inchangé (sa reprise demande `--init`, comme
+avant). Les `training_contract_<stamp>.json` et `training_contract_pre_resume_<stamp>.json` déjà
+écartés décrivent les archives `model_ArmageddonAgent_x1_<stamp>.zip` / `_pre_resume_<stamp>.zip` du
+même horodatage : les renommer en `<stem de l'archive>_training_contract.json` seulement si l'on
+compte reprendre une de ces archives.
 
 **Correctif du 2026-09-09** : un contrat enregistré **abîmé** (section absente, vide, du mauvais
 type, version non entière) **lève** au lieu d'être lu comme vide. Lu comme vide, il produisait un
