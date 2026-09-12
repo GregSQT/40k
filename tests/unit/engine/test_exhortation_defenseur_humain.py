@@ -59,7 +59,7 @@ def _engine(defender_seat: str) -> W40KEngine:
 
 def _spy_continue(eng: W40KEngine, calls: list) -> None:
     eng._continue_fight_after_exhortation = (  # type: ignore[method-assign]
-        lambda squad_id, target_slot: calls.append((squad_id, target_slot))
+        lambda squad_id, target_slot, regime: calls.append((squad_id, target_slot, regime))
         or (True, {"action": "squad_fight", "squad_id": squad_id, "resumed": True})
     )
 
@@ -82,7 +82,7 @@ def test_le_defenseur_humain_choisit_puis_le_combat_reprend(monkeypatch):
     assert {c["model_id"] for c in result["allocation"]["choices"]} == {"2#0", "2#1"}
     assert calls == [], "le combat ne doit pas reprendre avant la fin de l'attribution"
     assert gs["hazard_origin"] == "exhortation"
-    assert gs["_pending_exhortation_resume"] == {"squad_id": "1", "target_slot": 3}
+    assert gs["_pending_exhortation_resume"] == {"squad_id": "1", "target_slot": 3, "regime": "gym"}
     # La ligne SUFFERS est DÉJÀ émise, sans détail d'attribution pour l'instant.
     mw_logs = [e for e in gs["action_logs"] if e["type"] == "mortal_wounds_ability"]
     assert len(mw_logs) == 1 and mw_logs[0]["hazardousMortalWounds"] == 2, mw_logs
@@ -102,7 +102,7 @@ def test_le_defenseur_humain_choisit_puis_le_combat_reprend(monkeypatch):
     ok, r1 = eng._handle_hazard_allocate_model({"modelId": "2#1"})
     assert ok is True
     assert r1.get("resumed") is True, r1
-    assert calls == [("1", 3)], "le combat de l'attaquant reprend à la fin de l'attribution"
+    assert calls == [("1", 3, "gym")], "le combat de l'attaquant reprend à la fin de l'attribution"
     assert gs["models_cache"]["2#1"]["HP_CUR"] == 1, "2#1 devait encaisser les deux BM"
     assert gs["models_cache"]["2#0"]["HP_CUR"] == 3, "2#0 n'a pas été choisie"
     assert PENDING_HAZARD_ALLOCATION_KEY not in gs
@@ -122,7 +122,7 @@ def test_le_defenseur_machine_garde_le_regime_auto(monkeypatch):
 
     ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True)
     assert ok is True and result.get("resumed") is True, result
-    assert calls == [("1", None)]
+    assert calls == [("1", None, "gym")]
     assert PENDING_HAZARD_ALLOCATION_KEY not in gs
     assert "hazard_origin" not in gs
     hp = sorted(gs["models_cache"][m]["HP_CUR"] for m in ("2#0", "2#1"))

@@ -2271,6 +2271,20 @@ export const BoardWithAPI: React.FC = () => {
     const decidingSeat = apiProps.gameState?.player_types?.[String(pending.player)];
     return decidingSeat === "ai" ? null : pending;
   })();
+  // Exhortation of Rage (datasheet Chaplain JP) — « when this unit is selected to fight, you can
+  // select one enemy unit it is engaged with and roll one D6 ». Le moteur ARRÊTE le combat sur ce
+  // choix à l'activation de l'unité (plusieurs ennemis engagés) et refuse toute autre action tant
+  // qu'il n'est pas fait (`mortal_wounds_target_pending`) : sans ce panneau, la partie PvP se
+  // figerait. La cible PRÉCÈDE le dé — aucun résultat n'est connu quand le joueur choisit. Même
+  // filtre de siège que le mouvement réactif : la décision d'un bot est tranchée par sa politique.
+  const mortalWoundsTargetDecision = (() => {
+    const pending = apiProps.gameState?.pending_agent_decision ?? null;
+    if (!pending || pending.type !== "mortal_wounds_target") {
+      return null;
+    }
+    const decidingSeat = apiProps.gameState?.player_types?.[String(pending.player)];
+    return decidingSeat === "ai" ? null : pending;
+  })();
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   const oathTargets =
     oathSelectionPlayer === null
@@ -4423,6 +4437,46 @@ export const BoardWithAPI: React.FC = () => {
                   {option.label}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Exhortation of Rage : un bouton par unité ennemie engagée, rendue par le moteur ; le
+          libellé nomme l'unité (le moteur n'envoie que son id). `onCallWaaagh` est le verbe
+          générique `agent_decision` + `option_index` ; l'ordre des candidats est contractuel. */}
+      {mortalWoundsTargetDecision && (
+        <div className="rule-choice-overlay">
+          <div className="deployment-panel__picker deployment-panel__picker--oath">
+            <div className="deployment-panel__picker-title">
+              {`Exhortation of Rage — unit ${mortalWoundsTargetDecision.unit_id} — player ${mortalWoundsTargetDecision.player}`}
+            </div>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {
+                  "This unit has been selected to fight. Select one enemy unit it is engaged with, then roll one D6: on a 4-5 that unit suffers D3 mortal wounds, on a 6 it suffers 3 mortal wounds.\n\nThe target is chosen BEFORE the dice is rolled."
+                }
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+              {mortalWoundsTargetDecision.options.map((option, index) => {
+                const targetId = option.payload?.target_eid ?? option.label;
+                const target = unitsById.get(String(targetId));
+                const label = target?.DISPLAY_NAME
+                  ? `${target.DISPLAY_NAME} #${target.id}`
+                  : `Unit #${targetId}`;
+                return (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className="deployment-panel__picker-close deployment-panel__picker-close--validate"
+                    onClick={() => {
+                      void apiProps.onCallWaaagh(index);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
