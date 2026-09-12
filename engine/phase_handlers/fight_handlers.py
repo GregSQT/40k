@@ -26,20 +26,20 @@ from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 #: moment où l'unité est sélectionnée, et `W40KEngine._process_fight_phase` la consomme dans la
 #: même requête. Valeur : `{"squad_id": <id>, "regime": <EXHORTATION_REGIME_*>}`.
 FIGHT_SELECTION_EXHORTATION_KEY = "_fight_selection_exhortation"
-#: Régimes de REPRISE du combat après le jet — trois flux d'activation, trois reprises :
-#: gym (`_continue_squad_fight_after_selection`), manuel PvP (`_fight_v11_manual_state`, le
-#: joueur déclare ses attaques contre les survivants), auto PvE (`_fight_v11_auto_resolve_selected`).
+#: Régimes de REPRISE du combat après le jet — deux flux d'activation, deux reprises :
+#: gym (`_continue_squad_fight_after_selection`, siège programmatique : politique en gym, bot en
+#: PvE) et manuel (`_fight_v11_manual_state`, siège humain en PvP comme en PvE : le joueur déclare
+#: ses attaques contre les survivants). Le régime suit le SIÈGE, jamais le mode de jeu.
 #: Type littéral : pyright contrôle chaque site qui passe une constante ; la seule valeur qui entre
 #: par les données (`game_state`, relue) passe par `exhortation_regime_of`.
-ExhortationRegime = Literal["gym", "manual", "auto"]
+ExhortationRegime = Literal["gym", "manual"]
 EXHORTATION_REGIME_GYM: ExhortationRegime = "gym"
 EXHORTATION_REGIME_MANUAL: ExhortationRegime = "manual"
-EXHORTATION_REGIME_AUTO: ExhortationRegime = "auto"
 
 
 def exhortation_regime_of(value: Any, site: str) -> ExhortationRegime:
     """Relit un régime depuis `game_state` (`_pending_exhortation_*`, armement) — T1 : une valeur
-    hors des trois régimes est une erreur explicite au point d'entrée, pas plus loin."""
+    hors des deux régimes est une erreur explicite au point d'entrée, pas plus loin."""
     if value not in get_args(ExhortationRegime):
         raise ValueError(f"{site}: régime d'Exhortation inconnu {value!r}")
     return value
@@ -157,8 +157,8 @@ def _is_ai_controlled_fight_unit(game_state: Dict[str, Any], unit: Dict[str, Any
     """Return True when the unit owner is programmatically controlled (auto-resolution).
 
     Delegue a la source unique is_programmatic_owner (shared_utils) : True en gym training,
-    sinon player_types == 'ai'. Utilise par les checks defender_human du flux fight et par
-    _fight_auto_defender (FIGHT_CTX) -> allocation des pertes en melee auto-resolue en gym."""
+    sinon player_types == 'ai'. Utilise par _fight_auto_defender (FIGHT_CTX) -> allocation des
+    pertes en melee tranchee headless quand le defenseur est un siege machine (gym, bot PvE)."""
     from .shared_utils import is_programmatic_owner
     unit_player = require_key(unit, "player")
     return is_programmatic_owner(game_state, unit_player)
@@ -222,27 +222,6 @@ def _log_end_of_turn_coherency_removals(
                 "reward": 0.0,
             },
         )
-
-
-def _is_fight_auto_execution_allowed(game_state: Dict[str, Any]) -> bool:
-    """
-    Return whether fight-phase auto execution is allowed for the current mode.
-
-    PvP modes are strictly manual: no auto-activation, no auto-targeting,
-    no auto-chain execution in fight phase.
-    """
-    mode_code = game_state.get("current_mode_code")
-    if mode_code is None:
-        return True
-    if not isinstance(mode_code, str):
-        raise TypeError(
-            f"game_state['current_mode_code'] must be str when present, got {type(mode_code).__name__}"
-        )
-    if mode_code in {"pvp", "pvp_test"}:
-        return False
-    if mode_code in {"pve", "pve_test", "endless_duty"}:
-        return True
-    raise ValueError(f"Unsupported current_mode_code for fight auto execution: {mode_code}")
 
 
 def _is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
@@ -1784,8 +1763,8 @@ def _fight_v11_manual_activate(
     déclare contre les survivants).
 
     Armée : le plateau rendu ici est REMPLACÉ par `W40KEngine._process_fight_phase` (jet puis
-    reprise par `_fight_v11_manual_state`) — un stub suffit, comme dans `_fight_v11_auto_step`,
-    plutôt qu'un état complet calculé pour être jeté."""
+    reprise par `_fight_v11_manual_state`) — un stub suffit, plutôt qu'un état complet calculé
+    pour être jeté."""
     if _fight_v11_activation_locked_by_exhortation(game_state, active, uid):
         _fight_v11_log(
             game_state,
@@ -2024,6 +2003,13 @@ def fight_v11_current_pool(game_state: Dict[str, Any]) -> List[str]:
     drivers : grouped_next pour pile_in/consolidate, machine de sélection 12.04 pour fight.
     """
     sub = game_state.get("fight_subphase")
+    if sub == "consolidate":
+        # New Foes to Face (12.08 AFTER MOVING, engaging) : tant qu'il en reste, la machine attend
+        # que l'adversaire les fasse combattre — ils SONT le pool actionnable (clic humain ou
+        # `squad_fight` de la politique), avant la reprise de la consolidation groupée.
+        new_foes = _fight_v11_consolidation_new_foes_remaining(game_state)
+        if new_foes:
+            return new_foes
     if sub in ("pile_in", "consolidate"):
         nxt = fight_v11_grouped_next(game_state, sub)
         return list(nxt[1]) if nxt else []
@@ -2147,61 +2133,6 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     return _fight_v11_end_progression(game_state)
 
 
-def _fight_v11_resolve_attacks(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    config: Dict[str, Any],
-    *,
-    preferred_target_id: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """
-    Résout les attaques de mêlée d'une unité « selected to fight » via le moteur
-    d'allocation par-figurine (groupes 05.03/05.04, T bodyguard 19.02, save par figurine
-    allouée). Convergence §9.4b-2 : remplace l'ancien résolveur pool
-    (``_execute_fight_attack_sequence``, cible = pool de PV homogène).
-
-    Sélection de cible auto (ou ``preferred_target_id``), puis déclaration per-figurine
-    (``squad_declare_fight`` : arme CC auto par figurine — 04.01) et allocation headless
-    (défenseur non-humain garanti en mode auto → ``auto_decider``). Retourne ``(events,
-    tid)`` : la liste des attack_result (1 par blessure infligée) ET l'unité cible
-    sélectionnée (None si aucune cible valide). La liste peut être vide quand toutes les
-    attaques ratent (fight « à vide ») — tid reste non-None dans ce cas.
-    """
-    unit_id = str(require_key(unit, "id"))
-    if not (melee_weapons(unit) or []):
-        return [], None
-
-    targets = _fight_build_valid_target_pool(game_state, unit)
-    if not targets:
-        return [], None
-    tid = preferred_target_id if (preferred_target_id in targets) else _ai_select_fight_target(
-        game_state, unit_id, targets
-    )
-
-    # Déclaration per-figurine + allocation via le moteur groupes (jumeau du chemin
-    # training w40k_core). Le hook FIGHT_CTX.on_unit_destroyed retire la cible morte des
-    # pools de combat (équivalent de l'ancien _remove_dead_unit_from_fight_pools).
-    squad_fight_restart_activation(game_state, unit_id)
-    squad_declare_fight(game_state, unit_id, tid)
-    alloc = build_manual_fight_allocation(game_state, unit_id)
-    if not alloc.get("done"):
-        raise RuntimeError(
-            f"_fight_v11_resolve_attacks: allocation combat non terminée en auto pour "
-            f"unité {unit_id} (défenseur non-IA ?) — action={alloc.get('action')}"
-        )
-    summary = alloc["shoot_result"]
-    return [
-        {
-            "attackerId": unit_id,
-            "shooterId": unit_id,
-            "targetId": str(ev["target_squad_id"]),
-            "target_died": bool(ev["destroyed"]),
-            "damage": int(ev["damage"]),
-        }
-        for ev in require_key(summary, "events")
-    ], tid
-
-
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F811 (V11 override of V10)
     """
     START OF FIGHT PHASE V11 (12.01) — override de la version V10.
@@ -2224,116 +2155,16 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
         _fight_v11_log(game_state, "Aucune unité engagée/chargée → phase FIGHT vide, complétion immédiate")
         return _fight_v11_phase_complete(game_state)
 
-    if not _is_fight_auto_execution_allowed(game_state):
-        # Manuel (PvP) : entre dans l'étape PILE IN interactive. _fight_v11_manual_state
-        # n'auto-présente aucune unité : il expose le pool cliquable (fight_eligible_units,
-        # active_fight_unit=None) ; le pile-in lui-même est par-figurine (pile_in_model_move).
-        _fight_v11_log(game_state, "START (manuel) → étape PILE IN interactive")
-        _ok, state = _fight_v11_manual_state(game_state)
-        out = dict(state)
-        out["phase_initialized"] = True
-        return out
-
-    # Auto (PvE/gym) : reste en PILE IN, _fight_v11_auto_step gère les moves.
-    game_state["fight_eligible_units"] = fight_v11_current_pool(game_state)
-    game_state["active_fight_unit"] = None
-    _fight_v11_log(
-        game_state,
-        f"START → étape PILE IN (éligibles pile-in courants={game_state['fight_eligible_units']})",
-    )
-    return {"phase_initialized": True, "fight_subphase": "pile_in", "phase_complete": False}
-
-
-def _fight_v11_auto_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
-    """Pile-in groupé AUTO — par-figurine (fight_pile_in_plan). Marque pile_in_done."""
-    uid = str(require_key(unit, "id"))
-    try:
-        from .shared_utils import fight_pile_in_plan, commit_move
-        plan = fight_pile_in_plan(game_state, uid)
-        if plan is not None:
-            commit_move(plan, game_state, "pile_in")
-    finally:
-        game_state["pile_in_done"].add(uid)
-
-
-def _fight_v11_auto_consolidate(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
-    """
-    Consolidation AUTO (V1) : skip (consolidation est OPTIONNELLE, 12 encart) — choix
-    légal et conservateur. Marque consolidation_done. La consolidation auto effective
-    (3 modes + déclencheur Engaging, décision #7) est affinée avec l'UI (Bloc front).
-    """
-    game_state["consolidation_done"].add(str(require_key(unit, "id")))
-
-
-def _fight_v11_auto_resolve_selected(
-    game_state: Dict[str, Any], uid: str, config: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Résolution AUTO des attaques d'une unité DÉJÀ « selected to fight » (12.04) : overrun
-    12.06 si éligible, puis attaques (`_fight_v11_resolve_attacks`). Partagée par
-    `_fight_v11_auto_step` et par la reprise après Exhortation of Rage (régime auto)."""
-    u = require_unit_by_id(game_state, uid)
-    overrun = (
-        fight_v11_is_overrun_eligible(game_state, u)
-        and not _fight_v11_engaged_now(game_state, u)
-    )
-    if overrun:
-        from .shared_utils import _fight_overrun_pile_in_plan, commit_move
-        _ov_plan = _fight_overrun_pile_in_plan(game_state, uid)
-        if _ov_plan is not None:
-            commit_move(_ov_plan, game_state, "pile_in")
-    results, primary_tid = _fight_v11_resolve_attacks(game_state, u, config)
-    return fight_v11_combat_result(uid, results, primary_tid, overrun)
-
-
-def fight_v11_combat_result(
-    uid: str, results: List[Any], primary_tid: Optional[str], overrun: bool
-) -> Dict[str, Any]:
-    """Résultat `combat` d'une activation résolue en AUTO — forme unique, partagée avec la reprise
-    du moteur quand l'attaquant est mort avant ses attaques (`_continue_fight_after_exhortation`)."""
-    return {"action": "combat", "phase": "fight", "unitId": uid,
-            "fight_subphase": "fight", "all_attack_results": results,
-            "targetId": primary_tid,
-            "fight_type": "overrun" if overrun else "normal",
-            "waiting_for_player": False}
-
-
-def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """Une activation V11 par appel (granularité V10), résolution automatique (IA/gym/PvE)."""
-    for _ in range(6):
-        sub = require_key(game_state, "fight_subphase")
-        if sub == "pile_in":
-            nxt = fight_v11_grouped_next(game_state, "pile_in")
-            if nxt is None:
-                fight_v11_enter_fight_step(game_state)
-                continue
-            uid = nxt[1][0]
-            u = require_unit_by_id(game_state, uid)
-            _fight_v11_auto_pile_in(game_state, u, config)
-            return True, {"action": "pile_in", "phase": "fight", "unitId": uid,
-                          "fight_subphase": "pile_in", "waiting_for_player": False}
-        if sub == "fight":
-            uid = fight_v11_advance_selection(game_state)
-            if uid is None:
-                fight_v11_enter_consolidate(game_state)
-                continue
-            _fight_v11_register_selection(game_state, uid)
-            # Exhortation of Rage à la sélection : le jet est celui du moteur, qui reprend ensuite
-            # par `_fight_v11_auto_resolve_selected` (même résolution que ci-dessous).
-            if _fight_v11_arm_selection_exhortation(game_state, uid, EXHORTATION_REGIME_AUTO):
-                return True, {"action": "fight_selection", "phase": "fight", "unitId": uid,
-                              "fight_subphase": "fight", "waiting_for_player": False}
-            return True, _fight_v11_auto_resolve_selected(game_state, uid, config)
-        if sub == "consolidate":
-            nxt = fight_v11_grouped_next(game_state, "consolidate")
-            if nxt is None:
-                return True, _fight_v11_phase_complete(game_state)
-            uid = nxt[1][0]
-            u = require_unit_by_id(game_state, uid)
-            _fight_v11_auto_consolidate(game_state, u, config)
-            return True, {"action": "consolidation", "phase": "fight", "unitId": uid,
-                          "fight_subphase": "consolidate", "waiting_for_player": False}
-        return True, _fight_v11_phase_complete(game_state)
-    raise RuntimeError("_fight_v11_auto_step did not converge")
+    # Étape PILE IN interactive, quel que soit le mode : _fight_v11_manual_state n'auto-présente
+    # aucune unité, il expose le pool cliquable du groupe courant (fight_eligible_units,
+    # active_fight_unit=None) ; le pile-in lui-même est par-figurine (pile_in_model_move). Les
+    # unités d'un siège programmatique (bot PvE, politique en gym) sont résolues par le driver
+    # `W40KEngine._fight_v11_gym_settle`, qui s'arrête dès que le groupe courant est humain.
+    _fight_v11_log(game_state, "START → étape PILE IN interactive")
+    _ok, state = _fight_v11_manual_state(game_state)
+    out = dict(state)
+    out["phase_initialized"] = True
+    return out
 
 
 def _fight_fig_effective_level(entry: Dict[str, Any], model_id: str) -> int:
@@ -4361,7 +4192,10 @@ def _fight_v11_consolidation_resolve_new_foes(
         return None
     game_state["consolidation_new_foes_pending"] = [str(x) for x in new_foes]
     game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
-    game_state["consolidation_new_foes_selector"] = 3 - int(require_key(game_state, "current_player"))
+    # 12.08 AFTER MOVING (engaging) : « your opponent must select each of those units » — l'adversaire
+    # du PROPRIÉTAIRE de l'unité qui consolide, pas du joueur actif : à l'étape 12.07 les deux
+    # joueurs consolident (l'actif d'abord), donc l'unité peut appartenir au joueur non actif.
+    game_state["consolidation_new_foes_selector"] = 3 - int(require_key(unit, "player"))
     game_state["active_fight_unit"] = None
     _fight_v11_log(
         game_state,
@@ -4418,21 +4252,15 @@ def _fight_v11_consolidation_new_foes_step(
         if not intents:
             _fight_v11_log(game_state, f"NEW FOE validate {active} : aucune declaration -> ignore")
             return _fight_v11_manual_state(game_state)
-        target_id = str(intents[0]["target_unit_id"])
-        target_unit = require_unit_by_id(game_state, target_id)
-        defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
-        if not defender_human:
-            raise RuntimeError(
-                f"NEW FOE validate {active} : flux de declaration manuelle non supporte pour defenseur IA"
-            )
         _fight_v11_register_selection(game_state, active)
         game_state["active_fight_unit"] = None
-        alloc_result = build_manual_fight_allocation(game_state, active)
-        if alloc_result.get("waiting_for_player"):
-            return True, alloc_result
+        waiting = _fight_v11_allocate_declared(game_state, active)
+        if waiting is not None:
+            return True, waiting
         return _fight_v11_manual_state(game_state)
 
-    # Clic direct sur une cible → résolution + allocation (defenseur humain) ou auto (IA).
+    # Clic direct sur une cible → déclaration de toute l'escouade puis allocation des pertes
+    # (le défenseur décide : manuel s'il est humain, headless s'il est programmatique).
     if atype in ("fight", "left_click"):
         valid = _fight_build_valid_target_pool(game_state, u)
         if not valid:
@@ -4444,26 +4272,49 @@ def _fight_v11_consolidation_new_foes_step(
         _fight_v11_register_selection(game_state, active)
         pref = str(action["targetId"]) if "targetId" in action else None
         target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, active, valid)
-        target_unit = require_unit_by_id(game_state, target_id)
-        defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
         game_state["active_fight_unit"] = None
-        _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
-        if defender_human:
-            # Meme regle qu au dispatch FIGHT : le clic-cible repart de zero.
-            squad_fight_restart_activation(game_state, active)
-            squad_declare_fight(game_state, active, target_id)
-            alloc_result = build_manual_fight_allocation(game_state, active)
-            if alloc_result.get("waiting_for_player"):
-                return True, alloc_result
-        else:
-            _fight_v11_resolve_attacks(game_state, u, config, preferred_target_id=target_id)
+        _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref})")
+        waiting = _fight_v11_fight_target(game_state, active, target_id)
+        if waiting is not None:
+            return True, waiting
         return _fight_v11_manual_state(game_state)
 
     return _fight_v11_manual_state(game_state)
 
 
+def _fight_v11_allocate_declared(game_state: Dict[str, Any], uid: str) -> Optional[Dict[str, Any]]:
+    """Alloue les pertes des attaques DÉCLARÉES de ``uid`` (05.03/05.04). Le DÉFENSEUR décide :
+    siège humain → allocation manuelle, payload d'attente rendu ; siège programmatique →
+    ``FIGHT_CTX.auto_decider`` tranche headless dans le même appel, ``None`` rendu. Un résultat
+    ni en attente ni terminé est une rupture du moteur d'allocation, pas un cas à absorber."""
+    alloc = build_manual_fight_allocation(game_state, uid)
+    if alloc.get("waiting_for_player"):
+        _fight_v11_log(game_state, f"FIGHT unit {uid} : allocation manuelle du défenseur en attente")
+        return alloc
+    if not alloc.get("done"):
+        raise RuntimeError(
+            f"_fight_v11_allocate_declared: allocation combat ni en attente ni terminée pour "
+            f"{uid} — action={alloc.get('action')!r}"
+        )
+    return None
+
+
+def _fight_v11_fight_target(
+    game_state: Dict[str, Any], uid: str, target_id: str
+) -> Optional[Dict[str, Any]]:
+    """Combat cible-d'abord d'une unité DÉJÀ « selected to fight » : redéclare toute l'escouade
+    contre ``target_id`` (arme CC par figurine — 04.01 ; le clic-cible écrase ce que
+    ``squad_fight_assign`` avait pu déclarer) puis alloue (`_fight_v11_allocate_declared`)."""
+    squad_fight_restart_activation(game_state, uid)
+    squad_declare_fight(game_state, uid, target_id)
+    return _fight_v11_allocate_declared(game_state, uid)
+
+
 def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """État actionnable courant pour le joueur humain (PvP). Avance les transitions de sous-phase."""
+    """État actionnable courant exposé au client (pool du groupe / du sélecteur courant, unité
+    active). Avance les transitions de sous-phase et termine la phase quand tout est vidé. Le
+    pool exposé peut appartenir au siège programmatique : le client relance alors le bot
+    (`/game/ai-turn`), et `_fight_v11_manual_step` refuse d'agir à sa place."""
     for _ in range(64):
         sub = require_key(game_state, "fight_subphase")
         if sub == "pile_in":
@@ -4972,13 +4823,74 @@ def build_manual_fight_allocation(game_state: Dict[str, Any], attacker_squad_id:
     return _build_manual_allocation(game_state, attacker_squad_id, FIGHT_CTX, _manual_roll_fight_intent)
 
 
+def fight_v11_pending_selection_squad(game_state: Dict[str, Any]) -> Optional[str]:
+    """Escouade dont la sélection 12.04 par la POLITIQUE est en cours (choix d'arme V11 §0.69 ou
+    re-sélection de cible après la mort de la cible désignée), ou ``None``. `squad_fight` a déjà
+    enregistré cette escouade et passé le sélecteur à l'adversaire : le pool 12.04 ne la contient
+    plus, et pourtant c'est encore à son siège d'agir — le client et le driver doivent le voir."""
+    from engine.action_decoder import PENDING_FIGHT_TARGET_KEY, PENDING_FIGHT_WEAPON_KEY
+    for key in (PENDING_FIGHT_WEAPON_KEY, PENDING_FIGHT_TARGET_KEY):
+        pending = game_state.get(key)  # get allowed : None = aucune sélection en cours
+        if pending is not None:
+            return str(require_key(pending, "squad_id"))
+    return None
+
+
+def fight_v11_expected_seat(game_state: Dict[str, Any]) -> Optional[int]:
+    """Joueur dont la machine V11 attend la décision, ou ``None`` si l'étape courante est vidée.
+
+    Sélection de la politique en cours (arme / cible) → le siège de cette escouade ; New Foes
+    to Face en attente → leur sélecteur (l'adversaire du consolidant, 12.08) ; étape groupée
+    (pile-in 12.02 / consolidation 12.07) → le joueur du groupe courant ; étape FIGHT (12.04) →
+    le propriétaire du pool du sélecteur courant, handoff compris. Lecture seule."""
+    pending_squad = fight_v11_pending_selection_squad(game_state)
+    if pending_squad is not None:
+        return int(require_key(require_key(game_state, "units_cache")[pending_squad], "player"))
+    sub = game_state.get("fight_subphase")
+    if sub == "consolidate" and _fight_v11_consolidation_new_foes_remaining(game_state):
+        return int(require_key(game_state, "consolidation_new_foes_selector"))
+    if sub in ("pile_in", "consolidate"):
+        nxt = fight_v11_grouped_next(game_state, sub)
+        return int(nxt[0]) if nxt is not None else None
+    if sub == "fight":
+        pool = fight_v11_current_pool(game_state)
+        if not pool:
+            return None
+        return int(require_key(require_key(game_state, "units_cache")[str(pool[0])], "player"))
+    return None
+
+
+def fight_v11_client_pool(game_state: Dict[str, Any]) -> List[str]:
+    """Rafraîchit et rend `fight_eligible_units`, le pool que le CLIENT lit pour relancer le bot
+    (`/game/ai-turn` quand il contient des unités du siège machine) ou terminer la phase quand
+    il est vide. La machine manuelle l'écrit à chaque état rendu ; le chemin du bot
+    (`W40KEngine.execute_ai_turn`) doit l'écrire lui-même, sinon le client voit un pool périmé.
+    Pendant une allocation manuelle des pertes, le pool n'est pas touché : la seule action
+    attendue est celle du défenseur."""
+    if PENDING_FIGHT_ALLOCATION_KEY in game_state or game_state.get("fight_subphase") is None:
+        return list(game_state.get("fight_eligible_units") or [])
+    pending_squad = fight_v11_pending_selection_squad(game_state)
+    pool = [pending_squad] if pending_squad is not None else fight_v11_current_pool(game_state)
+    game_state["fight_eligible_units"] = list(pool)
+    return list(pool)
+
+
 def _fight_v11_manual_step(
     game_state: Dict[str, Any],
     unit: Optional[Dict[str, Any]],
     action: Dict[str, Any],
     config: Dict[str, Any],
 ) -> Tuple[bool, Dict[str, Any]]:
-    """Traite une action humaine (PvP) dans l'étape V11 courante, puis renvoie l'état suivant."""
+    """Traite une action du siège HUMAIN dans l'étape V11 courante, puis renvoie l'état suivant.
+
+    Même machine en PvP hot-seat et en PvE : ce que le joueur décide (12.02 « they choose to
+    move », 12.04 alternance, 12.07, 05.03/05.04 quand il défend) lui appartient quel que soit
+    le mode. Quand la machine attend un siège PROGRAMMATIQUE (groupe pile-in/consolidation du
+    bot, sélection 12.04 du bot, New Foes à son adversaire bot), toute action de jeu est REFUSÉE :
+    ce siège joue par `W40KEngine._process_squad_action` et `_fight_v11_gym_settle`, et un clic
+    humain sur ses unités (le front expose le pool du groupe courant) ne doit pas les conduire.
+    L'allocation des pertes par le défenseur humain passe AVANT ce refus : c'est précisément une
+    décision du siège humain pendant le combat du siège machine."""
     sub = require_key(game_state, "fight_subphase")
     atype = action.get("action")
     uid = action.get("unitId")
@@ -5012,6 +4924,22 @@ def _fight_v11_manual_step(
             _fight_v11_log(game_state, "FIGHT allocation annulee par le joueur")
             return _fight_v11_manual_state(game_state)
         return True, manual_allocation_waiting_payload(game_state, FIGHT_CTX)
+
+    if not game_state.get("gym_training_mode"):
+        from .shared_utils import is_programmatic_owner
+        seat = fight_v11_expected_seat(game_state)
+        if seat is not None and is_programmatic_owner(game_state, seat):
+            _fight_v11_log(
+                game_state,
+                f"action {atype!r} REFUSÉE : la machine attend le siège programmatique P{seat} "
+                f"(subphase={sub})",
+            )
+            return False, {
+                "error": "programmatic_seat_turn",
+                "player": seat,
+                "fight_subphase": sub,
+                "action": atype,
+            }
 
     # Combat cible-d abord par arme/quantite/figurine (jumeau du tir). Traite ICI, dans la
     # machine V11, et NON dans w40k_core : le garde-fou d allocation ci-dessus s applique donc
@@ -5352,24 +5280,11 @@ def _fight_v11_manual_step(
             if not intents:
                 _fight_v11_log(game_state, f"FIGHT validate {sel} : aucune declaration -> ignore")
                 return _fight_v11_manual_state(game_state)
-            # Defenseur : en PvP test les cibles appartiennent au joueur adverse (humain).
-            target_id = str(intents[0]["target_unit_id"])
-            target_unit = require_unit_by_id(game_state, target_id)
-            defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
-            if not defender_human:
-                raise RuntimeError(
-                    f"FIGHT validate {sel} : flux de declaration manuelle non supporte "
-                    f"pour un defenseur IA (cible {target_id})"
-                )
             _fight_v11_register_selection(game_state, sel)
             game_state["active_fight_unit"] = None
-            alloc_result = build_manual_fight_allocation(game_state, sel)
-            _fight_v11_log(
-                game_state,
-                f"FIGHT validate {sel} : alloc waiting={alloc_result.get('waiting_for_player')}"
-            )
-            if alloc_result.get("waiting_for_player"):
-                return True, alloc_result
+            waiting = _fight_v11_allocate_declared(game_state, sel)
+            if waiting is not None:
+                return True, waiting
             return _fight_v11_manual_state(game_state)
 
         # ÉTAPE 2 — unité active + clic sur une cible → résolution + allocation.
@@ -5389,28 +5304,12 @@ def _fight_v11_manual_step(
             if valid:
                 pref = str(action["targetId"]) if "targetId" in action else None
                 target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, sel, valid)
-                target_unit = require_unit_by_id(game_state, target_id)
-                defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
-                _fight_v11_log(game_state, f"FIGHT unit {sel} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
+                _fight_v11_log(game_state, f"FIGHT unit {sel} -> cible {target_id} (clic={pref})")
                 # L'unité a fini d'attaquer : on libère l'active (la prochaine sera re-choisie).
                 game_state["active_fight_unit"] = None
-                if defender_human:
-                    # Defenseur humain (§G) : allocation manuelle des pertes (par-figurine).
-                    # restart_ : le clic-cible redeclare toute l escouade, il ecrase donc
-                    # ce que squad_fight_assign avait pu declarer avant lui.
-                    squad_fight_restart_activation(game_state, sel)
-                    squad_declare_fight(game_state, sel, target_id)
-                    alloc_result = build_manual_fight_allocation(game_state, sel)
-                    _fight_v11_log(
-                        game_state,
-                        f"FIGHT unit {sel} : alloc waiting={alloc_result.get('waiting_for_player')} done={alloc_result.get('done')}"
-                    )
-                    if alloc_result.get("waiting_for_player"):
-                        return True, alloc_result
-                else:
-                    # Defenseur IA : resolution auto (chemin V11 inchange, HP-pool unite).
-                    _fight_v11_log(game_state, f"FIGHT unit {sel} : defenseur IA -> resolution auto")
-                    _fight_v11_resolve_attacks(game_state, u, config, preferred_target_id=target_id)
+                waiting = _fight_v11_fight_target(game_state, sel, target_id)
+                if waiting is not None:
+                    return True, waiting
             else:
                 _fight_v11_log(game_state, f"FIGHT unit {sel} : aucune cible valide")
             return _fight_v11_manual_state(game_state)
@@ -5645,12 +5544,13 @@ def execute_action(  # noqa: F811 (V11 override of V10)
 ) -> Tuple[bool, Dict[str, Any]]:
     """
     Routage de la phase FIGHT V11 (override). Sous-phases pile_in → fight → consolidate.
-    - PvE / gym / endless (auto autorisé) : une activation résolue par appel (_fight_v11_auto_step).
-    - PvP / pvp_test (manuel) : traite l'action humaine et renvoie l'état actionnable suivant.
+    Point d'entrée du siège HUMAIN, dans tous les modes (PvP hot-seat, siège humain du PvE,
+    endless duty) : traite l'action reçue et renvoie l'état actionnable suivant. Le siège
+    programmatique ne passe jamais ici — il joue par `W40KEngine._process_squad_action`
+    (sélection 12.04 par la politique) et par le driver `_fight_v11_gym_settle` (pile-in,
+    consolidation, New Foes to Face).
     """
     if game_state.get("phase") != "fight":
         fight_phase_start(game_state)
     fight_ensure_v11_state(game_state)
-    if _is_fight_auto_execution_allowed(game_state):
-        return _fight_v11_auto_step(game_state, config)
     return _fight_v11_manual_step(game_state, unit, action, config)

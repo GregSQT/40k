@@ -389,13 +389,17 @@ def test_candidats_mw_portent_des_traits_distincts(monkeypatch):
 
 # ---------------------------------------------------------------------------
 # Régime relu depuis `game_state` (armement, `_pending_exhortation_*`) : T1 au point d'entrée —
-# une valeur hors des trois régimes est une erreur explicite, jamais une reprise gym par défaut.
+# une valeur hors des deux régimes est une erreur explicite, jamais une reprise gym par défaut.
+# Le régime `auto` (siège humain PvE résolu sans choix de joueur) n'existe plus : le siège humain
+# joue la machine manuelle dans tous les modes, une valeur `auto` relue est donc un état périmé.
 # ---------------------------------------------------------------------------
 
-def test_regime_relu_hors_des_trois_valeurs_est_une_erreur():
-    for value in ("gym", "manual", "auto"):
+def test_regime_relu_hors_des_deux_valeurs_est_une_erreur():
+    for value in ("gym", "manual"):
         assert fh.exhortation_regime_of(value, "site") == value
     with pytest.raises(ValueError, match="site: régime d'Exhortation inconnu 'pvp'"):
         fh.exhortation_regime_of("pvp", "site")
+    with pytest.raises(ValueError, match="site: régime d'Exhortation inconnu 'auto'"):
+        fh.exhortation_regime_of("auto", "site")
     with pytest.raises(ValueError):
         fh.exhortation_regime_of(None, "site")

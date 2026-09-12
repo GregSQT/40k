@@ -37,7 +37,6 @@ from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 # Phase handlers (existing - keep these)
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
 from engine.phase_handlers.fight_handlers import (
-    EXHORTATION_REGIME_AUTO,
     EXHORTATION_REGIME_GYM,
     EXHORTATION_REGIME_MANUAL,
     FIGHT_CTX,
@@ -45,7 +44,6 @@ from engine.phase_handlers.fight_handlers import (
     ExhortationRegime,
     exhortation_regime_of,
     fight_exhortation_engaged_targets,
-    fight_v11_combat_result,
 )
 
 # units_cache helpers (single source of truth for position/HP of living units)
@@ -3858,24 +3856,51 @@ class W40KEngine(gym.Env):
         if current_phase != "fight" and current_player != 2:  # AI is player 2
             return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase}
         
-        # For fight phase, check if AI has eligible units in the appropriate pool
+        # Phase fight : le bot joue par siege, pas par tour. Ordre : (1) une allocation manuelle
+        # des pertes en attente appartient au defenseur humain, le bot ne joue pas ; (2) le driver
+        # `_fight_v11_gym_settle` resout ce qui n est pas une decision du bot (pile-in et
+        # consolidation de SES unites, arret des que la machine attend l humain) ; (3) machine
+        # videe par le bot -> fin de phase (12.09) par le MEME chemin que le client (`advance_phase`),
+        # `_fight_v11_manual_state` faisant de meme quand c est l humain qui vide la derniere
+        # etape ; (4) reste une selection 12.04 (ou un New Foe 12.08) du bot -> politique.
         if current_phase == "fight":
-            from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+            from engine.phase_handlers.fight_handlers import (
+                _fight_v11_consolidation_new_foes_remaining,
+                fight_v11_client_pool,
+                fight_v11_grouped_next,
+                fight_v11_pending_selection_squad,
+            )
             fight_subphase = self.game_state.get("fight_subphase")
-            # V11 : éligibilité dérivée de la machine de sélection (non-mutante).
-            has_eligible_ai = False
-            pool_to_check = fight_v11_current_pool(self.game_state) if fight_subphase else []
+            if fight_subphase is None:
+                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": None, "reason": "fight_machine_off"}
+            for _pending_ctx in _PENDING_ALLOC_CTXS:
+                if self.game_state.get(_pending_ctx.alloc_key) is not None:
+                    return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "manual_allocation_pending"}
+            # Selection de la politique en cours (arme, re-selection de cible) : `squad_fight` a
+            # deja enregistre l escouade et passe le selecteur — le pool 12.04 est a l humain,
+            # mais c est encore au bot de finir SA selection. Ni drain ni fin de phase ici.
+            if fight_v11_pending_selection_squad(self.game_state) is None:
+                self._fight_v11_gym_settle()
+            pool_to_check = fight_v11_client_pool(self.game_state)
+            if (
+                fight_v11_pending_selection_squad(self.game_state) is None
+                and require_key(self.game_state, "fight_subphase") == "consolidate"
+                and fight_v11_grouped_next(self.game_state, "consolidate") is None
+                and not _fight_v11_consolidation_new_foes_remaining(self.game_state)
+            ):
+                return self._process_semantic_action({"action": "advance_phase", "from": "fight"})
 
             # Check if any unit in the pool is an AI unit (player 2)
+            has_eligible_ai = False
             for unit_id in pool_to_check:
                 unit = require_unit_by_id(self.game_state, str(unit_id))
                 if unit.get("player") == 2:
                     has_eligible_ai = True
                     break
-            
+
             if not has_eligible_ai:
-                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "no_eligible_ai_units_in_pool", "pool_checked": pool_to_check}
-        
+                return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": self.game_state.get("fight_subphase"), "reason": "no_eligible_ai_units_in_pool", "pool_checked": pool_to_check}
+
         # Check PvE controller readiness without coupling to controller mode.
         if not hasattr(self, "pve_controller") or not self.pve_controller.is_ready_for_decision():
             return False, {"error": "ai_model_not_loaded"}
@@ -3890,6 +3915,9 @@ class W40KEngine(gym.Env):
             # vocabulaire — c'est `_process_squad_action` qui l'execute, en appelant les MEMES
             # handlers de phase que le joueur humain.
             result = self._process_squad_action(ai_semantic_action)
+            if self.game_state.get("phase") == "fight":
+                from engine.phase_handlers.fight_handlers import fight_v11_client_pool
+                fight_v11_client_pool(self.game_state)
             return result
             
         except Exception as e:
@@ -6714,9 +6742,9 @@ class W40KEngine(gym.Env):
         """Jet D6 d'Exhortation of Rage sur la cible DEJA choisie, puis reprise du combat.
 
         `regime` (`EXHORTATION_REGIME_*`, fight_handlers) dit COMMENT le combat reprend une fois
-        les blessures attribuées : gym (slots/armes de la politique), manuel PvP (le joueur
-        déclare ses attaques) ou auto PvE (résolution automatique) — cf.
-        `_continue_fight_after_exhortation`. Sans défaut : la reprise manuelle ou auto peut
+        les blessures attribuées : gym (slots/armes de la politique — siège programmatique) ou
+        manuel (le joueur humain déclare ses attaques, PvP comme PvE) — cf.
+        `_continue_fight_after_exhortation`. Sans défaut : la reprise manuelle peut
         survenir dans une requête ultérieure, et un appelant qui hériterait du régime gym en
         silence rendrait la main sur le mauvais dispatcher ; la valeur relue d'un état posé
         passe par `exhortation_regime_of`. `auto` : la cible n'est pas venue d'un choix de
@@ -6824,20 +6852,19 @@ class W40KEngine(gym.Env):
         self, squad_id: str, target_slot: Optional[int], *, regime: ExhortationRegime
     ) -> Tuple[bool, Dict[str, Any]]:
         """Reprise du combat de l attaquant une fois les blessures mortelles d Exhortation
-        attribuees — tout de suite (regime AUTO, figurines forcees) ou apres le dernier clic du
-        defenseur humain (`_resume_after_hazard`, origine `exhortation`).
+        attribuees — tout de suite (defenseur machine, figurines forcees) ou apres le dernier
+        clic du defenseur humain (`_resume_after_hazard`, origine `exhortation`).
 
-        Une reprise par régime de sélection (`EXHORTATION_REGIME_*`) :
-        - gym : `_continue_squad_fight_after_selection` (overrun → cible par slot → arme) ;
-        - manuel PvP : l'unité reste ACTIVE et non enregistrée (12.04 : elle est sélectionnée
-          mais n'a pas encore combattu) — `_fight_v11_manual_state` la présente avec ses cibles
-          survivantes, le joueur déclare puis valide comme pour toute autre unité ;
-        - auto PvE : `_fight_v11_auto_resolve_selected`, la résolution que `_fight_v11_auto_step`
-          aurait faite dans la même requête sans l'Exhortation.
+        Une reprise par régime de sélection (`EXHORTATION_REGIME_*`), le régime suivant le SIÈGE
+        de l'attaquant :
+        - gym (siège programmatique : politique en gym, bot en PvE) :
+          `_continue_squad_fight_after_selection` (overrun → cible par slot → arme) ;
+        - manuel (siège humain, PvP comme PvE) : l'unité reste ACTIVE et non enregistrée (12.04 :
+          elle est sélectionnée mais n'a pas encore combattu) — `_fight_v11_manual_state` la
+          présente avec ses cibles survivantes, le joueur déclare puis valide comme pour toute
+          autre unité.
         """
-        from engine.phase_handlers.fight_handlers import (
-            _fight_v11_auto_resolve_selected, _fight_v11_manual_state,
-        )
+        from engine.phase_handlers.fight_handlers import _fight_v11_manual_state
         if regime == EXHORTATION_REGIME_MANUAL:
             # Attaquant tué par la cascade (24.08) : plus dans le pool, `_fight_v11_manual_state`
             # rend la main sur le choix d'une autre unité.
@@ -6845,10 +6872,6 @@ class W40KEngine(gym.Env):
         # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
         # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
         attacker_alive = squad_id in require_key(self.game_state, "units_cache")
-        if regime == EXHORTATION_REGIME_AUTO:
-            if not attacker_alive:
-                return True, fight_v11_combat_result(squad_id, [], None, overrun=False)
-            return True, _fight_v11_auto_resolve_selected(self.game_state, squad_id, self.config)
         if regime == EXHORTATION_REGIME_GYM:
             if not attacker_alive:
                 self._fight_v11_gym_settle()
@@ -6873,18 +6896,15 @@ class W40KEngine(gym.Env):
         cibles : la décision `mortal_wounds_target` est posée AVANT tout jet — la datasheet dit
         « select one enemy unit … and roll one D6 », dans cet ordre — et le jet suit la réponse.
 
-        `regime` : gym (site `_process_squad_action`, réponse par la politique), manuel PvP
-        (site `_process_fight_phase`, réponse par le panneau `mortal_wounds_target` du joueur)
-        ou auto PvE (site `_process_fight_phase`) — ce dernier régime résout TOUT sans choix de
-        joueur, cible de mêlée comprise (`_fight_v11_resolve_attacks`) : la cible des blessures
-        mortelles y suit le même sélecteur (`_ai_select_fight_target`), jamais une décision que
-        personne ne répondrait pour une unité résolue hors politique.
+        `regime` : gym (site `_process_squad_action`, réponse par la politique) ou manuel (site
+        `_process_fight_phase`, réponse par le panneau `mortal_wounds_target` du joueur humain,
+        PvP comme PvE).
 
-        Siège sans canal de réponse — régime auto, OU siège IA hors gym en régime gym (Chaplain
-        du bot en PvE : `_fight_v11_register_selection` a déjà passé la main à l'humain, donc
-        `execute_ai_turn` refuserait `not_ai_player_turn` et personne ne répondrait) : la cible
-        est tranchée ICI par le sélecteur du siège machine, sans décision posée, comme les choix
-        de faction de `_resolve_faction_decisions_for_ai_seats` (heuristique, pas relevée).
+        Siège sans canal de réponse — siège IA hors gym en régime gym (Chaplain du bot en PvE :
+        `_fight_v11_register_selection` a déjà passé la main à l'humain, donc `execute_ai_turn`
+        refuserait `not_ai_player_turn` et personne ne répondrait) : la cible est tranchée ICI
+        par le sélecteur du siège machine, sans décision posée, comme les choix de faction de
+        `_resolve_faction_decisions_for_ai_seats` (heuristique, pas relevée).
         """
         from engine.phase_handlers.fight_handlers import _ai_select_fight_target, _fight_v11_manual_state
         from engine.observation_entities import (
@@ -6899,9 +6919,7 @@ class W40KEngine(gym.Env):
                 squad_id, engaged[0], target_slot, auto=True, regime=regime
             )
         player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
-        if regime == EXHORTATION_REGIME_AUTO or (
-            not self.gym_training_mode and not self._is_player_human(player)
-        ):
+        if not self.gym_training_mode and not self._is_player_human(player):
             return self._apply_exhortation_de_rage(
                 squad_id, _ai_select_fight_target(self.game_state, squad_id, engaged),
                 target_slot, auto=True, regime=regime,
@@ -8052,7 +8070,13 @@ class W40KEngine(gym.Env):
         )
 
     def _fight_v11_gym_settle(self) -> None:
-        """Deroule les etapes NON-DECISIONNELLES de la machine V11 (chemin gym uniquement).
+        """Deroule les etapes NON-DECISIONNELLES de la machine V11 pour les sieges PROGRAMMATIQUES.
+
+        Siege programmatique (`is_programmatic_owner`) : les deux en gym (self-play), le bot en
+        PvE. Le driver s arrete des que la machine attend un siege HUMAIN — groupe pile-in ou
+        consolidation de l humain, New Foes to Face (12.08) a resoudre par lui —, que la machine
+        manuelle (`fight_handlers._fight_v11_manual_step`) conduit clic par clic. En gym, ou
+        aucun siege n est humain, le deroule est celui d origine, integralement.
 
         La phase de combat (12.01-12.09) alterne trois etapes : PILE IN groupe (12.02), FIGHT
         (12.04), CONSOLIDATE groupe (12.07). Une seule comporte une decision que l agent prenne
@@ -8069,12 +8093,19 @@ class W40KEngine(gym.Env):
         pile-in d une escouade s intercale entre deux combats.
 
         Pile-in/consolidation sont resolus PAR-FIGURINE (`fight_pile_in_plan`,
-        `squad_consolidate_plan`) et non via les helpers par-ancre `_fight_v11_auto_pile_in` /
-        `_fight_v11_auto_consolidate` : le pile-in de reference est le par-figurine du PvP, le
-        par-ancre est condamne.
+        `squad_consolidate_plan`), les memes plans que la machine manuelle propose au joueur :
+        le pile-in de reference est le par-figurine, le par-ancre est condamne.
 
-        Chemin `_process_squad_action` (gym + bot PvE) : le PvP humain conduit la meme machine pas
-        a pas via `fight_handlers`, qui n est pas touche.
+        Chemin `_process_squad_action` (gym + bot PvE) : le siege humain (PvP hot-seat, siege
+        humain du PvE) conduit la meme machine pas a pas via `fight_handlers`.
+
+        New Foes to Face (12.08 AFTER MOVING, engaging) — HORS GYM seulement : apres chaque
+        consolidation engaging d une unite du bot, les ennemis engages non encore selectionnes
+        sont armes pour l adversaire (`_fight_v11_consolidation_resolve_new_foes`), qui les fait
+        combattre un par un ; tant qu il en reste, le driver rend la main (au siege humain via la
+        machine manuelle, au bot via la politique : `fight_v11_current_pool` expose alors ces New
+        Foes et `_process_squad_action` accepte `squad_fight` en sous-phase consolidate). En gym
+        les New Foes ne sont pas armes — contrat d entrainement inchange (cf. tour_de_jeu.md).
 
         Ne termine PAS la phase : le gym transitionne par l action systeme `advance_phase` quand
         le masque se vide (`fight_phase_end`), jamais par une cascade depuis une action d unite.
@@ -8084,6 +8115,9 @@ class W40KEngine(gym.Env):
         le masque aussi, et la route existante prend le relais.
         """
         from engine.phase_handlers.fight_handlers import (
+            _fight_v11_consolidation_clear_new_foes,
+            _fight_v11_consolidation_new_foes_remaining,
+            _fight_v11_consolidation_resolve_new_foes,
             fight_v11_advance_selection,
             fight_v11_enter_consolidate,
             fight_v11_enter_fight_step,
@@ -8091,6 +8125,7 @@ class W40KEngine(gym.Env):
         )
         from engine.phase_handlers.shared_utils import (
             fight_pile_in_plan,
+            is_programmatic_owner,
             squad_consolidate_plan,
         )
 
@@ -8098,6 +8133,7 @@ class W40KEngine(gym.Env):
         phase = require_key(gs, "phase")
         if phase != "fight":
             raise RuntimeError(f"_fight_v11_gym_settle appele hors phase fight (phase={phase!r})")
+        gym = bool(gs.get("gym_training_mode"))
 
         # Chaque tour de boucle marque >=1 unite `*_done` ou franchit une etape : la borne ne
         # peut etre atteinte que si la machine ne progresse pas -> bug, donc erreur explicite.
@@ -8110,6 +8146,8 @@ class W40KEngine(gym.Env):
                 if nxt is None:
                     fight_v11_enter_fight_step(gs)
                     continue
+                if not is_programmatic_owner(gs, nxt[0]):
+                    return  # groupe d un siege humain : pile-in par-figurine, clic par clic
                 for uid in nxt[1]:
                     plan = fight_pile_in_plan(gs, str(uid))
                     if plan is not None:
@@ -8128,14 +8166,26 @@ class W40KEngine(gym.Env):
                 return  # une selection est possible : la main revient a l agent
 
             if sub == "consolidate":
+                if "consolidation_new_foes_pending" in gs:
+                    if _fight_v11_consolidation_new_foes_remaining(gs):
+                        return  # New Foes a faire combattre : machine manuelle ou politique
+                    _fight_v11_consolidation_clear_new_foes(gs)
                 nxt = fight_v11_grouped_next(gs, "consolidate")
                 if nxt is None:
                     return  # 12.07 drainee : pool vide -> masque vide -> `advance_phase`
+                if not is_programmatic_owner(gs, nxt[0]):
+                    return  # groupe d un siege humain : consolidation par-figurine, clic par clic
                 for uid in nxt[1]:
                     plan = squad_consolidate_plan(gs, str(uid))
                     if plan is not None:
                         self._gym_commit_fight_move(gs, str(uid), plan, "consolidation")
                     require_key(gs, "consolidation_done").add(str(uid))
+                    if not gym and plan is not None:
+                        armed = _fight_v11_consolidation_resolve_new_foes(
+                            gs, require_unit_by_id(gs, str(uid)), self.config
+                        )
+                        if armed is not None:
+                            return  # l adversaire fait combattre les New Foes (12.08)
                 continue
 
             raise ValueError(f"fight_subphase inattendu dans le chemin gym: {sub!r}")
@@ -8938,18 +8988,28 @@ class W40KEngine(gym.Env):
             # premier combat, et 12.04 date son snapshot d eligibilite du debut de l etape FIGHT.
             # L ancien code resolvait pile-in + fight + consolidation par escouade, en une passe,
             # sans jamais avancer la machine V11 : l ordre etait faux ET aucun etat n etait pose.
+            from engine.phase_handlers.fight_handlers import (
+                _fight_v11_consolidation_new_foes_remaining,
+                _fight_v11_register_selection,
+                fight_v11_current_pool,
+            )
             sub = require_key(self.game_state, "fight_subphase")
-            if sub != "fight":
+            # New Foes to Face (12.08, hors gym) : l escouade du bot tiree au combat par une
+            # consolidation engaging de l humain est « selected to fight (12.04) » depuis la
+            # sous-phase consolidate — c est la seule autre sous-phase ou une selection existe.
+            if sub == "consolidate" and squad_id not in _fight_v11_consolidation_new_foes_remaining(
+                self.game_state
+            ):
+                raise RuntimeError(
+                    f"squad_fight recu en sous-phase consolidate pour {squad_id}, qui n est pas "
+                    f"un New Foe en attente"
+                )
+            if sub not in ("fight", "consolidate"):
                 raise RuntimeError(
                     f"squad_fight recu en sous-phase {sub!r} : la machine V11 n a pas ete "
                     f"deroulee jusqu a l etape FIGHT — `_fight_v11_gym_settle` manque sur le "
                     f"chemin d entree en phase fight"
                 )
-
-            from engine.phase_handlers.fight_handlers import (
-                _fight_v11_register_selection,
-                fight_v11_current_pool,
-            )
             # Parite masque/commit : le masque gym derive du MEME pool 12.04 (action_decoder ->
             # fight_v11_current_pool). Un squad hors pool est une rupture, pas un cas a absorber.
             pool = fight_v11_current_pool(self.game_state)
@@ -8960,7 +9020,7 @@ class W40KEngine(gym.Env):
                 )
             unit = require_unit_by_id(self.game_state, squad_id)
 
-            # Ordre du flux PvP (`_fight_v11_auto_step`) : marquer « selected to fight » AVANT de
+            # Ordre du flux manuel (`_fight_v11_manual_step`) : marquer « selected to fight » AVANT de
             # resoudre. C est ce marquage qui interdit a une escouade de combattre deux fois dans
             # la phase (12.04, « has not already been selected to fight this phase ») et qui ouvre
             # son eligibilite a la consolidation (12.08, « was eligible to fight this phase »).

@@ -1494,6 +1494,33 @@ sous-étapes via `fight_subphase` :
    (sélecteur = joueur actif) si une unité FF redevient éligible pendant Remaining ;
 3. `consolidate` — CONSOLIDATE (12.07/12.08), cascade de modes (voir matrice).
 
+**Qui conduit la machine — par SIÈGE, jamais par mode (2026-09-12).** 12.02/12.07 (« with all
+of their eligible units **they choose to move** »), 12.04 (« players alternate selecting ») et
+05.03/05.04 (« the opposing player ») sont des décisions du propriétaire du siège :
+- **siège humain** (PvP hot-seat, siège humain du PvE, endless duty) : `fight_handlers.execute_action`
+  → `_fight_v11_manual_step`, clic par clic — pile-in par-figurine, sélection 12.04, armes/cibles,
+  consolidation par-figurine, allocation des pertes quand il défend ;
+- **siège programmatique** (les deux en gym, le bot en PvE — `is_programmatic_owner`) : sélection
+  12.04, arme et cible par la politique (`_process_squad_action` : `squad_fight`,
+  `squad_fight_weapon`, `squad_fight_target_sel`) ; pile-in et consolidation de SES unités par le
+  driver `W40KEngine._fight_v11_gym_settle` (plans par-figurine `fight_pile_in_plan` /
+  `squad_consolidate_plan`, les mêmes que ceux proposés au joueur), qui s'arrête dès que le groupe
+  courant ou le sélecteur est humain. En PvE, `execute_ai_turn` enchaîne : refus si une
+  allocation humaine est en attente → drain → fin de phase (`advance_phase`, 12.09) si le bot a
+  vidé la dernière étape → politique si le pool est au bot. `fight_v11_expected_seat` nomme le
+  siège attendu ; une action humaine pendant le tour d'un siège programmatique est refusée
+  (`programmatic_seat_turn`), l'allocation du défenseur humain exceptée.
+- **New Foes to Face** (12.08 AFTER MOVING, engaging) : sélecteur = adversaire du PROPRIÉTAIRE de
+  l'unité qui consolide (pas du joueur actif — à 12.07 les deux joueurs consolident). Hors gym,
+  la consolidation engaging du bot arme les New Foes de l'humain ; les New Foes du bot sont joués
+  par la politique (`squad_fight` accepté en sous-phase `consolidate`, `fight_v11_current_pool`
+  les expose). **En gym, les New Foes ne sont pas armés** (contrat d'entraînement inchangé : le
+  driver consolide sans les lever) — écart 12.08 connu, hors chantier.
+- L'ancien chemin **auto** (`_is_fight_auto_execution_allowed` → `_fight_v11_auto_step`, actif
+  pour `pve/pve_test/endless_duty`) est supprimé : il résolvait l'activation À LA PLACE du siège
+  humain (pile-in imposé, cible par heuristique, pertes allouées par la machine) et n'avait aucun
+  autre appelant de production.
+
 **Éligibilité au fight (par unité)** — critères normatifs, portés par
 `fight_v11_eligible_unit_ids` :
 - `unit.HP_CUR > 0` (vivante) ;

@@ -22,15 +22,18 @@ Le mécanisme est découpé en trois couches, chacune paramétrée par un contex
 | **Allocation des pertes** (05.03 / 05.04) | `class ManualAllocCtx`, `def _build_manual_allocation`, `def apply_manual_shoot_declare_order`, `def apply_manual_shoot_allocation` | `SHOOT_CTX` (shared_utils) / `FIGHT_CTX` (fight_handlers) | [shared_utils.py](../../../engine/phase_handlers/shared_utils.py) |
 
 **Convergence** : il n'existe plus qu'UN chemin de résolution, PvP manuel comme PvE/gym.
-Le chemin auto passe par le même moteur d'allocation en mode headless : le champ
+Le défenseur machine passe par le même moteur d'allocation en mode headless : le champ
 `auto_decider` du `ManualAllocCtx` (branché sur `def is_programmatic_defender`,
 source unique `def is_programmatic_owner`) fait trancher au moteur l'ordre des groupes
 et le choix de figurine quand le défenseur est piloté par la machine, au lieu de rendre
-la main. Côté tir, l'entrée auto est `build_manual_shoot_allocation` appelée depuis le
+la main. Côté tir, l'entrée est `build_manual_shoot_allocation` appelée depuis le
 chemin `squad_shoot` de [w40k_core.py](../../../engine/w40k_core.py) ; côté mêlée,
-`build_manual_fight_allocation` appelée depuis `def _fight_v11_resolve_attacks`
-([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py)), qui a remplacé
-l'ancien résolveur « pool de PV homogène ».
+`build_manual_fight_allocation`, appelée par UNE seule voie quel que soit le siège du
+défenseur : `def _fight_v11_allocate_declared`
+([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py)) pour l'attaquant
+humain (validate et clic-cible, `def _fight_v11_fight_target`), `squad_fight_weapon` /
+`_continue_squad_fight_after_selection` pour l'attaquant programmatique — le résultat
+(`waiting_for_player` ou `done`) dit qui a décidé.
 
 Le moteur d'allocation sert aussi les blessures mortelles **[HAZARDOUS] 24.15**
 (champs `mortal` / `hazard_origin` du ctx, `def _resolve_one_hazard_wound`) : pas d'arme,
@@ -51,9 +54,11 @@ mortelles. Deux mécanismes selon le MOMENT :
   reprise du combat de l'attaquant par `def _resume_after_hazard` →
   `def _continue_fight_after_exhortation` (`engine/w40k_core.py`), selon le RÉGIME de sélection
   mémorisé dans `_pending_exhortation_resume` (`EXHORTATION_REGIME_*`, `fight_handlers.py`) :
-  gym → `_continue_squad_fight_after_selection` ; manuel PvP → `_fight_v11_manual_state`
-  (l'attaquant reste actif et déclare ses attaques contre les survivants) ; auto PvE →
-  `_fight_v11_auto_resolve_selected`.
+  gym (siège programmatique : politique en gym, bot en PvE) →
+  `_continue_squad_fight_after_selection` ; manuel (siège humain, PvP comme PvE) →
+  `_fight_v11_manual_state` (l'attaquant reste actif et déclare ses attaques contre les
+  survivants). Le régime suit le SIÈGE de l'attaquant, jamais le mode de jeu (depuis le
+  2026-09-12, chantier « phase fight PvE par siège »).
 Défenseur piloté par la machine : `allocate_mortal_wounds` AUTO (`eligibles[0]`), régime
 d'entraînement inchangé. Garde : `def _process_squad_action` refuse toute action de politique
 tant qu'une allocation humaine est en attente (jumeau des gardes du chemin API).
@@ -216,11 +221,26 @@ vivent dans la résolution de la blessure, pas dans le ctx.
 
 ## 7. Aiguillage humain/machine (§E) et asymétrie attaquant/défenseur (§G)
 
-- **Aiguilleur de phase fight** : `def _is_fight_auto_execution_allowed`
-  (fight_handlers) — `False` pour `{pvp, pvp_test}` (strictement manuel : pas
-  d'auto-activation, pas d'auto-ciblage, pas d'enchaînement auto), `True` pour
-  `{pve, pve_test, endless_duty}` et mode absent ; toute autre valeur lève. C'est le SEUL
-  aiguilleur auto/manuel de la phase.
+- **Aiguillage par SIÈGE, jamais par mode** (depuis le 2026-09-12) : l'ancien aiguilleur
+  `_is_fight_auto_execution_allowed` (auto pour `{pve, pve_test, endless_duty}`) et tout le
+  chemin auto (`_fight_v11_auto_step`, pile-in/consolidation auto, résolution par
+  heuristique) sont supprimés — en PvE, il résolvait l'activation À LA PLACE du joueur humain
+  (pile-in imposé, cible par heuristique, pertes allouées par la machine) et levait dès que le
+  sélecteur 12.04 était le bot. Aujourd'hui : `fight_handlers.execute_action` est le point
+  d'entrée du siège HUMAIN dans tous les modes (`def _fight_v11_manual_step`) ; le siège
+  programmatique (politique en gym, bot en PvE) joue par `def _process_squad_action` (sélection
+  12.04, arme, cible) et par le driver `def _fight_v11_gym_settle` (pile-in 12.02 et
+  consolidation 12.07 de SES unités, par les mêmes plans par-figurine que ceux proposés au
+  joueur), qui s'arrête dès que la machine attend un siège humain (`def is_programmatic_owner`
+  sur le groupe courant). `def fight_v11_expected_seat` nomme le siège attendu ; quand c'est
+  un siège programmatique, `_fight_v11_manual_step` REFUSE toute action de jeu
+  (`programmatic_seat_turn`) — sauf l'allocation des pertes par le défenseur humain, qui passe
+  avant. `def execute_ai_turn` (`w40k_core.py`) : allocation humaine en attente → le bot ne
+  joue pas ; sélection de la politique en cours (`def fight_v11_pending_selection_squad` :
+  arme / re-sélection de cible, escouade déjà passée au sélecteur adverse) → politique sans
+  drain ; sinon drain, puis fin de phase par `advance_phase` si le bot a vidé la dernière
+  étape, sinon politique si le pool est au bot. `def fight_v11_client_pool` rafraîchit
+  `fight_eligible_units` (pool lu par le client) sur ce chemin.
 - **Décideur d'allocation** : `def is_programmatic_owner` (shared_utils), source unique
   du prédicat « ce joueur est piloté par la machine » — vrai en gym
   (`gym_training_mode`), sinon `player_types == "ai"`. Branché UNIQUEMENT sur les
@@ -278,10 +298,9 @@ d'abord — `def is_fights_first`, un ordre d'**activation**, pas de cible) → 
 - Chemin manuel : `def _fight_v11_manual_step` — expose le pool éligible du sélecteur
   courant (`fight_eligible_units` → cercles verts), activation en 2 temps
   (`activate_unit` puis déclaration), puis allocation.
-- Chemin auto : `def _fight_v11_auto_step` → `def _fight_v11_resolve_attacks` —
-  sélection de cible auto (`def _ai_select_fight_target`), puis MÊME moteur : déclaration
-  per-figurine (`def squad_declare_fight`, shared_utils — arme CC choisie par figurine,
-  04.01) + allocation headless.
+- Attaquant programmatique : `def _process_squad_action` (`squad_fight` par slot de cible,
+  `squad_fight_weapon`) → MÊME moteur d'allocation ; `def _ai_select_fight_target` ne sert
+  plus qu'au clic-cible humain sans `targetId` et à l'Exhortation d'un siège bot hors gym.
 - Granularité spatiale : `def unit_entries_within_engagement_zone`
   ([spatial_relations.py](../../../engine/spatial_relations.py)) compare des empreintes
   d'unités ; l'éligibilité par-figurine descend au niveau figurine via les callbacks §3.
@@ -375,8 +394,9 @@ système V10 (code mort, supprimé depuis) ; réutiliser la résolution du manue
 perdu les rerolls de combat (§B) ; le chemin d'application dégâts du tir nu aurait cassé
 les invalidations de cache fight (§D). Le GO porte sur : généraliser par ctx UNIQUEMENT
 l'allocation des pertes ; garder une résolution mêlée propre (rerolls) ; greffer sur la
-machine V11 (`_fight_v11_manual_step`) ; isolation gym via
-`_is_fight_auto_execution_allowed` ; `squad_fight_cancel` + garde-fou
+machine V11 (`_fight_v11_manual_step`) ; isolation gym (à l'époque via
+`_is_fight_auto_execution_allowed`, remplacé le 2026-09-12 par l'aiguillage par siège, §7) ;
+`squad_fight_cancel` + garde-fou
 `pending_fight_allocation` ; application dégâts via le chemin fight avec invalidations ;
 logs paramétrés. Toutes ces conditions sont dans le code aujourd'hui (sections 5–10).
 

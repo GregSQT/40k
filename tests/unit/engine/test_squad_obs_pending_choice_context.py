@@ -158,6 +158,10 @@ def _melee_engine() -> W40KEngine:
     gs["phase"] = "fight"
     gs["current_player"] = 1
     gs["units_fought"] = set()
+    # Chemin squad (`_process_squad_action`, driver `_fight_v11_gym_settle`) = sièges
+    # PROGRAMMATIQUES : avec des sièges humains, le driver rend la main au premier groupe
+    # sans rien dérouler et `squad_fight` n'a pas d'étape FIGHT à sélectionner.
+    gs["player_types"] = {"1": "ai", "2": "ai"}
 
     from engine.phase_handlers import fight_handlers
 
