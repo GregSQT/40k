@@ -18,7 +18,7 @@ import type { AuthSession } from "../auth/authStorage";
 import type { Unit, Weapon } from "../types/game";
 import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
-import { readManualAllocationPrompt, useEngineAPI } from "./useEngineAPI";
+import { readManualAllocationPrompt, readManualOrderPrompt, useEngineAPI } from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------
 // ErrorBoundary pour tester les hooks qui lancent une exception sur erreur
@@ -827,6 +827,39 @@ describe("readManualAllocationPrompt", () => {
   });
 });
 
+describe("readManualOrderPrompt", () => {
+  const order_request = {
+    attacker_unit_id: "2",
+    target_unit_id: "1",
+    defender_player: 1,
+    wounds_to_save: 2,
+    groups: [],
+  };
+
+  it("payload fight en attente d'ordre → requête de famille fight", () => {
+    expect(
+      readManualOrderPrompt({
+        action: "squad_fight_declare_order",
+        waiting_for_player: true,
+        order_request,
+      })
+    ).toEqual({ ...order_request, kind: "fight" });
+  });
+
+  it("pas une attente d'ordre → null", () => {
+    expect(
+      readManualOrderPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: true,
+        order_request,
+      })
+    ).toBeNull();
+    expect(
+      readManualOrderPrompt({ action: "squad_fight_declare_order", waiting_for_player: true })
+    ).toBeNull();
+  });
+});
+
 describe("useEngineAPI — executeAITurn, allocation du défenseur humain en phase fight", () => {
   it("ROUGE sans la prise en charge : `/game/ai-turn` rend squad_fight_manual_alloc → prompt posé, boucle arrêtée", async () => {
     const fightState = makeGameState({
@@ -874,6 +907,57 @@ describe("useEngineAPI — executeAITurn, allocation du défenseur humain en pha
 
       expect(result.current.manualAllocation).toEqual({ ...allocation, kind: "fight" });
       // La main est à l'humain : un seul appel, pas de relance tant qu'il n'a pas alloué.
+      expect(aiTurnCalls).toBe(1);
+    } finally {
+      window.history.replaceState({}, "", "/game");
+    }
+  });
+
+  it("cible hétérogène (05.03) : `/game/ai-turn` rend squad_fight_declare_order → ordre demandé, boucle arrêtée", async () => {
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const order_request = {
+      attacker_unit_id: "2",
+      target_unit_id: "1",
+      defender_player: 1,
+      wounds_to_save: 2,
+      groups: [],
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: { action: "squad_fight_declare_order", waiting_for_player: true, order_request },
+          game_state: fightState,
+          action_logs: [],
+        });
+      })
+    );
+
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+      expect(result.current.manualOrderRequest).toBeNull();
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(result.current.manualOrderRequest).toEqual({ ...order_request, kind: "fight" });
+      expect(result.current.manualAllocation).toBeNull();
       expect(aiTurnCalls).toBe(1);
     } finally {
       window.history.replaceState({}, "", "/game");

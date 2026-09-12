@@ -3866,8 +3866,6 @@ class W40KEngine(gym.Env):
         if current_phase == "fight":
             from engine.phase_handlers.fight_handlers import (
                 fight_v11_client_pool,
-                fight_v11_grouped_next,
-                fight_v11_new_foes_pool,
                 fight_v11_pending_selection_squad,
             )
             fight_subphase = self.game_state.get("fight_subphase")
@@ -3882,13 +3880,9 @@ class W40KEngine(gym.Env):
             if fight_v11_pending_selection_squad(self.game_state) is None:
                 self._fight_v11_gym_settle()
             pool_to_check = fight_v11_client_pool(self.game_state)
-            if (
-                fight_v11_pending_selection_squad(self.game_state) is None
-                and require_key(self.game_state, "fight_subphase") == "consolidate"
-                and fight_v11_grouped_next(self.game_state, "consolidate") is None
-                and not fight_v11_new_foes_pool(self.game_state)
-            ):
-                return self._process_semantic_action({"action": "advance_phase", "from": "fight"})
+            drained = self._fight_v11_bot_ends_phase_if_drained()
+            if drained is not None:
+                return drained
 
             # Check if any unit in the pool is an AI unit (player 2)
             has_eligible_ai = False
@@ -3918,6 +3912,14 @@ class W40KEngine(gym.Env):
             if self.game_state.get("phase") == "fight":
                 from engine.phase_handlers.fight_handlers import fight_v11_client_pool
                 fight_v11_client_pool(self.game_state)
+                # L action du bot peut avoir vide la machine (derniere selection puis drain de
+                # sa consolidation par `_fight_v11_gym_settle`) : la fin de phase se joue ICI,
+                # dans la meme requete — le client ne relance `/game/ai-turn` que sur un pool
+                # contenant une unite du bot, et n envoie jamais `advance_phase` depuis sa
+                # boucle IA ; un pool vide sans fin de phase figerait la partie.
+                drained = self._fight_v11_bot_ends_phase_if_drained()
+                if drained is not None:
+                    return drained
             return result
             
         except Exception as e:
@@ -3925,6 +3927,30 @@ class W40KEngine(gym.Env):
             import traceback
             traceback.print_exc()
             return False, {"error": "ai_decision_failed", "message": str(e)}
+
+    def _fight_v11_bot_ends_phase_if_drained(self) -> Optional[Tuple[bool, Dict[str, Any]]]:
+        """Fin de phase fight (12.09) par le siege bot quand la machine V11 est VIDE apres son
+        action : consolidation drainee (aucun groupe restant, aucun New Foe 12.08), aucune
+        selection de politique en cours, aucune allocation humaine en attente. Passe par le MEME
+        chemin que le client (`advance_phase`), et rend le resultat de la transition ; ``None``
+        quand il reste quelque chose a jouer (a l humain ou au bot). Jumeau de
+        `_fight_v11_manual_state`, qui complete la phase quand c est l humain qui vide la
+        derniere etape."""
+        from engine.phase_handlers.fight_handlers import (
+            fight_v11_grouped_next,
+            fight_v11_new_foes_pool,
+            fight_v11_pending_selection_squad,
+        )
+        gs = self.game_state
+        if gs.get("phase") != "fight" or gs.get("fight_subphase") != "consolidate":
+            return None
+        if fight_v11_pending_selection_squad(gs) is not None:
+            return None
+        if any(gs.get(ctx.alloc_key) is not None for ctx in _PENDING_ALLOC_CTXS):
+            return None
+        if fight_v11_new_foes_pool(gs) or fight_v11_grouped_next(gs, "consolidate") is not None:
+            return None
+        return self._process_semantic_action({"action": "advance_phase", "from": "fight"})
 
     def _initialize_rule_choice_runtime_state(self) -> None:
         """Initialize in-memory state for timing-based rule choices."""
@@ -8149,7 +8175,6 @@ class W40KEngine(gym.Env):
         phase = require_key(gs, "phase")
         if phase != "fight":
             raise RuntimeError(f"_fight_v11_gym_settle appele hors phase fight (phase={phase!r})")
-        gym = bool(gs.get("gym_training_mode"))
 
         # Chaque tour de boucle marque >=1 unite `*_done` ou franchit une etape : la borne ne
         # peut etre atteinte que si la machine ne progresse pas -> bug, donc erreur explicite.

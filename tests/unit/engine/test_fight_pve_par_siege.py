@@ -344,12 +344,11 @@ def test_les_new_foes_du_bot_sont_joues_par_la_politique(monkeypatch):
     assert "2" in gs["units_selected_to_fight"]
     assert "consolidation_new_foes_pending" not in gs, "liste épuisée → purgée par le driver"
     # 2 « was eligible to fight this phase » : le driver l'a consolidée dans la foulée (groupe
-    # du bot), la machine est vidée → le prochain tour du bot termine la phase (12.09).
-    assert "2" in gs["consolidation_done"] and gs["phase"] == "fight"
-    assert gs["fight_eligible_units"] == []
-    ok, out = _ai_turn(eng)
-    assert ok is True, out
-    assert gs["phase"] != "fight" and gs["fight_subphase"] is None
+    # du bot), la machine est vidée → la phase se termine DANS LA MÊME REQUÊTE (12.09). Le client
+    # ne relance le bot que sur un pool contenant une de ses unités et n'envoie jamais
+    # `advance_phase` depuis sa boucle IA : un pool vide sans fin de phase figerait la partie.
+    assert "2" in gs["consolidation_done"]
+    assert gs["phase"] != "fight" and gs["fight_subphase"] is None, out
 
 
 def test_squad_fight_en_consolidate_hors_new_foe_est_une_rupture():
