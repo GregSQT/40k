@@ -138,3 +138,26 @@ def test_un_jet_rate_ne_rend_pas_la_main(monkeypatch):
     ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True)
     assert ok is True and result.get("resumed") is True, result
     assert PENDING_HAZARD_ALLOCATION_KEY not in eng.game_state
+
+
+def test_le_reset_purge_l_etat_de_reprise_en_attente(monkeypatch):
+    """Finding /code-review : un reset pendant l'attribution humaine laissait `hazard_origin` à
+    `exhortation` — le prochain Desperate Escape aurait repris un combat de l'épisode précédent
+    au lieu du preview Fall Back."""
+    eng = _engine("human")
+    gs = eng.game_state
+    _spy_continue(eng, [])
+    rolls = iter([4, 2])
+    real_randint = random.randint
+    # D6 puis D3 forcés ; le reset qui suit tire ses propres dés, rendus au vrai `randint`.
+    monkeypatch.setattr(random, "randint", lambda a, b: next(rolls, None) or real_randint(a, b))
+    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True)
+    assert ok and result.get("waiting_for_player") is True
+    assert gs["hazard_origin"] == "exhortation" and "_pending_exhortation_resume" in gs
+
+    eng.reset()
+    gs = eng.game_state
+    assert "hazard_origin" not in gs
+    assert "_pending_exhortation_resume" not in gs
+    assert "_pending_exhortation_fight" not in gs
+    assert PENDING_HAZARD_ALLOCATION_KEY not in gs

@@ -1738,6 +1738,13 @@ class W40KEngine(gym.Env):
         self.game_state.pop(PENDING_FIGHT_ALLOCATION_KEY, None)
         self.game_state.pop(PENDING_SHOOT_ALLOCATION_KEY, None)
         self.game_state.pop(PENDING_HAZARD_ALLOCATION_KEY, None)
+        # Etat de REPRISE d une attribution hazard et d une Exhortation en attente : meme danger.
+        # Un reset pendant l attribution humaine d une Exhortation laissait `hazard_origin` a
+        # `exhortation`, et le prochain Desperate Escape reprenait un combat de l episode
+        # precedent au lieu du preview Fall Back.
+        self.game_state.pop("hazard_origin", None)
+        self.game_state.pop("_pending_exhortation_resume", None)
+        self.game_state.pop("_pending_exhortation_fight", None)
         # Les intents en attente (tir et combat) ne sont jamais purgés par game_state.update() ci-
         # dessous : un dict stale de l'épisode N déroute declare_attack_weapon_qty et
         # _build_manual_allocation au N+1. Remise à zéro explicite, identique à _fight_v11_phase_complete.
