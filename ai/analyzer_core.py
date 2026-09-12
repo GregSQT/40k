@@ -19,7 +19,9 @@ from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases import claim_kill_context, died_before_phase
 from ai.analyzer_phases.episode_handler import handle_episode_start
-from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_advance
+from ai.analyzer_phases.shoot_handler import (
+    flush_cross_weapon_lost, handle_shoot, handle_wait, handle_advance,
+)
 from ai.analyzer_phases.charge_handler import handle_charge
 from ai.analyzer_phases.move_handler import handle_move_or_fled
 from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
@@ -1064,6 +1066,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
+                # Attaques perdues inter-armes : verdict par groupe, donc à la clôture seulement
+                # — le dernier groupe de l'épisode n'est complet qu'ici.
+                flush_cross_weapon_lost(state, stats)
 
                 # Save turn distribution for this episode
                 if state.episode_turn > 0:
@@ -2370,4 +2375,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         # Save turn distribution for last episode
         if state.episode_turn > 0:
             stats['turns_distribution'][state.episode_turn] += 1
+        # Dernier épisode sans `EPISODE END` (journal lu pendant un entraînement, ou tronqué) :
+        # ses groupes de tir sont complets, le verdict tombe ici comme aux deux autres
+        # frontières (`EPISODE END`, `handle_episode_start`).
+        flush_cross_weapon_lost(state, stats)
 
