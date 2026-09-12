@@ -97,6 +97,9 @@ class _FakeEngine:
     _fight_v11_gym_settle = wcore.W40KEngine._fight_v11_gym_settle
     _mortal_wounds_target_metrics = wcore.W40KEngine._mortal_wounds_target_metrics
 
+    # Régime gym : les deux sièges répondent par le masque, la décision reste posée.
+    gym_training_mode = True
+
     def __init__(self, gs):
         self.game_state = gs
 
@@ -168,7 +171,7 @@ def test_deux_cibles_posent_la_decision_sans_aucun_jet(monkeypatch):
 
     # Le pending ne porte QUE ce que la reprise a besoin de savoir : le dé n'existe pas encore.
     pending = engine.game_state.get("_pending_exhortation_fight")
-    assert pending == {"squad_id": "CHAP", "target_slot": None}, pending
+    assert pending == {"squad_id": "CHAP", "target_slot": None, "regime": "gym"}, pending
 
 
 # ---------------------------------------------------------------------------

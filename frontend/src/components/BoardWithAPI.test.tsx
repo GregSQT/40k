@@ -16,6 +16,12 @@
  * `reactiveMoveDecision`, l'humain se verrait poser la question du bot le temps d'un aller-retour
  * d'état et y répondrait à sa place. Les deux cas sont testés ensemble — le cas humain est ce qui
  * empêche un panneau muet pour une autre raison de rendre le cas IA vert pour rien.
+ *
+ * T_BoardWithAPI_MortalWoundsTarget — Exhortation of Rage (Chaplain JP). Le moteur arrête le combat
+ * à l'activation de l'unité sur le choix de la cible (`mortal_wounds_target`, plusieurs ennemis
+ * engagés) et REFUSE toute autre action tant qu'il n'est pas fait : sans panneau, la partie PvP se
+ * figerait. Un bouton par unité ennemie rendue par le moteur, libellée par son nom (le moteur
+ * n'envoie que son id), et c'est l'INDEX qui est joué (`agent_decision` + `option_index`).
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -137,6 +143,26 @@ const REACTIVE_MOVE_DECISION = {
     { label: "Ne pas reagir (rester sur place)" },
   ],
 };
+
+/** Forme posée par `_check_and_trigger_exhortation_de_rage` (engine/w40k_core.py) : un candidat
+ *  par unité ennemie ENGAGÉE, `payload.target_eid` = son id, aucun candidat `declines`. */
+const MORTAL_WOUNDS_TARGET_DECISION = {
+  type: "mortal_wounds_target",
+  player: 1,
+  unit_id: "1",
+  options: [
+    { label: "2", payload: { target_eid: "2" } },
+    { label: "3", payload: { target_eid: "3" } },
+  ],
+};
+
+/** Les deux cibles, pour que le panneau puisse les NOMMER. `makeUnit` (déclaré plus bas, hissé)
+ *  porte tout ce que `convertUnits` exige d'une unité. */
+const MORTAL_WOUNDS_TARGET_UNITS = [
+  { ...makeUnit(1, 1), DISPLAY_NAME: "Chaplain", col: 5, row: 5 },
+  { ...makeUnit(2, 2), DISPLAY_NAME: "Boyz", col: 6, row: 5 },
+  { ...makeUnit(3, 2), col: 5, row: 6 },
+];
 
 // ---------------------------------------------------------------------------
 // msw server
@@ -262,6 +288,79 @@ describe("BoardWithAPI — panneau de mouvement réactif", () => {
     for (const option of REACTIVE_MOVE_DECISION.options) {
       expect(screen.getByRole("button", { name: option.label })).toBeTruthy();
     }
+  });
+});
+
+describe("BoardWithAPI — panneau de cible d'Exhortation of Rage", () => {
+  function renderWithMortalWoundsDecision(mode: "pvp" | "pve", seat1: "human" | "ai") {
+    if (mode === "pve") {
+      localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);
+      window.history.replaceState({}, "", "/game?mode=pve");
+    }
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            phase: "fight",
+            // En PvE le siège IA est le joueur 2 (`useEngineAPI` refuse l'inverse) : la décision
+            // du bot est donc posée au joueur 2 dans ce cas.
+            player_types: { "1": "human", "2": seat1 },
+            units: MORTAL_WOUNDS_TARGET_UNITS,
+            pending_agent_decision: {
+              ...MORTAL_WOUNDS_TARGET_DECISION,
+              player: seat1 === "ai" ? 2 : 1,
+            },
+          }),
+        })
+      )
+    );
+    renderBoard(mode === "pve" ? "/game?mode=pve" : "/");
+  }
+
+  it("siège humain → un bouton par ennemi engagé, nommé, et le clic joue l'INDEX du candidat", async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post("/api/game/action", async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          result: { action: "wait" },
+          game_state: makeGameState({ phase: "fight", units: MORTAL_WOUNDS_TARGET_UNITS }),
+        });
+      })
+    );
+    renderWithMortalWoundsDecision("pvp", "human");
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Exhortation of Rage — unit 1 — player 1/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.getByRole("button", { name: "Boyz #2" })).toBeTruthy();
+    const second = screen.getByRole("button", { name: "Squad 3 #3" });
+    expect(second).toBeTruthy();
+
+    fireEvent.click(second);
+    await waitFor(() => {
+      expect(posted.length).toBeGreaterThan(0);
+    });
+    expect(posted[0]).toMatchObject({ action: "agent_decision", option_index: 1 });
+  });
+
+  it("siège IA → le panneau n'est PAS rendu (la politique du bot répond, pas l'humain)", async () => {
+    renderWithMortalWoundsDecision("pve", "ai");
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("board-pvp")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+
+    expect(screen.queryByText(/Exhortation of Rage — unit 1/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Boyz #2" })).toBeNull();
   });
 });
 

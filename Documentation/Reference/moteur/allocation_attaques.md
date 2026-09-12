@@ -49,7 +49,11 @@ mortelles. Deux mécanismes selon le MOMENT :
 - **hors lot** (Exhortation of Rage, infligée à la SÉLECTION de l'attaquant) :
   `build_manual_hazard_allocation` (`HAZARD_CTX`), origine `hazard_origin = "exhortation"`,
   reprise du combat de l'attaquant par `def _resume_after_hazard` →
-  `def _continue_fight_after_exhortation` (`engine/w40k_core.py`).
+  `def _continue_fight_after_exhortation` (`engine/w40k_core.py`), selon le RÉGIME de sélection
+  mémorisé dans `_pending_exhortation_resume` (`EXHORTATION_REGIME_*`, `fight_handlers.py`) :
+  gym → `_continue_squad_fight_after_selection` ; manuel PvP → `_fight_v11_manual_state`
+  (l'attaquant reste actif et déclare ses attaques contre les survivants) ; auto PvE →
+  `_fight_v11_auto_resolve_selected`.
 Défenseur piloté par la machine : `allocate_mortal_wounds` AUTO (`eligibles[0]`), régime
 d'entraînement inchangé. Garde : `def _process_squad_action` refuse toute action de politique
 tant qu'une allocation humaine est en attente (jumeau des gardes du chemin API).
