@@ -40,6 +40,16 @@ class SelectTargetsFreeze(NamedTuple):
 
 
 @dataclass
+class ShootAllocGroup:
+    """Bilan d'allocation d'un groupe de tir (arme × cible d'une activation), cf.
+    `AnalyzerState.shoot_alloc_groups`. Mutable : il se remplit ligne à ligne."""
+    player: int
+    allocated: int = 0
+    not_allocated: int = 0
+    first_not_allocated_line: Optional[str] = None
+
+
+@dataclass
 class AnalyzerState:
     # Stats globales (référence partagée, pas une copie)
     stats: Dict
@@ -230,6 +240,17 @@ class AnalyzerState:
     #: défaut que la mêlée avait fermé y vivait encore : mesuré sur le run du 2026-08-11,
     #: 320 fausses « Shots over RNG_NB » sur 23 169 tirs.
     last_shoot_shooters: Tuple[str, ...] = ()
+    #: Allocation des attaques par GROUPE de tir (épisode, tour, tireur, arme, cible, signature
+    #: `shoot_group_signature` : tags de tir, seuils de touche et de blessure) — le lot
+    #: « cible × profil » que le moteur résout d'un bloc (04.03). Valeur : joueur, nombre de
+    #: lignes ALLOUÉES (segment `Save` chiffré ou `[DEVASTATING WOUNDS]`), nombre de lignes
+    #: `Save [NOT ALLOCATED]`, et la première de ces dernières. Le verdict « attaques perdues
+    #: sur une cible qu'une AUTRE arme de la même activation venait d'anéantir » se rend sur le
+    #: groupe entier (`flush_cross_weapon_lost`), jamais ligne à ligne : dans un lot, l'ordre
+    #: des lignes est l'ordre des tirs, pas celui de l'allocation (pool trié par sauvegarde
+    #: croissante, 05.04), donc une ligne non allouée du tueur peut précéder sa première
+    #: ligne de dégâts. Vidé à chaque frontière d'épisode.
+    shoot_alloc_groups: Dict[Tuple[int, int, str, str, str, Tuple[str, str, str]], ShootAllocGroup] = field(default_factory=dict)
     #: Dernière unité dont un SHOT a déclenché un marqueur d'activation SHOOT (frontière
     #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT et au changement
     #: de tour. Mis à jour uniquement sur les lignes SHOT (pas sur les actions non-tir).

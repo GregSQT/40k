@@ -1968,6 +1968,14 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_at_dead_unit': {1: 0, 2: 0},
         'shoot_over_rng_nb': {1: 0, 2: 0},
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
+        # Attaques d'une arme résolues contre une cible qu'une AUTRE arme de la même activation
+        # venait d'anéantir (`Save [NOT ALLOCATED]` sur tout le groupe) : perte observée du
+        # tir fractionné, cf. `flush_cross_weapon_lost`. Métrique de qualité de l'agent, PAS
+        # une faute — hors `error_totals['shooting']` à dessein : le moteur perd ces attaques
+        # conformément à 05.04, c'est l'assignation qui les a gaspillées.
+        'shoot_cross_weapon_attacks_lost': {1: 0, 2: 0},
+        'shoot_cross_weapon_lost_groups': {1: 0, 2: 0},
+        'shoot_cross_weapon_lost_sample': {1: None, 2: None},
         'devastating_wounds_correct': {1: 0, 2: 0},
         'devastating_wounds_incorrect': {1: 0, 2: 0},
         # 03.03 : cohérence d'escouade à la fin de chaque déplacement et à la mise en place.
@@ -3197,7 +3205,19 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         f"{agent_shots_after_advance:6d} ({agent_pct_after_advance:5.1f}%)",
         f"{bot_shots_after_advance:6d} ({bot_pct_after_advance:5.1f}%)",
     )
-    
+    # Tir fractionné : attaques d'une arme arrivées sur une cible qu'une autre arme de la même
+    # activation venait d'anéantir. Perte OBSERVÉE (les jets y sont pour quelque chose), pas
+    # une faute de règle — ligne d'information, absente des totaux d'erreurs.
+    _table_row(
+        "Cross-weapon lost (attacks/groups)",
+        f"{stats['shoot_cross_weapon_attacks_lost'][1]:6d} / {stats['shoot_cross_weapon_lost_groups'][1]:4d}",
+        f"{stats['shoot_cross_weapon_attacks_lost'][2]:6d} / {stats['shoot_cross_weapon_lost_groups'][2]:4d}",
+    )
+    for _pl in (1, 2):
+        _sample = stats['shoot_cross_weapon_lost_sample'][_pl]
+        if _sample is not None:
+            log_print(f"  First P{_pl} occurrence (Episode {_sample['episode']}): {_sample['line']}")
+
     # CLOSE_QUARTERS WEAPON SHOTS
     _table_header("CLOSE_QUARTERS WEAPON SHOTS BY ENGAGEMENT (10.06)")
     agent_close_quarters_eng = stats['close_quarters_shots'][1]['engaged_target']

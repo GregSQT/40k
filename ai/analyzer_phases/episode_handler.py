@@ -29,6 +29,11 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
 
         if stats['current_episode_deaths']:
             stats['death_orders'].append(tuple(stats['current_episode_deaths']))
+        # Épisode sans `EPISODE END` : ses groupes de tir sont complets, le verdict tombe ici
+        # (même traitement que `death_orders`). Le flush vide l'accumulateur, donc aucun
+        # double compte avec la clôture ordinaire.
+        from ai.analyzer_phases.shoot_handler import flush_cross_weapon_lost
+        flush_cross_weapon_lost(state, stats)
 
         stats['episode_lengths'].append((state.current_episode_num, state.episode_actions))
         if state.episode_turn > 0:
@@ -79,6 +84,7 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_movement_history = {}
     state.shot_sequence_counts = {}
     state.fight_sequence_counts = {}
+    state.shoot_alloc_groups = {}
     # Effectifs de cible figés au Select Targets step : même durée de vie que les compteurs
     # qu'ils accompagnent (mêmes clés). Les garder d'un épisode à l'autre ferait juger une
     # séquence sur l'effectif d'une partie précédente.
