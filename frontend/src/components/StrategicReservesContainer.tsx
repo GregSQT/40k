@@ -2,7 +2,10 @@
 import type { MouseEvent, ReactElement } from "react";
 import type { PlayerId } from "../types";
 import type { StrategicReservesPlayerSummary, Unit, UnitId } from "../types/game";
-import { formatStrategicReservesRatio } from "../utils/strategicReservesUi";
+import {
+  formatStrategicReservesRatio,
+  isUnitListedForDeclaration,
+} from "../utils/strategicReservesUi";
 import { type RosterRowUnitsCache, UnitRosterRow } from "./UnitRosterRow";
 
 /** Contour ORANGE du conteneur de réserves — le distingue des lignes d'unités normales. */
@@ -44,35 +47,88 @@ function _declarationButton(
 }
 
 /**
- * 20.01 — les DEUX réponses à la question de l'étape Declare Battle Formations.
+ * 20.01 — le bouton `Reserve` d'une escouade SÉLECTIONNÉE pendant l'étape Declare Battle
+ * Formations.
  *
- * Ce n'était qu'un bouton, activé ou grisé selon que le moteur accepterait un dépôt : la
- * déclaration était alors un geste facultatif pris au tour de déploiement de l'escouade. La règle
- * en fait une étape ANTÉRIEURE au déploiement, où chaque escouade déclarable reçoit une question
- * fermée — d'où deux boutons, tous deux actifs. Un bouton grisé dirait « tu peux ne pas
- * répondre », ce qui est faux : tant que la réponse manque, aucune pose n'est possible et le
- * moteur repose la même question.
+ * UN SEUL bouton, et pas de `Deploy` en face : 20.01 dit « select one or more friendly units to
+ * place in strategic reserves. Instead of setting up these units on the battlefield during
+ * deployment » — ne pas réserver, c'est déployer, il n'y a rien à déclarer pour ça. La version
+ * précédente posait une question fermée à deux boutons sur l'escouade que le moteur désignait,
+ * dans un ordre figé ; la règle ne porte ni la question, ni l'ordre.
  *
- * Le composant n'apparaît QUE sur l'escouade que le moteur interroge (`pending_declaration`), donc
- * il n'a aucune éligibilité à évaluer : le plafond de 50 % et la clause FORTIFICATION ont déjà
- * décidé côté moteur qu'il y avait une question à poser.
+ * Le composant n'apparaît QUE sur une escouade que le moteur liste comme déclarable
+ * (`strategic_reserves.declarable`), donc il n'a aucune éligibilité à évaluer : le plafond de 50 %
+ * et la clause FORTIFICATION ont déjà décidé côté moteur.
  */
-export function ReservesDeclarationPrompt({
-  onDeclare,
-  onKeep,
+export function ReserveButton({ onReserve }: { onReserve: () => void }): ReactElement {
+  return _declarationButton(
+    "strategic-reserves-declare",
+    "Reserve",
+    "var(--ui-green-validate)",
+    onReserve
+  );
+}
+
+/**
+ * 20.01 — le bouton `Cancel` d'une escouade DU conteneur, tant que son camp n'a pas validé.
+ *
+ * La déclaration est un ENSEMBLE que le joueur compose, pas une suite de réponses définitives :
+ * tant qu'il n'a pas validé, il n'a rien arrêté. N'apparaît que sur une escouade que le moteur
+ * liste comme annulable (`strategic_reserves.cancellable`) — donc jamais après validation, ni sur
+ * le conteneur adverse, ni hors de l'étape.
+ */
+export function CancelReserveButton({ onCancel }: { onCancel: () => void }): ReactElement {
+  return _declarationButton(
+    "strategic-reserves-cancel",
+    "Cancel",
+    "var(--ui-gray-cancel)",
+    onCancel
+  );
+}
+
+/**
+ * 20.01 — le bandeau de l'étape Declare Battle Formations : QUI déclare, et `Validate`.
+ *
+ * Pas un modal bloquant, délibérément : le joueur doit pouvoir cliquer les lignes de sa liste
+ * derrière pour y faire apparaître `Reserve`, et son conteneur pour `Cancel`. Le bandeau informe
+ * et offre le seul geste qui n'est porté par aucune ligne — figer la déclaration.
+ *
+ * `Validate` est TOUJOURS actif : déclarer zéro réserve est une déclaration légale (« can
+ * select »), et c'est même le cas majoritaire. Un bouton grisé sur un conteneur vide dirait au
+ * joueur qu'il doit réserver quelque chose, ce qui est faux.
+ */
+export function ReservesDeclarationBanner({
+  playerLabel,
+  onValidate,
 }: {
-  onDeclare: () => void;
-  onKeep: () => void;
+  playerLabel: string;
+  onValidate: () => void;
 }): ReactElement {
   return (
-    <div style={{ display: "flex", flex: "0 0 auto", gap: "4px" }}>
+    <div
+      data-testid="strategic-reserves-declaration-banner"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        marginBottom: "6px",
+        padding: "6px 10px",
+        border: `2px solid ${RESERVES_BORDER_COLOR}`,
+        borderRadius: "4px",
+        backgroundColor: "#1b1b1b",
+        color: RESERVES_BORDER_COLOR,
+        fontWeight: "bold",
+        fontSize: "12px",
+      }}
+    >
+      <span>STRATEGIC RESERVES DECLARATION — {playerLabel}</span>
       {_declarationButton(
-        "strategic-reserves-declare",
-        "Reserve",
+        "strategic-reserves-validate",
+        "Validate",
         "var(--ui-green-validate)",
-        onDeclare
+        onValidate
       )}
-      {_declarationButton("strategic-reserves-keep", "Deploy", "var(--ui-gray-cancel)", onKeep)}
     </div>
   );
 }
@@ -123,10 +179,11 @@ export function ResetPlacementButton({ onReset }: { onReset: () => void }): Reac
  * côtés (« place them to one side » : les réserves sont déclarées ouvertement), mais cliquable
  * seulement pour son propriétaire et seulement en phase de mouvement, où l'arrivée existe.
  *
- * La DÉCLARATION ne se fait pas ici : elle se fait par `ReservesDeclarationPrompt`, porté par la
- * ligne de l'escouade que le moteur interroge dans la liste des unités à déployer. Une escouade
- * qu'on n'a pas encore choisi de déployer n'a rien à faire dans ce conteneur, et le geste reste
- * là où est la décision.
+ * La MISE EN RÉSERVES ne se fait pas ici : elle se fait par `ReserveButton`, porté par la ligne
+ * sélectionnée dans la liste des unités à déployer. Une escouade qu'on n'a pas encore choisi de
+ * réserver n'a rien à faire dans ce conteneur, et le geste reste là où est la décision. Son
+ * ANNULATION, elle, se fait ici (`CancelReserveButton`) : c'est ici que l'escouade réservée est
+ * visible, tant que son camp n'a pas validé.
  *
  * Les lignes sont au FORMAT COMMUN (`UnitRosterRow`), celui de la liste à déployer : même
  * escouade, même tête, qu'elle attende son déploiement ou son arrivée.
@@ -145,6 +202,8 @@ export function StrategicReservesContainer({
   canSelectReserveUnit,
   placingUnitId = null,
   onCancelPlacement,
+  cancellableUnitIds = [],
+  onCancelReserve,
   phase,
   haloGlow,
 }: {
@@ -161,6 +220,10 @@ export function StrategicReservesContainer({
   /** 20.04 — escouade dont l'ARRIVÉE est en cours de placement : sa ligne porte le `Reset`. */
   placingUnitId?: UnitId | null;
   onCancelPlacement?: () => void;
+  /** 20.01 — escouades que le moteur dit ANNULABLES (`strategic_reserves.cancellable`) : leur
+   *  ligne porte `Cancel`. Vide hors de l'étape, pour l'adversaire, ou après validation. */
+  cancellableUnitIds?: readonly string[];
+  onCancelReserve?: (unitId: UnitId) => void;
   /** Phase courante : décide de l'AFFICHAGE du conteneur vide (cf. corps). */
   phase: string | undefined;
   /** Halo vert de « cible active », partagé avec les lignes d'unités (`HALO_GLOW`). */
@@ -215,13 +278,26 @@ export function StrategicReservesContainer({
                 onClick={() => onSelectReserveUnit?.(unit.id)}
                 borderColor={borderColor}
                 haloGlow={haloGlow}
-                trailing={
-                  placingUnitId !== null &&
-                  String(placingUnitId) === String(unit.id) &&
-                  onCancelPlacement ? (
-                    <ResetPlacementButton onReset={onCancelPlacement} />
-                  ) : undefined
-                }
+                trailing={(() => {
+                  // 20.01 d'abord : pendant l'étape, l'escouade n'a aucune arrivée à annuler, elle
+                  // n'est même pas encore « en réserves » de façon définitive. Les deux gestes ne
+                  // coexistent jamais sur une même ligne — l'un vit avant la partie, l'autre
+                  // pendant.
+                  if (
+                    onCancelReserve &&
+                    isUnitListedForDeclaration({ unitId: unit.id, list: cancellableUnitIds })
+                  ) {
+                    return <CancelReserveButton onCancel={() => onCancelReserve(unit.id)} />;
+                  }
+                  if (
+                    placingUnitId !== null &&
+                    String(placingUnitId) === String(unit.id) &&
+                    onCancelPlacement
+                  ) {
+                    return <ResetPlacementButton onReset={onCancelPlacement} />;
+                  }
+                  return undefined;
+                })()}
               />
             </div>
           ))}

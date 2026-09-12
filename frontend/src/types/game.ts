@@ -235,24 +235,22 @@ export interface StrategicReservesPlayerSummary {
   cap_points: number;
 }
 
-/** 20.01 — la question de l'étape Declare Battle Formations que le moteur pose MAINTENANT.
- *
- * Une seule à la fois, dans un ordre figé au reset. Le client l'affiche, il ne choisit pas quelle
- * unité proposer : la déclaration précède TOUT déploiement, et une sélection libre laisserait le
- * joueur déclarer après avoir vu les poses adverses. */
-export interface StrategicReservesPendingDeclaration {
-  player: number;
-  unitId: string;
-}
-
 /** ``strategic_reserves`` du game_state : un résumé par joueur + le round de destruction (20.04). */
 export interface StrategicReservesSummary {
   "1"?: StrategicReservesPlayerSummary;
   "2"?: StrategicReservesPlayerSummary;
   /** Round au bout duquel les réserves non arrivées sont détruites (20.04). */
   last_round?: number;
-  /** Question 20.01 en attente, ou ``null`` quand l'étape est close. */
-  pending_declaration?: StrategicReservesPendingDeclaration | null;
+  /** Camp qui compose sa déclaration 20.01, ou ``null`` quand l'étape est close. */
+  declaring_player?: number | null;
+  /**
+   * Escouades que le camp déclarant peut ENCORE mettre en réserves, dans l'ordre du pool de pose.
+   * Rendue par le moteur et jamais recalculée ici : le plafond de 50 % bouge à chaque geste, et
+   * une seconde éligibilité côté client afficherait un bouton que la route refuserait.
+   */
+  declarable?: string[];
+  /** Escouades du camp déclarant qu'il peut retirer de sa déclaration tant qu'il n'a pas validé. */
+  cancellable?: string[];
 }
 
 /** Detection range effective d'une unité cachée vis-à-vis du tireur actif (règle 13.09 + 13.5). */

@@ -109,7 +109,7 @@ SCENARIO = os.path.join(
 #: TL08 = TL07 à la clé de PREMIER niveau près : le bump vient d'une sous-clé de
 #: `deployment_state` (`reserves_declaration_started`), donc de la table du second niveau — d'où
 #: deux formats de suite au même compte (131) et à la même empreinte, fait mesuré et non doublon.
-_TL08_KEYS: FrozenSet[str] = frozenset({
+_TL09_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
         '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
         '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
@@ -155,7 +155,8 @@ _TL08_KEYS: FrozenSet[str] = frozenset({
 #: renommer le littéral sans re-tagger la clé laisserait `_MAGIC` sans entrée, et
 #: `test_the_current_magic_declares_its_key_set` rougit.
 MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
-    b"W40KTL08": _TL08_KEYS,
+    b"W40KTL08": _TL09_KEYS,
+    b"W40KTL09": _TL09_KEYS,
 }
 
 #: --- DEUXIÈME NIVEAU : sous-clés des dicts mutables publiés par le reset ---------------------
@@ -176,13 +177,15 @@ MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
 #: réponse 20.01 a été donnée », lu par `_execute_change_roster_action` pour refuser le
 #: remplacement d'armée une fois l'étape commencée. Une row TL07 restitue `deployment_state` en
 #: bloc, donc sans lui, et ce lecteur lève.
-_TL08_SUBKEYS: Dict[str, FrozenSet[str]] = {
-    # Comptabilité MUTABLE de la phase de déploiement. Les trois dernières sont les clés 20.01
-    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY` / `_STARTED_KEY`).
+_TL09_SUBKEYS: Dict[str, FrozenSet[str]] = {
+    # Comptabilité MUTABLE de la phase de déploiement. Les quatre dernières sont les clés 20.01
+    # (`deployment_handlers.RESERVES_DECLARATION_DECLINED_KEY` / `_VALIDATED_KEY` / `_CLOSED_KEY`
+    # / `_STARTED_KEY`). `reserves_declaration_queue` a disparu en TL09 : l'étape Declare Battle
+    # Formations ne fige plus de file alternée d'escouades, chaque camp déclare pour son armée.
     "deployment_state": frozenset({
         "current_deployer", "deployable_units", "deployed_units", "deployment_complete",
-        "reserves_declaration_queue", "reserves_declaration_closed",
-        "reserves_declaration_started",
+        "reserves_declaration_declined", "reserves_declaration_validated",
+        "reserves_declaration_closed", "reserves_declaration_started",
     }),
     "_deployment_slot_candidates": frozenset({"key", "candidates"}),
     "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
@@ -216,7 +219,7 @@ _TL08_SUBKEYS: Dict[str, FrozenSet[str]] = {
 }
 
 MUTABLE_SUBKEYS_BY_MAGIC: Dict[bytes, Dict[str, FrozenSet[str]]] = {
-    b"W40KTL08": _TL08_SUBKEYS,
+    b"W40KTL09": _TL09_SUBKEYS,
 }
 
 #: Dicts mutables dont les sous-clés sont des DONNÉES de la partie — identifiants d'unité ou de
@@ -267,8 +270,11 @@ _FORMAT_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     # Même empreinte encore : TL07 ne brûlait qu'un numéro d'en-tête, et TL08 vient d'une
     # sous-clé. Deux bumps de suite sans mouvement au premier niveau — fait mesuré.
     b"W40KTL07": (131, "bc1d5f0c7f07dc36"),
-    #: COURANTE — vérifiée contre `_TL08_KEYS` à chaque exécution.
+    # TL08 vient d'une sous-clé, TL09 d'un échange de sous-clés : le premier niveau n'a pas
+    # bougé depuis TL05. Faits mesurés, pas des copier-coller à corriger.
     b"W40KTL08": (131, "bc1d5f0c7f07dc36"),
+    #: COURANTE — vérifiée contre `_TL09_KEYS` à chaque exécution.
+    b"W40KTL09": (131, "bc1d5f0c7f07dc36"),
 }
 
 #: Même registre pour le SECOND niveau, né sous TL06 : les magics antérieures n'y figurent pas,
@@ -277,9 +283,11 @@ _FORMAT_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL06": (24, "f5d15abb41f83555"),
     # TL07 n'ajoutait aucune sous-clé (numéro brûlé), d'où l'égalité avec TL06.
     b"W40KTL07": (24, "f5d15abb41f83555"),
-    #: COURANTE — vérifiée contre `_TL08_SUBKEYS` à chaque exécution ; `reserves_declaration_started`
-    #: est la sous-clé qui sépare cette empreinte de celle de TL07.
+    #: `reserves_declaration_started` est la sous-clé qui sépare cette empreinte de celle de TL07.
     b"W40KTL08": (24, "982bf7cde624e5aa"),
+    #: COURANTE — vérifiée contre `_TL09_SUBKEYS` à chaque exécution ; `reserves_declaration_queue`
+    #: y est remplacée par `reserves_declaration_declined` et `reserves_declaration_validated`.
+    b"W40KTL09": (24, "9a31f524e24f7534"),
 }
 
 #: Première magic relevée par chacun des deux registres. Avant elles, le fichier n'a jamais décrit
@@ -352,14 +360,14 @@ def test_the_current_format_matches_its_recorded_fingerprint() -> None:
     la marche à suivre est d'écrire ICI la nouvelle valeur, sciemment.
     """
     couple = _FORMAT_FINGERPRINTS[_MAGIC]
-    assert (len(_TL08_KEYS), _fingerprint(_TL08_KEYS)) == couple, (
-        f"le littéral de {_MAGIC.decode()} vaut {len(_TL08_KEYS)} clés / "
-        f"{_fingerprint(_TL08_KEYS)}, le registre dit {couple[0]} / {couple[1]}."
+    assert (len(_TL09_KEYS), _fingerprint(_TL09_KEYS)) == couple, (
+        f"le littéral de {_MAGIC.decode()} vaut {len(_TL09_KEYS)} clés / "
+        f"{_fingerprint(_TL09_KEYS)}, le registre dit {couple[0]} / {couple[1]}."
     )
     couple = _FORMAT_SUBKEY_FINGERPRINTS[_MAGIC]
-    assert (len(_TL08_SUBKEYS), _subkey_fingerprint(_TL08_SUBKEYS)) == couple, (
-        f"la table de sous-clés de {_MAGIC.decode()} vaut {len(_TL08_SUBKEYS)} dicts / "
-        f"{_subkey_fingerprint(_TL08_SUBKEYS)}, le registre dit {couple[0]} / {couple[1]}."
+    assert (len(_TL09_SUBKEYS), _subkey_fingerprint(_TL09_SUBKEYS)) == couple, (
+        f"la table de sous-clés de {_MAGIC.decode()} vaut {len(_TL09_SUBKEYS)} dicts / "
+        f"{_subkey_fingerprint(_TL09_SUBKEYS)}, le registre dit {couple[0]} / {couple[1]}."
     )
 
 
@@ -522,7 +530,11 @@ def test_reset_subkeys_match_the_current_save_format(
     )
 
 
-@pytest.mark.parametrize("subkey", ("reserves_declaration_queue", "reserves_declaration_closed"))
+@pytest.mark.parametrize(
+    "subkey",
+    ("reserves_declaration_declined", "reserves_declaration_validated",
+     "reserves_declaration_closed"),
+)
 def test_the_subkey_lock_covers_the_2001_keys(
     subkey: str, reset_mutable_dicts: Dict[str, FrozenSet[Any]]
 ) -> None:

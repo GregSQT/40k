@@ -2173,13 +2173,13 @@ class W40KEngine(gym.Env):
                 "deployed_units": set(),
                 "deployment_complete": False,
             }
-            # 20.01 — l'etape Declare Battle Formations PRECEDE le deploiement : la file des
-            # questions est figee ICI, avant qu'une seule figurine ne soit posee. La batir plus
-            # tard reviendrait a la batir sur un plateau deja partiellement deploye, c'est-a-dire
-            # a rendre au declarant l'information que la regle lui refuse. Les trois cles passent
-            # par l'ecrivain unique du module, partage avec `change_roster`.
+            # 20.01 — l'etape Declare Battle Formations PRECEDE le deploiement : son etat est
+            # remis a zero ICI, avant qu'une seule figurine ne soit posee. L'ouvrir plus tard
+            # reviendrait a la faire declarer sur un plateau deja partiellement deploye,
+            # c'est-a-dire a rendre au declarant l'information que la regle lui refuse. Les quatre
+            # cles passent par l'ecrivain unique du module, partage avec `change_roster`.
             deployment_handlers.reset_reserves_declaration_state(
-                self.game_state["deployment_state"], deployable_units
+                self.game_state["deployment_state"]
             )
             if not deployable_units[1] and deployable_units[2]:
                 self.game_state["deployment_state"]["current_deployer"] = 2
@@ -2204,12 +2204,12 @@ class W40KEngine(gym.Env):
                 placed_by_player[int(require_key(u, "player"))] += 1
         self.game_state["_reserves_placed"] = placed_by_player
 
-        # 20.01 — LE SIÈGE SUIT LA PREMIÈRE QUESTION, ici et pas plus tôt : `_reserves_placed` et
-        # les pools viennent d'être posés, et c'est d'eux que dépend l'éligibilité qui ampute la
-        # file. La tête de file n'est pas toujours le joueur 1 : ses unités inéligibles (plafond,
-        # FORTIFICATION) sont retirées sans réponse, et la question peut donc s'ouvrir sur le
-        # camp d'en face. Sans ce recalage, une partie servie par l'API ouvrirait l'étape avec le
-        # siège d'un joueur et la question d'un autre — en PvE, la question du bot sans tour IA.
+        # 20.01 — LE SIÈGE SUIT LE PREMIER DÉCLARANT, ici et pas plus tôt : `_reserves_placed` et
+        # les pools viennent d'être posés, et c'est d'eux que dépend l'éligibilité. Le premier
+        # déclarant n'est pas toujours le joueur 1 : un camp sans aucune escouade éligible
+        # (plafond, FORTIFICATION) n'a rien à déclarer et l'étape s'ouvre alors sur le camp d'en
+        # face. Sans ce recalage, une partie servie par l'API ouvrirait l'étape avec le siège d'un
+        # joueur et la déclaration d'un autre — en PvE, la question du bot sans tour IA.
         if str(self.game_state["phase"]) == "deployment" and "deployment_state" in self.game_state:
             deployment_handlers.move_seat_to_pending_reserves_declaration(self.game_state)
 
@@ -4445,11 +4445,12 @@ class W40KEngine(gym.Env):
             # sépare les candidats et le payload qui rend le sens explicite côté moteur.
             declared = bool(require_key(require_key(selected_option, "payload"), "declare"))
             decision_squad_id = str(require_key(decision, "unit_id"))
-            # `apply_reserves_declaration_decision` efface la decision elle-meme (ecrivain unique)
-            # puis enchaine sur la suite commune aux deux sieges
-            # (`resolve_reserves_declaration_answer`) : file amputee, mise en reserves, et siege
-            # place sur la question SUIVANTE — sans quoi le client relance un tour IA sur un siege
-            # perime et le modele repond a la question de l'humain.
+            # `apply_reserves_declaration_decision` efface la decision elle-meme (ecrivain unique),
+            # inscrit la mise en reserves ou le refus, puis — quand ce camp n'a PLUS d'escouade
+            # interrogeable — fige sa declaration par la suite commune aux deux sieges
+            # (`finalize_reserves_declaration`), qui place le siege sur le camp SUIVANT. Sans ce
+            # deplacement, le client relance un tour IA sur un siege perime et le modele repond a
+            # la declaration de l'humain.
             deployment_handlers.apply_reserves_declaration_decision(
                 self.game_state, decision_squad_id, declared
             )

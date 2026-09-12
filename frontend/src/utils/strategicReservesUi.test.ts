@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type {
-  StrategicReservesPendingDeclaration,
-  StrategicReservesPlayerSummary,
-} from "../types/game";
+import type { StrategicReservesPlayerSummary, StrategicReservesSummary } from "../types/game";
 import {
   canSelectReserveUnitForIngress,
   formatStrategicReservesRatio,
-  isReservesDeclarationPendingFor,
+  humanReservesDeclarer,
   isReservesDeclarationStepOpen,
+  isUnitListedForDeclaration,
+  readReservesDeclaration,
   shouldWarnReservesLastRound,
 } from "./strategicReservesUi";
 
@@ -16,9 +15,6 @@ const SUMMARY_120_OF_250: StrategicReservesPlayerSummary = {
   used_points: 120,
   cap_points: 250,
 };
-
-/** La question 20.01 que le moteur pose : l'unité 7 du joueur 1, et elle seule. */
-const PENDING_ON_7: StrategicReservesPendingDeclaration = { player: 1, unitId: "7" };
 
 describe("formatStrategicReservesRatio", () => {
   it("affiche le ratio du moteur, jamais un calcul local", () => {
@@ -31,91 +27,112 @@ describe("formatStrategicReservesRatio", () => {
   });
 });
 
-describe("isReservesDeclarationPendingFor — 20.01", () => {
+describe("humanReservesDeclarer — 20.01", () => {
   const base = {
     phase: "deployment" as string | undefined,
-    pending: PENDING_ON_7,
+    declaringPlayer: 1 as number | null | undefined,
     deploymentStarted: true,
     playerTypes: { "1": "human", "2": "ai" } as Record<string, "human" | "ai"> | undefined,
   };
 
-  it("la question porte sur UNE escouade, celle que le moteur désigne", () => {
-    // L'éligibilité (plafond de 50 %, FORTIFICATION) est tranchée côté moteur
-    // (test_strategic_reserves_summary_asks_only_about_a_unit_the_engine_would_accept) : le
-    // client n'en refait rien, il compare l'identifiant que le moteur lui a donné.
-    expect(isReservesDeclarationPendingFor({ ...base, unitId: 7 })).toBe(true);
-    expect(isReservesDeclarationPendingFor({ ...base, unitId: 8 })).toBe(false);
-  });
-
-  it("l'identifiant est comparé en CHAÎNE, comme le moteur le publie", () => {
-    // Les lignes du panneau portent des ids numériques, `pending_declaration.unitId` est une
-    // chaîne : une comparaison stricte sans conversion ne matcherait jamais, et la question
-    // resterait invisible — donc le déploiement bloqué sans que rien ne l'explique.
-    expect(isReservesDeclarationPendingFor({ ...base, unitId: "7" })).toBe(true);
+  it("rend le camp humain que le moteur dit en train de déclarer", () => {
+    expect(humanReservesDeclarer(base)).toBe(1);
   });
 
   it("la déclaration n'existe QU'EN phase de déploiement", () => {
     for (const phase of ["command", "move", "shoot", "charge", "fight", undefined]) {
-      expect(isReservesDeclarationPendingFor({ ...base, phase, unitId: 7 })).toBe(false);
+      expect(humanReservesDeclarer({ ...base, phase })).toBeNull();
     }
   });
 
-  it("étape close : plus aucune question, donc plus aucun bouton", () => {
-    for (const pending of [null, undefined]) {
-      expect(isReservesDeclarationStepOpen({ phase: "deployment", pending })).toBe(false);
-      expect(isReservesDeclarationPendingFor({ ...base, pending, unitId: 7 })).toBe(false);
+  it("étape close : plus aucun déclarant, donc plus aucun bouton", () => {
+    for (const declaringPlayer of [null, undefined]) {
+      expect(isReservesDeclarationStepOpen({ phase: "deployment", declaringPlayer })).toBe(false);
+      expect(humanReservesDeclarer({ ...base, declaringPlayer })).toBeNull();
     }
   });
 
-  it("aucune question tant que le déploiement n'a pas démarré", () => {
+  it("aucune déclaration tant que le déploiement n'a pas démarré", () => {
     // L'écran de préparation est la SEULE fenêtre où le joueur peut encore changer d'armée, et
-    // le moteur refuse ce changement dès la première réponse 20.01
-    // (`change_roster_locked_after_reserves_declaration`). Poser la question là ferait payer le
-    // droit de changer d'armée pour un geste que le joueur n'a pas demandé à faire maintenant.
-    expect(isReservesDeclarationPendingFor({ ...base, deploymentStarted: false, unitId: 7 })).toBe(
-      false
-    );
-    // VERT VACANT : la même question, déploiement démarré, est bien posée.
-    expect(isReservesDeclarationPendingFor({ ...base, deploymentStarted: true, unitId: 7 })).toBe(
-      true
-    );
+    // le moteur refuse ce changement dès le premier geste 20.01
+    // (`change_roster_locked_after_reserves_declaration`). Ouvrir la déclaration là ferait payer
+    // le droit de changer d'armée pour un geste que le joueur n'a pas demandé à faire maintenant.
+    expect(humanReservesDeclarer({ ...base, deploymentStarted: false })).toBeNull();
+    // VERT VACANT : le même état, déploiement démarré, ouvre bien la déclaration.
+    expect(humanReservesDeclarer({ ...base, deploymentStarted: true })).toBe(1);
   });
 
-  it("la question d'un siège piloté par le modèle n'est jamais rendue au client", () => {
+  it("la déclaration d'un siège piloté par le modèle n'est jamais rendue au client", () => {
     // 20.01 : « you can select one or more friendly units » — la liste d'un camp se décide depuis
-    // son siège. En PvE le moteur refuse la route humaine sur cette question
-    // (`reserves_declaration_seat_is_not_human`) : les deux boutons ne pourraient que revenir en
+    // son siège. En PvE le moteur refuse la route humaine sur ce camp
+    // (`reserves_declaration_seat_is_not_human`) : les boutons ne pourraient que revenir en
     // erreur, et le temps d'un aller-retour d'état l'humain choisirait la liste de son adversaire.
-    const pendingOnBot: StrategicReservesPendingDeclaration = { player: 2, unitId: "11" };
-    expect(isReservesDeclarationPendingFor({ ...base, pending: pendingOnBot, unitId: 11 })).toBe(
-      false
-    );
-    // VERT VACANT : la MÊME question, sur un siège humain, est bien posée — l'absence ci-dessus
-    // vient du siège, pas de l'unité ni du joueur 2 en tant que numéro.
+    expect(humanReservesDeclarer({ ...base, declaringPlayer: 2 })).toBeNull();
+    // VERT VACANT : le MÊME camp, sur un siège humain, déclare bien — l'absence ci-dessus vient
+    // du siège, pas du joueur 2 en tant que numéro.
     expect(
-      isReservesDeclarationPendingFor({
+      humanReservesDeclarer({
         ...base,
-        pending: pendingOnBot,
-        unitId: 11,
+        declaringPlayer: 2,
         playerTypes: { "1": "human", "2": "human" },
       })
-    ).toBe(true);
+    ).toBe(2);
   });
 
-  it("aucun type de joueur connu : aucune question, jamais un siège déduit d'un numéro", () => {
+  it("aucun type de joueur connu : aucun déclarant, jamais un siège déduit d'un numéro", () => {
     // Même doctrine que `shouldWarnReservesLastRound` : le type de joueur vient du moteur. Sans
-    // lui, offrir la réponse reviendrait à parier que le siège interrogé est humain.
-    expect(isReservesDeclarationPendingFor({ ...base, playerTypes: undefined, unitId: 7 })).toBe(
-      false
-    );
+    // lui, offrir les boutons reviendrait à parier que le siège déclarant est humain.
+    expect(humanReservesDeclarer({ ...base, playerTypes: undefined })).toBeNull();
   });
 
-  it("étape ouverte dès qu'une question existe, quelle que soit l'escouade visée", () => {
-    // C'est ce prédicat-là qui gèle la liste de pose : tant qu'une question est en attente, le
-    // moteur refuse `deploy_commit` pour les DEUX joueurs, pas seulement pour l'interrogé.
-    expect(isReservesDeclarationStepOpen({ phase: "deployment", pending: PENDING_ON_7 })).toBe(
-      true
-    );
+  it("étape ouverte dès qu'un camp déclare, quel qu'il soit", () => {
+    // C'est ce prédicat-là qui gèle la liste de pose : tant qu'un camp déclare, le moteur refuse
+    // `deploy_commit` pour les DEUX joueurs, pas seulement pour le déclarant.
+    expect(isReservesDeclarationStepOpen({ phase: "deployment", declaringPlayer: 2 })).toBe(true);
+  });
+});
+
+describe("isUnitListedForDeclaration — 20.01", () => {
+  it("l'escouade est dans la liste que le moteur publie, ou elle n'y est pas", () => {
+    // L'éligibilité (plafond de 50 %, FORTIFICATION, encore à poser) est tranchée côté moteur
+    // (test_strategic_reserves_summary_asks_only_about_a_unit_the_engine_would_accept) : le
+    // client n'en refait rien, il regarde si l'identifiant est dans la liste reçue.
+    expect(isUnitListedForDeclaration({ unitId: 7, list: ["7", "9"] })).toBe(true);
+    expect(isUnitListedForDeclaration({ unitId: 8, list: ["7", "9"] })).toBe(false);
+  });
+
+  it("l'identifiant est comparé en CHAÎNE, comme le moteur le publie", () => {
+    // Les lignes du panneau portent des ids numériques, le moteur publie des chaînes : une
+    // comparaison stricte sans conversion ne matcherait jamais, et les boutons resteraient
+    // invisibles — donc le déploiement bloqué sans que rien ne l'explique.
+    expect(isUnitListedForDeclaration({ unitId: "7", list: ["7"] })).toBe(true);
+  });
+
+  it("liste absente : rien n'est listé, aucun bouton inventé", () => {
+    expect(isUnitListedForDeclaration({ unitId: 7, list: undefined })).toBe(false);
+  });
+});
+
+describe("readReservesDeclaration — 20.01", () => {
+  it("lit les trois champs du résumé moteur", () => {
+    const summary: StrategicReservesSummary = {
+      declaring_player: 2,
+      declarable: ["11"],
+      cancellable: ["12"],
+    };
+    expect(readReservesDeclaration(summary)).toEqual({
+      declaringPlayer: 2,
+      declarable: ["11"],
+      cancellable: ["12"],
+    });
+  });
+
+  it("sans résumé, aucun déclarant et deux listes vides — jamais une clé absente", () => {
+    expect(readReservesDeclaration(undefined)).toEqual({
+      declaringPlayer: null,
+      declarable: [],
+      cancellable: [],
+    });
   });
 });
 

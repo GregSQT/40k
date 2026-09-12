@@ -3857,6 +3857,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // deploy_commit (qui change current_deployer) et le re-render React : sans ça, un clic
           // rapide après le 1er déploiement voit encore current_deployer=2 et lance le plan à tort.
           const gsLatest = latestGameStateRef.current ?? gameState;
+          // 20.01 — TANT QUE L'ÉTAPE Declare Battle Formations EST OUVERTE, un clic SÉLECTIONNE et
+          // ne pose rien : c'est la sélection qui fait apparaître `Reserve` sur la ligne. Lancer
+          // ici un plan de pose ouvrirait un mode que le moteur refuse (`deploy_commit` ->
+          // `reserves_declaration_still_open`) et volerait au joueur la ligne qu'il vient de
+          // cliquer. Re-cliquer l'escouade sélectionnée la désélectionne.
+          if (gsLatest.strategic_reserves?.declaring_player != null) {
+            setSelectedUnitId((prev) => (prev === numericUnitId ? null : numericUnitId));
+            return;
+          }
           const ds = gsLatest.deployment_state;
           const deployer = ds?.current_deployer;
           const deployable =
@@ -6076,29 +6085,57 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    *  `declare` est OBLIGATOIRE et porte les deux réponses : `true` met l'unité en réserves,
    *  `false` la garde pour le déploiement. « Garder » n'est pas l'absence de réponse — la file du
    *  moteur n'avance que sur une réponse explicite, sinon la même question se reposerait. */
-  const handleDeployToStrategicReserves = useCallback(
-    async (unitId: number | string, declare: boolean) => {
-      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
-      const data = await executeAction({
-        action: "deploy_strategic_reserves",
-        unitId: String(uid),
-        declare,
-      });
+  /** 20.01 — les TROIS gestes de la déclaration (réserver, annuler, valider) passent par la même
+   *  route : même lecture des trois issues, même message de refus, même sortie. Écrits trois fois,
+   *  l'un d'eux traiterait un refus comme une non-action et le joueur cliquerait dans le vide. */
+  const runReservesDeclarationGesture = useCallback(
+    async (action: Record<string, unknown>, refusalLabel: string) => {
+      const data = await executeAction(action);
       // Trois issues, pas deux (cf. `readEngineActionOutcome`). Sur une NON-ACTION on ne tombe
-      // PAS dans le `handleCancelDeploy` ci-dessous, qui détruirait le plan provisoire du joueur
-      // alors qu'aucun dépôt n'a eu lieu, et on n'affiche rien : le diagnostic est déjà posé.
+      // PAS dans le `handleCancelDeploy` ci-dessous, et on n'affiche rien : le diagnostic est déjà
+      // posé.
       const outcome = readEngineActionOutcome(data);
       if (outcome.kind === "noop") return;
       if (outcome.kind === "refused") {
-        setActionRefusal(`Mise en réserves refusée : ${outcome.message}`);
+        setActionRefusal(`${refusalLabel} : ${outcome.message}`);
         return;
       }
-      // Sortie de mode identique à un Annuler de déploiement : le dépôt CONSOMME le tour
-      // d'alternance comme une pose, donc il faut purger exactement les mêmes ressources.
+      // La sélection portait sur une escouade qui vient de changer de liste (pool -> réserves, ou
+      // l'inverse) : la garder sélectionnée ferait pointer les boutons sur une ligne qui n'est
+      // plus là. Aucun plan de pose n'est en cours pendant l'étape, la purge est sans effet dessus.
       handleCancelDeploy();
     },
     [executeAction, handleCancelDeploy]
   );
+
+  const handleDeployToStrategicReserves = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      await runReservesDeclarationGesture(
+        { action: "deploy_strategic_reserves", unitId: String(uid) },
+        "Mise en réserves refusée"
+      );
+    },
+    [runReservesDeclarationGesture]
+  );
+
+  const handleCancelStrategicReserves = useCallback(
+    async (unitId: number | string) => {
+      const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      await runReservesDeclarationGesture(
+        { action: "cancel_strategic_reserves", unitId: String(uid) },
+        "Annulation de réserve refusée"
+      );
+    },
+    [runReservesDeclarationGesture]
+  );
+
+  const handleValidateReservesDeclaration = useCallback(async () => {
+    await runReservesDeclarationGesture(
+      { action: "validate_reserves_declaration" },
+      "Validation de la déclaration refusée"
+    );
+  }, [runReservesDeclarationGesture]);
 
   /** 20.04 — sélection d'une escouade DANS le conteneur, en phase de mouvement : demande au moteur
    *  son aire d'arrivée et entre en mode pose. Pool vide ou round d'arrivée pas atteint → popup. */
@@ -8272,7 +8309,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       reservesLastRoundWarning: null as null | { player: number; unitIds: number[] },
       onDismissIngressBlocked: () => {},
       onDismissReservesLastRoundWarning: () => {},
-      onDeployToStrategicReserves: async (_unitId: number | string, _declare: boolean) => {},
+      onDeployToStrategicReserves: async (_unitId: number | string) => {},
+      onCancelStrategicReserves: async (_unitId: number | string) => {},
+      onValidateReservesDeclaration: async () => {},
       onSelectReserveUnitForIngress: async (_unitId: number | string) => {},
       onIngressPlace: async (_col: number, _row: number) => {},
       onCancelIngress: () => {},
@@ -8727,6 +8766,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onDismissIngressBlocked: () => setIngressBlocked(null),
     onDismissReservesLastRoundWarning: () => setReservesLastRoundWarning(null),
     onDeployToStrategicReserves: handleDeployToStrategicReserves,
+    onCancelStrategicReserves: handleCancelStrategicReserves,
+    onValidateReservesDeclaration: handleValidateReservesDeclaration,
     onSelectReserveUnitForIngress: handleSelectReserveUnitForIngress,
     onIngressPlace: handleIngressPlace,
     onCancelIngress: handleCancelIngress,

@@ -1,16 +1,13 @@
-import type {
-  StrategicReservesPendingDeclaration,
-  StrategicReservesPlayerSummary,
-} from "../types/game";
+import type { StrategicReservesPlayerSummary, StrategicReservesSummary } from "../types/game";
 
 /**
  * Décisions d'interface des réserves stratégiques (20.01 / 20.04).
  *
  * Ces fonctions ne CALCULENT aucune règle : elles combinent la phase, le joueur, et ce que le
- * moteur a déjà tranché (`strategic_reserves` de l'API). En particulier `pending_declaration`
- * porte à lui seul les trois conditions de 20.01 (plafond de 50 %, pas FORTIFICATION, encore à
- * poser) ET le moment où la question se pose — les rejouer ici donnerait deux formules pour une
- * même règle, et l'UI proposerait des dépôts que le moteur refuse.
+ * moteur a déjà tranché (`strategic_reserves` de l'API). En particulier `declarable` et
+ * `cancellable` portent à eux seuls les conditions de 20.01 (plafond de 50 %, pas FORTIFICATION,
+ * encore à poser, camp qui a la main) — les rejouer ici donnerait deux formules pour une même
+ * règle, et l'UI proposerait des dépôts que le moteur refuse.
  */
 
 /** Forme minimale d'une unité pour les sélecteurs ci-dessous — le hook manipule les unités BRUTES
@@ -54,50 +51,82 @@ export function formatStrategicReservesRatio(
  *
  * TANT QU'ELLE L'EST, AUCUNE POSE N'EST POSSIBLE : la règle situe la déclaration avant le
  * déploiement, et le moteur refuse `deploy_commit` (`reserves_declaration_still_open`). L'UI ne
- * fait que ne pas proposer un geste voué au refus — elle ne rejoue pas la règle, elle lit la
- * question que le moteur a posée.
+ * fait que ne pas proposer un geste voué au refus — elle ne rejoue pas la règle, elle lit le camp
+ * que le moteur dit en train de déclarer.
  */
 export function isReservesDeclarationStepOpen(o: {
   phase: string | undefined;
-  pending: StrategicReservesPendingDeclaration | null | undefined;
+  declaringPlayer: number | null | undefined;
 }): boolean {
   if (o.phase !== "deployment") return false;
-  return o.pending != null;
+  return o.declaringPlayer != null;
 }
 
 /**
- * 20.01 — la question en attente porte-t-elle sur CETTE unité, MAINTENANT ?
+ * 20.01 — le camp HUMAIN qui compose sa déclaration MAINTENANT, ou `null`.
  *
- * Le client n'a aucune liste de candidats à filtrer : le moteur interroge une unité à la fois,
- * dans un ordre figé au reset, et publie laquelle. Reconstruire ici « quelles unités pourraient
- * partir en réserves » rouvrirait la sélection libre — donc la possibilité de déclarer après
- * avoir vu le déploiement adverse, le défaut que ce contrat ferme.
+ * C'est lui, et lui seul, dont les lignes portent le bouton `Reserve`, dont le conteneur porte
+ * les boutons `Cancel`, et à qui le bandeau offre `Validate`. Chaque camp déclare pour TOUTE son
+ * armée avant que l'autre commence — 20.01 dit « select one or more friendly units », une
+ * formation de bataille, pas une escouade à la fois.
  *
  * `deploymentStarted` SÉPARE LA PRÉPARATION DE LA PARTIE. Tant que l'écran de préparation est
  * ouvert, le joueur choisit encore son armée ; 20.01 place la déclaration après que les listes
- * sont arrêtées, et le moteur refuse désormais le changement d'armée dès la première réponse
- * (`change_roster_locked_after_reserves_declaration`). Poser la question avant le démarrage
- * mettait les deux gestes dans la MÊME fenêtre : répondre y coûtait le droit de changer d'armée,
- * dans le seul écran où ce droit existe.
+ * sont arrêtées, et le moteur refuse le changement d'armée dès le premier geste
+ * (`change_roster_locked_after_reserves_declaration`). Ouvrir la déclaration avant le démarrage
+ * mettrait les deux gestes dans la MÊME fenêtre : réserver y coûterait le droit de changer
+ * d'armée, dans le seul écran où ce droit existe.
  *
  * ET SEULEMENT À UN SIÈGE HUMAIN. 20.01 dit « **you** can select one or more friendly units » :
- * la question d'un camp appartient à son siège. En PvE, celle du bot est répondue par le modèle
- * (`apply_reserves_declaration_decision`) et le moteur refuse désormais la route humaine
+ * la déclaration d'un camp appartient à son siège. En PvE, celle du bot est composée par le
+ * modèle (`apply_reserves_declaration_decision`) et le moteur refuse la route humaine
  * (`reserves_declaration_seat_is_not_human`) — sans ce filtre, le client offrirait le temps d'un
- * aller-retour d'état deux boutons qui ne peuvent que revenir en erreur. Le type de joueur vient
+ * aller-retour d'état des boutons qui ne peuvent que revenir en erreur. Le type de joueur vient
  * du moteur, jamais d'un numéro : même lecture que `shouldWarnReservesLastRound`.
  */
-export function isReservesDeclarationPendingFor(o: {
+export function humanReservesDeclarer(o: {
   phase: string | undefined;
-  unitId: number | string;
-  pending: StrategicReservesPendingDeclaration | null | undefined;
+  declaringPlayer: number | null | undefined;
   deploymentStarted: boolean;
   playerTypes: Record<string, "human" | "ai"> | undefined;
+}): number | null {
+  if (!o.deploymentStarted) return null;
+  if (!isReservesDeclarationStepOpen({ phase: o.phase, declaringPlayer: o.declaringPlayer })) {
+    return null;
+  }
+  const player = o.declaringPlayer as number;
+  if (o.playerTypes?.[String(player)] !== "human") return null;
+  return player;
+}
+
+/**
+ * 20.01 — CETTE escouade est-elle dans une des deux listes que le moteur publie pour le camp
+ * déclarant ?
+ *
+ * Le client n'a aucune éligibilité à calculer : le plafond de 50 %, la clause FORTIFICATION et
+ * « encore à poser » sont tranchés côté moteur (`reserves_declarable_squads`,
+ * `reserves_cancellable_squads`), et c'est la même fonction qui refuse le dépôt. Les lignes du
+ * panneau portent des ids numériques, le moteur publie des chaînes : la comparaison se fait en
+ * chaîne, sans quoi rien ne matcherait jamais et les boutons resteraient invisibles.
+ */
+export function isUnitListedForDeclaration(o: {
+  unitId: number | string;
+  list: readonly string[] | undefined;
 }): boolean {
-  if (!o.deploymentStarted) return false;
-  if (!isReservesDeclarationStepOpen({ phase: o.phase, pending: o.pending })) return false;
-  if (o.playerTypes?.[String(o.pending!.player)] !== "human") return false;
-  return o.pending!.unitId === String(o.unitId);
+  return (o.list ?? []).some((id) => String(id) === String(o.unitId));
+}
+
+/** Les trois lectures 20.01 du résumé moteur, sous une seule forme pour les appelants. */
+export function readReservesDeclaration(summary: StrategicReservesSummary | undefined): {
+  declaringPlayer: number | null;
+  declarable: readonly string[];
+  cancellable: readonly string[];
+} {
+  return {
+    declaringPlayer: summary?.declaring_player ?? null,
+    declarable: summary?.declarable ?? [],
+    cancellable: summary?.cancellable ?? [],
+  };
 }
 
 /**

@@ -94,6 +94,85 @@ puis constaté rouge sur les 4 invariants centraux), `tests/integration/pvp/test
 côté siège humain quand tout part en réserves, et file non reconstruite par `change_roster` — sont
 corrigés et couverts.
 
+⚠️ **La file alternée décrite ci-dessus n'existe plus depuis le 2026-09-12** — voir la section
+suivante. Le MOMENT de la déclaration (avant toute pose) et le refus moteur de `deploy_commit` sont
+inchangés ; c'est la GRANULARITÉ qui a changé.
+
+---
+
+## ✅ 20.01 — la déclaration se compose PAR CAMP, sans ordre ni question fermée {#declaration-reserves-2001-par-camp}
+
+**Livré le 2026-09-12.** Point de départ : en PvP, après « Start Deployment », aucune unité du
+joueur 1 n'était sélectionnable — curseur interdit sur toute la liste. Ce n'était pas un bug mais
+la face visible du lot précédent : l'étape interrogeait les escouades une à une, dans une file
+alternée figée au reset, et toute la liste restait inerte sauf la ligne interrogée.
+
+**Décision utilisateur (2026-09-10)**, après arbitrage à trois options : déclaration par joueur à
+écran ouvert, un seul mécanisme pour tous les modes. Alternance avec pass irréversible écartée (ne
+restaure pas le secret, invente une punition absente de 20.01) ; masquage avec passation d'écran
+écarté (contrat social jugé irréaliste). Aux joueurs de s'organiser pour le secret. Mémoire :
+`project_reserves_20_01_hotseat.md`.
+
+**Ce que dit la règle, relu avant d'écrire** (`20 Strategic reserves.pdf` §20.01) : « you can select
+one or more friendly units (excluding FORTIFICATIONS) to place in strategic reserves. Instead of
+setting up these units on the battlefield during deployment » — un ENSEMBLE déclaré par un camp
+pour toute son armée, sans ordre, et sans question binaire : ne pas réserver, c'est déployer. La file
+par escouade et le bouton `Deploy` n'avaient aucune base dans le texte.
+
+**Ce qui change dans le moteur** (`engine/phase_handlers/deployment_handlers.py`) :
+`RESERVES_DECLARATION_QUEUE_KEY` et sa file disparaissent ; l'étape porte `reserves_declaration_declined`
+et `reserves_declaration_validated`, PAR JOUEUR. Qui déclare se DÉRIVE de l'état
+(`current_reserves_declarer` : joueur 1 puis 2, tant qu'il lui reste une escouade déclarable et
+qu'il n'a pas validé). Le siège humain compose librement — `deploy_strategic_reserves` (réserver
+n'importe laquelle), `cancel_strategic_reserves` (défaire avant validation),
+`validate_reserves_declaration` (figer, zéro réserve étant légal) — par le dispatcher commun, donc
+avec snapshot de rewind. Le siège piloté par le modèle reste interrogé escouade par escouade
+(`CHOICE_0`/`CHOICE_1`), et se fige de lui-même quand il n'a plus de question : **espace d'action
+et registres d'observation inchangés, contrat d'entraînement à zéro écart mesuré avant et après —
+aucun `--new`, `--append` tient.** `finalize_reserves_declaration` est l'écrivain unique du figeage
+pour les deux sièges, `settle_reserves_declaration_step` la suite commune des trois gestes humains
+(clôture, siège, sortie de phase).
+
+**Le camp humain ne se ferme QUE par Validate** — y compris après avoir réservé sa dernière
+escouade déclarable ou sur un roster pré-déclarant ses réserves jusqu'au plafond : il garde la main
+et peut encore annuler. Le camp machine, lui, se ferme à sa dernière question (il n'a aucune action
+d'annulation ; le garder ouvert armerait un masque sans question posable et
+`next_reserves_declaration_question` lèverait — reproduit). La distinction passe par
+`is_programmatic_owner` (`shared_utils.py`), SOURCE UNIQUE du prédicat « piloté par la machine »,
+vrai pour tout camp en `gym_training_mode` — où `player_types` marque pourtant les deux camps
+« human » — sinon `player_types == "ai"`. Une première écriture avait fermé tout camp sans question
+posable, siège ignoré, et documenté ce coût comme « conséquence assumée » : c'était un défaut, pas
+une contrainte — le discriminateur existait.
+
+**Quatre défauts de l'écriture initiale, trouvés par relecture, revue et session parallèle avant
+livraison, chacun rouge→vert** : (1) le crash du camp machine saturé ; (2) la sortie de phase
+déplacée dans la seule route de validation — deux camps d'une escouade chacun, tous deux en
+réserves : pools vides, étape jamais close, partie figée ; (3) `/code-review` : le point commun
+clôturait sans déplacer le siège — en PvE `not_ai_player_turn` pour le bot,
+`reserves_declaration_still_open` pour l'humain, partie figée ; (4) la fermeture d'office du camp
+humain, ci-dessus. Les deux tests de sortie de phase avaient été SUPPRIMÉS à la réécriture du
+fichier pendant que le code qu'ils gardaient déménageait : réintroduits. Verrous à double sens :
+fermer d'office → 4 tests humains rouges ; ignorer le siège → 4 tests machine (gym et `ai`) rouges.
+
+**API** (`services/api_server.py`) : `pending_declaration` remplacé par `declaring_player`,
+`declarable`, `cancellable` — listes publiées par le moteur, jamais recalculées par le client, parce
+que le plafond de 50 % bouge à chaque geste. `deploy_strategic_reserves` avec l'ancien paramètre
+`declare` LÈVE (un appelant resté sur `declare: false` obtiendrait l'inverse de sa demande en silence).
+**Save** : TL08 → TL09, les deux clés testées en aller-retour JSON (clés entières → chaînes).
+
+**Front** : bandeau non bloquant « STRATEGIC RESERVES DECLARATION — <joueur> » avec `Validate`
+(`ReservesDeclarationBanner`) ; un clic sur une ligne pendant l'étape SÉLECTIONNE sans lancer de plan
+de pose (`handleSelectUnit`) ; la ligne sélectionnée porte `Reserve` si le moteur la liste
+déclarable, jamais `Deploy` ; le conteneur porte `Cancel` sur les escouades listées annulables. Garde
+`!isPopupVisible` du tour IA conservé tel quel.
+
+Verrous : `tests/unit/engine/test_reserves_declaration_step_2001.py` (réécrit, 31 tests ×2 terrains,
+4 mutations rouge→vert dont le crash, le blocage et le siège), `test_strategic_reserves_20.py`,
+`tests/unit/services/test_api_server_helpers.py`, `test_save_format_key_contract.py` (TL09 enregistré
+avec son empreinte), `tests/integration/pvp/test_deploy.py` (`TestDeclareBattleFormations` réécrit,
+29 verts), vitest `strategicReservesUi.test.ts` (25) et `BoardWithAPI.test.tsx` (14). `tsc` complet
+et suites larges : vérification utilisateur.
+
 ---
 
 ## Phase B — Observation des niveaux {#phase-b}
