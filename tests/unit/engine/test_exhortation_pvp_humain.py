@@ -6,9 +6,8 @@ one D6, and on a result of: 4-5: That enemy unit suffers D3 mortal wounds. 6: Th
 suffers 3 mortal wounds. »
 
 Avant ce lot, le seul site qui jouait ce dé était `_process_squad_action` (gym / politique) :
-le flux manuel PvP (`_fight_v11_manual_step`) et le flux auto PvE (`_fight_v11_auto_step`)
-enregistraient la sélection 12.04 sans jamais rouler le D6 — un Chaplain humain ne l'appliquait
-jamais. Et `_continue_fight_after_exhortation` ne connaissait que la reprise gym, qui lève
+le flux manuel (`_fight_v11_manual_step`) enregistrait la sélection 12.04 sans jamais rouler
+le D6 — un Chaplain humain ne l'appliquait jamais. Et `_continue_fight_after_exhortation` ne connaissait que la reprise gym, qui lève
 « combat à vide … pool non vide » sans slot de cible.
 
 Chemins verrouillés, sur un MOTEUR RÉEL, par `execute_semantic_action` (LE point d'entrée du
@@ -18,7 +17,8 @@ frontend) :
     DÉFENSEUR humain (HAZARD_CTX) → reprise MANUELLE : l'unité reste active, non enregistrée,
     et déclare ses attaques contre les survivants ; verrou d'activation ; un seul dé par phase.
   PvP, 1 ennemi engagé : jet immédiat à l'activation, sans décision.
-  PvE (auto) : même sélection, cible et pertes AUTO, puis les attaques de l'unité.
+  PvE, siège humain : MÊME machine manuelle (décision, dé, reprise) ; le défenseur bot se voit
+    attribuer les blessures mortelles headless (06.02, siège machine).
 """
 from __future__ import annotations
 
@@ -214,41 +214,66 @@ def test_pvp_sans_regle_rien_ne_change(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# PvE, siège humain résolu en AUTO : cible et pertes automatiques, puis les attaques
+# PvE, siège HUMAIN : même machine manuelle qu'en PvP (12.04 : c'est le joueur qui sélectionne).
+# Le défenseur est le bot : les blessures mortelles lui sont attribuées headless (06.02, siège
+# machine), puis le Chaplain reste actif et déclare ses attaques comme en PvP.
 # ---------------------------------------------------------------------------
 
-def test_pve_auto_le_de_est_joue_puis_l_unite_combat(monkeypatch):
+def test_pve_siege_humain_meme_decision_et_meme_reprise_qu_en_pvp(monkeypatch):
+    """ROUGE si le siège humain PvE est résolu en auto : aucune décision posée, cible et attaques
+    tranchées par le moteur dans la même requête."""
     eng = _engine("pve", "ai", [
         _chaplain(),
-        _unit_cfg(2, 2, 21, 20),
+        _two_model_cfg(2, 2, 21, 20),
         _unit_cfg(3, 2, 20, 21),
     ])
     gs = eng.game_state
-    rolls = iter([6])
-    real_randint = random.Random(3).randint
-    monkeypatch.setattr(random, "randint", lambda a, b: next(rolls, None) or real_randint(a, b))
-    # Le sélecteur de cible AUTO (`_ai_select_fight_target`, partagé par les blessures mortelles
-    # et les attaques) lit le registre d'unités, que le type `TestUnit` de la fixture n'a pas :
-    # il est remplacé par « la première cible », ce qui ne touche ni au dé ni à la reprise.
-    import engine.phase_handlers.fight_handlers as fh
-    chosen: List[str] = []
-    monkeypatch.setattr(
-        fh, "_ai_select_fight_target",
-        lambda gs_, uid, targets: chosen.append(targets[0]) or targets[0],
-    )
 
-    ok, out = eng.execute_semantic_action({"action": "fight", "unitId": "1"})
+    def _no_roll(a, b):
+        raise AssertionError("aucun dé avant le choix de la cible")
+    monkeypatch.setattr(random, "randint", _no_roll)
+
+    ok, out = eng.execute_semantic_action({"action": "activate_unit", "unitId": "1"})
     assert ok is True, out
-    assert gs["pending_agent_decision"] is None, "régime auto : aucune décision posée à personne"
+    assert out.get("waiting_for_agent_decision") is True and out.get("decision_type") == "mortal_wounds_target", out
+    pending = gs["pending_agent_decision"]
+    assert pending is not None and pending["player"] == 1 and pending["unit_id"] == "1", pending
+    assert gs["_pending_exhortation_fight"]["regime"] == "manual"
+    assert gs["active_fight_unit"] == "1" and "1" not in gs["units_selected_to_fight"]
+    assert _mw_lines(gs) == []
+
+    # Cible 2 (deux figurines de 3 PV) ; D6 = 6 : trois blessures mortelles, attribuées par le
+    # défenseur MACHINE sans rendre la main (figurine forcée, 06.02 siège programmatique).
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    ok, out = eng.execute_semantic_action({"action": "agent_decision", "option_index": 0})
+    assert ok is True, out
+    assert gs["pending_agent_decision"] is None
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["hazardousMortalWounds"] == 3, lines
-    assert lines[0]["unitId"] == chosen[0] and lines[0]["mortalWoundSourceId"] == "1"
-    # Puis les attaques de l'unité, dans la même requête (reprise auto).
-    assert out["action"] == "combat" and out["unitId"] == "1", out
-    assert out["targetId"] in {"2", "3"}
-    assert "1" in gs["units_selected_to_fight"]
+    assert lines[0]["unitId"] == "2" and lines[0]["mortalWoundSourceId"] == "1"
+    assert out.get("waiting_for_player") is True and out["action"] == "wait", out
+    assert gs.get("hazard_origin") is None and gs.get("_pending_exhortation_resume") is None
+    # 3 blessures sur 2 figurines de 3 PV : une détruite, l'autre intacte.
+    hp = sorted(gs["models_cache"][m]["HP_CUR"] for m in ("2#0", "2#1") if m in gs["models_cache"])
+    assert hp == [3], hp
+
+    # Reprise MANUELLE : le Chaplain reste actif, ses cibles lui sont présentées, il n'est pas
+    # enregistré — il n'a pas encore combattu.
+    assert out["fight_subphase"] == "fight" and out["active_fight_unit"] == "1"
+    # La figurine survivante de 2 (col 22) n'est plus au contact : seule 3 reste engagée.
+    assert out["valid_targets"] == ["3"]
+    assert "1" not in gs["units_selected_to_fight"]
     assert gs["fight_exhortation_done"] == {"1"}
     assert FIGHT_SELECTION_EXHORTATION_KEY not in gs
+
+    # Il combat par clic-cible : défenseur machine → pertes allouées headless dans la requête,
+    # et c'est LÀ qu'il est enregistré « selected to fight ».
+    monkeypatch.setattr(random, "randint", random.Random(7).randint)
+    ok, out = eng.execute_semantic_action({"action": "fight", "unitId": "1", "targetId": "3"})
+    assert ok is True, out
+    assert out.get("waiting_for_player") is True and out["action"] == "wait", out
+    assert "1" in gs["units_selected_to_fight"]
+    assert len(_mw_lines(gs)) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -1035,8 +1035,8 @@ le modèle + LoS 3D est le vrai chantier.
    8. **DEUX MOTEURS de pile-in (vérifié 2026-07-08) — cadrer la migration en conséquence.**
 
       > **[Mise à jour 2026-08-28]** Ce constat est **périmé** : le par-ancre a été condamné depuis
-      > (cf. mémoire `project_pile_in_par_figurine`). Aujourd'hui `_fight_v11_auto_pile_in`
-      > ([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py)) délègue au plan
+      > (cf. mémoire `project_pile_in_par_figurine`). Aujourd'hui le pile-in du siège programmatique
+      > (driver `_fight_v11_gym_settle`, [w40k_core.py](../../../engine/w40k_core.py)) délègue au plan
       > **par-figurine** `fight_pile_in_plan` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py))
       > et l'**overrun** à `_fight_overrun_pile_in_plan` (shared_utils, plan par-figurine en 4-uplets
       > `(mid,col,row,level)` — la limite « un overrun ne peut pas finir en hauteur » est levée).
@@ -1064,9 +1064,9 @@ le modèle + LoS 3D est le vrai chantier.
         tout le pile-in **auto/IA** roulaient sur A (voie **RL/hex 2D**) → **différer** comme le pool squad du
         move, **ou** migrer A explicitement. Tant que A n'était pas 3D, un **overrun ne pouvait pas finir en
         hauteur, même en PvP**. **Décision à prendre** (A différé vs migré) — pas un sous-cas gratuit de B.
-      - **Consolidation = structure DIFFÉRENTE du pile-in (vérifié)** : (a) son auto **skippe entièrement**
-        (`_fight_v11_auto_consolidate` [fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py),
-        consolidation optionnelle §12) → **aucun moteur A/RL**. (b) Son autoplace Focus `consolidate_autoplace_plan`
+      - **Consolidation = structure DIFFÉRENTE du pile-in (vérifié)** : (a) son auto **skippait entièrement**
+        (`_fight_v11_auto_consolidate`, supprimé le 2026-09-12 avec le chemin auto ; le siège programmatique
+        consolide désormais par `squad_consolidate_plan` via `_fight_v11_gym_settle`) → **aucun moteur A/RL**. (b) Son autoplace Focus `consolidate_autoplace_plan`
         ([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py)) **ne calcule rien** : c'est un
         **routeur** vers des autoplaces existants dont l'AFTER coïncide avec le mode (docstring de
         `consolidate_autoplace_plan`) — `ongoing` →
@@ -1450,7 +1450,7 @@ le modèle + LoS 3D est le vrai chantier.
       - **Validation runtime PvP** (impossible headless) : tester unité 119 (niveau 1) sur un scénario à planchers —
         sélection fig → bouton étage → pool sur le plancher → pose → commit → fig rendue au bon niveau ; idem conso.
       - **IA auto pile-in** : à cette date le pile-in auto était un **move rigide par ancre** (moteur distinct,
-        non porté) → une unité IA niveau 1 descendait. *(Depuis : `_fight_v11_auto_pile_in` délègue au plan
+        non porté) → une unité IA niveau 1 descendait. *(Depuis : le driver `_fight_v11_gym_settle` délègue au plan
         par-figurine `fight_pile_in_plan` — cf. la mise à jour du point 8 « DEUX MOTEURS ».)*
       - **Autoplace ILP Focus** (`pile_in_autoplace_plan` / `consolidate_autoplace_plan`) : génération de slots **au
         sol** → à niveau ≥1 le preview (désormais level-aware) **REJETTE** le plan (pas de commit silencieux faux,

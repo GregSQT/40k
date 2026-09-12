@@ -500,6 +500,53 @@ export interface ManualOrderGroup {
   has_wounded: boolean;
 }
 
+/**
+ * Payload d'ATTENTE d'allocation manuelle des pertes (défenseur humain, 05.03/05.04, 06.02) tel
+ * que le moteur le rend sur `/game/action` comme sur `/game/ai-turn` (attaquant bot en PvE) :
+ * `{ action: squad_*_manual_alloc, waiting_for_player: true, allocation }`. Rend l'allocation
+ * typée (avec sa famille) ou `null` si le payload n'en est pas une.
+ */
+export function readManualAllocationPrompt(result: unknown): ManualAllocation | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as { action?: unknown; waiting_for_player?: unknown; allocation?: unknown };
+  if (r.waiting_for_player !== true || !r.allocation || typeof r.allocation !== "object") {
+    return null;
+  }
+  const kind =
+    r.action === "squad_fight_manual_alloc"
+      ? "fight"
+      : r.action === "squad_hazard_manual_alloc"
+        ? "hazard"
+        : r.action === "squad_shoot_manual_alloc"
+          ? "shoot"
+          : null;
+  if (kind === null) return null;
+  return { ...(r.allocation as ManualAllocation), kind };
+}
+
+/**
+ * Payload d'ATTENTE de déclaration de l'ordre des groupes d'allocation (05.03, cible hétérogène /
+ * CHARACTER) — même double provenance que `readManualAllocationPrompt` :
+ * `{ action: squad_*_declare_order, waiting_for_player: true, order_request }`.
+ */
+export function readManualOrderPrompt(result: unknown): ManualOrderRequest | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as { action?: unknown; waiting_for_player?: unknown; order_request?: unknown };
+  if (r.waiting_for_player !== true || !r.order_request || typeof r.order_request !== "object") {
+    return null;
+  }
+  const kind =
+    r.action === "squad_fight_declare_order"
+      ? "fight"
+      : r.action === "squad_hazard_declare_order"
+        ? "hazard"
+        : r.action === "squad_shoot_declare_order"
+          ? "shoot"
+          : null;
+  if (kind === null) return null;
+  return { ...(r.order_request as ManualOrderRequest), kind };
+}
+
 export interface ManualOrderRequest {
   /** "shoot" = ordre d'allocation du tir (défaut) ; "fight" = du combat ; "hazard" = mortal wounds Desperate Escape. */
   kind?: "shoot" | "fight" | "hazard";
@@ -1071,6 +1118,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [manualOrderRequest, setManualOrderRequest] = useState<ManualOrderRequest | null>(null);
   const manualOrderRequestRef = useRef<ManualOrderRequest | null>(null);
   manualOrderRequestRef.current = manualOrderRequest;
+  /** Pose le prompt du DÉFENSEUR humain depuis un payload d'attente — ordre des groupes (05.03)
+   *  ou choix de figurine (05.04) — et rend true s'il en a posé un. Les deux états s'excluent :
+   *  poser l'un efface l'autre. */
+  const applyManualDefenderPrompt = useCallback((result: unknown): boolean => {
+    const order = readManualOrderPrompt(result);
+    if (order !== null) {
+      setManualOrderRequest(order);
+      if (manualAllocationRef.current !== null) setManualAllocation(null);
+      return true;
+    }
+    const allocation = readManualAllocationPrompt(result);
+    if (allocation !== null) {
+      setManualAllocation(allocation);
+      if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+      return true;
+    }
+    return false;
+  }, []);
 
   // Track last action to detect activate_unit in shoot phase
   const lastActionRef = useRef<{ action: string; phase: string; unitId?: string } | null>(null);
@@ -2060,56 +2125,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           // Déclaration de l'ordre des groupes d'allocation (cible hétérogène / CHARACTER) :
           // le backend attend l'ordre avant l'allocation fig par fig.
-          if (
-            (data.result?.action === "squad_shoot_declare_order" ||
-              data.result?.action === "squad_fight_declare_order" ||
-              data.result?.action === "squad_hazard_declare_order") &&
-            data.result?.waiting_for_player === true &&
-            data.result?.order_request
-          ) {
-            const orderKind =
-              data.result.action === "squad_fight_declare_order"
-                ? "fight"
-                : data.result.action === "squad_hazard_declare_order"
-                  ? "hazard"
-                  : "shoot";
-            setManualOrderRequest({
-              ...(data.result.order_request as ManualOrderRequest),
-              kind: orderKind,
-            });
-            if (manualAllocationRef.current !== null) setManualAllocation(null);
-            setGameState((p) => {
-              const merged = mergeGameStatePreservingOmittedObjectives(
-                p,
-                data.game_state as APIGameState
-              );
-              latestGameStateRef.current = merged;
-              return merged;
-            });
-            return;
-          }
-
           // Allocation manuelle des pertes (defenseur humain) : le backend attend un
-          // choix de figurine. Capté ici comme rule_choice ; le garde-fou backend renvoie
-          // le même payload tant que l'allocation n'est pas terminée → l'état se ré-arme.
-          if (
-            (data.result?.action === "squad_shoot_manual_alloc" ||
-              data.result?.action === "squad_fight_manual_alloc" ||
-              data.result?.action === "squad_hazard_manual_alloc") &&
-            data.result?.waiting_for_player === true &&
-            data.result?.allocation
-          ) {
-            const allocKind =
-              data.result.action === "squad_fight_manual_alloc"
-                ? "fight"
-                : data.result.action === "squad_hazard_manual_alloc"
-                  ? "hazard"
-                  : "shoot";
-            setManualAllocation({
-              ...(data.result.allocation as ManualAllocation),
-              kind: allocKind,
-            });
-            if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+          // choix de figurine (ou l'ordre des groupes avant). Capté ici comme rule_choice ; le
+          // garde-fou backend renvoie le même payload tant que l'allocation n'est pas terminée
+          // → l'état se ré-arme.
+          if (applyManualDefenderPrompt(data.result)) {
             setGameState((p) => {
               const merged = mergeGameStatePreservingOmittedObjectives(
                 p,
@@ -3342,6 +3362,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       clearChargePoolRefs,
       syncChargePoolRefs,
       blinkingUnits.coverByUnitId,
+      applyManualDefenderPrompt,
     ]
   );
 
@@ -9506,6 +9527,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setEndlessDutyState(
               (activationData.endless_duty_state as EndlessDutyState | undefined) ?? null
             );
+          }
+
+          // Allocation manuelle des pertes par le DÉFENSEUR HUMAIN (05.03/05.04, 06.02) : le bot
+          // a attaqué, le moteur attend un clic de figurine de l'humain. Même prompt que sur
+          // le chemin `executeAction` ; sans lui, le joueur ne verrait rien avant son prochain
+          // geste (le garde-fou backend ne ré-arme le prompt qu'à la requête suivante), et la
+          // boucle relancerait `/game/ai-turn` que le moteur refuse tant que l'allocation dure.
+          if (applyManualDefenderPrompt(activationData.result)) {
+            break;
           }
 
           // Step 2: Check if we got a preview response requiring decision

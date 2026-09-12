@@ -303,8 +303,9 @@ le HP_MAX de l'unité.
 
 - **Tir** : `squad_declare_shoot` (gym) et les déclarations manuelles PvP
   (`declare_attack_weapon_qty` / `models_status_for_target` / `toggle_attack_model_weapon`).
-- **Mêlée** : `squad_declare_fight`, appelée par le chemin auto (`_fight_v11_resolve_attacks`,
-  fight_handlers) comme par le chemin manuel.
+- **Mêlée** : `squad_declare_fight`, appelée par le clic-cible du siège humain
+  (`_fight_v11_fight_target`, fight_handlers) — la déclaration par arme/figurine passe par
+  `squad_declare_fight_weapon_qty` (siège humain comme `squad_fight_weapon` de la politique).
 
 ### Historique — politique supprimée
 

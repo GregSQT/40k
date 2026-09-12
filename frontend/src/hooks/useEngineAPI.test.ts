@@ -18,7 +18,7 @@ import type { AuthSession } from "../auth/authStorage";
 import type { Unit, Weapon } from "../types/game";
 import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
-import { useEngineAPI } from "./useEngineAPI";
+import { readManualAllocationPrompt, readManualOrderPrompt, useEngineAPI } from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------
 // ErrorBoundary pour tester les hooks qui lancent une exception sur erreur
@@ -765,6 +765,203 @@ describe("useEngineAPI — refus de la confirmation de danger", () => {
     // REPOSÉ : sans lui, le prochain geste de mouvement croirait le danger réglé.
     expect(result.current.hazardWarningPopup).toEqual({ unitId: 10 });
     expect(result.current.error).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PvE, phase fight : le bot a attaqué (`/game/ai-turn`), le DÉFENSEUR HUMAIN alloue ses pertes
+// (05.03/05.04). Le prompt s'ouvre depuis la réponse du tour IA, sans attendre un geste humain.
+// ---------------------------------------------------------------------------
+
+describe("readManualAllocationPrompt", () => {
+  const allocation = {
+    attacker_unit_id: "2",
+    target_unit_id: "1",
+    defender_player: 1,
+    choices: [{ model_id: "1#0", col: 0, row: 0, HP_CUR: 5, HP_MAX: 5 }],
+    wounds_remaining: 1,
+  };
+
+  it("payload fight en attente → allocation de famille fight", () => {
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: true,
+        allocation,
+      })
+    ).toEqual({ ...allocation, kind: "fight" });
+  });
+
+  it("familles shoot et hazard reconnues", () => {
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_shoot_manual_alloc",
+        waiting_for_player: true,
+        allocation,
+      })?.kind
+    ).toBe("shoot");
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_hazard_manual_alloc",
+        waiting_for_player: true,
+        allocation,
+      })?.kind
+    ).toBe("hazard");
+  });
+
+  it("pas une attente d'allocation → null (autre action, pas d'attente, sans allocation)", () => {
+    expect(
+      readManualAllocationPrompt({ action: "wait", waiting_for_player: true, allocation })
+    ).toBeNull();
+    expect(
+      readManualAllocationPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: false,
+        allocation,
+      })
+    ).toBeNull();
+    expect(
+      readManualAllocationPrompt({ action: "squad_fight_manual_alloc", waiting_for_player: true })
+    ).toBeNull();
+    expect(readManualAllocationPrompt(undefined)).toBeNull();
+  });
+});
+
+describe("readManualOrderPrompt", () => {
+  const order_request = {
+    attacker_unit_id: "2",
+    target_unit_id: "1",
+    defender_player: 1,
+    wounds_to_save: 2,
+    groups: [],
+  };
+
+  it("payload fight en attente d'ordre → requête de famille fight", () => {
+    expect(
+      readManualOrderPrompt({
+        action: "squad_fight_declare_order",
+        waiting_for_player: true,
+        order_request,
+      })
+    ).toEqual({ ...order_request, kind: "fight" });
+  });
+
+  it("pas une attente d'ordre → null", () => {
+    expect(
+      readManualOrderPrompt({
+        action: "squad_fight_manual_alloc",
+        waiting_for_player: true,
+        order_request,
+      })
+    ).toBeNull();
+    expect(
+      readManualOrderPrompt({ action: "squad_fight_declare_order", waiting_for_player: true })
+    ).toBeNull();
+  });
+});
+
+describe("useEngineAPI — executeAITurn, allocation du défenseur humain en phase fight", () => {
+  it("ROUGE sans la prise en charge : `/game/ai-turn` rend squad_fight_manual_alloc → prompt posé, boucle arrêtée", async () => {
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const allocation = {
+      attacker_unit_id: "2",
+      target_unit_id: "1",
+      defender_player: 1,
+      choices: [{ model_id: "1#0", col: 0, row: 0, HP_CUR: 5, HP_MAX: 5 }],
+      wounds_remaining: 1,
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: { action: "squad_fight_manual_alloc", waiting_for_player: true, allocation },
+          game_state: fightState,
+          action_logs: [],
+        });
+      })
+    );
+
+    // Le mode vient de l'URL (`?mode=pve`) : c'est lui qui autorise un siège 2 de type "ai".
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+      expect(result.current.manualAllocation).toBeNull();
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(result.current.manualAllocation).toEqual({ ...allocation, kind: "fight" });
+      // La main est à l'humain : un seul appel, pas de relance tant qu'il n'a pas alloué.
+      expect(aiTurnCalls).toBe(1);
+    } finally {
+      window.history.replaceState({}, "", "/game");
+    }
+  });
+
+  it("cible hétérogène (05.03) : `/game/ai-turn` rend squad_fight_declare_order → ordre demandé, boucle arrêtée", async () => {
+    const fightState = makeGameState({
+      phase: "fight",
+      fight_subphase: "fight",
+      current_player: 2,
+      player_types: { "1": "human", "2": "ai" },
+      fight_eligible_units: ["2"],
+      move_activation_pool: [],
+      units: [makeUnit(1, 1), makeUnit(2, 2)],
+    });
+    const order_request = {
+      attacker_unit_id: "2",
+      target_unit_id: "1",
+      defender_player: 1,
+      wounds_to_save: 2,
+      groups: [],
+    };
+    let aiTurnCalls = 0;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: fightState })
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        return HttpResponse.json({
+          success: true,
+          result: { action: "squad_fight_declare_order", waiting_for_player: true, order_request },
+          game_state: fightState,
+          action_logs: [],
+        });
+      })
+    );
+
+    window.history.replaceState({}, "", "/game?mode=pve");
+    try {
+      const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+      await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+      expect(result.current.manualOrderRequest).toBeNull();
+
+      await act(async () => {
+        await result.current.executeAITurn();
+      });
+
+      expect(result.current.manualOrderRequest).toEqual({ ...order_request, kind: "fight" });
+      expect(result.current.manualAllocation).toBeNull();
+      expect(aiTurnCalls).toBe(1);
+    } finally {
+      window.history.replaceState({}, "", "/game");
+    }
   });
 });
 

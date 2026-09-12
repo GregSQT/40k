@@ -84,6 +84,7 @@ Plusieurs chantiers récents ont été livrés sans passage navigateur. À valid
 | Aplatissements chemin rendu 2026-08-12 | Navigateur : glisser déploiement rangée du bas ; murs et couleurs objectif inchangés |
 | Config plateau BoardPvp 2026-08-12 | Navigateur replay (changement épisode, décor/échelle corrects) + glisser déploiement objectif |
 | Terrain transmis au démarrage 2026-09-03 | Navigateur PvP : choisir « Terrain 1 » (mc1) dans le popup, puis vérifier que les murs DESSINÉS bloquent bien le déploiement et qu'aucune zone visuellement vide ne le refuse. Avant le fix, le moteur jouait toujours le terrain par défaut du mode. Vérifier aussi le mode PvE (défaut mc1) et un `?terrain=` d'URL |
+| Phase fight PvE par siège 2026-09-12 (suite 101) | Navigateur PvE (`?mode=pve`) : (1) pile-in du joueur par-figurine, puis le bot pile ses unités seul ; (2) sélection 12.04 du joueur, cible, pertes du bot allouées headless ; (3) combat du bot : le prompt d'allocation des pertes s'ouvre DEPUIS le tour IA (sans clic préalable), le clic d'allocation est appliqué, la main revient au joueur ; (4) clic sur une unité du bot pendant son tour → refus affiché, plateau vivant ; (5) consolidation du joueur, puis le bot consolide et la phase se termine sans bouton. |
 
 ---
 

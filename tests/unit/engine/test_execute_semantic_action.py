@@ -411,26 +411,31 @@ class TestExecuteSemanticActionShoot:
 class TestExecuteSemanticActionFight:
     """Routing execute_semantic_action → _process_fight_phase."""
 
-    def test_fight_v11_auto_drives_and_selects(self):
-        """esa_fight_v11_auto : action fight (mode auto) pilote la machine V11 et sélectionne."""
+    def test_fight_v11_pve_siege_humain_conduit_la_machine_manuelle(self):
+        """esa_fight_v11_pve : en PvE, l'action du siège humain est TRAITÉE (machine manuelle),
+        jamais remplacée par une activation résolue d'office ; le siège du bot est refusé."""
         from engine.phase_handlers.fight_handlers import fight_phase_start
         units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]  # engagés
         gs = _make_fight_gs(units)
         gs["current_player"] = 1
-        gs["current_mode_code"] = "pve"  # auto autorisé
-        gs["player_types"] = {"1": "ai", "2": "ai"}
+        gs["current_mode_code"] = "pve"
+        gs["player_types"] = {"1": "human", "2": "ai"}
         gs["units_charged"] = {"1"}
         gs["phase"] = "charge"
         fight_phase_start(gs)
         engine = _bare_engine(gs)
-        result = {}
-        for _ in range(20):
-            success, result = engine.execute_semantic_action({"action": "fight", "unitId": "1"})
-            assert success is True
-            if result.get("phase_complete"):
-                break
-        # Au moins une unité a été sélectionnée pour combattre (machine 12.04).
-        assert gs["units_selected_to_fight"]
+        assert gs["fight_subphase"] == "pile_in" and gs["fight_eligible_units"] == ["1"]
+
+        # Pile-in : le joueur passe son unité (skip) → groupe du bot, que l'humain ne conduit pas.
+        success, result = engine.execute_semantic_action({"action": "activate_unit", "unitId": "1"})
+        assert success is True and gs["active_fight_unit"] == "1", result
+        success, result = engine.execute_semantic_action({"action": "skip", "unitId": "1"})
+        assert success is True and "1" in gs["pile_in_done"], result
+        assert gs["fight_subphase"] == "pile_in" and gs["fight_eligible_units"] == ["2"]
+        success, result = engine.execute_semantic_action({"action": "activate_unit", "unitId": "2"})
+        assert success is False and result["error"] == "programmatic_seat_turn", result
+        assert result["player"] == 2 and "2" not in gs["pile_in_done"]
+        assert gs["units_selected_to_fight"] == set(), "rien n'a été résolu d'office"
 
     def test_fight_v11_manual_ineligible_unit_no_resolution(self):
         """esa_fight_v11_manual : unité non éligible → aucune résolution (V11 ne combat que l'éligible)."""

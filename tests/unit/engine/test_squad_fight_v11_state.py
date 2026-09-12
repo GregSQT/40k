@@ -483,23 +483,26 @@ def test_gym_consolidation_log_carries_pre_move_mode(melee_scenario_file):
     assert entries[0]["consolidationMode"] == "engaging"
 
 
-def test_auto_step_resolves_new_foes_before_consolidation(melee_scenario_file):
-    """Siège auto (PvE : `_is_fight_auto_execution_allowed`) : un New Foe gelé par le settle du
-    bot doit combattre AVANT toute reprise de la consolidation — même priorité que le flux
-    manuel. L'ancien auto-step ignorait la liste et sautait droit à `fight_v11_grouped_next`.
+def test_manual_machine_resolves_new_foes_before_consolidation(melee_scenario_file):
+    """Siège HUMAIN (machine manuelle, PvP comme siège humain du PvE) : un New Foe gelé par le
+    settle du bot doit combattre AVANT toute reprise de la consolidation — même priorité que le
+    chemin politique. L'ancien auto-step PvE (supprimé le 2026-09-12) ignorait la liste et sautait
+    droit à `fight_v11_grouped_next` ; le siège humain joue désormais `_fight_v11_manual_step`.
     """
-    from engine.phase_handlers.fight_handlers import _fight_v11_auto_step
+    from engine.phase_handlers.fight_handlers import fight_v11_current_pool
 
     eng = _engine_at_new_foes(melee_scenario_file)
     gs = eng.game_state
-    ok, result = _fight_v11_auto_step(gs, eng.config)
-    assert ok is True
-    assert result["action"] == "combat" and result["unitId"] == "4"
-    assert result["fight_type"] == "normal", "New Foe engagé : normal fight in-place, pas d'overrun"
+    assert fight_v11_current_pool(gs) == ["4"]
+    ok, result = eng.execute_semantic_action({"action": "activate_unit", "unitId": "4"})
+    assert ok is True and result["active_fight_unit"] == "4", result
+    assert result["valid_targets"] == ["1"]
+    ok, result = eng.execute_semantic_action({"action": "fight", "unitId": "4", "targetId": "1"})
+    assert ok is True, result
     assert "4" in {str(x) for x in gs["units_selected_to_fight"]}
-    assert "4" not in gs["consolidation_done"], "le combat précède la conso, il ne la remplace pas"
-    # Appel suivant : liste épuisée → purge → la consolidation reprend (E, désormais éligible).
-    ok, result = _fight_v11_auto_step(gs, eng.config)
-    assert ok is True
+    # Liste épuisée → purgée → la consolidation reprend : E (désormais éligible 12.08) est
+    # proposée à son propriétaire, elle n'est pas consolidée d'office.
     assert "consolidation_new_foes_pending" not in gs
-    assert result["action"] == "consolidation" and result["unitId"] == "4"
+    assert gs["fight_subphase"] == "consolidate"
+    assert "4" not in gs["consolidation_done"], "le combat précède la conso, il ne la remplace pas"
+    assert result["fight_eligible_units"] == ["4"]

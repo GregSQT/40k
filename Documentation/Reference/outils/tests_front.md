@@ -200,8 +200,8 @@ PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
    Correctif appliqué : `squad_fight_restart_activation` (`shared_utils.py`) — libère puis
    ouvre — sur les 4 chemins de **résolution directe**, qui redéclarent TOUTE l'escouade et
    remplacent donc les déclarations manuelles au lieu de s'y ajouter (`fight_handlers.py`
-   dispatch FIGHT, branche New Foes, `_fight_v11_resolve_attacks`, et le chemin gym
-   `squad_fight` de `w40k_core.py`). Plus la purge symétrique en fin de phase
+   dispatch FIGHT et branche New Foes — aujourd'hui une seule voie `_fight_v11_fight_target` —, et
+   le chemin gym `squad_fight` de `w40k_core.py`). Plus la purge symétrique en fin de phase
    (`_fight_v11_phase_complete`).
    Tests : `test_fight.py::TestFightActivationRestart` (2 tests).
 4. **Tir d'une arme non-[ASSAULT] après un advance** — PDF 10.05. **CORRIGÉ** (trouvée en T4).
