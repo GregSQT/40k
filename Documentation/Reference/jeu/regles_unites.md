@@ -127,7 +127,7 @@ ligne montre un ecart sans en donner la cause (les valeurs sont nettes) :
 | `[OATH OF MOMENT]` | `Hit:X+RR` / `Wound:X+` | relance de touche, +1 au jet de blessure |
 | `[WAAAGH!]` | `Shots:N` / `Wound:X+` | +1 Attaque, +1 Force (melee seulement) |
 | `[WAAAGH!]` | `Save:X+` | invulnerable 5+ octroyee a la CIBLE, et seulement si elle AMELIORE le seuil affiche |
-| `[WAAAGH!]` | `CHARGED [...]` | charge apres Advance autorisee par le Waaagh! (a defaut d'une capacite de datasheet) |
+| `[WAAAGH!]` | `CHARGED [...]` | charge apres Advance autorisee par le Waaagh! (a defaut d'une capacite de datasheet). L'analyzer ne s'y fie pas : il re-derive le verdict de `T{n} EFFECTS:` + mot-cle ORKS, pour CHARGED comme pour FAILED CHARGE, et contre-controle le marqueur |
 
 **`FACTION_KEYWORDS`** suit exactement la convention de `UNIT_KEYWORDS` : une liste d'objets
 `{ keywordId: "..." }`, exigee par `_build_enhanced_unit`, et unie sur l'escouade par la regle
