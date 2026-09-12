@@ -13217,13 +13217,29 @@ def _assign_cells_toward_enemies(
         for nc, nr in get_hex_neighbors(ec, er):
             if _cell_base_legal(nc, nr):
                 b2b_cells.add((nc, nr))
-    # Admissibilite PAR FIGURINE, independante du plan (trajet + AFTER) : calculee UNE fois, le
-    # point fixe ci-dessous ne fait varier que `blocked`.
+    # 12.03 WHILE MOVING : « each model that is moved must end its move closer to the closest
+    # pile-in target ». Precalcule par mover : cible la plus proche + distance d'origine.
+    # Miroir du pool PvP (`_fight_pile_in_build_model_pool`, `start_min`) et de la branche (b).
+    _model_closest_ep: Dict[str, Tuple[int, int]] = {}
+    _model_orig_dist: Dict[str, int] = {}
+    for _mid in movers:
+        _oc, _orow = origins[_mid]
+        _cep = min(
+            enemy_positions,
+            key=lambda ep, c=_oc, r=_orow: calculate_hex_distance(c, r, ep[0], ep[1]),
+        )
+        _model_closest_ep[_mid] = _cep
+        _model_orig_dist[_mid] = calculate_hex_distance(_oc, _orow, _cep[0], _cep[1])
+    # Admissibilite PAR FIGURINE, independante du plan (trajet + AFTER + WHILE) : calculee UNE
+    # fois, le point fixe ci-dessous ne fait varier que `blocked`.
     admissible: Dict[str, List[Tuple[int, int]]] = {
         mid: sorted(
             cell for cell in b2b_cells
             if _reach_by_mid[mid](cell[0], cell[1])
             and _keeps_start_engagements(mid, cell[0], cell[1])
+            and calculate_hex_distance(
+                cell[0], cell[1], _model_closest_ep[mid][0], _model_closest_ep[mid][1]
+            ) < _model_orig_dist[mid]
         )
         for mid in movers
     }
@@ -13258,12 +13274,9 @@ def _assign_cells_toward_enemies(
     for mid in unmatched:
         oc, orow = origins[mid]
         # (b) A defaut de B2B : finir strictement plus proche du plus proche ennemi.
-        nearest = min(
-            enemy_positions,
-            key=lambda ep: calculate_hex_distance(oc, orow, ep[0], ep[1]),
-        )
-        tc, tr = nearest
-        orig_dist = calculate_hex_distance(oc, orow, tc, tr)
+        # `_model_closest_ep` et `_model_orig_dist` sont precalcules plus haut (WHILE MOVING).
+        tc, tr = _model_closest_ep[mid]
+        orig_dist = _model_orig_dist[mid]
         best: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
         for d in range(1, pile_in_budget + 1):
             for d_col in range(-d, d + 1):
