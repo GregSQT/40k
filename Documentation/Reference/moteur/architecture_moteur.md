@@ -261,7 +261,7 @@ Pour les règles d'**arme** :
 
 Helpers centraux dans `engine/phase_handlers/shared_utils.py` :
 
-- `def _resolve_effect_rule_id_to_technical` — suit les chaînes d'alias, lève sur ID inconnu, alias invalide ou cycle.
+- `def _resolve_effect_rule_id_to_technical` — lookup dans la table `rule_id → id technique` construite une fois au chargement du registre (`_build_unit_rules_technical_ids`, qui suit les chaînes d'alias et lève au chargement sur alias invalide, cible absente ou cycle) ; lève `KeyError` sur ID inconnu.
 - `def _resolve_unit_rule_entry_effect_rule_ids` — effets actifs d'une entrée `UNIT_RULES` : `and`/`always` → tous les granted ; `or`/`unique` → seulement `_selected_granted_rule_id`.
 - `def unit_has_rule_effect` — check public des handlers.
 - `def get_source_unit_rule_id_for_effect` / `def get_source_unit_rule_display_name_for_effect` — remontée effet → règle source et label à logguer (pour `or`/`unique`, le nom de la règle enfant sélectionnée, pas du parent).
