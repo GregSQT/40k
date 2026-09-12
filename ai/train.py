@@ -2073,14 +2073,27 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
     des runs precedents et laissait orphelin leur compte d'episodes ; le chemin de rotation n'en
     a jamais eu (cf. le contrat des artefacts canoniques et
     `test_scored_and_checkpoint_models_are_NOT_archived`).
+
+    Le nom porte l'HORODATAGE DU RUN : `<prefix>_<run_stamp>_<pas>_steps.zip`. Sans lui, le nom
+    ne tenait qu'au nombre de pas, et un run `--new` (qui repart de 0) comme un `--resume-from`
+    (qui continue au compte du checkpoint promu) ECRASAIENT en silence ceux du run precedent a
+    chaque compte atteint — precisement l'historique que le paragraphe ci-dessus promet. Le
+    dossier dit ainsi de lui-meme a quel run appartient chaque checkpoint ; `--resume-from` recoit
+    un chemin explicite et aucun consommateur ne parse le nom.
     """
 
     #: Compteur d'episodes GLOBAL, pose apres construction — le tracker de metriques n'existe pas
     #: encore quand les callbacks sont crees. Meme convention que `BotEvaluationCallback`.
     metrics_tracker: Any = None
 
-    def __init__(self, **kwargs):
+    def __init__(self, run_stamp: str, **kwargs):
         super().__init__(**kwargs)
+        if not isinstance(run_stamp, str) or not run_stamp:
+            raise ValueError(
+                f"VecNormalizeCheckpointCallback.run_stamp doit etre une chaine non vide "
+                f"(recu {run_stamp!r}) : sans lui, deux runs ecrivent les memes noms de checkpoint."
+            )
+        self.name_prefix = f"{self.name_prefix}_{run_stamp}"
         #: Chemins des zips ecrits par cette instance, du plus ancien au plus recent.
         self.written_checkpoints: List[str] = []
 
@@ -4545,14 +4558,19 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.max_checkpoints must be > 0 when provided (got {max_checkpoints})"
             )
 
+    # Un horodatage par RUN (une construction de callbacks par run, cf. `VecNormalizeCheckpointCallback`).
+    checkpoint_run_stamp = time.strftime("%Y%m%d-%H%M%S")
+    if max_checkpoints is not None:
         checkpoint_callback = RotatingCheckpointCallback(
             max_checkpoints=max_checkpoints,
+            run_stamp=checkpoint_run_stamp,
             save_freq=callback_params["checkpoint_save_freq"],
             save_path=os.path.dirname(model_path),
             name_prefix=callback_params["checkpoint_name_prefix"],
         )
     else:
         checkpoint_callback = VecNormalizeCheckpointCallback(
+            run_stamp=checkpoint_run_stamp,
             save_freq=callback_params["checkpoint_save_freq"],
             save_path=os.path.dirname(model_path),
             name_prefix=callback_params["checkpoint_name_prefix"],
@@ -6040,7 +6058,7 @@ def _run_main():
                        help="Continue training existing model")
     parser.add_argument("--resume-from", type=str, default=None, metavar="CHECKPOINT_ZIP",
                        help="Reprendre l'entrainement depuis un checkpoint (ex: "
-                            "ai/models/<agent>/ppo_checkpoint_640000_steps.zip). Le checkpoint et "
+                            "ai/models/<agent>/ppo_checkpoint_<run>_640000_steps.zip). Le checkpoint et "
                             "ses stats VecNormalize sont installes au chemin canonique du modele "
                             "(l'ancien est ecarte, pas ecrase) puis --append est active. "
                             "Combinable avec --etape Px (sauf si l'etape a init='new') pour "
