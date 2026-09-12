@@ -1939,6 +1939,10 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state["consolidation_done"] = set()
     game_state[OVERRUN_PILE_IN_DONE_KEY] = set()
     game_state.pop(OVERRUN_PILE_IN_UNIT_KEY, None)
+    # New Foes to Face (12.08 AFTER) : liste gelée propre à la phase. Une phase peut se clore avec
+    # une liste non vidée (New Foe sans action possible → masque vide → `advance_phase`) ; sans
+    # cette purge, `units_selected_to_fight` remis à zéro la ferait ressortir à la phase suivante.
+    _fight_v11_consolidation_clear_new_foes(game_state)
     # « until end of phase » : purgé à chaque nouvelle fight phase pour que
     # DEVASTATING WOUNDS ne persiste pas au-delà de la phase d'activation.
     game_state["finest_hour_active_this_phase"] = set()
@@ -2037,39 +2041,73 @@ def fight_v11_grouped_next(
     return None
 
 
+def fight_v11_new_foes_pool(game_state: Dict[str, Any]) -> List[str]:
+    """New Foes to Face (12.08 AFTER) restant à sélectionner par l'adversaire — non-mutant.
+
+    ``[]`` hors de cette attente : pas en sous-phase consolidate, aucune liste gelée, ou liste
+    épuisée (morts / déjà « selected to fight »).
+    """
+    if game_state.get("fight_subphase") != "consolidate":
+        return []
+    return _fight_v11_consolidation_new_foes_remaining(game_state)
+
+
+def fight_v11_fight_selection_pool(game_state: Dict[str, Any]) -> List[str]:
+    """Unités qu'une sélection « to fight » peut viser MAINTENANT — non-mutant.
+
+    Machine 12.04 en sous-phase fight ; New Foes 12.08 en sous-phase consolidate (« your
+    opponent must select each of those units, one at a time; when each is selected, it becomes
+    eligible to fight and is selected to fight ») ; ``[]`` sinon. SOURCE UNIQUE du masque FIGHT
+    (`build_squad_action_mask`) et du commit `squad_fight` (`_process_squad_action`) : la garde
+    de sous-phase vit ici, pas chez les appelants.
+    """
+    sub = game_state.get("fight_subphase")
+    if sub == "consolidate":
+        return fight_v11_new_foes_pool(game_state)
+    if sub != "fight":
+        return []
+    active = int(require_key(game_state, "current_player"))
+    step = game_state.get("fight_step") or "fights_first"
+    selector = int(game_state.get("fight_selector") or active)
+    if step == "remaining" and (
+        fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
+        or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
+    ):
+        step, selector = "fights_first", active
+    for _ in range(8):
+        ff = step == "fights_first"
+        mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
+        if mine:
+            return mine
+        theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
+        if theirs:
+            selector = 3 - selector
+            continue
+        if ff:
+            step = "remaining"
+            continue
+        return []
+    return []
+
+
 def fight_v11_current_pool(game_state: Dict[str, Any]) -> List[str]:
     """
     Liste NON-MUTANTE des unités actionnables dans la sous-phase FIGHT V11 courante
     (pour observation_builder / action_decoder / masking). Miroir lecture-seule des
     drivers : grouped_next pour pile_in/consolidate, machine de sélection 12.04 pour fight.
+    En consolidate, les New Foes (12.08 AFTER) priment sur la reprise de la consolidation,
+    comme dans `_fight_v11_manual_state` et `_fight_v11_gym_settle`.
     """
     sub = game_state.get("fight_subphase")
+    if sub == "fight":
+        return fight_v11_fight_selection_pool(game_state)
+    if sub == "consolidate":
+        new_foes = fight_v11_new_foes_pool(game_state)
+        if new_foes:
+            return new_foes
     if sub in ("pile_in", "consolidate"):
         nxt = fight_v11_grouped_next(game_state, sub)
         return list(nxt[1]) if nxt else []
-    if sub == "fight":
-        active = int(require_key(game_state, "current_player"))
-        step = game_state.get("fight_step") or "fights_first"
-        selector = int(game_state.get("fight_selector") or active)
-        if step == "remaining" and (
-            fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
-            or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
-        ):
-            step, selector = "fights_first", active
-        for _ in range(8):
-            ff = step == "fights_first"
-            mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
-            if mine:
-                return mine
-            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
-            if theirs:
-                selector = 3 - selector
-                continue
-            if ff:
-                step = "remaining"
-                continue
-            return []
-        return []
     return []
 
 
@@ -2345,6 +2383,19 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
                               "fight_subphase": "fight", "waiting_for_player": False}
             return True, _fight_v11_auto_resolve_selected(game_state, uid, config)
         if sub == "consolidate":
+            # New Foes to Face (12.08 AFTER) : le siège auto combat ses New Foes AVANT toute
+            # reprise de la consolidation — même priorité que le flux manuel (§8.C). En PvE le
+            # settle du bot (`_fight_v11_gym_settle`) peut geler des New Foes du siège humain,
+            # dont les combats sont auto dans ce mode (`_is_fight_auto_execution_allowed`).
+            new_foes = fight_v11_new_foes_pool(game_state)
+            if new_foes:
+                uid = new_foes[0]
+                _fight_v11_register_selection(game_state, uid)
+                if _fight_v11_arm_selection_exhortation(game_state, uid, EXHORTATION_REGIME_AUTO):
+                    return True, {"action": "fight_selection", "phase": "fight", "unitId": uid,
+                                  "fight_subphase": "consolidate", "waiting_for_player": False}
+                return True, _fight_v11_auto_resolve_selected(game_state, uid, config)
+            _fight_v11_consolidation_clear_new_foes(game_state)
             nxt = fight_v11_grouped_next(game_state, "consolidate")
             if nxt is None:
                 return True, _fight_v11_phase_complete(game_state)
@@ -4342,9 +4393,7 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     if not remaining:
         _fight_v11_consolidation_clear_new_foes(game_state)
         return None
-    selector = int(
-        game_state.get("consolidation_new_foes_selector", 3 - int(require_key(game_state, "current_player")))
-    )
+    selector = int(require_key(game_state, "consolidation_new_foes_selector"))
     for_unit = game_state.get("consolidation_new_foes_for_unit")
     game_state["fight_eligible_units"] = list(remaining)
     active = game_state.get("active_fight_unit")
@@ -4376,23 +4425,40 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     }
 
 
+def fight_v11_consolidation_freeze_new_foes(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> List[str]:
+    """Gèle les New Foes (12.08 AFTER) d'une consolidation engaging de ``unit`` qui vient d'être
+    commitée : ennemis engagés avec elle non encore « selected to fight ». Pose les trois clés
+    ``consolidation_new_foes_*`` et retourne la liste gelée ; ``[]`` (aucune clé posée) sans New Foe.
+
+    Sélecteur = ADVERSAIRE DU PROPRIÉTAIRE de ``unit``, pas ``3 - current_player`` : en seconde
+    moitié de 12.07 c'est l'unité du joueur NON actif qui consolide, et son adversaire EST le
+    joueur courant. Source unique des chemins PvP (`_fight_v11_consolidation_resolve_new_foes`)
+    et gym (`W40KEngine._fight_v11_gym_settle`).
+    """
+    new_foes = [str(x) for x in fight_v11_engaging_triggered_unit_ids(game_state, unit)]
+    if not new_foes:
+        return []
+    selector = 3 - int(require_key(unit, "player"))
+    game_state["consolidation_new_foes_pending"] = list(new_foes)
+    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
+    game_state["consolidation_new_foes_selector"] = selector
+    _fight_v11_log(
+        game_state,
+        f"CONSOLIDATE engaging : New Foes to Face = {new_foes} (sélecteur P{selector}, in-place)",
+    )
+    return new_foes
+
+
 def _fight_v11_consolidation_resolve_new_foes(
     game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """Au commit engaging : gèle les New Foes (ennemis engagés non sélectionnés) et présente le
     premier choix au sélecteur (adversaire). ``None`` si aucun New Foe (reprise immédiate)."""
-    new_foes = fight_v11_engaging_triggered_unit_ids(game_state, unit)
-    if not new_foes:
+    if not fight_v11_consolidation_freeze_new_foes(game_state, unit):
         return None
-    game_state["consolidation_new_foes_pending"] = [str(x) for x in new_foes]
-    game_state["consolidation_new_foes_for_unit"] = str(require_key(unit, "id"))
-    game_state["consolidation_new_foes_selector"] = 3 - int(require_key(game_state, "current_player"))
     game_state["active_fight_unit"] = None
-    _fight_v11_log(
-        game_state,
-        f"CONSOLIDATE engaging : New Foes to Face = {list(new_foes)} "
-        f"(sélecteur P{game_state['consolidation_new_foes_selector']}, in-place)",
-    )
     return _fight_v11_consolidation_new_foes_state(game_state)
 
 

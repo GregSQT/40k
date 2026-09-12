@@ -117,3 +117,32 @@ class TestEngagingTriggeredUnits:
             {"id": "e1", "player": 2, "col": 5, "row": 4},
         ], units_selected_to_fight=["e1"])
         assert fight_v11_engaging_triggered_unit_ids(gs, _u(gs, "a")) == []
+
+
+class TestFreezeNewFoes:
+    def test_selector_is_opponent_of_consolidating_unit_owner(self):
+        """12.08 AFTER : « YOUR OPPONENT must select each of those units ». En seconde moitié de
+        12.07 c'est l'unité du joueur NON actif qui consolide : son adversaire EST le joueur
+        courant. L'ancien calcul `3 - current_player` désignait alors le mauvais joueur."""
+        from engine.phase_handlers.fight_handlers import fight_v11_consolidation_freeze_new_foes
+
+        gs = _make_gs([
+            {"id": "a", "player": 2, "col": 5, "row": 5},
+            {"id": "e1", "player": 1, "col": 5, "row": 4},  # engagé, non sélectionné
+        ])
+        gs["current_player"] = 1
+        assert fight_v11_consolidation_freeze_new_foes(gs, _u(gs, "a")) == ["e1"]
+        assert gs["consolidation_new_foes_pending"] == ["e1"]
+        assert gs["consolidation_new_foes_for_unit"] == "a"
+        assert gs["consolidation_new_foes_selector"] == 1
+
+    def test_no_new_foe_poses_no_key(self):
+        from engine.phase_handlers.fight_handlers import fight_v11_consolidation_freeze_new_foes
+
+        gs = _make_gs([
+            {"id": "a", "player": 1, "col": 5, "row": 5},
+            {"id": "e1", "player": 2, "col": 5, "row": 4},
+        ], units_selected_to_fight=["e1"])
+        gs["current_player"] = 1
+        assert fight_v11_consolidation_freeze_new_foes(gs, _u(gs, "a")) == []
+        assert "consolidation_new_foes_pending" not in gs

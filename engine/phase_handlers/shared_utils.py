@@ -13217,13 +13217,29 @@ def _assign_cells_toward_enemies(
         for nc, nr in get_hex_neighbors(ec, er):
             if _cell_base_legal(nc, nr):
                 b2b_cells.add((nc, nr))
-    # Admissibilite PAR FIGURINE, independante du plan (trajet + AFTER) : calculee UNE fois, le
-    # point fixe ci-dessous ne fait varier que `blocked`.
+    # 12.03 WHILE MOVING : « each model that is moved must end its move closer to the closest
+    # pile-in target ». Precalcule par mover : cible la plus proche + distance d'origine.
+    # Miroir du pool PvP (`_fight_pile_in_build_model_pool`, `start_min`) et de la branche (b).
+    _model_closest_ep: Dict[str, Tuple[int, int]] = {}
+    _model_orig_dist: Dict[str, int] = {}
+    for _mid in movers:
+        _oc, _orow = origins[_mid]
+        _cep = min(
+            enemy_positions,
+            key=lambda ep, c=_oc, r=_orow: calculate_hex_distance(c, r, ep[0], ep[1]),
+        )
+        _model_closest_ep[_mid] = _cep
+        _model_orig_dist[_mid] = calculate_hex_distance(_oc, _orow, _cep[0], _cep[1])
+    # Admissibilite PAR FIGURINE, independante du plan (trajet + AFTER + WHILE) : calculee UNE
+    # fois, le point fixe ci-dessous ne fait varier que `blocked`.
     admissible: Dict[str, List[Tuple[int, int]]] = {
         mid: sorted(
             cell for cell in b2b_cells
             if _reach_by_mid[mid](cell[0], cell[1])
             and _keeps_start_engagements(mid, cell[0], cell[1])
+            and calculate_hex_distance(
+                cell[0], cell[1], _model_closest_ep[mid][0], _model_closest_ep[mid][1]
+            ) < _model_orig_dist[mid]
         )
         for mid in movers
     }
@@ -13258,12 +13274,9 @@ def _assign_cells_toward_enemies(
     for mid in unmatched:
         oc, orow = origins[mid]
         # (b) A defaut de B2B : finir strictement plus proche du plus proche ennemi.
-        nearest = min(
-            enemy_positions,
-            key=lambda ep: calculate_hex_distance(oc, orow, ep[0], ep[1]),
-        )
-        tc, tr = nearest
-        orig_dist = calculate_hex_distance(oc, orow, tc, tr)
+        # `_model_closest_ep` et `_model_orig_dist` sont precalcules plus haut (WHILE MOVING).
+        tc, tr = _model_closest_ep[mid]
+        orig_dist = _model_orig_dist[mid]
         best: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
         for d in range(1, pile_in_budget + 1):
             for d_col in range(-d, d + 1):
@@ -15327,26 +15340,21 @@ def build_squad_action_mask(
 
     # --- Fight phase: un slot par cible de melee eligible (12.05), ou « combat a vide » ---
     elif phase == "fight":
-        # Parite masque/commit : le bit FIGHT reflete EXACTEMENT le pool de selection 12.04
-        # (`fight_v11_current_pool`), la MEME source que le commit (`_process_squad_action` ->
-        # squad_fight, qui verifie `squad_id in fight_v11_current_pool` sous garde
-        # `fight_subphase == "fight"`). `_squad_is_in_fight` etait une 3e copie divergente de la
-        # regle d eligibilite (engaged-now + charge, SANS le snapshot `engaged_at_fight_step_start`
+        # Parite masque/commit : le bit FIGHT reflete EXACTEMENT le pool de selection
+        # (`fight_v11_fight_selection_pool`), la MEME source que le commit (`_process_squad_action`
+        # -> squad_fight). Ce pool porte lui-meme la garde de sous-phase : machine 12.04 en
+        # sous-phase FIGHT (le snapshot `engaged_at_fight_step_start` n existe que la), New Foes
+        # to Face 12.08 en sous-phase CONSOLIDATE, vide ailleurs. `_squad_is_in_fight` etait une
+        # 3e copie divergente de la regle d eligibilite (engaged-now + charge, SANS le snapshot
         # de 12.04) : une unite engagee au debut de l etape mais desengagee par la mort de son
         # ennemi restait dans le pool tout en se voyant masquer FIGHT -> seul WAIT, qui ne clot pas
-        # son eligibilite -> boucle infinie. Le pool est la source unique. Le snapshot n existe que
-        # pendant la sous-phase FIGHT (poppe en fin d etape) et `fight_v11_current_pool` le lit via
-        # require_key : d ou la garde de sous-phase, comme le commit l exige — pas de `.get()` de
-        # contournement.
+        # son eligibilite -> boucle infinie. Le pool est la source unique.
         from engine.phase_handlers.fight_handlers import (
             _fight_build_valid_target_pool,
             _fight_v11_engaged_now,
-            fight_v11_current_pool,
+            fight_v11_fight_selection_pool,
         )
-        if (
-            game_state.get("fight_subphase") == "fight"
-            and squad_id in fight_v11_current_pool(game_state)
-        ):
+        if squad_id in fight_v11_fight_selection_pool(game_state):
             # V11 §9 P3-1 — CIBLE : le pool 12.05 (`_fight_build_valid_target_pool`) est la MEME
             # source que le commit (`_process_squad_action` -> squad_fight), qui refuse une cible
             # hors pool. Un slot est ouvert ssi l'escouade qu'il designe y figure : le masque dit

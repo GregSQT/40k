@@ -344,3 +344,30 @@ class TestPileInKeepsStartingEngagements12_03_AFTER:
         from engine.spatial_relations import geometry_is_hex
         assert not geometry_is_hex(gs), "prémisse : géométrie euclidienne attendue à x10"
         self._check(fight_pile_in_plan(gs, "S"), gs)
+
+
+class TestPileInWhileMovingCloserToClosestTarget:
+    """12.03 WHILE MOVING : « each model that is moved must end its move closer to the closest
+    pile-in target ».
+
+    S#0 en (10,10) non engagée, A en (10,13) (dist=3, cible la plus proche), B en (7,7) (dist=4).
+    Le bug : admissible[S#0] contenait (7,8) (B2B avec B, reachable=3 subhex), case qui porte
+    S#0 à dist 6 de A — exactement le contraire de l'obligation WHILE MOVING. Verrou : chaque
+    case de admissible[mid] doit être strictement plus proche de la cible la plus proche du mover.
+    """
+
+    def test_while_moving_fig_ends_closer_to_closest_target(self):
+        """S#0 ne peut pas atterrir B2B avec B si cela la recule de A (cible la plus proche)."""
+        from engine.combat_utils import calculate_hex_distance
+        gs = _make_gs({"S": (1, [(10, 10)]), "A": (2, [(10, 13)]), "B": (2, [(7, 7)])})
+        plan = fight_pile_in_plan(gs, "S")
+        assert plan is not None, "le pile-in doit trouver un plan (A est à portée)"
+        assert len(plan) == 1
+        _mid, c, r, _lv = plan[0]
+        # A est la cible la plus proche de S#0 (dist 3 < dist 4 vers B).
+        dist_before = calculate_hex_distance(10, 10, 10, 13)  # 3
+        dist_after = calculate_hex_distance(c, r, 10, 13)
+        assert dist_after < dist_before, (
+            f"S#0 → ({c},{r}) : dist A = {dist_after} ≥ {dist_before} "
+            f"(violation WHILE MOVING 12.03 : figure reculée de sa cible la plus proche)"
+        )
