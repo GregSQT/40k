@@ -54,9 +54,13 @@ def _avance(depart: str, arrivee: str, horodatage: str = "10:00:03") -> str:
     )
 
 
+# Grammaire RÉELLE du formateur (`step_logger`) : ` with [arme]` et `Dmg:XHP`. L'ancienne forme
+# `- Bolt Rifle - … - Damage 1` n'a jamais été produite par le moteur ; elle passait parce
+# qu'aucun lecteur n'exigeait le nom d'arme sur une ligne à sauvegarde — `note_shoot_allocation`
+# l'exige désormais (un groupe de tir anonyme est inidentifiable, T1).
 _TIR = (
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(90,50) - Bolt Rifle"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Damage 1 [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(90,50) with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
 )
 
 
