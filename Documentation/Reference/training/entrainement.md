@@ -119,7 +119,7 @@ Un arrêt de trop coûte une commande ; un arrêt manquant, des dizaines d'heure
 
 `ai/training_contract.py` écrit donc, à côté de chaque modèle, un **compagnon**
 `<stem>_training_contract.json` (`model_<agent>_training_contract.json` pour le canonique,
-`ppo_checkpoint_<n>_steps_training_contract.json` pour un checkpoint — même dérivation que
+`ppo_checkpoint_<run>_<n>_steps_training_contract.json` pour un checkpoint — même dérivation que
 `_vec_normalize.pkl` et `_run_state.json`, `ai/model_artifacts.py`) qui porte **les noms, dans leur
 ordre** : registres d'observation (`*_FIELDS` de `engine/observation_entities.py`, découverts par
 introspection), canaux de `GRID_CHANNEL_NAMES`, `ACTION_FAMILIES`, et les **chemins de clés** de la
@@ -159,7 +159,7 @@ python3 -m ai.training_contract --init --agent <agent_key>
 ### Reprendre depuis un checkpoint périodique
 ```bash
 python ai/train.py --agent <agent_key> --training-config default --scenario bot \
-  --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip
+  --resume-from ai/models/<agent_key>/ppo_checkpoint_20260912-143000_640000_steps.zip
 ```
 `--resume-from` installe le checkpoint **et ses stats VecNormalize** (`<stem>_vec_normalize.pkl`,
 écrit par le callback de checkpoint) au chemin canonique du modèle, écarte les artefacts canoniques
@@ -180,10 +180,13 @@ explicitement plutôt que de servir les stats d'un autre modèle (V11 §0.35).
 d'entraînement ne les retire en fin de run réussi, et `--new` ne les archive pas. Ils sont le seul
 point de reprise d'un run terminé dont la politique s'avère mauvaise, et sous `save_best_robust` la
 seule trace des poids de fin de run (le canonique est l'instantané robuste). Ceux d'un run précédent
-restent donc en place, et deux runs de même longueur réécrivent le même `ppo_checkpoint_<n>_steps.zip`
-à tour de rôle : le nombre de pas ne dit pas de quel run il vient. Ce que la promotion **garantit**,
-c'est le sens des grandeurs — chaque checkpoint emporte son contrat (`<stem>_training_contract.json`),
-c'est lui qui est installé et comparé au code courant. Ce qu'elle **ne garantit pas**, c'est
+restent donc en place, et **le nom porte l'horodatage du run** :
+`<checkpoint_name_prefix>_<AAAAMMJJ-HHMMSS>_<pas>_steps.zip`. Nommé par le seul nombre de pas, un
+`--new` (qui repart de 0) comme un `--resume-from` (qui continue au compte du checkpoint promu)
+écrasait en silence ceux du run précédent à chaque compte atteint. Le dossier dit donc à quel run
+appartient chaque checkpoint. Ce que la promotion **garantit**, c'est le sens des grandeurs — chaque
+checkpoint emporte son contrat (`<stem>_training_contract.json`), c'est lui qui est installé et
+comparé au code courant, jamais celui du canonique écarté. Ce qu'elle **ne vérifie pas**, c'est
 l'identité du run : le log de promotion donne la date d'écriture et le compte d'épisodes du promu et
 du canonique écarté, c'est à l'opérateur de les lire. Un checkpoint est un ensemble de **quatre**
 fichiers (zip, `_vec_normalize.pkl`, `_run_state.json`, `_training_contract.json`) écrits l'un après
@@ -1165,7 +1168,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1       --scenari
 # Reprise sur un modèle EXISTANT
 python3 ai/train.py --agent ArmageddonAgent --training-config x1 --scenario bot --resolution 1 --append
 python3 ai/train.py --agent ArmageddonAgent --scenario bot --resolution 1 \
-    --resume-from ai/models/ArmageddonAgent/ppo_checkpoint_640000_steps.zip
+    --resume-from ai/models/ArmageddonAgent/ppo_checkpoint_20260912-143000_640000_steps.zip
 
 # Evaluation (no training)
 python3 ai/train.py --agent ArmageddonAgent --training-config x1 --resolution 1 --test-only --step

@@ -2081,19 +2081,33 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
     a jamais eu (cf. le contrat des artefacts canoniques et
     `test_scored_and_checkpoint_models_are_NOT_archived`).
 
+    Le nom porte l'HORODATAGE DU RUN : `<prefix>_<run_stamp>_<pas>_steps.zip`. Sans lui, le nom
+    ne tenait qu'au nombre de pas, et un run `--new` (qui repart de 0) comme un `--resume-from`
+    (qui continue au compte du checkpoint promu) ECRASAIENT en silence ceux du run precedent a
+    chaque compte atteint — precisement l'historique que le paragraphe ci-dessus promet. Le
+    dossier dit ainsi de lui-meme a quel run appartient chaque checkpoint ; `--resume-from` recoit
+    un chemin explicite et aucun consommateur ne parse le nom.
+
     Chaque checkpoint emporte aussi une copie du CONTRAT du run (`run_contract_path`, celui que
     le prologue a ecrit ou verifie a cote du modele canonique) : les checkpoints des runs
     precedents restent dans le dossier, et `--resume-from` installe le contrat DU checkpoint
     promu — sans cette copie, il ne pouvait que reposer celui du canonique ecarte, en supposant
-    qu'ils sortaient du meme entrainement.
+    qu'ils sortaient du meme entrainement. L'horodatage dit de quel run vient un checkpoint ;
+    le contrat dit sur quel SENS des grandeurs il a appris, et c'est lui que le prologue compare.
     """
 
     #: Compteur d'episodes GLOBAL, pose apres construction — le tracker de metriques n'existe pas
     #: encore quand les callbacks sont crees. Meme convention que `BotEvaluationCallback`.
     metrics_tracker: Any = None
 
-    def __init__(self, run_contract_path: str, **kwargs):
+    def __init__(self, run_stamp: str, run_contract_path: str, **kwargs):
         super().__init__(**kwargs)
+        if not isinstance(run_stamp, str) or not run_stamp:
+            raise ValueError(
+                f"VecNormalizeCheckpointCallback.run_stamp doit etre une chaine non vide "
+                f"(recu {run_stamp!r}) : sans lui, deux runs ecrivent les memes noms de checkpoint."
+            )
+        self.name_prefix = f"{self.name_prefix}_{run_stamp}"
         if not run_contract_path:
             raise ValueError(
                 "VecNormalizeCheckpointCallback : run_contract_path vide — un checkpoint sans "
@@ -2487,10 +2501,10 @@ def _promote_checkpoint_for_resume(
 def _describe_promotable(model_zip_path: str) -> str:
     """Date d'ecriture et compte d'episodes d'un modele, pour le log de promotion.
 
-    Deux runs de meme longueur ecrivent le meme `ppo_checkpoint_<n>_steps.zip` a tour de role :
-    le nombre de pas ne dit pas de quel run il vient. La date et le compte d'episodes sont ce
-    que l'operateur a pour le savoir ; le contrat installe garantit le SENS des grandeurs, pas
-    l'identite du run.
+    Le nom d'un checkpoint porte l'horodatage de son run ; ceux d'un modele d'etape, d'une
+    archive ou d'un `_interrupted` ne portent pas de date d'ecriture, et aucun ne dit son compte
+    d'episodes. Le log met les deux cote a cote pour le promu et l'ecarte : le contrat installe
+    garantit le SENS des grandeurs, pas l'identite du run — celle-la, l'operateur la lit ici.
     """
     written = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(model_zip_path)))
     # Le modele ECARTE peut etre anterieur au compte d'episodes (un `--new` l'archive tel quel) :
@@ -4600,8 +4614,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                 f"callback_params.max_checkpoints must be > 0 when provided (got {max_checkpoints})"
             )
 
+    # Un horodatage par RUN (une construction de callbacks par run, cf. `VecNormalizeCheckpointCallback`).
+    checkpoint_run_stamp = time.strftime("%Y%m%d-%H%M%S")
+    if max_checkpoints is not None:
         checkpoint_callback = RotatingCheckpointCallback(
             max_checkpoints=max_checkpoints,
+            run_stamp=checkpoint_run_stamp,
             run_contract_path=contract_path(model_path),
             save_freq=callback_params["checkpoint_save_freq"],
             save_path=os.path.dirname(model_path),
@@ -4609,6 +4627,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
         )
     else:
         checkpoint_callback = VecNormalizeCheckpointCallback(
+            run_stamp=checkpoint_run_stamp,
             run_contract_path=contract_path(model_path),
             save_freq=callback_params["checkpoint_save_freq"],
             save_path=os.path.dirname(model_path),
@@ -6099,7 +6118,7 @@ def _run_main():
                        help="Continue training existing model")
     parser.add_argument("--resume-from", type=str, default=None, metavar="CHECKPOINT_ZIP",
                        help="Reprendre l'entrainement depuis un checkpoint (ex: "
-                            "ai/models/<agent>/ppo_checkpoint_640000_steps.zip). Le checkpoint et "
+                            "ai/models/<agent>/ppo_checkpoint_<run>_640000_steps.zip). Le checkpoint et "
                             "ses stats VecNormalize sont installes au chemin canonique du modele "
                             "(l'ancien est ecarte, pas ecrase) puis --append est active. "
                             "Combinable avec --etape Px (sauf si l'etape a init='new') pour "
