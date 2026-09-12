@@ -12327,7 +12327,7 @@ def _new_mortal_batch(
     `pending_mortal_wounds` a None : un lot mortel n en produit pas d autres.
 
     `mortal_details` : la liste `hazardDetails` de la ligne DEJA emise, que
-    `_resolve_one_mortal_wound` complete figurine par figurine. Absent sur le lot HAZARD_CTX,
+    `_resolve_one_mortal_wound` complete figurine par figurine. None sur le lot HAZARD_CTX,
     dont le contexte porte le puits (`alloc["hazard_details"]`, cf. `_resolve_one_hazard_wound`).
     """
     batch: Dict[str, Any] = {
@@ -12339,9 +12339,8 @@ def _new_mortal_batch(
         "current_model_id": None,
         "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
         "pending_mortal_wounds": None,
+        "mortal_details": mortal_details,
     }
-    if mortal_details is not None:
-        batch["mortal_details"] = mortal_details
     return batch
 
 

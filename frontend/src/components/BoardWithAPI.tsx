@@ -497,7 +497,7 @@ function AgentDecisionPicker({
   return (
     <div className="rule-choice-overlay">
       <div
-        className={`deployment-panel__picker deployment-panel__picker--oath ${pickerClassName}`.trim()}
+        className={`deployment-panel__picker deployment-panel__picker--oath${pickerClassName ? ` ${pickerClassName}` : ""}`}
       >
         <div className="deployment-panel__picker-title">{title}</div>
         <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
@@ -2277,40 +2277,10 @@ export const BoardWithAPI: React.FC = () => {
   const unitsById = new Map(
     (apiProps.gameState?.units ?? []).map((unit) => [String(unit.id), unit])
   );
-  // ── Capacités de faction (chantier 03) — 08.04 ───────────────────────────────────────────
-  // Le moteur ARRÊTE la phase de commandement sur ces deux décisions, exactement comme sur un
-  // choix de règle. Sans ces deux panneaux, la partie PvP ne repart pas : la désignation d'Oath
-  // n'est pas optionnelle (« select one unit from your opponent's army »).
-  const waaaghDecision = (() => {
-    const pending = apiProps.gameState?.pending_agent_decision ?? null;
-    return pending && pending.type === "waaagh_call" ? pending : null;
-  })();
-  // Grot Orderly (chantier 06, passe 6) — placement des figurines rendues. Le moteur arrête AUSSI
-  // la phase de commandement dessus (`COMMAND_PHASE_DECISION_TYPES`) : sans ce panneau, une partie
-  // PvP dont un joueur a la capacité et des pertes reste bloquée, le PvP n'ayant aucun verbe de
-  // sortie de cette phase. Les intentions viennent du moteur (`RETURNED_PLACEMENT_INTENTS`), leur
-  // ORDRE est contractuel — c'est l'INDEX qui est joué, jamais le libellé.
-  const returnedPlacementDecision = (() => {
-    const pending = apiProps.gameState?.pending_agent_decision ?? null;
-    return pending && pending.type === "returned_models_placement" ? pending : null;
-  })();
-  // Grot Orderly, PREMIÈRE étape — QUELLES figurines détruites reviennent. La règle fixe le
-  // nombre (D3) mais pas l'identité, et un personnage à 90 points ne vaut pas trois figurines de
-  // base à 8 : le choix appartient au joueur. Le moteur arrête la phase dessus comme sur le
-  // placement, donc sans ce panneau une partie PvP resterait bloquée. Cette décision n'est posée
-  // que si PLUSIEURS profils sont morts — sinon il n'y a rien à choisir.
-  const returnedProfileDecision = (() => {
-    const pending = apiProps.gameState?.pending_agent_decision ?? null;
-    return pending && pending.type === "returned_models_profile" ? pending : null;
-  })();
-  // Mouvement réactif (datasheet « Skulking Horrors ») — la SEULE décision posée pendant le tour
-  // de l'ADVERSAIRE : c'est le joueur qui réagit qui répond, pas celui qui vient de bouger. Sans
-  // ce panneau la partie se bloquerait, le moteur ayant rendu la main sur une question que
-  // personne n'afficherait. `player` est celui de la décision, jamais `current_player`.
-  // Le siège qui décide est celui de la DÉCISION, et lui seul voit le panneau. En PvE le moteur
-  // tranche celle du bot sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`, sélecteur
-  // machine de `_check_and_trigger_exhortation_de_rage`) : sans ce filtre, l'humain se verrait
-  // poser la question du bot le temps d'un aller-retour d'état, et y répondrait à sa place.
+  // Le siège qui décide est celui de la DÉCISION, et lui seul voit le panneau de choix. En PvE le
+  // moteur tranche la décision du bot sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`,
+  // sélecteur machine de `_check_and_trigger_exhortation_de_rage`) : sans ce filtre, l'humain se
+  // verrait poser la question du bot le temps d'un aller-retour d'état, et y répondrait à sa place.
   const pendingDecisionForHumanSeat = (type: string): PendingAgentDecision | null => {
     const pending = apiProps.gameState?.pending_agent_decision ?? null;
     if (!pending || pending.type !== type) {
@@ -2319,6 +2289,27 @@ export const BoardWithAPI: React.FC = () => {
     const decidingSeat = apiProps.gameState?.player_types?.[String(pending.player)];
     return decidingSeat === "ai" ? null : pending;
   };
+  // ── Capacités de faction (chantier 03) — 08.04 ───────────────────────────────────────────
+  // Le moteur ARRÊTE la phase de commandement sur ces deux décisions, exactement comme sur un
+  // choix de règle. Sans ces deux panneaux, la partie PvP ne repart pas : la désignation d'Oath
+  // n'est pas optionnelle (« select one unit from your opponent's army »).
+  const waaaghDecision = pendingDecisionForHumanSeat("waaagh_call");
+  // Grot Orderly (chantier 06, passe 6) — placement des figurines rendues. Le moteur arrête AUSSI
+  // la phase de commandement dessus (`COMMAND_PHASE_DECISION_TYPES`) : sans ce panneau, une partie
+  // PvP dont un joueur a la capacité et des pertes reste bloquée, le PvP n'ayant aucun verbe de
+  // sortie de cette phase. Les intentions viennent du moteur (`RETURNED_PLACEMENT_INTENTS`), leur
+  // ORDRE est contractuel — c'est l'INDEX qui est joué, jamais le libellé.
+  const returnedPlacementDecision = pendingDecisionForHumanSeat("returned_models_placement");
+  // Grot Orderly, PREMIÈRE étape — QUELLES figurines détruites reviennent. La règle fixe le
+  // nombre (D3) mais pas l'identité, et un personnage à 90 points ne vaut pas trois figurines de
+  // base à 8 : le choix appartient au joueur. Le moteur arrête la phase dessus comme sur le
+  // placement, donc sans ce panneau une partie PvP resterait bloquée. Cette décision n'est posée
+  // que si PLUSIEURS profils sont morts — sinon il n'y a rien à choisir.
+  const returnedProfileDecision = pendingDecisionForHumanSeat("returned_models_profile");
+  // Mouvement réactif (datasheet « Skulking Horrors ») — la SEULE décision posée pendant le tour
+  // de l'ADVERSAIRE : c'est le joueur qui réagit qui répond, pas celui qui vient de bouger. Sans
+  // ce panneau la partie se bloquerait, le moteur ayant rendu la main sur une question que
+  // personne n'afficherait. `player` est celui de la décision, jamais `current_player`.
   const reactiveMoveDecision = pendingDecisionForHumanSeat("reactive_move");
   // Exhortation of Rage (datasheet Chaplain JP) — « when this unit is selected to fight, you can
   // select one enemy unit it is engaged with and roll one D6 ». Le moteur ARRÊTE le combat sur ce
