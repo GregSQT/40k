@@ -3507,6 +3507,59 @@ def pile_in_autoplace_plan(
         # les arêtes ILP conservent exactement les engagements que le dry-run exigera.
         return _fight_model_start_engaged_entries(game_state, squad_id, models_cache[mid])
 
+    def _keeps_start_engagements(
+        mid: str, c: int, r: int, start_eng: List[Dict[str, Any]]
+    ) -> bool:
+        """AFTER 12.03 : la figurine posée en (c, r) reste engagée avec CHAQUE unité ennemie de
+        ``start_eng`` (mesure au niveau EFFECTIF de la case, comme `_engages_tier`)."""
+        if not start_eng:
+            return True
+        synth_slot = _synth_model_entry(
+            game_state, squad_id, models_cache[mid], c, r, level=_slot_level(mid, c, r)
+        )
+        return all(
+            unit_entries_within_engagement_zone(synth_slot, ce, ez, metric=metric)
+            for ce in start_eng
+        )
+
+    # « engaged with it if possible » (12.03 WHILE) du côté ILP. Le validateur n'admet une case
+    # NON engagée avec le palier que s'il n'existe AUCUNE case engagée-avec-le-palier faisable
+    # dans la configuration FINALE ; or l'ILP ne pose que des slots engageant le FOCUS, qui peut
+    # ne pas appartenir au palier (unité engagée avec E1 proche et E2 plus loin, Focus sur E2).
+    # Une figurine qui a une option engagée-avec-le-palier — cases atteignables, strictement plus
+    # proches, hors bloqueurs statiques, engagements de départ conservés : SUR-ENSEMBLE de la
+    # faisabilité du validateur, qui ne fait que retirer les chevauchements de coéquipières et
+    # la cohésion, tous deux dépendants d'une configuration que l'ILP ne connaît pas encore — ne
+    # reçoit donc que des arêtes vers des slots engageant AUSSI le palier. Sans option : le slot
+    # focus-seul est légal (« closer » suffit). Focus ∈ palier : tout slot engage le palier,
+    # l'option n'est jamais consultée.
+    _tier_option_cache: Dict[str, bool] = {}
+
+    def _has_tier_engaged_option(mid: str) -> bool:
+        cached = _tier_option_cache.get(mid)
+        if cached is not None:
+            return cached
+        level = eff_level[mid]
+        sm = start_min[mid]
+        obstacles = _at_level(static_blockers, level)
+        start_eng = _start_engagements(mid)
+        found = False
+        for (cc, rr) in _reachable(mid):
+            if (cc, rr) == starts[mid]:
+                continue
+            soc = _socle(mid, cc, rr)
+            if any(not (0 <= x < board_cols and 0 <= y < board_rows) for x, y in soc.fp):
+                continue
+            if _overlaps(soc, obstacles, level):
+                continue
+            if _fp_min_to_tier(set(soc.fp)) >= sm:
+                continue  # WHILE
+            if _engages_tier(mid, cc, rr) and _keeps_start_engagements(mid, cc, rr, start_eng):
+                found = True
+                break
+        _tier_option_cache[mid] = found
+        return found
+
     # --- Arêtes ILP : (fig f, slot s) légales. edges_by_slot[s] = liste d'indices d'arête. ---
     edges: List[Tuple[str, int, int]] = []  # (mid, slot_index, pathdist)
     for mid in movable:
@@ -3522,20 +3575,10 @@ def pile_in_autoplace_plan(
             pd = reach.get((sc, sr))
             if pd is None:
                 continue  # slot hors budget (atteignabilité réelle)
-            if start_eng:
-                synth_slot = _synth_model_entry(
-                    game_state, squad_id, models_cache[mid], sc, sr,
-                    level=_fight_effective_level_at(
-                        game_state, models_cache[mid], sc, sr,
-                        int(require_key(models_cache[mid], "level")),
-                    ),
-                )
-                if not all(
-                    unit_entries_within_engagement_zone(
-                        synth_slot, ce, ez, metric=metric)
-                    for ce in start_eng
-                ):
-                    continue  # AFTER : un engagement de départ serait perdu
+            if not _keeps_start_engagements(mid, sc, sr, start_eng):
+                continue  # AFTER : un engagement de départ serait perdu
+            if not _engages_tier(mid, sc, sr) and _has_tier_engaged_option(mid):
+                continue  # WHILE « engaged with it if possible » : le palier est atteignable
             edges.append((mid, si, pd))
 
     provisional: Dict[str, Tuple[int, int]] = {}
