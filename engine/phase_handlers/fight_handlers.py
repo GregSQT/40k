@@ -1587,8 +1587,7 @@ def fight_v11_can_overrun_pile_in(game_state: Dict[str, Any], unit: Dict[str, An
     overrun (`fight_v11_is_overrun_eligible`) et pas déjà fait cette phase."""
     if not fight_v11_is_overrun_eligible(game_state, unit):
         return False
-    done = {str(x) for x in game_state.get(OVERRUN_PILE_IN_DONE_KEY, set())}
-    return str(require_key(unit, "id")) not in done
+    return str(require_key(unit, "id")) not in game_state.get(OVERRUN_PILE_IN_DONE_KEY, set())
 
 
 def fight_v11_is_normal_fight_eligible(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:

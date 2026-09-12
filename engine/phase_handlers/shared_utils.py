@@ -2511,11 +2511,9 @@ def _get_unit_rules_registry() -> Dict[str, Dict[str, Any]]:
 
 def _resolve_effect_rule_id_to_technical(rule_id: str) -> str:
     """Resolve a rule id to technical effect id (alias chain pre-resolved at registry load)."""
-    if not isinstance(rule_id, str):
+    if not isinstance(rule_id, str) or not rule_id.strip():
         raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
     normalized_rule_id = rule_id.strip()
-    if not normalized_rule_id:
-        raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
     technical_rule_id = _get_unit_rules_caches()[1].get(normalized_rule_id)
     if technical_rule_id is None:
         raise KeyError(f"Unknown rule id '{normalized_rule_id}' in config/unit_rules.json")

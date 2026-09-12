@@ -3910,7 +3910,6 @@ class W40KEngine(gym.Env):
             # handlers de phase que le joueur humain.
             result = self._process_squad_action(ai_semantic_action)
             if self.game_state.get("phase") == "fight":
-                from engine.phase_handlers.fight_handlers import fight_v11_client_pool
                 fight_v11_client_pool(self.game_state)
                 # L action du bot peut avoir vide la machine (derniere selection puis drain de
                 # sa consolidation par `_fight_v11_gym_settle`) : la fin de phase se joue ICI,
