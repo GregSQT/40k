@@ -8,11 +8,13 @@ par ``movement_handlers`` ET ``charge_handlers`` sans duplication ni couplage in
 
 import heapq
 import math
-from typing import AbstractSet, Any, Dict, List, Mapping, Optional, Set, Tuple
+import threading
+from typing import AbstractSet, Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from engine.hex_utils import (
-    geodesic_field, geodesic_field_multi_source, get_neighbors, round_base_radius_norm, _hex_center,
-    inflate_obstacles_by_footprint as _inflate_obstacles_by_footprint, obstacles_touching_disc,
+    _SEG_TOL, geodesic_field, geodesic_field_multi_source, get_neighbors, round_base_radius_norm,
+    _hex_center, inflate_obstacles_by_footprint as _inflate_obstacles_by_footprint,
+    obstacles_touching_disc,
 )
 
 
@@ -82,7 +84,91 @@ def _euclidean_move_field_multi(
     return geodesic_field_multi_source(starts, board_cols, board_rows, _inflated, budget_norm, 0.0)
 
 
+def multilevel_target_within_straight_bound(
+    start_pos: Tuple[int, int],
+    start_level: int,
+    target_levels: Iterable[int],
+    floor_hexes_by_level: Mapping[int, AbstractSet[Tuple[int, int]]],
+    height_by_level: Mapping[int, float],
+    budget_norm: float,
+) -> bool:
+    """Un niveau cible peut-il porter AU MOINS une cellule dans ``budget_norm`` ? Borne INFÉRIEURE,
+    sans Dijkstra — sert de pré-check aux champs multi-niveaux par-figurine.
+
+    Toute distance du champ (``reachable_multilevel_field``) est une somme de segments any-angle
+    et de portails, chacun un ``hypot`` entre centres d'hexes, plus les coûts verticaux
+    ``|height(L+1) − height(L)|`` des portails traversés. Par inégalité triangulaire la part
+    horizontale vaut au moins la ligne droite départ→cellule, et la part verticale au moins
+    ``|height(cible) − height(départ)|``. Une cellule dont cette borne dépasse
+    ``budget_norm + _SEG_TOL`` (la tolérance d'admission du Dijkstra, cf. ``geodesic_field``) ne
+    peut donc PAS figurer dans le champ ; si aucune cellule d'aucun niveau cible ne passe, le
+    champ rendu serait vide sur ces niveaux — et le calcul peut être sauté sans rien changer.
+
+    Le SOL (niveau 0) parmi les cibles vaut toujours True : il n'a pas d'empreinte finie à
+    borner, on ne cherche pas à le prouver inatteignable. Une cible sans plancher n'apporte
+    aucune cellule. Mesure (HEAD daf17143b, ``refactor_fingerprint.py --episodes 8``) : 305 des
+    675 champs de montée n'atteignaient aucune cible, pour 34 % du temps de ces champs.
+    """
+    if any(int(lv) == 0 for lv in target_levels):
+        return True
+    sx, sy = _hex_center(start_pos[0], start_pos[1])
+    h_start = float(height_by_level[int(start_level)])
+    limit = budget_norm + _SEG_TOL
+    for lv in target_levels:
+        cells = floor_hexes_by_level.get(int(lv))  # get allowed (cible sans plancher = aucune cellule)
+        if not cells:
+            continue
+        vc = abs(float(height_by_level[int(lv)]) - h_start)
+        if vc > limit:
+            continue
+        for c, r in cells:
+            hx, hy = _hex_center(c, r)
+            if math.hypot(hx - sx, hy - sy) + vc <= limit:
+                return True
+    return False
+
+
+# Portails mémoïsés PAR VALEUR : (planchers, hauteurs, plateau, flag) → index. Statiques par
+# partie (le terrain ne bouge pas), ils étaient reconstruits à CHAQUE champ par-figurine
+# (675 fois sur 8 épisodes, 2,0 s sous cProfile). La clé porte les frozensets d'étage eux-mêmes
+# (hash mis en cache par l'objet, rendu par ``floor_hexes_at_level``), jamais un ``id()`` — un
+# identifiant recyclé après GC servirait les portails d'un autre terrain. Borné et verrouillé
+# comme ``_FLOOR_INDEX_CACHE`` (API Flask multi-threads). L'index rendu est PARTAGÉ : lecture seule.
+_LEVEL_TRANSITIONS_CACHE: Dict[Any, Dict[Tuple[int, int, int], List[Tuple[int, int, int, float]]]] = {}
+_LEVEL_TRANSITIONS_CACHE_MAX = 8
+_LEVEL_TRANSITIONS_LOCK = threading.Lock()
+
+
 def _build_level_transitions(
+    floor_hexes_by_level: Mapping[int, AbstractSet[Tuple[int, int]]],
+    height_by_level: Dict[int, float],
+    board_cols: int,
+    board_rows: int,
+    ignore_vertical_cost: bool = False,
+) -> Dict[Tuple[int, int, int], List[Tuple[int, int, int, float]]]:
+    """Portails de ``_compute_level_transitions``, mémoïsés par VALEUR des entrées (cf. le cache
+    ci-dessus). Même signature, même résultat ; l'index rendu ne doit pas être muté."""
+    key = (
+        tuple(sorted((int(lv), frozenset(fh)) for lv, fh in floor_hexes_by_level.items())),
+        tuple(sorted((int(lv), float(h)) for lv, h in height_by_level.items())),
+        int(board_cols), int(board_rows), bool(ignore_vertical_cost),
+    )
+    with _LEVEL_TRANSITIONS_LOCK:
+        cached = _LEVEL_TRANSITIONS_CACHE.get(key)  # get allowed (terrain pas encore vu)
+        if cached is not None:
+            return cached
+    index = _compute_level_transitions(
+        floor_hexes_by_level, height_by_level, board_cols, board_rows, ignore_vertical_cost
+    )
+    with _LEVEL_TRANSITIONS_LOCK:
+        _LEVEL_TRANSITIONS_CACHE[key] = index
+        if len(_LEVEL_TRANSITIONS_CACHE) > _LEVEL_TRANSITIONS_CACHE_MAX:
+            # Un dict Python conserve l'ordre d'insertion : la première clé est la plus ancienne.
+            del _LEVEL_TRANSITIONS_CACHE[next(iter(_LEVEL_TRANSITIONS_CACHE))]
+    return index
+
+
+def _compute_level_transitions(
     floor_hexes_by_level: Mapping[int, AbstractSet[Tuple[int, int]]],
     height_by_level: Dict[int, float],
     board_cols: int,

@@ -1704,7 +1704,9 @@ def _charge_model_multilevel_reachable_cells(
     from engine.hex_utils import (
         get_neighbors, precompute_footprint_offsets, ENGAGEMENT_NORM_HEX_WIDTH,
     )
-    from engine.phase_handlers.geodesic_move import reachable_multilevel_field
+    from engine.phase_handlers.geodesic_move import (
+        multilevel_target_within_straight_bound, reachable_multilevel_field,
+    )
     from engine.phase_handlers.shared_utils import build_occupied_positions_set
     from engine.game_state import unit_can_occupy_upper_floor
 
@@ -1728,6 +1730,14 @@ def _charge_model_multilevel_reachable_cells(
                     f"entre ruines ({height_by_level[lv]:.3f} vs {hn:.3f}) — non supporté"
                 )
             height_by_level[lv] = hn
+
+    # PRÉ-CHECK de portée (perf, résultat identique) — jumeau du champ multi-niveaux du move :
+    # aucune cellule cible dans le budget en ligne droite + dénivelé → couches vides sans Dijkstra.
+    if not multilevel_target_within_straight_bound(
+        (int(start_pos[0]), int(start_pos[1])), int(start_level), target_levels,
+        floor_hexes_by_level, height_by_level, int(budget_subhex) * ENGAGEMENT_NORM_HEX_WIDTH,
+    ):
+        return {lv: {} for lv in target_levels}
 
     obstacles_by_level: Dict[int, Set[Tuple[int, int]]] = {0: set(ground_obstacles)}
     occupied_by_level: Dict[int, Set[Tuple[int, int]]] = {}
