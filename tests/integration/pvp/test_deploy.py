@@ -64,29 +64,35 @@ def _dep_state(client: GameClient) -> Dict[str, Any]:
     return client.state["deployment_state"]
 
 
-def _pending_declaration(client: GameClient) -> Optional[Dict[str, Any]]:
-    """20.01 — la question de l'étape Declare Battle Formations en attente, ou ``None``."""
-    return client.state.get("strategic_reserves", {}).get("pending_declaration")
+def _reserves_declaration(client: GameClient) -> Dict[str, Any]:
+    """20.01 — le résumé de l'étape Declare Battle Formations publié par l'API.
 
-
-def _settle_reserves_declarations(client: GameClient, limit: int = 50) -> int:
-    """Répond « garder pour le déploiement » à toutes les questions 20.01. Rend le compte.
-
-    L'étape Declare Battle Formations PRÉCÈDE la mise en place : tant qu'une question est en
-    attente, `deploy_commit` est refusé (`reserves_declaration_still_open`). Le siège humain y
-    répond par la MÊME action que le dépôt, avec `declare` à False — « garder » est le second
-    candidat de la question, pas l'absence de réponse.
+    Trois lectures : `declaring_player` (le camp qui compose, ou ``None`` étape close),
+    `declarable` (ses escouades encore proposables) et `cancellable` (celles qu'il peut retirer).
     """
-    answered = 0
-    while answered < limit:
-        pending = _pending_declaration(client)
-        if not pending:
-            return answered
-        client.act(
-            "deploy_strategic_reserves", unitId=str(pending["unitId"]), declare=False
-        )
-        answered += 1
-    raise AssertionError(f"étape 20.01 non close après {limit} réponses")
+    return client.state.get("strategic_reserves", {})
+
+
+def _declaring_player(client: GameClient) -> Optional[int]:
+    player = _reserves_declaration(client).get("declaring_player")
+    return None if player is None else int(player)
+
+
+def _settle_reserves_declarations(client: GameClient, limit: int = 4) -> int:
+    """Valide la déclaration de chaque camp SANS rien réserver. Rend le nombre de validations.
+
+    L'étape Declare Battle Formations PRÉCÈDE la mise en place : tant qu'un camp déclare,
+    `deploy_commit` est refusé (`reserves_declaration_still_open`). Le siège humain fige sa
+    déclaration par `validate_reserves_declaration` — valider sans avoir rien réservé est légal
+    (« can select »), et c'est le cas majoritaire.
+    """
+    validated = 0
+    while validated < limit:
+        if _declaring_player(client) is None:
+            return validated
+        client.act("validate_reserves_declaration")
+        validated += 1
+    raise AssertionError(f"étape 20.01 non close après {limit} validations")
 
 
 def _current_deployer(client: GameClient) -> int:
@@ -482,10 +488,16 @@ def declaration_game(api_isolated):
 class TestDeclareBattleFormations:
     """20.01 — la déclaration précède la mise en place, y compris pour le joueur humain."""
 
-    def test_a_question_is_pending_before_any_placement(self, declaration_game):
-        """L'API publie la question, et rien n'est encore sur la table."""
-        pending = _pending_declaration(declaration_game)
-        assert pending, "aucune question 20.01 publiée : le conteneur PvP resterait inerte"
+    def test_a_camp_is_declaring_before_any_placement(self, declaration_game):
+        """L'API publie le camp déclarant et ses escouades proposables ; rien n'est sur la table."""
+        summary = _reserves_declaration(declaration_game)
+        assert summary.get("declaring_player") == 1, (
+            "aucun camp déclarant publié : le bandeau PvP resterait inerte"
+        )
+        assert summary.get("declarable"), (
+            "le camp déclarant n'a aucune escouade proposable : les boutons Reserve seraient morts"
+        )
+        assert summary.get("cancellable") == [], "rien n'est en réserves au départ de l'étape"
         on_board = [
             u for u in declaration_game.state["units"] if u["deployed_on_turn"] is not None
         ]
@@ -515,85 +527,104 @@ class TestDeclareBattleFormations:
         assert not accepted
         assert body["result"]["error"] == "reserves_declaration_still_open", body["result"]
 
-    def test_declaring_holds_the_unit_off_table(self, declaration_game):
-        """`declare: true` met l'escouade en réserves et la sort du pool à poser."""
-        pending = _pending_declaration(declaration_game)
-        assert pending, "aucune question 20.01 publiée : le test n'a rien à déclarer"
-        unit_id = str(pending["unitId"])
-        player = int(pending["player"])
+    def test_reserving_holds_the_unit_off_table_in_any_order(self, declaration_game):
+        """`deploy_strategic_reserves` met l'escouade en réserves et la sort du pool — la DERNIÈRE
+        du pool, pas la première : 20.01 n'impose aucun ordre, et l'ancienne file refusait tout
+        ce qui n'était pas sa tête."""
+        player = _declaring_player(declaration_game)
+        assert player == 1
+        declarable = _reserves_declaration(declaration_game)["declarable"]
+        assert len(declarable) >= 2, "il faut deux escouades pour choisir « pas la première »"
+        unit_id = str(declarable[-1])
 
-        declaration_game.act("deploy_strategic_reserves", unitId=unit_id, declare=True)
+        declaration_game.act("deploy_strategic_reserves", unitId=unit_id)
 
         unit = next(u for u in declaration_game.state["units"] if str(u["id"]) == unit_id)
         assert unit["in_strategic_reserves"] is True
         assert unit["deployed_on_turn"] is None
         assert unit_id not in _deployable_for(declaration_game, player)
+        assert unit_id in _reserves_declaration(declaration_game)["cancellable"]
+        # Le camp n'a PAS fini : il reste déclarant tant qu'il n'a pas validé.
+        assert _declaring_player(declaration_game) == player
 
-    def test_declining_leaves_the_unit_to_deploy(self, declaration_game):
-        """`declare: false` retire la QUESTION, pas l'escouade — et la question ne revient pas."""
-        pending = _pending_declaration(declaration_game)
-        assert pending, "aucune question 20.01 publiée : le test n'a rien à décliner"
-        unit_id = str(pending["unitId"])
-        player = int(pending["player"])
+    def test_cancelling_returns_the_unit_to_the_pool(self, declaration_game):
+        """`cancel_strategic_reserves` défait une mise en réserves avant validation."""
+        player = _declaring_player(declaration_game)
+        unit_id = str(_reserves_declaration(declaration_game)["declarable"][0])
+        declaration_game.act("deploy_strategic_reserves", unitId=unit_id)
+        assert unit_id in _reserves_declaration(declaration_game)["cancellable"]
 
-        declaration_game.act("deploy_strategic_reserves", unitId=unit_id, declare=False)
+        declaration_game.act("cancel_strategic_reserves", unitId=unit_id)
 
         unit = next(u for u in declaration_game.state["units"] if str(u["id"]) == unit_id)
         assert unit["in_strategic_reserves"] is False
         assert unit_id in _deployable_for(declaration_game, player)
-        next_pending = _pending_declaration(declaration_game)
-        assert not next_pending or str(next_pending["unitId"]) != unit_id, (
-            "la question 20.01 se repose sur la même escouade : l'étape ne finirait jamais"
+        assert unit_id in _reserves_declaration(declaration_game)["declarable"]
+
+    def test_validating_passes_the_hand_and_two_validations_close_the_step(
+        self, declaration_game
+    ):
+        """Valider fige le camp et passe la main ; la seconde validation ferme l'étape."""
+        assert _declaring_player(declaration_game) == 1
+
+        declaration_game.act("validate_reserves_declaration")
+
+        assert _declaring_player(declaration_game) == 2, "la main n'est pas passée au joueur 2"
+        assert int(_dep_state(declaration_game)["current_deployer"]) == 2
+        assert int(declaration_game.state["current_player"]) == 2
+
+        declaration_game.act("validate_reserves_declaration")
+
+        assert _declaring_player(declaration_game) is None, "l'étape reste ouverte"
+        assert int(_dep_state(declaration_game)["current_deployer"]) == 1, (
+            "la mise en place ne repart pas du joueur 1"
         )
 
-    def test_change_roster_rebuilds_the_question_queue(self, declaration_game):
-        """`change_roster` remplace les unités ET compacte leurs ids : la file doit suivre.
+    def test_change_roster_rebuilds_the_declaration_lists(self, declaration_game):
+        """`change_roster` remplace les unités ET compacte leurs ids : les listes doivent suivre.
 
-        Le changement de roster est NOMINAL tant qu'aucune réponse 20.01 n'a été donnée — la
-        première le refuse désormais
-        (`test_change_roster_is_refused_once_a_declaration_has_been_answered`), et c'est ce test-ci
-        qui prouve que ce refus n'est pas devenu inconditionnel.
+        Le changement de roster est NOMINAL tant qu'aucun geste 20.01 n'a été posé — le premier le
+        refuse désormais (`test_change_roster_is_refused_once_a_declaration_has_been_answered`),
+        et c'est ce test-ci qui prouve que ce refus n'est pas devenu inconditionnel.
 
-        Une file laissée telle qu'au reset garde des ids qui n'existent plus :
-        `_strategic_reserves_summary` tourne à chaque sérialisation d'état et
-        levait `unit_can_be_placed_in_strategic_reserves: unit ... introuvable` — et, à tailles de
-        roster égales, posait la question sur l'unité d'un autre joueur sans rien lever.
+        Un état laissé tel qu'au reset garderait des ids qui n'existent plus :
+        `_strategic_reserves_summary` tourne à chaque sérialisation d'état et levait
+        `unit_can_be_placed_in_strategic_reserves: unit ... introuvable`.
         """
         # Roster de TAILLE DIFFÉRENTE de celui du scénario : c'est le décalage de la compaction
-        # d'ids qui fait diverger la file, pas le remplacement en lui-même.
+        # d'ids qui fait diverger les listes, pas le remplacement en lui-même.
         declaration_game.act(
             "change_roster", player=1, army_file="armageddon_space_marines.json"
         )
 
-        queue = _dep_state(declaration_game)["reserves_declaration_queue"]
+        summary = _reserves_declaration(declaration_game)
         known_ids = {str(u["id"]) for u in declaration_game.state["units"]}
-        unknown = [str(uid) for _p, uid in queue if str(uid) not in known_ids]
-        assert not unknown, f"la file 20.01 interroge des unités inexistantes : {unknown}"
-
         owner_by_id = {
             str(u["id"]): int(u["player"]) for u in declaration_game.state["units"]
         }
-        mismatched = [
-            (p, uid) for p, uid in queue if owner_by_id[str(uid)] != int(p)
-        ]
+        player = summary["declaring_player"]
+        assert player == 1, summary
+        unknown = [uid for uid in summary["declarable"] if str(uid) not in known_ids]
+        assert not unknown, f"les listes 20.01 nomment des unités inexistantes : {unknown}"
+        mismatched = [uid for uid in summary["declarable"] if owner_by_id[str(uid)] != player]
         assert not mismatched, (
-            f"la file 20.01 attribue des unités au mauvais joueur : {mismatched}"
+            f"les listes 20.01 attribuent des unités au mauvais joueur : {mismatched}"
         )
-        # VERT VACANT : une file VIDE passerait les deux contrôles ci-dessus.
-        assert queue, "file 20.01 vide après changement de roster"
+        # VERT VACANT : une liste VIDE passerait les deux contrôles ci-dessus.
+        assert summary["declarable"], "aucune escouade déclarable après changement de roster"
 
-    def test_change_roster_leaves_the_seat_on_the_rebuilt_question(self, declaration_game):
-        """La file rebâtie peut changer de camp en tête : le siège doit l'y suivre.
+    def test_change_roster_leaves_the_seat_on_the_rebuilt_declarer(self, declaration_game):
+        """Le camp déclarant peut changer au remplacement : le siège doit le suivre.
 
-        `change_roster` restaure le déployeur d'avant le remplacement, mais la file, elle, est
-        rebâtie sur un autre roster — et les unités inéligibles (FORTIFICATION, plafond de 50 %)
-        en sont retirées sans réponse. La tête peut donc passer au camp d'en face, et le siège
-        resté en arrière rendrait à nouveau la question d'un joueur depuis celui d'en face — en
-        PvE, sans qu'aucun tour IA ne parte.
+        `change_roster` restaure le déployeur d'avant le remplacement, mais l'étape est rebâtie sur
+        un autre roster — et un camp sans aucune escouade éligible (FORTIFICATION, plafond de 50 %)
+        n'a rien à déclarer. Le premier déclarant peut donc passer au camp d'en face, et le siège
+        resté en arrière rendrait la déclaration d'un joueur depuis celui d'en face — en PvE, sans
+        qu'aucun tour IA ne parte.
 
-        INSTRUMENT : l'éligibilité du joueur 1 est fermée pendant le remplacement, ce qui met le
-        joueur 2 en tête de file. Sans lui les deux camps sont symétriques dans cette fixture, la
-        tête reste au joueur 1, et le test ne distinguerait pas un siège qui suit d'un siège figé.
+        INSTRUMENT : l'éligibilité du joueur 1 est fermée pendant le remplacement, ce qui fait du
+        joueur 2 le premier déclarant. Sans lui les deux camps sont symétriques dans cette fixture,
+        le joueur 1 reste premier, et le test ne distinguerait pas un siège qui suit d'un siège figé.
         """
         from unittest.mock import patch
 
@@ -611,10 +642,10 @@ class TestDeclareBattleFormations:
             declaration_game.act(
                 "change_roster", player=1, army_file="armageddon_space_marines.json"
             )
-            pending = _pending_declaration(declaration_game)
+            declarer = _declaring_player(declaration_game)
 
-        assert pending and int(pending["player"]) == 2, (
-            "la tête de file n'est pas passée au joueur 2 : le test n'observe pas le cas visé"
+        assert declarer == 2, (
+            "le premier déclarant n'est pas passé au joueur 2 : le test n'observe pas le cas visé"
         )
         assert int(_dep_state(declaration_game)["current_deployer"]) == 2
         assert int(declaration_game.state["current_player"]) == 2
@@ -631,15 +662,13 @@ class TestDeclareBattleFormations:
         un joueur qui y avait déjà répondu.
 
         VERT VACANT : un refus inconditionnel passerait ce test mais mettrait
-        `test_change_roster_rebuilds_the_question_queue` au rouge — c'est lui qui prouve que le
-        changement d'armée reste possible AVANT toute réponse.
+        `test_change_roster_rebuilds_the_declaration_lists` au rouge — c'est lui qui prouve que le
+        changement d'armée reste possible AVANT tout geste.
         """
-        pending = _pending_declaration(declaration_game)
-        assert pending, "aucune question 20.01 publiée : le test n'a rien à répondre"
-        answering_player = int(pending["player"])
-        declaration_game.act(
-            "deploy_strategic_reserves", unitId=str(pending["unitId"]), declare=False
-        )
+        answering_player = _declaring_player(declaration_game)
+        assert answering_player is not None, "aucun camp déclarant : le test n'a rien à poser"
+        unit_id = str(_reserves_declaration(declaration_game)["declarable"][0])
+        declaration_game.act("deploy_strategic_reserves", unitId=unit_id)
 
         for player in (1, 2):
             accepted, body = declaration_game.try_act(
@@ -654,10 +683,10 @@ class TestDeclareBattleFormations:
             ), body["result"]
 
     def test_the_step_closes_and_deployment_resumes_with_player_one(self, declaration_game):
-        """Une fois toutes les questions réglées, la mise en place reprend, joueur 1 d'abord."""
-        answered = _settle_reserves_declarations(declaration_game)
-        assert answered > 0, "aucune question posée : le test ne prouve rien"
-        assert _pending_declaration(declaration_game) in (None, {}, False)
+        """Une fois les deux camps validés, la mise en place reprend, joueur 1 d'abord."""
+        validated = _settle_reserves_declarations(declaration_game)
+        assert validated == 2, f"deux validations attendues, {validated} faites"
+        assert _declaring_player(declaration_game) is None
         assert _current_deployer(declaration_game) == 1
         # VERT VACANT : l'étape close doit RÉELLEMENT rouvrir la pose, pas seulement se taire.
         player = 1

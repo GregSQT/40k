@@ -19,6 +19,7 @@ from engine.phase_handlers.shared_utils import (
     _model_height_of,
     _build_enemy_adjacent_hexes_all_players,
     _squad_mode_level,
+    is_programmatic_owner,
 )
 
 
@@ -2034,26 +2035,30 @@ def reserves_cancellable_squads(game_state: Dict[str, Any], player: int) -> List
 
 
 def player_can_still_declare_reserves(game_state: Dict[str, Any], player: int) -> bool:
-    """`player` a-t-il encore une escouade à qui l'étape 20.01 peut proposer les réserves ?
+    """`player` compose-t-il ENCORE sa déclaration 20.01 ?
 
     Une déclaration FIGÉE ferme le camp, quoi qu'il lui reste — c'est le terminateur du siège
     humain (`deployment_validate_reserves_declaration`), et le modèle se le pose à lui-même quand
     il n'a plus de question (`apply_reserves_declaration_decision`).
 
-    Sinon, le camp est ouvert TANT QU'IL RESTE UNE ESCOUADE DÉCLARABLE, et rien d'autre. Une
-    version précédente gardait aussi ouvert un camp qui n'avait plus qu'à ANNULER, pour ne pas
-    enfermer un joueur ayant épuisé son plafond de 50 %. Elle ouvrait un état sans question à
-    poser, et `next_reserves_declaration_question` levait dessus — reproduit sur un camp dont le
-    roster pré-déclare ses réserves (`strategic_reserves: true`, rosters d'entraînement) jusqu'à
-    consommer le plafond : plus aucune escouade éligible, une réserve annulable, et l'armement du
-    masque plantait. Le siège du modèle n'a d'ailleurs AUCUNE action d'annulation à jouer, donc ce
-    camp-là n'aurait de toute façon jamais pu se refermer.
+    Sinon, un camp qui a encore une escouade DÉCLARABLE est ouvert, quel que soit son siège : il
+    reste une question à poser.
 
-    Le seuil est donc « une question reste-t-elle posable ? », qui vaut pour les deux sièges. Sa
-    contrepartie assumée : un joueur qui épuise exactement son plafond termine sa déclaration sans
-    repasser par Validate, et ne peut plus défaire son dernier choix. Le prédicat ne peut pas
-    distinguer les deux sièges — `player_types` marque le joueur 1 « human » jusqu'en entraînement
-    gym, donc s'y fier gèlerait un camp piloté par le modèle.
+    Un camp qui n'a plus qu'à ANNULER se sépare selon le siège, et c'est là que la règle et le
+    mécanisme divergent. 20.01 dit « you can select one or more friendly units » : un ENSEMBLE,
+    que le siège humain compose (réserver, annuler) puis fige d'un clic. Un humain qui vient de
+    réserver sa dernière escouade déclarable n'a rien FIGÉ : il doit pouvoir défaire ce choix, donc
+    son camp reste ouvert jusqu'à Validate. Le siège piloté par le modèle n'a AUCUNE action
+    d'annulation à jouer et sa déclaration se fige d'elle-même quand la dernière question a reçu
+    sa réponse : le garder ouvert armerait un masque sans question à poser, et
+    `next_reserves_declaration_question` lèverait — reproduit sur un roster qui pré-déclare ses
+    réserves (`strategic_reserves: true`, rosters d'entraînement) jusqu'à consommer le plafond :
+    plus aucune escouade éligible, une réserve annulable.
+
+    Le siège se lit par `is_programmatic_owner`, SOURCE UNIQUE du prédicat « piloté par la
+    machine » : vrai pour tout camp en entraînement gym (`gym_training_mode`, où `player_types`
+    marque pourtant les deux camps « human »), sinon `player_types == "ai"`. C'est ce qui empêche
+    de geler un camp piloté par le modèle en le prenant pour un humain.
     """
     deployment_state = require_key(game_state, "deployment_state")
     if bool(
@@ -2062,7 +2067,11 @@ def player_can_still_declare_reserves(game_state: Dict[str, Any], player: int) -
         )
     ):
         return False
-    return bool(reserves_declarable_squads(game_state, int(player)))
+    if reserves_declarable_squads(game_state, int(player)):
+        return True
+    if is_programmatic_owner(game_state, int(player)):
+        return False
+    return bool(reserves_cancellable_squads(game_state, int(player)))
 
 
 def current_reserves_declarer(game_state: Dict[str, Any]) -> Optional[int]:
@@ -2487,30 +2496,28 @@ def _human_reserves_declarer(
 def settle_reserves_declaration_step(
     game_state: Dict[str, Any], result: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Suite COMMUNE aux trois gestes humains : clôturer l'étape, et sortir de la phase si besoin.
+    """Suite COMMUNE aux trois gestes humains : clôture, siège, et sortie de phase si besoin.
 
-    APPELÉE PAR LES TROIS, et c'est tout l'enjeu. La fin de phase vivait dans la seule route de
-    validation, sur l'idée qu'un camp finit toujours par valider. FAUX : un camp qui réserve sa
-    DERNIÈRE escouade déclarable n'a plus de geste à poser, la main passe à l'adversaire, et il ne
-    valide jamais (`test_reserving_the_last_declarable_squad_ends_the_declaration`). Mesuré sur
-    deux camps d'une escouade chacun, tous deux mis en réserves par la route humaine ::
-
-        pools               : {1: [], 2: []}
-        etape ouverte       : False
-        etape CLOSE         : False
-        deployment_complete : False
-        phase               : deployment
-
-    Plus rien à poser, et la partie ne sortait jamais du déploiement. Le siège gym n'y tombait pas :
-    son build de masque appelle la clôture à chaque tour. La route humaine ne construit aucun
-    masque, d'où ce point de passage explicite.
+    APPELÉE PAR LES TROIS, pour que l'état rendu soit le même quel que soit le geste : l'étape
+    close si plus aucun camp ne déclare, le siège sur le camp qui déclare sinon, et
+    `reserves_declaration_open` / `deployment_complete` posés dans le résultat. Un camp humain ne
+    se ferme que par Validate (`player_can_still_declare_reserves`), donc ce sont la clôture et le
+    transfert de siège de la ROUTE DE VALIDATION que ce point de passage porte réellement ; les
+    deux autres gestes y trouvent un état déjà cohérent, et c'est voulu — une version précédente
+    fermait un camp humain sur sa dernière réserve, sans déplacer le siège, et la partie se figeait
+    en déploiement (tour IA refusé par `not_ai_player_turn`, pose refusée par
+    `reserves_declaration_still_open`). Le siège suit ici comme dans
+    `finalize_reserves_declaration` : fermer, sinon déplacer.
 
     PLUS RIEN À POSER : cas limite RÉEL — un roster dont la valeur totale tient sous le plafond de
-    50 % peut partir ENTIÈREMENT en réserves. C'est exactement le `phase_complete` que
+    50 % peut partir ENTIÈREMENT en réserves. Sans cette clôture, la phase de déploiement resterait
+    ouverte avec deux pools vides : le siège gym s'en sort par son build de masque, la route
+    humaine ne construit aucun masque. C'est exactement le `phase_complete` que
     `deployment_commit_plan` rend dans le même état : les deux sorties de la phase de déploiement
     doivent le signaler de la même façon.
     """
-    close_reserves_declaration_step_if_done(game_state)
+    if not close_reserves_declaration_step_if_done(game_state):
+        move_seat_to_pending_reserves_declaration(game_state)
     deployment_state = require_key(game_state, "deployment_state")
     result["reserves_declaration_open"] = reserves_declaration_step_is_open(game_state)
     if not result["reserves_declaration_open"] and not any(

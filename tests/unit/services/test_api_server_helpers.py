@@ -530,17 +530,16 @@ def test_strategic_reserves_summary_reports_points_per_player() -> None:
 
 
 def test_strategic_reserves_summary_asks_only_about_a_unit_the_engine_would_accept() -> None:
-    """`pending_declaration` = la question 20.01 que le moteur pose RÉELLEMENT.
+    """`declarable` = les escouades que le moteur ACCEPTERAIT réellement en réserves.
 
-    Ce n'est plus une LISTE de candidats : 20.01 situe la déclaration à l'étape Declare Battle
-    Formations, avant tout déploiement, et le moteur interroge une unité à la fois dans un ordre
-    figé au reset. L'UI affiche cette question, elle n'en propose pas une autre.
+    C'est une liste libre (20.01 n'impose aucun ordre), mais c'est le MOTEUR qui la publie : le
+    plafond de 50 % bouge à chaque geste, et une éligibilité recalculée côté client afficherait un
+    bouton que la route refuserait.
 
     BORNE du plafond (20.01) : avec 120 pts déjà engagés sur un plafond de 250, une unité de
     130 pts tient encore (130 <= 130) et une de 131 ne tient plus. Une FORTIFICATION ne tient
     JAMAIS, quelle que soit la place restante — c'est ce test-là que le client ne peut pas faire.
-    La file commence donc sur l'unité de 131 pts et sur la FORTIFICATION, toutes deux SAUTÉES :
-    poser une question à candidat unique n'est pas poser une question.
+    Le pool met VOLONTAIREMENT ces deux-là en tête : la liste doit ne rendre que ce qui tient.
     """
     game_state = {
         "points_limit": 500,

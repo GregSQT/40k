@@ -266,26 +266,10 @@ def test_the_deployment_mask_never_opens_wait():
 # ===========================================================================
 
 
-def test_a_camp_with_no_declarable_squad_is_skipped_without_crashing():
-    """Un camp dont le plafond est SATURÉ est passé, il n'ouvre pas une étape sans question.
-
-    DÉFAUT MESURÉ à la relecture, avant qu'aucun test n'existe. Le prédicat d'ouverture retenait
-    aussi les réserves ANNULABLES, pour ne pas enfermer un joueur ayant épuisé ses 50 %. Il
-    déclarait donc un camp interrogeable sans qu'aucune escouade ne puisse l'être, et
-    `next_reserves_declaration_question` levait ::
-
-        RuntimeError: next_reserves_declaration_question: joueur 1 declare interrogeable sans
-        escouade interrogeable — `current_reserves_declarer` et `reserves_declarable_squads`
-        ont diverge.
-
-    La configuration n'est pas théorique : un roster qui pré-déclare ses réserves
-    (`strategic_reserves: true`, rosters d'entraînement) consomme le plafond dès le chargement. Le
-    siège du modèle n'a d'ailleurs AUCUNE action d'annulation, donc ce camp n'aurait de toute façon
-    jamais pu se refermer.
-
-    Mise en scène : plafond 100 (50 % de 200), joueur 1 réduit à une seule escouade de 100 points
-    DÉJÀ en réserves. Plus rien de déclarable, une réserve annulable.
-    """
+def _saturated_camp_state() -> Dict[str, Any]:
+    """Plafond 100 (50 % de 200), joueur 1 réduit à UNE escouade de 100 points DÉJÀ en réserves :
+    plus rien de déclarable, une réserve annulable. C'est l'état d'un roster qui pré-déclare ses
+    réserves (`strategic_reserves: true`, rosters d'entraînement) jusqu'au plafond."""
     gs = _synthetic_state(
         [
             _synthetic_unit("u1", 1, 100, in_reserves=True),
@@ -293,10 +277,34 @@ def test_a_camp_with_no_declarable_squad_is_skipped_without_crashing():
         ],
         points_limit=200,
     )
-
     # VERT VACANT : sans ces deux faits, le cas visé n'est pas celui qui est mis en scène.
     assert reserves_declarable_squads(gs, 1) == [], "le joueur 1 a encore de quoi déclarer"
     assert reserves_cancellable_squads(gs, 1) == ["u1"], "aucune réserve annulable à retenir"
+    return gs
+
+
+@pytest.mark.parametrize("seat", ["gym", "ai"])
+def test_a_saturated_machine_camp_is_skipped_without_crashing(seat: str):
+    """Un camp MACHINE dont le plafond est SATURÉ est passé : il n'ouvre pas une étape sans question.
+
+    DÉFAUT MESURÉ à la relecture, avant qu'aucun test n'existe. Le prédicat d'ouverture retenait
+    les réserves ANNULABLES sans regarder le siège. Il déclarait donc un camp piloté par le modèle
+    interrogeable sans qu'aucune escouade ne puisse l'être, et `next_reserves_declaration_question`
+    levait ::
+
+        RuntimeError: next_reserves_declaration_question: joueur 1 declare interrogeable sans
+        escouade interrogeable — `current_reserves_declarer` et `reserves_declarable_squads`
+        ont diverge.
+
+    Le siège du modèle n'a AUCUNE action d'annulation, donc ce camp ne pourrait jamais se refermer
+    autrement. Les DEUX formes du siège machine sont jouées : l'entraînement gym, où `player_types`
+    marque pourtant les deux camps « human », et le siège `ai` d'une partie servie par l'API.
+    """
+    gs = _saturated_camp_state()
+    if seat == "gym":
+        gs["gym_training_mode"] = True
+    else:
+        gs["player_types"]["1"] = "ai"
 
     assert player_can_still_declare_reserves(gs, 1) is False
     assert current_reserves_declarer(gs) == 2, (
@@ -305,6 +313,31 @@ def test_a_camp_with_no_declarable_squad_is_skipped_without_crashing():
     assert next_reserves_declaration_question(gs) == (2, "u2")
     # LE CHEMIN DE PRODUCTION : c'est le build de masque qui levait.
     assert arm_reserves_declaration_decision(gs) is not None
+
+
+def test_a_saturated_human_camp_keeps_the_hand_until_it_validates():
+    """JUMEAU HUMAIN : le même camp saturé reste déclarant, parce qu'il a encore un choix à défaire.
+
+    20.01 dit « you can select one or more friendly units » — un ensemble que l'humain COMPOSE puis
+    fige. Une version précédente fermait ce camp d'office (plus de question posable), et le joueur
+    ne pouvait plus retirer de sa déclaration une réserve qu'un fichier de roster avait posée pour
+    lui. Ici il annule, sa réserve redevient déclarable, et seul Validate passe la main.
+    """
+    gs = _saturated_camp_state()
+
+    assert player_can_still_declare_reserves(gs, 1) is True
+    assert current_reserves_declarer(gs) == 1, "le camp humain saturé a perdu la main sans valider"
+    assert reserves_declaration_step_is_open(gs) is True
+
+    ok, result = deployment_cancel_strategic_reserves(gs, {"unitId": "u1"})
+    assert ok, result
+    assert reserves_declarable_squads(gs, 1) == ["u1"], "la réserve annulée n'est pas redéclarable"
+    assert current_reserves_declarer(gs) == 1
+
+    ok, _ = deployment_validate_reserves_declaration(gs, {})
+    assert ok
+    assert current_reserves_declarer(gs) == 2
+    assert next_reserves_declaration_question(gs) == (2, "u2")
 
 
 def test_a_camp_with_nothing_at_all_does_not_hold_the_step_open():
@@ -385,6 +418,46 @@ def test_a_reserve_can_be_cancelled_before_validation():
     assert sorted(reserves_declarable_squads(gs, 1)) == ["a", "b"]
 
 
+def test_reserves_placed_never_goes_below_zero_on_cancellation():
+    """`_reserves_placed` ne passe jamais sous zéro : chaque annulation défait UNE mise comptée.
+
+    Le compteur a DEUX sources — le reset compte les réserves pré-déclarées au roster, le commit
+    ajoute celles de l'étape — et `withdraw_strategic_reserves` décrémente sans borne. Le chemin
+    sous zéro est barré par construction, et c'est cela qui est verrouillé : (1) une réserve
+    pré-déclarée au roster est COMPTÉE au reset, donc son annulation rend 0 et pas -1 ; (2) une
+    annulation remet `in_strategic_reserves` à faux, donc `reserves_cancellable_squads` ne propose
+    plus l'escouade et la seconde annulation est REFUSÉE avant tout décrément ; (3) réserver,
+    annuler, réserver laisse le compteur à 1 — l'aller et le retour se compensent exactement.
+    """
+    # (1) — réserve posée par le roster : comptée au reset (`_synthetic_state` recopie ce compte).
+    gs = _synthetic_state(
+        [_synthetic_unit("r", 1, 30, in_reserves=True), _synthetic_unit("b", 1, 30),
+         _synthetic_unit("z", 2, 30)],
+        points_limit=200,
+    )
+    assert gs["_reserves_placed"][1] == 1, "la réserve du roster n'est pas comptée : rien à défaire"
+    assert reserves_cancellable_squads(gs, 1) == ["r"]
+    ok, result = deployment_cancel_strategic_reserves(gs, {"unitId": "r"})
+    assert ok, result
+    assert gs["_reserves_placed"][1] == 0
+
+    # (2) — seconde annulation de la même escouade : refusée AVANT le décrément.
+    assert reserves_cancellable_squads(gs, 1) == [], "l'escouade annulée reste annulable"
+    ok, result = deployment_cancel_strategic_reserves(gs, {"unitId": "r"})
+    assert not ok
+    assert result["error"] == "unit_not_in_strategic_reserves", result
+    assert gs["_reserves_placed"][1] == 0, "le compteur est passé sous sa borne"
+
+    # (3) — aller-retour : réserver, annuler, réserver.
+    assert deployment_place_in_strategic_reserves(gs, {"unitId": "b"})[0]
+    assert gs["_reserves_placed"][1] == 1
+    assert deployment_cancel_strategic_reserves(gs, {"unitId": "b"})[0]
+    assert gs["_reserves_placed"][1] == 0
+    assert deployment_place_in_strategic_reserves(gs, {"unitId": "b"})[0]
+    assert gs["_reserves_placed"][1] == 1
+    assert gs["_reserves_placed"][2] == 0, "le compteur de l'adversaire a bougé"
+
+
 def test_validating_with_zero_reserves_is_legal_and_passes_the_hand():
     """« can select » : déclarer AUCUNE réserve est une déclaration, et c'est le cas majoritaire."""
     gs = _synthetic_state(
@@ -424,18 +497,14 @@ def test_cancelling_is_refused_once_the_declaration_is_validated():
     assert "a" not in gs["deployment_state"]["deployable_units"][1]
 
 
-def test_reserving_the_last_declarable_squad_ends_the_declaration():
-    """CONSÉQUENCE ASSUMÉE : réserver sa dernière escouade déclarable fige le camp d'office.
+def test_reserving_the_last_declarable_squad_keeps_a_human_camp_open():
+    """Réserver sa dernière escouade déclarable ne fige RIEN : l'humain peut encore défaire ce choix.
 
-    Le prédicat d'ouverture ne retient que « reste-t-il une escouade déclarable ? », et il ne peut
-    pas retenir davantage : garder ouvert un camp qui n'a plus qu'à ANNULER ouvrait un état sans
-    question à poser, sur lequel l'armement du masque levait
-    (`test_a_camp_with_no_declarable_squad_is_skipped_without_crashing`). Le distinguer par le
-    siège est impossible ici — `player_types` marque le joueur 1 « human » jusqu'en entraînement
-    gym, donc s'y fier gèlerait un camp piloté par le modèle.
-
-    Le coût : ce camp ne repasse pas par Validate et ne peut plus défaire son dernier choix. Ce
-    test EXISTE pour que ce coût soit un comportement verrouillé et non une surprise.
+    Une version précédente fermait le camp d'office dès qu'aucune question n'était plus posable —
+    « contrepartie assumée » d'un prédicat qui ne regardait pas le siège. Le joueur perdait alors
+    Cancel ET Validate sur son dernier geste, et le siège ne suivait même pas le déclarant : en PvE
+    le tour IA était refusé (`not_ai_player_turn`), l'humain ne pouvait pas poser
+    (`reserves_declaration_still_open`), partie figée en déploiement.
     """
     gs = _synthetic_state(
         [_synthetic_unit("a", 1, 30), _synthetic_unit("z", 2, 30)], points_limit=200
@@ -446,9 +515,67 @@ def test_reserving_the_last_declarable_squad_ends_the_declaration():
     assert ok
     assert reserves_declarable_squads(gs, 1) == [], "le camp a encore de quoi déclarer"
 
-    assert current_reserves_declarer(gs) == 2, "le camp garde la main sans question à poser"
+    assert current_reserves_declarer(gs) == 1, "le camp humain a perdu la main sans valider"
+    assert gs["deployment_state"]["current_deployer"] == 1
+    assert gs["current_player"] == 1
+
     ok, result = deployment_cancel_strategic_reserves(gs, {"unitId": "a"})
-    assert not ok, "l'annulation reste possible alors que le camp n'a plus la main"
+    assert ok, result
+    assert reserves_declarable_squads(gs, 1) == ["a"]
+    ok, _ = deployment_place_in_strategic_reserves(gs, {"unitId": "a"})
+    assert ok
+
+    ok, _ = deployment_validate_reserves_declaration(gs, {})
+    assert ok
+    assert current_reserves_declarer(gs) == 2
+    assert gs["deployment_state"]["current_deployer"] == 2, "le siège n'a pas suivi le déclarant"
+    assert gs["current_player"] == 2
+
+
+def test_the_seat_follows_when_a_human_exhausts_its_declarables_in_pve():
+    """JUMEAU PvE du test ci-dessus, sur le CHEMIN DE PRODUCTION : le tour IA doit pouvoir partir.
+
+    P1 humain, P2 modèle. L'humain réserve jusqu'à épuisement : il GARDE la main (il n'a rien
+    figé), donc le client ne déclenche aucun tour IA. À sa validation, le déclarant passe au
+    modèle ET le siège suit ; sinon le client déclencherait un tour IA sur `current_player == 1`,
+    `execute_ai_turn` le refuserait (`not_ai_player_turn`) pendant que `deploy_commit` refuse
+    l'humain (`reserves_declaration_still_open`) — personne ne pourrait plus rien faire.
+
+    `gym_training_mode` est retiré de l'état : c'est lui qui rend TOUT camp « machine »
+    (`is_programmatic_owner`), et cet état-là est une partie servie par l'API, pas un entraînement.
+    Passe par `eng.execute_ai_turn`, comme le client, et non par un build de masque : le masque
+    recalerait le siège de lui-même et rendrait ce test vert quel que soit le code.
+    """
+    eng = _engine()
+    gs = eng.game_state
+    gs["gym_training_mode"] = False
+    gs["player_types"]["2"] = "ai"
+    eng.is_pve_mode = True
+    assert current_reserves_declarer(gs) == 1
+
+    declarable = reserves_declarable_squads(gs, 1)
+    assert len(declarable) >= 2, "il faut au moins deux escouades pour réserver « la dernière »"
+    # On réserve jusqu'à épuisement, sans Validate. Le plafond peut fermer avant la dernière : on
+    # s'arrête dès que le camp n'a plus rien de déclarable, quelle qu'en soit la raison.
+    guard = 0
+    while reserves_declarable_squads(gs, 1) and guard < 20:
+        target = reserves_declarable_squads(gs, 1)[0]
+        ok, result = deployment_place_in_strategic_reserves(gs, {"unitId": target})
+        assert ok, result
+        guard += 1
+    assert guard, "aucune réserve posée : le test n'observe pas le cas visé"
+    assert current_reserves_declarer(gs) == 1, "le camp humain a perdu la main sans valider"
+    assert gs["current_player"] == 1
+
+    ok, result = deployment_validate_reserves_declaration(gs, {})
+    assert ok, result
+    assert current_reserves_declarer(gs) == 2, "le déclarant n'est pas passé au modèle"
+
+    # LE CHEMIN DE PRODUCTION : le tour IA du client doit être ACCEPTÉ — c'est le siège qui le
+    # permet, et lui seul.
+    assert gs["current_player"] == 2, "le siège n'a pas suivi : le tour IA sera refusé"
+    ai_ok, ai_result = eng.execute_ai_turn()
+    assert ai_ok is True or ai_result.get("error") != "not_ai_player_turn", ai_result
 
 
 def test_the_step_closes_once_both_camps_have_validated():
@@ -476,9 +603,8 @@ def test_the_human_route_closes_the_phase_when_nothing_is_left_to_place():
     Cas limite RÉEL de 20.01 — un roster dont la valeur tient sous le plafond de 50 % peut partir
     ENTIÈREMENT en réserves, et les deux pools sont alors vides.
 
-    DÉFAUT MESURÉ : la sortie de phase vivait dans la seule route de VALIDATION, sur l'idée qu'un
-    camp finit toujours par valider. Or un camp qui réserve sa dernière escouade déclarable n'a
-    plus de geste et ne valide jamais. Relevé brut sur cet état ::
+    DÉFAUT MESURÉ : la sortie de phase n'existait pas sur la route humaine. Relevé brut sur cet
+    état, deux camps entièrement réservés ::
 
         pools               : {1: [], 2: []}
         etape ouverte       : False
@@ -488,13 +614,17 @@ def test_the_human_route_closes_the_phase_when_nothing_is_left_to_place():
 
     Le siège gym n'y tombait pas — son build de masque clôture à chaque tour —, donc aucun test
     passant par `eng.step` ne pouvait le voir. Celui-ci passe par la route HUMAINE, la seule qui
-    ne construit aucun masque.
+    ne construit aucun masque : chaque camp réserve tout puis VALIDE, et c'est la seconde
+    validation qui doit sortir de la phase.
     """
     gs = _synthetic_state(
         [_synthetic_unit("a", 1, 30), _synthetic_unit("z", 2, 30)], points_limit=200
     )
     assert deployment_place_in_strategic_reserves(gs, {"unitId": "a"})[0]
-    ok, result = deployment_place_in_strategic_reserves(gs, {"unitId": "z"})
+    assert deployment_validate_reserves_declaration(gs, {})[0]
+    assert current_reserves_declarer(gs) == 2
+    assert deployment_place_in_strategic_reserves(gs, {"unitId": "z"})[0]
+    ok, result = deployment_validate_reserves_declaration(gs, {})
     assert ok, result
 
     ds = gs["deployment_state"]

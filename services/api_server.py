@@ -1239,15 +1239,18 @@ def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Any]:
     ratio qui n'est pas celui qui refuse le dépôt — le défaut même que le passage par le serveur
     cherche à éviter côté client.
 
-    Deux grandeurs de plus, pour la MÊME raison — l'UI PvP ne doit rejouer aucune règle en TS :
+    Quatre grandeurs de plus, pour la MÊME raison — l'UI PvP ne doit rejouer aucune règle en TS :
 
-      - ``pending_declaration`` : la question 20.01 EN ATTENTE — ``{"unitId", "player"}`` — ou
-        ``null``. Elle a remplacé ``placeable_unit_ids``, et ce n'est pas un renommage : 20.01
-        situe la déclaration à l'étape Declare Battle Formations, AVANT tout déploiement, donc
-        l'UI ne propose plus une sélection libre parmi les unités encore à poser. Le moteur
-        interroge une unité à la fois, dans un ordre figé au reset, et le client ne fait
-        qu'afficher CETTE question. Publier de nouveau une liste de candidats libres rouvrirait
-        exactement le défaut corrigé : déclarer après avoir vu le déploiement adverse.
+      - ``declaring_player`` : le camp qui COMPOSE sa déclaration 20.01, ou ``null`` une fois
+        l'étape close. 20.01 situe la déclaration à l'étape Declare Battle Formations, AVANT tout
+        déploiement, et chaque camp déclare pour toute son armée avant que l'autre commence.
+      - ``declarable`` / ``cancellable`` : les escouades de ce camp qu'il peut encore mettre en
+        réserves, et celles qu'il peut en retirer tant qu'il n'a pas validé. Ce sont des listes
+        LIBRES — 20.01 dit « select one or more friendly units » sans imposer d'ordre —, mais
+        publiées PAR LE MOTEUR : le plafond de 50 % bouge à chaque geste, et une éligibilité
+        recalculée côté client afficherait un bouton que la route refuserait. La sélection libre
+        ne rouvre pas le défaut d'origine (déclarer après avoir vu le déploiement adverse) : le
+        moteur refuse toute pose tant qu'un camp déclare.
       - ``last_round`` : le round au bout duquel les réserves non arrivées sont détruites (20.04),
         lu sur la constante moteur. Le popup d'avertissement du client s'y accroche au lieu de
         coder « 3 » en dur.
