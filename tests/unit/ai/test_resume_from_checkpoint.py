@@ -269,6 +269,42 @@ def test_rotating_callback_removes_stats_with_their_zip(models_root, tmp_path):
     ]
 
 
+def test_rotating_callback_leaves_the_checkpoints_of_a_previous_run_in_place(models_root, tmp_path):
+    """Reproduction du 2026-09-12 : trois checkpoints périmés à 24 M pas, un run `--new` qui repart
+    de 0. La rotation triait TOUS les `<prefix>_*_steps.zip` du dossier par nombre de pas : les
+    checkpoints du run neuf, toujours les plus « anciens en pas », partaient à chaque écriture et
+    seuls les trois périmés survivaient — aucun checkpoint conservé pour aucun run depuis."""
+    save_path = tmp_path / "ckpts"
+    save_path.mkdir()
+    for steps in ("24309576", "24549576", "24789576"):
+        (save_path / f"ppo_checkpoint_{steps}_steps.zip").write_bytes(b"stale")
+        (save_path / f"ppo_checkpoint_{steps}_steps_vec_normalize.pkl").write_bytes(b"stale")
+        (save_path / f"ppo_checkpoint_{steps}_steps_run_state.json").write_text('{"episodes_trained": 1}')
+    callback = RotatingCheckpointCallback(
+        max_checkpoints=3, save_freq=1, save_path=str(save_path), name_prefix="ppo_checkpoint"
+    )
+    callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=7))
+    model = _make_vec_normalize_model()
+    callback.init_callback(cast(Any, model))
+
+    for steps in (10000, 20000, 30000, 40000):
+        _run_checkpoint(callback, model, steps)
+
+    remaining = sorted(p for p in os.listdir(save_path) if p.endswith(".zip"))
+    # Le périmé reste en place (contrat `test_scored_and_checkpoint_models_are_NOT_archived`) ;
+    # la rotation ne porte que sur ce que CE callback a écrit : 10000 part, les trois derniers restent.
+    assert remaining == [
+        "ppo_checkpoint_20000_steps.zip",
+        "ppo_checkpoint_24309576_steps.zip",
+        "ppo_checkpoint_24549576_steps.zip",
+        "ppo_checkpoint_24789576_steps.zip",
+        "ppo_checkpoint_30000_steps.zip",
+        "ppo_checkpoint_40000_steps.zip",
+    ]
+    # Et les compagnons du checkpoint tourné partent avec lui.
+    assert not any(p.startswith("ppo_checkpoint_10000_steps") for p in os.listdir(save_path))
+
+
 def _write_previous_canonical_model(models_root, run_dir: str = "/tb/run_20260101-000000"):
     """Un modele canonique complet : poids, deux compagnons, et son sidecar TensorBoard."""
     previous = models_root / "TestAgent" / "model_TestAgent.zip"

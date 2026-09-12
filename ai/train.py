@@ -2075,31 +2075,42 @@ class VecNormalizeCheckpointCallback(CheckpointCallback):
 
 
 class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
-    """Checkpoint callback that keeps only the most recent N checkpoints."""
+    """Checkpoint periodique qui ne garde que les N derniers checkpoints ecrits par CE callback.
+
+    La rotation porte sur la liste des chemins que l'instance a elle-meme ecrits, dans l'ordre
+    d'ecriture — PAS sur le contenu du dossier. Un balayage `<prefix>_*_steps.zip` trie par nombre
+    de pas supprimait les checkpoints du run courant : un run `--new` repart de 0, ses checkpoints
+    sont toujours les plus « anciens en pas » face a ceux d'un run precedent a plusieurs millions
+    de pas, et seuls les perimes survivaient (aucun checkpoint conserve du 2026-09-05 au
+    2026-09-12). Les checkpoints d'un run precedent restent en place : leur nom est unique, ils
+    sont l'historique (cf. le contrat des artefacts canoniques et
+    `test_scored_and_checkpoint_models_are_NOT_archived`).
+
+    L'ordre d'ecriture est l'ordre en pas : `num_timesteps` est monotone dans un processus, et
+    l'instance survit aux tranches `learn()` successives de `train_model` (`n_calls` n'est pas
+    remis a zero par `init_callback`).
+    """
 
     def __init__(self, max_checkpoints: int, **kwargs):
         super().__init__(**kwargs)
         self.max_checkpoints = max_checkpoints
+        #: Chemins des zips ecrits par cette instance, du plus ancien au plus recent.
+        self._written_checkpoints: List[str] = []
 
-    def _cleanup_old_checkpoints(self) -> None:
-        pattern = os.path.join(self.save_path, f"{self.name_prefix}_*_steps.zip")
-        # Tri sur le NOMBRE DE PAS, pas sur mtime : plusieurs checkpoints ecrits dans la meme
-        # granularite d'horloge se departageraient arbitrairement, et c'est bien le plus ancien
-        # en pas — pas en date de fichier — qu'il faut retirer.
-        checkpoint_files = sorted(
-            glob.glob(pattern),
-            key=lambda p: int(os.path.basename(p)[len(self.name_prefix) + 1:-len("_steps.zip")]),
-            reverse=True,
-        )
-        for old_checkpoint in checkpoint_files[self.max_checkpoints:]:
+    def _rotate_own_checkpoints(self, checkpoint_path: str) -> None:
+        # Un chemin reecrit (meme nombre de pas) redevient le plus recent, sans doublon.
+        if checkpoint_path in self._written_checkpoints:
+            self._written_checkpoints.remove(checkpoint_path)
+        self._written_checkpoints.append(checkpoint_path)
+        while len(self._written_checkpoints) > self.max_checkpoints:
             # Les compagnons partent AVEC leur zip : un orphelin serait relu par un futur
             # checkpoint de meme nom (cf. ai/model_artifacts.py).
-            remove_model_with_companions(old_checkpoint)
+            remove_model_with_companions(self._written_checkpoints.pop(0))
 
     def _on_step(self) -> bool:
         continue_training = super()._on_step()
         if self.save_freq > 0 and self.n_calls % self.save_freq == 0:
-            self._cleanup_old_checkpoints()
+            self._rotate_own_checkpoints(self._checkpoint_path(extension="zip"))
         return continue_training
 
 
