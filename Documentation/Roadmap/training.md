@@ -121,6 +121,64 @@ horizon plus long, ni sur un roster où le tir fractionné offrirait plus souven
 
 ---
 
+## 🔴 Entropie normalisée par l'état — contrôle vs traité, deux runs à faire {#entropie-normalisee}
+
+**Code livré le 2026-09-12 ; reste à faire : les deux runs, puis la lecture.** Décision utilisateur
+du 2026-09-13, option B deux fois : normalisation **par l'état** plutôt qu'un poids d'entropie par
+phase ; **témoin même code** plutôt que P0 du 2026-09-10, invalide comme témoin (70 commits
+moteur/IA depuis, dont overrun 12.06 et New Foes sur le chemin gym).
+
+**Cause mesurée le 2026-09-12** (sonde 6 épisodes, 1 301 décisions) : `train/entropy_loss` est une
+moyenne en nats dominée par `move_cell` (194 actions légales en moyenne, ln n moyen 5,07, H 2,23)
+alors que `charge_slot` vaut 0,007 nat sur 0,86 possible, `shoot_slot` 0,23 / 1,58, `deploy_slot`
+0,16 / 1,95, `oath` 0,11 / 1,59, `fight_weapon_slot` 0,17 / 1,35 ; `ent_coef` 0,01 pèse 1,3 % du
+gradient (`diag/grad_share_*_mb0`) et n'agit que sur le mouvement.
+
+**Mécanisme** (`ai/patched_ppo.py`, site unique du terme d'entropie) : clé `model_params`
+`entropy_normalize_by_legal`, acceptée par le constructeur de `PatchedMaskablePPO`, sérialisée
+dans le zip et reposée en `--append` (`_PLAIN_CURRICULUM_KEYS`, `ai/train.py`). Active : le terme
+de loss devient `−mean_i(H_i / ln n_i)` sur les échantillons à `n_i > 1` (`n_i` = somme du masque),
+borné dans [−1, 0] ; aucun `n_i > 1` → terme nul relié au graphe ; entropie `None` → lève.
+Absente : terme strictement inchangé. `train/entropy_loss` reste la moyenne brute ;
+`train/entropy_loss_normalized` est publié au même dump sur **tous** les runs
+(`Documentation/Reference/training/metriques.md`). `diag/grad_norm_entropy_mb0` porte le terme
+réellement optimisé. Verrous : `tests/unit/ai/test_entropy_normalize_by_legal.py` (16 tests,
+rouge/vert par mutation sur les cinq défauts réintroduits).
+
+**Config** : `config/agents/ArmageddonAgent_x1_entnorm/` = copie complète de
+`config/agents/ArmageddonAgent_x1/` (`inherits_from` inutilisable : `config_loader.py` résout
+**tout** vers l'agent de base, profils compris), fichiers et clé de récompense renommés.
+`x1_long` inchangé = bras de **contrôle** (verrou : égal au `x1_long` de base). `x1_long_entnorm`
+(`extends: x1_long`) = bras **traité** : clé active + `ent_coef` {0,5 → 0,05, `decay_fraction`
+0,4}, soit ×5 ≈ ln n moyen du mouvement : pression inchangée sur les états de mouvement
+(5/5,07), relevée de 5/ln n sur les têtes courtes (charge ×5,8, shoot ×3,2, deploy ×2,6, oath ×3,1,
+fight ×3,7). Aucun JSON existant de `config/` n'est modifié (P1 en cours). La copie est un
+**bras d'expérience** : à supprimer ou à réabsorber à la clôture, jamais à faire diverger.
+
+**Instrument de lecture** : `scripts/family_entropy_probe.py` — table H_A / H_B / ln n / KL(A‖B)
+par famille d'action sur les mêmes états (échantillonnés par A), plancher = politique UNIFORME
+(logits à zéro sur la vraie architecture, H = ln n exactement, `--floor-tol` 0,01, code 2 sinon).
+Vérifié le 2026-09-12 : plancher tenu sur les cinq familles visitées. Mesuré au passage : une
+politique **neuve** n'est PAS uniforme sur les têtes pointées (`shoot_slot` 0,45 / 1,10,
+`shoot_weapon_sel_slot` 1,04 / 1,39, `deploy_slot` 1,76 / 1,95) — d'où le plancher uniforme et non
+« non entraînée ». Verrous : `tests/unit/scripts/test_family_entropy_probe.py`.
+
+**Runs, uniquement après la fin du run `--etape P1` en cours (un seul run GPU)** :
+1. Contrôle : `python3 ai/train.py --agent ArmageddonAgent_x1_entnorm --training-config x1_long --scenario bot --resolution 1 --new`
+2. Traité : `python3 ai/train.py --agent ArmageddonAgent_x1_entnorm --training-config x1_long_entnorm --scenario bot --resolution 1 --new` — ce second `--new` **écarte** les artefacts du contrôle sous horodatage (`archive_canonical_artifacts_for_new_run`) : noter le nom archivé, c'est le modèle final du contrôle.
+
+Sur les deux : `diag/grad_norm_entropy_mb0`, `diag/grad_share_policy_mb0`, `train/n_minibatches_done`,
+`train/entropy_loss` (brut), `train/entropy_loss_normalized`.
+
+**Critère de clôture** : deux runs terminés ; métrique décisive = win-rate holdout final contrôle
+vs traité (300 ép./bot, IC95 ±5,7 par bras) et `00_critical/s_win_rate_deploy_auto` (bruité :
+12,5 % des épisodes en fin de run sur fenêtre 100) ; table H / KL par famille des deux modèles
+finaux ; écart rapporté **avec son intervalle** — un run par bras ne mesure pas la variance
+entre entraînements, jamais un verdict sur un point. Écart holdout < ~10 points → proposer le
+second run traité (option C), ne pas conclure.
+
+---
+
 ## 🔴 Régime de lignée — option A livrée, P2 à relancer depuis P1 {#regime-lignee-2026-09-07}
 
 **Livré le 2026-09-07. Ce qui reste à faire : lancer P2.** Trois runs P2 successifs ont échoué en

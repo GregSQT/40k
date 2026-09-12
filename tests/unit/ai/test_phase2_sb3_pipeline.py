@@ -360,6 +360,7 @@ class TestPatchedTrainNumericalParity:
         model.ent_coef = 0.01
         model.vf_coef = 0.5
         model.max_grad_norm = 0.5
+        model.entropy_normalize_by_legal = False
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -442,6 +443,7 @@ class TestPatchedTrainNumericalParity:
         model.ent_coef = 0.01
         model.vf_coef = 0.5
         model.max_grad_norm = 0.5
+        model.entropy_normalize_by_legal = False
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -676,6 +678,7 @@ class TestPatchedVsReferenceParity:
         model.ent_coef = 0.01
         model.vf_coef = 0.5
         model.max_grad_norm = 0.5
+        model.entropy_normalize_by_legal = False
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -819,6 +822,7 @@ class TestPatchedVsReferenceParity:
             model.ent_coef = 0.01
             model.vf_coef = 0.5
             model.max_grad_norm = 0.5
+            model.entropy_normalize_by_legal = False
             model.target_kl = None
             model.clip_range_vf = None
             model._current_progress_remaining = 1.0
