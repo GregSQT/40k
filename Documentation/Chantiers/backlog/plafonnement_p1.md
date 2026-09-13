@@ -478,6 +478,15 @@ log-prob 1,7 × 10⁻⁴).
       (`is_grads_batched`, −30 à −50 % estimés sur la phase gradients) — change le chemin autograd
       de l'instrument publié, à mesurer avant d'adopter. 26 tests, mutation rouge/vert (stats par
       groupe, troncature).
+- [x] Go/no-go du backward vectorisé (2026-09-13, suite 126) — **abandonné sur mesure**. Sur le
+      code actuel (1 passe avant + 8 backward par mini-lot : 4 termes + 4 λ), 3 rollouts P1
+      réels (`--rollouts 3`, canonique, `x1_lineage`) : collecte 37,6 / 32,8 / 30,4 s, gradients
+      7,2 / 6,7 / 6,8 s → phase gradients = 16,1 / 16,9 / 18,3 % du rollout, 17,0 % cumulé
+      (20,7 s sur 121,5 s). Critère fixé avant la mesure : ne vectoriser que si ≥ 25 %. Borne
+      haute du gain (−6/8 des backward, tout le reste inchangé) ≈ 5 s par rollout, ≈ 2 min sur
+      une collecte de 24 ; changer le chemin autograd de l'instrument publié ne vaut pas ce gain.
+      Rappel : à cotangentes empilées, un vjp batché fait les mêmes FLOPs de gradient de poids
+      que 6 backward séparés — le gain ne viendrait que du nombre de lancements de kernels.
 - Observation : une passe `--random-init` sur trois tuée par le moteur (`engine/w40k_core.py::_process_squad_action`, levée « execute_squad_move a échoué »,
   incohérence masque/exécution « collision intra-plan » pendant un tour bot) — état atteint par
   une politique aléatoire seulement ; bug hors chantier, consigné.
