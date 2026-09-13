@@ -211,16 +211,16 @@ _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 _RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
 _HAZARDOUS_TAG_RE = re.compile(r'\[HAZARDOUS(?::\d+)?\]')
 _HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]')
-#: 24.08 — jet de Deadly Demise RÉUSSI : `Unit <source> DEADLY DEMISE Roll:6 → Unit <victime>(c,r)
-#: SUFFERS N MW [DEADLY DEMISE]` (formateur `deadly_demise`, step_logger). Le jet raté (`→ no
-#: effect`) ne nomme aucune victime et ne matche pas. « MW » et non « Mortal Wounds » : la ligne
-#: ne doit tomber dans aucune branche SUFFERS des capacités (`_MW_ABILITY_SUFFERS_RE`).
-_DEADLY_DEMISE_EFFECT_RE = re.compile(
-    r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→\s+Unit\s+(\d+)\(-?\d+,-?\d+\)\s+SUFFERS\s+\d+\s+MW'
+#: 24.08 — ligne `[DEADLY DEMISE]` (formateur `deadly_demise`, step_logger), sur ses deux formes :
+#: `Unit <source> DEADLY DEMISE Roll:6 → Unit <victime>(c,r) SUFFERS N MW` (jet réussi) et
+#: `Unit <source> DEADLY DEMISE Roll:3 → no effect` (jet raté, aucune victime : groupe 2 vide).
+#: La source (groupe 1) exerce la règle ; c'est sur elle que l'usage §1.7 se relève. « MW » et
+#: non « Mortal Wounds » : la ligne ne doit tomber dans aucune branche SUFFERS des capacités
+#: (`_MW_ABILITY_SUFFERS_RE`).
+_DEADLY_DEMISE_RE = re.compile(
+    r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→'
+    r'(?:\s+Unit\s+(\d+)\(-?\d+,-?\d+\)\s+SUFFERS\s+\d+\s+MW)?'
 )
-#: 24.08 — SOURCE de la ligne, sur ses deux formes (jet réussi comme `→ no effect`) : c'est elle
-#: qui exerce la règle, et c'est sur elle que l'usage §1.7 se relève.
-_DEADLY_DEMISE_SOURCE_RE = re.compile(r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→')
 #: Mort par-figurine : `Unit N DEAD model=<mid> reason=<raison>`. La raison est EXIGÉE par le
 #: formateur (`KeyError` sinon) : elle est donc sur chaque ligne DEAD de toute grammaire.
 _DEAD_EVENT_RE = re.compile(r'Unit (\d+)\S* DEAD model=(\S+) reason=(\w+)')
@@ -1783,15 +1783,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 _is_engine_event = _is_dead_event or _is_dd_event
                 if not _is_engine_event:
                     state.deadly_demise_pending.clear()
-                    state.deadly_demise_exploder.clear()
+                    state.deadly_demise_recorded.clear()
+                    state.last_dead = None
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
                     _dead_mid = _dead_event_m.group(2)
                     _dead_reason = _dead_event_m.group(3)
                     # 24.08 : si ce socle porte Deadly Demise, sa ligne DEADLY DEMISE suit
-                    # immédiatement (`destroy_model`) — c'est lui qu'elle jugera
-                    # (`deadly_demise_exploder`).
-                    state.last_dead_mid_by_unit[_dead_uid] = _dead_mid
+                    # immédiatement (`destroy_model`) — c'est lui qu'elle jugera.
+                    state.last_dead = (_dead_uid, _dead_mid)
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
@@ -2145,10 +2145,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
-                        # Ligne sans préfixe `Unit N(` : défaut de grammaire déjà consigné par
-                        # le handler, rien à dater.
-                        if _dmg_actor_id is not None:
-                            state.last_attack_line_by_actor[_dmg_actor_id] = state.line_number
                 elif agent_decision_match:
                         # V11 §9.3 P2 — RELEVE d'une decision d'agent resolue (grammaire 8).
                         # PREMIERE branche de la chaine, et ce n'est pas cosmetique : le libelle
@@ -2501,41 +2497,50 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         stats['deadly_demise_triggers'][player] += 1
                         note_rule_usage(stats, "24.08", player)
                         # §1.7 : UN relevé par jet de D6 (première ligne de la source dans le
-                        # bloc, cf. `deadly_demise_exploder` — pas une par unité à portée, ce
+                        # bloc, cf. `deadly_demise_recorded` — pas une par unité à portée, ce
                         # qui ferait dépendre le compte de la densité du plateau), sur la SOURCE,
                         # sous le type de son escouade, jugé sur sa composition vivante PLUS le
-                        # socle qui vient d'exploser (24.08 est une règle d'unité, cf.
-                        # `note_special_rule_usage`). Type ou camp inconnus (journal tronqué) :
+                        # socle qui vient d'exploser (`last_dead` ; 24.08 est une règle d'unité,
+                        # cf. `note_special_rule_usage`). Type inconnu (journal tronqué) :
                         # abstention, comme la branche MW ci-dessus ; DEAD absent : vivants seuls.
-                        _dd_src_m = _DEADLY_DEMISE_SOURCE_RE.match(action_desc)
-                        if _dd_src_m is None:
+                        # Le `player` de la ligne est le propriétaire de la source
+                        # (`_apply_deadly_demise`).
+                        _dd_m = _DEADLY_DEMISE_RE.match(action_desc)
+                        if _dd_m is None:
                             _parse_error(
                                 "ligne [DEADLY DEMISE] sans source (attendu : "
                                 "'Unit N DEADLY DEMISE Roll:<d6> →' en tête d'action)"
                             )
-                        elif (_dd_src := _dd_src_m.group(1)) not in state.deadly_demise_exploder:
-                            _dd_mid = state.last_dead_mid_by_unit.get(_dd_src)  # get allowed : DEAD absent = abstention
-                            state.deadly_demise_exploder[_dd_src] = _dd_mid
-                            _dd_src_type = state.unit_types.get(_dd_src)  # get allowed
-                            _dd_player = state.unit_player.get(_dd_src)  # get allowed
-                            if _dd_src_type and _dd_player is not None:
-                                note_special_rule_usage(
-                                    stats, state, config, 'deadly_demise',
-                                    _dd_src, _dd_src_type, int(_dd_player),
-                                    include_mids=() if _dd_mid is None else (_dd_mid,),
-                                )
-                        # Jet réussi : la victime est annoncée AVANT ses lignes DEAD
-                        # (`_apply_deadly_demise` : append_action_log puis allocate_mortal_wounds).
-                        _dd_m = _DEADLY_DEMISE_EFFECT_RE.match(action_desc)
-                        if _dd_m is not None:
-                            state.deadly_demise_pending[_dd_m.group(2)] = _dd_m.group(1)
+                        else:
+                            _dd_src = _dd_m.group(1)
+                            if _dd_src not in state.deadly_demise_recorded:
+                                state.deadly_demise_recorded.add(_dd_src)
+                                _dd_src_type = state.unit_types.get(_dd_src)  # get allowed
+                                if _dd_src_type:
+                                    _dd_exploder = (
+                                        (state.last_dead[1],)
+                                        if state.last_dead is not None and state.last_dead[0] == _dd_src
+                                        else ()
+                                    )
+                                    note_special_rule_usage(
+                                        stats, state, config, 'deadly_demise',
+                                        _dd_src, _dd_src_type, player,
+                                        include_mids=_dd_exploder,
+                                    )
+                            # Jet réussi : la victime est annoncée AVANT ses lignes DEAD
+                            # (`_apply_deadly_demise` : append_action_log puis allocate_mortal_wounds).
+                            if _dd_m.group(2) is not None:
+                                state.deadly_demise_pending[_dd_m.group(2)] = _dd_src
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
-                        if _dmg_actor_id is not None:
-                            state.last_attack_line_by_actor[_dmg_actor_id] = state.line_number
                 else:
                     action_type = 'other'
+                # Frontière d'activation pour `died_in_own_activation` : date de la dernière ligne
+                # d'attaque de chaque acteur. Ligne sans préfixe `Unit N(` : défaut de grammaire
+                # déjà consigné par le handler, rien à dater.
+                if action_type in ('shoot', 'fight') and _dmg_actor_id is not None:
+                    state.last_attack_line_by_actor[_dmg_actor_id] = state.line_number
 
                 # Ici vivait un recalcul du contrôle d'objectif à CHAQUE action `step_inc`,
                 # suivi d'une seconde implémentation du barème primaire. Les deux sont supprimés :
