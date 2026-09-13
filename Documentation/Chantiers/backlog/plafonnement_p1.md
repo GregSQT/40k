@@ -291,6 +291,7 @@ log-prob 1,7 × 10⁻⁴).
 | S20 | Ventiler les pénalités −97 | C5 | ☐ non investigué | tracker | |
 | S21 | K ≈ 316 rollouts pour distinguer ‖G‖² = 0 de 8 × 10⁻⁵ | C3 | ✗ jugé inutile pour la décision | ~4 h | même à la borne haute, l'update est du bruit à > 97,8 % |
 | S22 | Second run traité entnorm (variance entre entraînements) | B1 | ☐ non fait | ~6 h | écart holdout < 10 points → « pas de verdict » selon le critère écrit ; remplacé par la mesure S13 plus directe |
+| S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 4 080 (8 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ⏳ **proposé (§7, complément 40k-a2)**, prédiction chiffrée | config `x1_lineage`, run ~6 h | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; risque VRAM du lot 4 080 à revoir |
 
 ---
 
@@ -445,6 +446,45 @@ part exacte (Var(r − E[r∣s,a])) soit identifiable avant de l'implémenter.
 
 **Décision restante (nouvel arbitrage à ouvrir) : S14 contre S15, et S11 avant ou non.** Ce
 dossier ne le tranche pas.
+
+**Complément de la session parallèle 40k-a2 (collecte `main.json`, même soir) — trois points
+qui changent l'arbitrage ci-dessus.**
+
+1. **Un levier de configuration reste non joué : λ court ET lot ×4 ensemble (S23).**
+   L'élimination ci-dessus a testé λ à lot fixe (f plafonne à 0,05) et, le 2026-09-07, le lot
+   ×4 à λ fixe (0,95, où le signal est indétectable). Elle n'a pas testé la combinaison, et les
+   nombres mesurés la prédisent : f_B = 1 / (1 + B_noise / B) — c'est la définition même de
+   B_noise, vérifiée sur les rollouts — donne à λ = 0,2 (B_noise 145 000 [69 000, 222 000]) et
+   B = 32 640 : **f ≈ 0,18 [0,13, 0,32], dix fois aujourd'hui** ; à λ = 0,95 : ≈ 0,07, non
+   distinguable de 0. Config `x1_lineage` : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size`
+   4 080, `target_kl` inchangé — les 8 mini-lots rendent la coupure KL à ~15 pas ≈ 2 epochs de
+   tout le rollout (l'objection du 32ᵉ/128 de 2026-09-07 disparaît) ; risque VRAM du lot
+   4 080 à revoir dès la première update (obs non résidentes depuis le 2026-09-07). Un run P1
+   de 30 000 épisodes jugé sur `03_selfplay/P0` contre le plat à 0,59 coûte ~6 h et tranche si
+   la lignée repart avant d'engager des semaines sur S14 / S15 ; s'il ne bouge rien avec
+   f ≈ 0,18, le levier config est épuisé et S14 / S15 restent seuls.
+2. **« S11 bornée à 86 % de Var(δ) » n'est pas une borne.** Var(r) / Var(δ) = 0,86 garde
+   Var(E[r∣s,a]) (qu'une récompense en espérance conserve) et ignore la covariance : avec
+   ρ(r, ΔV) = −0,55 ce rapport peut dépasser 1 sans que l'espérance retire quoi que ce soit
+   (ΔV = −r/2 donne 4,0 pour 0 % retirable). La part retirable est Var(ε) + 2 Cov(ε, ΔV) avec
+   ε = r − E[r∣s,a], inaccessible sans l'espérance ; la seule lecture solide de la table est que
+   la part de transition seule (Var ΔV 0,065) dépasse Var δ (0,048–0,050).
+3. **Le contrôle à poids aléatoires valide le code, pas le régime.** Une politique aléatoire a
+   l'entropie maximale, et le signal par échantillon vaut p(1−p)·ΔQ²/σ² : son f = 0,43 vient
+   du facteur p(1−p), que les politiques entraînées n'ont plus (têtes courtes à p ≈ 0,99). Le
+   fait informatif est le témoin 040721 : entraîné, 30 points sous P1, aussi indétectable à
+   λ = 0,95 — dans ce régime le gradient à long horizon d'une politique entraînée est sous la
+   résolution quelle que soit sa marge de progrès, ce qui penche vers « noyé » plutôt que
+   « stationnaire » pour P1, et soutient S23. Mesure à 20 min qui isolerait le facteur
+   d'exploration : sonder le modèle **traité** entnorm (même code, entropie ×2–5 sur les têtes
+   courtes) contre son témoin — `--model .../model_ArmageddonAgent_x1_entnorm.zip` — et lire si
+   f monte avec l'entropie à ΔQ inchangé.
+
+**Arbitrage proposé par 40k-a2 (à trancher par l'utilisateur) :** A — run P1 direct avec S23
+(6 h, décisif) ; B — sonde à 32 640 d'abord (option `n_steps` à ajouter, ~80 min) puis run ;
+C — S14 / S15 sans passer par le levier. Recommandation A : la prédiction repose sur une identité
+vérifiée sur les données, B confirmerait ce que les nombres disent déjà, et C engage des semaines
+sans savoir si un changement de config suffisait.
 
 ---
 

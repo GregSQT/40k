@@ -174,6 +174,12 @@ paragraphe ci-dessus)** : la source du bruit est le crédit lui-même (variance 
 l'échelle de Var(r), pas un point stationnaire — le gradient existe à λ = 0 et le contrôle
 aléatoire est vu) ; ni λ ni l'adversaire déterministe ne le réduisent. **Décision en attente** :
 le mécanisme d'avantage moyenné (tête Q ou distillation, §7 du dossier).
+**Complément 40k-a2 (même soir, collecte indépendante concordante) : un levier de configuration
+reste non joué — λ court ET lot ×4 ensemble (S23 du dossier : `gae_lambda` 0,2, `n_steps`
+32 640, `batch_size` 4 080), f attendu ≈ 0,18 [0,13, 0,32] par la définition même de B_noise,
+dix fois aujourd'hui ; « S11 bornée à 86 % » n'est pas une borne (covariance r / ΔV négative) ;
+le contrôle aléatoire valide le code, pas le régime (facteur p(1−p)). Arbitrage A / B / C au §7
+du dossier, recommandation A : run P1 direct avec S23 (~6 h) avant d'engager S14 / S15.**
 
 ---
 

@@ -523,6 +523,22 @@ ai/models/ArmageddonAgent_x1_entnorm/model_ArmageddonAgent_x1_entnorm_20260913-0
 `... --random-init 20260913 --rollouts 12` ; `... --opponent-deterministic`. Aucun JSON de
 `config/` ni zip/pkl touché (vérifié par mtime en sortie de chaque collecte).
 
+**Complément 40k-a2 (collecte indépendante, `main.json`, 24 rollouts, même env) :** λ 0,95 →
+0,8 → 0,5 → 0,2 → 0 : f_8160 = 0,018 [−0,008, 0,045] (non détecté) → 0,016 → 0,036 → 0,053 →
+**0,058 [0,027, 0,089]** (Δ‖G‖² appairé vs profil +7,6 × 10⁻⁴ [0,6, 15] × 10⁻⁴) ; B_noise(λ = 0,2)
+= 145 000 [69 000, 222 000], (λ = 0) = 133 000 [63 000, 203 000] ; par groupe à λ = 0 :
+`activate_query_net` f = 0,28 [0,17, 0,39], `deploy_query_net` 0,125, `features_extractor` 0,052,
+`move_cell_net` non détecté ; contrôle synthétique (crédit = log-prob de l'action, déterministe)
+f = 0,667 [0,637, 0,696], plafond de l'instrument pour un crédit cohérent de variance unité.
+Trois points qui complètent le verdict, détaillés au §7 du dossier `plafonnement_p1.md` :
+(1) λ à lot fixe et lot à λ = 0,95 ont été éliminés séparément, pas **ensemble** — à λ = 0,2 et
+B = 32 640 la définition de B_noise prédit f ≈ 0,18 [0,13, 0,32] (S23, run ~6 h à jouer avant
+S14 / S15) ; (2) Var(r) / Var(δ) = 0,86 n'est pas une borne de ce qu'une récompense en espérance
+retirerait (covariance négative, Var(E[r∣s,a]) conservée) ; (3) le contrôle aléatoire valide le
+code, pas le régime (son f vient du facteur p(1−p) d'une politique d'entropie maximale) — le fait
+informatif est le témoin entraîné à 28 % aussi indétectable que P1, qui penche vers « noyé »
+plutôt que « stationnaire ».
+
 ### Six défauts de la livraison, fermés le 2026-09-07
 
 **Le premier était bloquant pour toute la chaîne.** `_apply_curriculum_model_params` posait un
