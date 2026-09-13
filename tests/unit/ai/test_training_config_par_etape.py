@@ -147,10 +147,10 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     assert mp["batch_size"] == 2040
     assert mp["gae_lambda"] == pytest.approx(0.2)
     assert mp["vf_coef"] == pytest.approx(0.17)
-    # 12 envs (2026-09-13 23:55) : la RAM d'un rollout est proportionnelle au rollout TOTAL (chaque
-    # worker garde sa trajectoire, le learner en tient 3 copies) ; 24 puis 16 envs ont été tués par
-    # le watchdog à 1 et 2 Go disponibles. 32 640 / 12 = 2 720 pas par env, rollout divisible par le lot.
-    assert profil_lignee["n_envs"] == 12
+    # 8 envs (2026-09-14 00:50) : la RAM d'un rollout est proportionnelle au rollout TOTAL (chaque
+    # worker garde sa trajectoire) ; 24, 16 puis 12 envs ont laissé 1, 2 puis 4 Go disponibles au
+    # pic de réception. 32 640 / 8 = 4 080 pas par env, rollout divisible par le lot.
+    assert profil_lignee["n_envs"] == 8
     assert (mp["n_steps"] // profil_lignee["n_envs"] * profil_lignee["n_envs"]) % mp["batch_size"] == 0
     # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
