@@ -552,7 +552,7 @@ def handle_fight(
             if (
                 died_before_phase(fighter_id, turn, phase, state.line_number, state.unit_deaths)
                 and not died_in_own_activation(
-                    fighter_id, turn, phase, state.unit_death_cause, state.last_attack_line_by_actor
+                    fighter_id, turn, phase, state.deadly_demise_deaths, state.last_attack_line_by_actor
                 )
             ):
                 attacker_player = require_key(state.unit_player, fighter_id)

@@ -384,7 +384,7 @@ def handle_shoot(
         # 24.08, jumeau du contrôle FIGHT : le tireur qui détruit un porteur de Deadly Demise à
         # ≤ 6" et meurt de l'explosion a son DEAD écrit avant ses lignes SHOT.
         if unit_died_before_shoot and not is_false_positive and not died_in_own_activation(
-            shooter_id, turn, phase, state.unit_death_cause, state.last_attack_line_by_actor
+            shooter_id, turn, phase, state.deadly_demise_deaths, state.last_attack_line_by_actor
         ):
             stats['shoot_dead_unit'][player] += 1
             if stats['first_error_lines']['shoot_dead_unit'][player] is None:
