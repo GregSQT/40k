@@ -1,18 +1,20 @@
-"""24.08 Deadly Demise dans la table §1.7 : relevé par unité SOURCE, verdict sur les vivants ∪ le socle qui explose.
+"""24.08 Deadly Demise dans la table §1.7 : relevé par unité SOURCE, verdict sur le socle DÉTRUIT.
 
 Mesuré sur l'éval du 2026-09-13 : `deadly_demise_triggers` = 90 + 63 alors que la table §1.7
 affichait `deadly_demise WeirdBoy 0 0` — la branche `[DEADLY DEMISE]` incrémentait le compteur
 d'exercice sans jamais relever l'usage §1.7.
 
-Règles lues (Documentation/40k_rules, 24.08 et 19.04) : « Each time a model IN THIS UNIT is
-destroyed […] roll one D6 » — règle d'UNITÉ, conférée à toute l'escouade attachée « until the
-source of that ability/rule is destroyed ». Donc un Boy mené par un WeirdBoy explose légalement
-tant que le WeirdBoy est dans l'escouade, et plus jamais après sa disparition.
+Règle : Deadly Demise est une ability CORE (PDF 24.08) ; les abilities CORE ne sont PAS conférées
+à l'escouade attachée par 19.04 (décision du 2026-09-13, Documentation/Reference/jeu/
+couverture_regles.md § Attached Units — le Rules Commentary qui la fonde n'est pas dans
+Documentation/40k_rules/). Seul le socle dont la datasheet porte la règle explose : un Boy mené
+par un WeirdBoy n'explose jamais, WeirdBoy vivant ou non.
 
-Le verdict se rend sur la composition vivante PLUS le socle qui vient d'exploser : sa ligne
-`DEAD model=` précède la ligne DEADLY DEMISE (écrite dans `destroy_model`), et il faisait partie
-de l'unité à l'instant du jet (exemple du PDF : le jet, puis l'Impulsor est retiré). Le socle est
-celui du `DEAD` de la source qui précède sa PREMIÈRE ligne DEADLY DEMISE du bloc.
+Le verdict se rend donc sur le socle qui vient d'exploser, SEUL : sa ligne `DEAD model=` précède
+la ligne DEADLY DEMISE (écrite dans `destroy_model`), c'est celui du `DEAD` de la source qui
+précède sa PREMIÈRE ligne DEADLY DEMISE du bloc. Les vivants ne conviennent pas : ils ne
+contiennent plus un porteur qui était le dernier socle, et ils blanchiraient un Boy qui explose
+parce que son WeirdBoy respire encore.
 
 UN relevé par jet de D6, pas une ligne par unité à 6" : `_apply_deadly_demise` écrit une ligne par
 unité dans le rayon — la source comprise tant qu'il lui reste des socles, dont les pertes
@@ -87,32 +89,15 @@ def test_weirdboy_attache_qui_explose_est_valide_sous_la_cle_de_l_escouade(tmp_p
     assert ("deadly_demise", "Boyz") not in stats["special_rule_usage_invalid"]
 
 
-def test_un_boy_qui_explose_pendant_que_le_weirdboy_est_vivant_est_valide(tmp_path):
-    """24.08 + 19.04 : la règle du WeirdBoy est conférée à tout Boy de l'escouade tant qu'il vit."""
+def test_un_boy_qui_explose_est_invalide_meme_si_le_weirdboy_est_vivant(tmp_path):
+    """Ability CORE non conférée : le Boy (4#0) n'a pas la règle, le WeirdBoy vivant ne le
+    blanchit pas. C'est le détecteur du défaut moteur « clé `deadly_demise` posée sur l'escouade
+    depuis l'union 19.04 » (shared_utils.py:1251, lue :4520).
+
+    Mutation : juger via les vivants (`judged_mids=None`) → INVALID 0."""
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS_ATTACHE + _dead("4#0") + _DD_EFFET, units=_WEIRDBOY_ATTACHE, ez_vertical_inches=None,
     ))
-    assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
-    assert ("deadly_demise", "Boyz") not in stats["special_rule_usage_invalid"]
-
-
-def test_un_boy_qui_explose_apres_la_disparition_du_weirdboy_est_invalide(tmp_path):
-    """19.04 : la source est détruite ET sortie de la composition (ligne `[MODELS:]` postérieure
-    à sa mort) ; un Boy qui explose ensuite n'a plus la règle. C'est le détecteur du défaut
-    moteur « clé `deadly_demise` d'escouade jamais rafraîchie » (shared_utils.py:1251/4520).
-
-    Mutation : juger le socle exploseur SEUL (sans les vivants) → le Boy sortait déjà INVALID,
-    mais le cas précédent (WeirdBoy vivant) sortait INVALID aussi — les deux tests ensemble
-    verrouillent l'union."""
-    weirdboy_mort = "[10:00:02] E1 T1 P2 FIGHT : Unit 4 DEAD model=4#1 reason=combat [SUCCESS]\n"
-    mouvement_sans_lui = "[10:00:03] E1 T2 P1 MOVE : Unit 4(50,50) MOVED from (50,50) to (50,52) [R:+0.0] [MODELS: 4#0@(50,52,z0)] [SUCCESS]\n"
-    boy_mort = "[10:00:04] E1 T2 P2 FIGHT : Unit 4 DEAD model=4#0 reason=combat [SUCCESS]\n"
-    dd = "[10:00:04] E1 T2 P1 FIGHT : Unit 4 DEADLY DEMISE Roll:3 → no effect [DEADLY DEMISE] [SUCCESS]\n"
-    stats = _parse(tmp_path, entete_step_log(
-        _DEPLOIEMENTS_ATTACHE + weirdboy_mort + mouvement_sans_lui + boy_mort + dd,
-        units=_WEIRDBOY_ATTACHE, ez_vertical_inches=None,
-    ))
-    assert stats["parse_errors"] == [], stats["parse_errors"]
     assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
     assert stats["special_rule_usage_invalid"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
 
@@ -125,19 +110,25 @@ def test_une_source_qui_n_a_jamais_porte_la_regle_est_invalide(tmp_path):
     assert stats["special_rule_usage_invalid"][("deadly_demise", "Intercessor")] == {1: 1, 2: 0}
 
 
-def test_deadly_demise_sans_dead_prealable_est_jugee_sur_les_vivants_seuls(tmp_path):
-    """Journal tronqué (aucune ligne DEAD de la source avant l'explosion) : le verdict se rend sur
-    la composition vivante, comme toute autre règle — une unité qui ne porte jamais la règle
-    reste INVALID, un porteur vivant reste VALID."""
+def test_deadly_demise_sans_dead_prealable_est_relevee_sans_verdict(tmp_path):
+    """Journal tronqué (aucune ligne DEAD de la source dans le bloc de l'explosion) : le socle qui
+    explose est inconnu, l'usage est relevé et le verdict s'abstient — jamais une faute inventée.
+    Un DEAD d'un bloc ANTÉRIEUR (ici le Boy 4#0, avant un MOVE) ne passe pas pour l'exploseur.
+
+    Mutation : garder `last_dead` hors bloc → le second cas juge 4#0 → INVALID 1."""
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS + _DD_EFFET, units=_SANS_PORTEUR, ez_vertical_inches=None,
     ))
     assert stats["special_rule_usage"][("deadly_demise", "Intercessor")] == {1: 1, 2: 0}
-    assert stats["special_rule_usage_invalid"][("deadly_demise", "Intercessor")] == {1: 1, 2: 0}
+    assert ("deadly_demise", "Intercessor") not in stats["special_rule_usage_invalid"]
+
+    mouvement = "[10:00:03] E1 T1 P2 MOVE : Unit 105(51,50) MOVED from (51,50) to (51,52) [R:+0.0] [MODELS: 105#0@(51,52,z0)] [SUCCESS]\n"
     stats = _parse(tmp_path, entete_step_log(
-        _DEPLOIEMENTS + _DD_EFFET, units=_WEIRDBOY_SEUL, ez_vertical_inches=None,
+        _DEPLOIEMENTS_ATTACHE + _dead("4#0") + mouvement + _DD_EFFET,
+        units=_WEIRDBOY_ATTACHE, ez_vertical_inches=None,
     ))
-    assert ("deadly_demise", "WeirdBoy") not in stats["special_rule_usage_invalid"]
+    assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
+    assert ("deadly_demise", "Boyz") not in stats["special_rule_usage_invalid"]
 
 
 def test_ligne_deadly_demise_sans_source_est_une_erreur_de_parse(tmp_path):
@@ -186,10 +177,9 @@ def test_une_explosion_illegale_pres_de_deux_unites_compte_une_faute_pas_deux(tm
 
 def test_deux_explosions_separees_de_la_meme_source_font_deux_releves(tmp_path):
     """Le bloc se ferme à la première ligne qui n'est ni DEAD ni DEADLY DEMISE : l'explosion
-    suivante de la même escouade est un nouveau jet. Ici le WeirdBoy reste dans la composition
-    connue (aucun `[MODELS:]` de l'escouade 4 entre les deux) : les deux jets sont VALID.
+    suivante de la même escouade est un nouveau jet, jugé sur SON socle (ici un Boy : INVALID).
 
-    Mutation : ne pas vider `deadly_demise_recorded` hors bloc → usage 1."""
+    Mutation : ne pas vider `deadly_demise_recorded` hors bloc → usage 1, INVALID 0."""
     mouvement = "[10:00:03] E1 T1 P2 MOVE : Unit 105(51,50) MOVED from (51,50) to (51,52) [R:+0.0] [MODELS: 105#0@(51,52,z0)] [SUCCESS]\n"
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS_ATTACHE + _dead("4#1") + _DD_RATE + mouvement + _dead("4#0") + _DD_RATE,
@@ -197,16 +187,16 @@ def test_deux_explosions_separees_de_la_meme_source_font_deux_releves(tmp_path):
     ))
     assert stats["parse_errors"] == [], stats["parse_errors"]
     assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 2, 2: 0}
-    assert ("deadly_demise", "Boyz") not in stats["special_rule_usage_invalid"]
+    assert stats["special_rule_usage_invalid"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
 
 
-def test_le_socle_exploseur_compte_meme_deja_sorti_de_la_composition_vivante(tmp_path):
-    """Le verdict est vivants ∪ exploseur. Aujourd'hui la ligne `DEAD model=` du moteur ne porte
+def test_le_porteur_qui_explose_est_valide_meme_deja_sorti_de_la_composition_vivante(tmp_path):
+    """Le verdict ne dépend pas des vivants. Aujourd'hui la ligne `DEAD model=` du moteur ne porte
     pas de `[MODELS:]`, donc le socle reste « vivant » jusqu'au prochain recalage (limite connue
-    de `living_datasheets`) et l'union ne se voit pas ; ce journal, grammaticalement légal, retire
-    le WeirdBoy sur sa propre ligne DEAD — c'est ce que produirait la levée de cette limite.
+    de `living_datasheets`) ; ce journal, grammaticalement légal, retire le WeirdBoy sur sa
+    propre ligne DEAD — c'est ce que produirait la levée de cette limite.
 
-    Mutation : ignorer `include_mids` → INVALID 1."""
+    Mutation : juger via les vivants → INVALID 1."""
     weirdboy_mort_recale = "[10:00:02] E1 T1 P2 FIGHT : Unit 4 DEAD model=4#1 reason=combat [MODELS: 4#0@(50,50,z0)] [SUCCESS]\n"
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS_ATTACHE + weirdboy_mort_recale + _DD_EFFET,
@@ -215,21 +205,3 @@ def test_le_socle_exploseur_compte_meme_deja_sorti_de_la_composition_vivante(tmp
     assert stats["parse_errors"] == [], stats["parse_errors"]
     assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
     assert ("deadly_demise", "Boyz") not in stats["special_rule_usage_invalid"]
-
-
-def test_un_dead_anterieur_de_la_source_hors_bloc_ne_rejoint_pas_les_vivants(tmp_path):
-    """Journal tronqué APRÈS une perte antérieure : le WeirdBoy 4#1 est mort et sorti de la
-    composition dans un bloc clos (le MOVE l'a fermé), puis une ligne DEADLY DEMISE de 4 arrive
-    sans DEAD immédiat. Le socle exploseur est inconnu → vivants seuls (un Boy : INVALID), pas le
-    WeirdBoy périmé qui blanchirait le jet.
-
-    Mutation : garder le dernier DEAD par escouade pour toute la durée de l'épisode → INVALID 0."""
-    weirdboy_mort_recale = "[10:00:02] E1 T1 P2 FIGHT : Unit 4 DEAD model=4#1 reason=combat [MODELS: 4#0@(50,50,z0)] [SUCCESS]\n"
-    mouvement = "[10:00:03] E1 T1 P2 MOVE : Unit 105(51,50) MOVED from (51,50) to (51,52) [R:+0.0] [MODELS: 105#0@(51,52,z0)] [SUCCESS]\n"
-    stats = _parse(tmp_path, entete_step_log(
-        _DEPLOIEMENTS_ATTACHE + weirdboy_mort_recale + mouvement + _DD_RATE,
-        units=_WEIRDBOY_ATTACHE, ez_vertical_inches=None,
-    ))
-    assert stats["parse_errors"] == [], stats["parse_errors"]
-    assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
-    assert stats["special_rule_usage_invalid"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}

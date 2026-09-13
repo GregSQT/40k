@@ -207,6 +207,9 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Attached unit shares all keywords | 19.03 | ✅ |
 | Leader ability propagates to whole unit | 19.04 | ✅ |
 | Ability stops on last leader model destroyed | 19.04 | ✅ |
+| **Core abilities (PDF 24) are NOT conferred to the attached unit** | 19.04 + Rules Commentary | ⚠️ décision |
+
+**Décision du 2026-09-13 (utilisateur) — Core abilities et 19.04.** Les abilities CORE (celles du PDF 24 : Deadly Demise 24.08, Deep Strike 24.09, Feel No Pain 24.12, …) ne se transmettent PAS à l'unité attachée par 19.04 : elles restent propres au(x) modèle(s) dont la datasheet les porte. Source : Rules Commentary GW, **absent de `Documentation/40k_rules/`** (vérifié le 2026-09-13 : aucun des 25 PDF n'énonce cette exclusion ; lu littéralement, 19.04 « abilities/rules that affect a unit (or models in it) apply to every model in an attached unit » l'aurait conférée). Conséquence concrète : un Boy mené par un WeirdBoy (Deadly Demise D3) n'explose pas ; seul le WeirdBoy explose. L'analyzer juge donc 24.08 sur le socle DÉTRUIT (`ai/analyzer_rules.py`, `judged_mids`), et le moteur doit lire la règle sur la figurine détruite, pas sur l'union d'escouade (défaut ouvert, cf. ROADMAP suite 119). Toute règle CORE lue par le moteur via `unit["UNIT_RULES"]` (union 19.04) est suspecte — audit à part.
 
 ---
 

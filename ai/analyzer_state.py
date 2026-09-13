@@ -216,9 +216,9 @@ class AnalyzerState:
     # model_id), `None` hors bloc. La ligne DEADLY DEMISE ne nomme pas la figurine qui explose ;
     # `destroy_model` la déclenche juste après avoir journalisé SA ligne DEAD, donc le DEAD qui
     # précède immédiatement la PREMIÈRE ligne DEADLY DEMISE d'une source est le socle qui
-    # explose — il rejoint les vivants pour le verdict (il faisait partie de l'unité à l'instant
-    # du jet). Un DEAD d'une autre escouade ou aucun DEAD (journal tronqué) = vivants seuls,
-    # jamais un socle périmé d'une mort antérieure.
+    # explose — jugé SEUL (ability CORE, non conférée à l'escouade par 19.04). Un DEAD d'une
+    # autre escouade ou aucun DEAD (journal tronqué) = abstention, jamais un socle périmé d'une
+    # mort antérieure ni une faute inventée.
     last_dead: Optional[Tuple[str, str]] = None
     # 24.08 — sources déjà relevées dans le bloc. Une explosion écrit UNE ligne par unité à 6",
     # la source comprise tant qu'il lui reste des socles : ses propres pertes `DEAD … reason=hazard`

@@ -2499,10 +2499,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # §1.7 : UN relevé par jet de D6 (première ligne de la source dans le
                         # bloc, cf. `deadly_demise_recorded` — pas une par unité à portée, ce
                         # qui ferait dépendre le compte de la densité du plateau), sur la SOURCE,
-                        # sous le type de son escouade, jugé sur sa composition vivante PLUS le
-                        # socle qui vient d'exploser (`last_dead` ; 24.08 est une règle d'unité,
-                        # cf. `note_special_rule_usage`). Type inconnu (journal tronqué) :
-                        # abstention, comme la branche MW ci-dessus ; DEAD absent : vivants seuls.
+                        # sous le type de son escouade, jugé sur le SEUL socle qui vient
+                        # d'exploser (`last_dead`) : ability CORE, non conférée à l'escouade par
+                        # 19.04 (cf. `living_datasheets`). Type inconnu (journal tronqué) :
+                        # abstention, comme la branche MW ci-dessus ; DEAD absent : abstention.
                         # Le `player` de la ligne est le propriétaire de la source
                         # (`_apply_deadly_demise`).
                         _dd_m = _DEADLY_DEMISE_RE.match(action_desc)
@@ -2525,7 +2525,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     note_special_rule_usage(
                                         stats, state, config, 'deadly_demise',
                                         _dd_src, _dd_src_type, player,
-                                        include_mids=_dd_exploder,
+                                        judged_mids=_dd_exploder,
                                     )
                             # Jet réussi : la victime est annoncée AVANT ses lignes DEAD
                             # (`_apply_deadly_demise` : append_action_log puis allocate_mortal_wounds).
