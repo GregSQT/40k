@@ -215,7 +215,9 @@ class AnalyzerState:
     # 24.08 — dernier socle DÉTRUIT de chaque escouade : unit_id -> model_id, écrit par la
     # ligne `DEAD model=`. La ligne DEADLY DEMISE ne nomme pas la figurine qui explose ; c'est
     # `destroy_model` qui la déclenche juste après avoir journalisé SA ligne DEAD, donc le DEAD
-    # qui précède la PREMIÈRE ligne DEADLY DEMISE d'une source est le socle qui explose.
+    # qui précède la PREMIÈRE ligne DEADLY DEMISE d'une source est le socle qui explose. Même
+    # durée de vie que le bloc DEAD/DEADLY DEMISE contigu : vidé à la première autre ligne,
+    # sinon un DEAD d'un tour antérieur passerait pour l'exploseur d'un journal tronqué.
     last_dead_mid_by_unit: Dict[str, str] = field(default_factory=dict)
     # 24.08 — socle qui EXPLOSE, par source, figé à sa première ligne DEADLY DEMISE du bloc :
     # source -> model_id (None si aucun DEAD de la source ne précède : journal tronqué). Une

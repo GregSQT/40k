@@ -1784,6 +1784,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 if not _is_engine_event:
                     state.deadly_demise_pending.clear()
                     state.deadly_demise_exploder.clear()
+                    state.last_dead_mid_by_unit.clear()
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
                     _dead_mid = _dead_event_m.group(2)
