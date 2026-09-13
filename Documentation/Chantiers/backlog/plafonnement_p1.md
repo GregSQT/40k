@@ -453,8 +453,7 @@ log-prob 1,7 × 10⁻⁴).
       `info["TimeLimit.truncated"]` (comme `ai/training_callbacks`) et S'ARRÊTE sur toute
       troncature, sur chaque rollout (faux nul + bootstrap replié dans la récompense du dernier
       pas → Var(r) faussée). (3) `--opponent-deterministic` jugé sur la plomberie, plus sur les
-      bornes du run de référence (autre adversaire) ; mode écrit dans le JSON (`acceptance.mode`,
-      `check_control_acceptance` → `check_plumbing_acceptance`).
+      bornes du run de référence (autre adversaire) ; mode écrit dans le JSON (`acceptance.mode`).
       (4) `vf_coef` / `ent_coef` du checkpoint mesuré rapportés (`model_hyperparams`, en-têtes
       des termes) — un contrôle a les siens. Doc : « part r » est descriptive, pas la part
       retirable par une récompense en espérance (déjà rétracté §7) ; parts rendues nan quand
@@ -469,6 +468,16 @@ log-prob 1,7 × 10⁻⁴).
       familles lues comme le moteur, trous de la revue fermés) ; repris de 40k-a2 les stats par
       groupe pour chaque λ (`per_lambda[λ][groupe]`, celles citées dans training.md à λ = 0) et
       la garde `model._last_episode_starts == dones[-1]` ; branche et worktree 40k-a2 supprimés.
+- [x] /simplify (2026-09-13, suite 125, quatre angles) : une seule famille d'accumulateurs
+      indexée par clé de backward (les quatre termes puis les λ, plus de jumeaux `sweep_*`),
+      `group_grams` partagé, `lambda_sweep_stats` reprend les stats déjà calculées (plus de
+      recalcul du λ du modèle), mode d'acceptation décidé une fois dans le contexte
+      (`acceptance.mode` + `PLUMBING_ACCEPTANCE_KEYS`, wrapper supprimé), troncature levée dans
+      le recorder lui-même, `load_vec_normalize` réutilisé, `model_hyperparams` porté par le seul
+      `context`. Écarté : gradients des six pertes « ratio » en un seul backward vectorisé
+      (`is_grads_batched`, −30 à −50 % estimés sur la phase gradients) — change le chemin autograd
+      de l'instrument publié, à mesurer avant d'adopter. 26 tests, mutation rouge/vert (stats par
+      groupe, troncature).
 - Observation : une passe `--random-init` sur trois tuée par le moteur (`engine/w40k_core.py::_process_squad_action`, levée « execute_squad_move a échoué »,
   incohérence masque/exécution « collision intra-plan » pendant un tour bot) — état atteint par
   une politique aléatoire seulement ; bug hors chantier, consigné.

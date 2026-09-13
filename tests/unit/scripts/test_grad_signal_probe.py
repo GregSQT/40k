@@ -475,12 +475,10 @@ def test_balayage_lambda_differences_appairees():
              0.0: {"all": gram_matrix(noisy), "head": gram_matrix(noisy[:, :half])}}
     mbs = {0.95: {"all": mb_clean, "head": mb_clean / 2}, 0.5: {"all": mb_clean, "head": mb_clean / 2},
            0.0: {"all": mb_noisy, "head": mb_noisy / 2}}
-    out = lambda_sweep_stats(grams, mbs, BATCH_STEPS)
+    stats = {lam: {g: signal_stats(grams[lam][g], mbs[lam][g], BATCH_STEPS) for g in grams[lam]} for lam in grams}
+    out = lambda_sweep_stats(grams, stats)
     assert out["lambdas"] == [0.95, 0.5, 0.0]
-    for gname in ("all", "head"):  # chaque groupe porte SES stats, pas celles de « all »
-        assert out["per_lambda"][0.95][gname]["true_sq"]["estimate"] == pytest.approx(
-            signal_stats(grams[0.95][gname], mbs[0.95][gname], BATCH_STEPS)["true_sq"]["estimate"]
-        )
+    assert out["per_lambda"] == stats  # repris tels quels, par λ et par groupe
     assert out["per_lambda"][0.95]["head"]["true_sq"]["estimate"] < out["per_lambda"][0.95]["all"]["true_sq"]["estimate"]
     by_pair = {(p["lambda_a"], p["lambda_b"]): p for p in out["pairs"]}
     assert set(by_pair) == {(0.95, 0.5), (0.95, 0.0), (0.5, 0.0)}
@@ -495,9 +493,9 @@ def test_balayage_lambda_differences_appairees():
     # Le signal vrai est le même des deux côtés : Δ‖G‖² appairé contient 0.
     assert diff["true_sq_diff"]["low"] <= 0.0 <= diff["true_sq_diff"]["high"]
     with pytest.raises(ValueError):
-        lambda_sweep_stats(grams, {0.95: mbs[0.95]}, BATCH_STEPS)
+        lambda_sweep_stats(grams, {0.95: stats[0.95]})
     with pytest.raises(ValueError):
-        lambda_sweep_stats({lam: {"head": g["head"]} for lam, g in grams.items()}, mbs, BATCH_STEPS)  # « all » requis
+        lambda_sweep_stats({lam: {"head": g["head"]} for lam, g in grams.items()}, stats)  # « all » requis
 
 
 class _TinyPolicy(nn.Module):
@@ -599,11 +597,11 @@ def test_reset_policy_parameters_change_tout_et_est_reproductible():
 
 
 def test_acceptation_plomberie_ne_juge_que_la_part_pool():
-    from scripts.grad_signal_probe import check_plumbing_acceptance
+    from scripts.grad_signal_probe import PLUMBING_ACCEPTANCE_KEYS, check_acceptance
 
     ok = {"pool_episode_share": 0.68, "explained_variance": -5.0, "grad_norm_policy_mb0": 9.0}
-    assert check_plumbing_acceptance(ok) == []
-    failures = check_plumbing_acceptance({"pool_episode_share": 0.2})
+    assert check_acceptance(ok, keys=PLUMBING_ACCEPTANCE_KEYS) == []
+    failures = check_acceptance({"pool_episode_share": 0.2}, keys=PLUMBING_ACCEPTANCE_KEYS)
     assert len(failures) == 1 and failures[0].startswith("pool_episode_share")
 
 
@@ -612,7 +610,7 @@ def _done_info(winner: int | None, controlled: int = 1, truncated: bool = False,
             "controlled_player": controlled, "TimeLimit.truncated": truncated, "action": "wait", **extra}
 
 
-def test_recorder_score_les_issues_et_enregistre_les_troncatures_du_moteur():
+def test_recorder_score_les_issues_et_leve_sur_une_troncature_du_moteur():
     """Le moteur ne rend jamais `winner = None` : sa limite anti-runaway pose un NUL avec
     `truncated = True`. Le signal gym `TimeLimit.truncated` est le seul discriminant ; sans lui,
     l'épisode tronqué passait pour un nul et le bootstrap replié dans sa récompense entrait dans
@@ -624,23 +622,26 @@ def test_recorder_score_les_issues_et_enregistre_les_troncatures_du_moteur():
     rec.locals = {"dones": np.array([True, False, True]),
                   "infos": [_done_info(1), {"TimeLimit.truncated": False, "action": "ingress_move"}, _done_info(2)]}
     assert rec._on_step() is True
-    debug = {"turn": 4, "phase": "move", "steps": 5000}
     rec.locals = {"dones": np.array([False, True, False]),
-                  "infos": [{"TimeLimit.truncated": False}, _done_info(
-                      DRAW_WINNER, truncated=True, win_method="step_limit",
-                      truncation_reason="episode_steps_limit", truncation_debug=debug), {"TimeLimit.truncated": False}]}
+                  "infos": [{"TimeLimit.truncated": False}, _done_info(DRAW_WINNER), {"TimeLimit.truncated": False}]}
     rec._on_step()
     dones, outcomes, setting_up = rec.arrays()
     assert dones.shape == (2, 3) and outcomes[0].tolist() == [OUTCOME_REWARD, 0.0, -OUTCOME_REWARD]
     assert outcomes[1].tolist() == [0.0, 0.0, 0.0]
     assert setting_up.tolist() == [[False, True, False], [False, False, False]]
     assert rec.episodes_total == 3 and rec.episodes_pool == 3 and rec.episode_lengths == [90, 90, 90]
-    assert rec.truncations == [{"env": 1, "step": 1, "truncation_reason": "episode_steps_limit",
-                                "win_method": "step_limit", "truncation_debug": debug}]
+    # Un nul par limite anti-runaway est TRONQUÉ : levée avec le diagnostic du moteur, jamais scoré.
+    debug = {"turn": 4, "phase": "move", "steps": 5000}
+    rec.locals = {"dones": np.array([False, True, False]),
+                  "infos": [{"TimeLimit.truncated": False}, _done_info(
+                      DRAW_WINNER, truncated=True, win_method="step_limit",
+                      truncation_reason="episode_steps_limit", truncation_debug=debug), {"TimeLimit.truncated": False}]}
+    with pytest.raises(RuntimeError, match="step_limit.*'steps': 5000"):
+        rec._on_step()
     # Un vainqueur None sur un épisode fini viole le contrat du moteur : levée, pas comptée.
     rec.locals = {"dones": np.array([True, False, False]),
                   "infos": [_done_info(None), {"TimeLimit.truncated": False}, {"TimeLimit.truncated": False}]}
     with pytest.raises(RuntimeError):
         rec._on_step()
     rec._on_rollout_start()
-    assert rec.truncations == [] and rec.episodes_total == 0
+    assert rec.episodes_total == 0 and rec.dones == []
