@@ -12,6 +12,58 @@
 
 ---
 
+## En clair — ce qu'on sait, ce qu'on propose (lecture non technique, 2026-09-13 soir)
+
+**Le problème.** P1, c'est P0 réentraîné contre lui-même. Il gagne 6 parties sur 10 contre P0
+depuis 40 000 parties et n'avance plus ; le seuil pour passer à l'étape suivante demande 6,5 sur
+10.
+
+**Ce qu'on a essayé et écarté.**
+- Les réglages classiques de l'apprentissage (taille des lots, vitesse d'apprentissage, nombre
+  de passes, plafond du gradient, poids du critic) : chacun testé ou mesuré, aucun ne débloque.
+- L'exploration : l'agent hésite très peu sur les décisions courtes (charger, viser, se
+  déployer). Le faire hésiter 2 à 5 fois plus (expérience d'hier) n'a rien changé au jeu.
+- Baisser le seuil de promotion : le même dispositif passait quand le seuil valait 0,55 ; écarté
+  par décision, parce que ça promeut un agent qui n'apprend plus.
+
+**La cause, mesurée ce soir.** À chaque étape d'apprentissage, l'agent reçoit un « conseil » :
+dans quelle direction se modifier pour mieux jouer. On a mesuré quelle part de ce conseil est du
+vrai signal et quelle part est du hasard (dés, choix aléatoires de l'adversaire, longues chaînes
+de conséquences). Avec les réglages actuels, **le conseil est du hasard à 98 %** : l'agent bouge
+à chaque étape, mais dans une direction tirée au sort — c'est le plateau. Deux mesures
+indépendantes (deux sessions, deux programmes) donnent le même chiffre. Un agent volontairement
+plus faible (28 % contre P0) est dans la même situation : ce n'est pas que P1 aurait « tout
+appris », c'est que ce régime ne laisse passer presque aucun signal.
+
+**Deux leviers, insuffisants séparément, jamais essayés ensemble.**
+- Raccourcir la « mémoire » du crédit (sur combien de coups futurs on juge une décision, le
+  paramètre λ) : le signal passe de 2 % à 6 %. Mieux, mais encore 94 % de hasard.
+- Agrandir les lots (juger sur 4 fois plus de coups avant de bouger) : essayé seul le
+  7 septembre, sans effet — normal, il n'y avait alors aucun signal à amplifier.
+- Les deux ensemble : jamais essayé. La formule vérifiée sur les données prédit **environ 18 %
+  de signal, dix fois aujourd'hui**.
+
+**La recommandation.** Relancer P1 avec trois valeurs changées dans le profil `x1_lineage`
+(`config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json`, bloc
+`model_params`) et rien d'autre : `gae_lambda` 0,95 → **0,2**, `n_steps` 8160 → **32640**,
+`batch_size` 1020 → **4080**. Commande habituelle (`python3 ai/train.py --agent
+ArmageddonAgent_x1 --training-config x1_lineage --scenario bot --etape P1`), 30 000 épisodes
+(~6 h), à juger sur la courbe `03_selfplay/P0`, aujourd'hui plate à 0,59. Un point à surveiller :
+la mémoire du GPU au premier lot de 4 080 (un essai avait planté le 7 septembre ; la cause a été
+levée depuis, mais ce n'est pas revérifié) — si ça plante, `batch_size` 2 040.
+
+**Si ça ne bouge pas.** Le levier « réglages » est épuisé. Il faut alors changer la façon dont
+l'agent reçoit son conseil : soit une tête « Q » qui moyenne les dés (quelques jours de code),
+soit l'entraînement par recherche (MCTS, plusieurs semaines, chantier gelé après J3). C'est
+l'arbitrage que l'autre session propose ; il ne se pose qu'après ce run.
+
+**Mesure optionnelle (20 min, aucun code).** Sonder le modèle « traité » de l'expérience
+d'hier (celui qui hésite plus) contre son témoin : si l'hésitation augmente le signal, la
+température devient un levier chiffrable ; sinon on sait que le hasard vient des dés et de
+l'adversaire, pas du manque d'exploration. Pas nécessaire pour lancer le run.
+
+---
+
 ## 0. Résumé au 2026-09-13
 
 **Symptôme.** P1 (reprise des poids de P0, profil `x1_lineage`) plafonne contre P0 : sondes
