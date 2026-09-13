@@ -1,9 +1,6 @@
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from shared.data_validation import require_key
-
-if TYPE_CHECKING:
-    from ai.analyzer_state import DeathCause
 
 PHASE_ORDER: dict[str, int] = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
 
@@ -54,7 +51,7 @@ def died_in_own_activation(
     unit_id: str,
     turn: int,
     phase: str,
-    unit_death_cause: Dict[str, "DeathCause"],
+    deadly_demise_deaths: Dict[str, Tuple[int, str, int]],
     last_attack_line_by_actor: Dict[str, int],
 ) -> bool:
     """True si la mort de ``unit_id`` appartient à l'activation dont on lit une ligne d'attaque.
@@ -75,10 +72,10 @@ def died_in_own_activation(
     Journal antérieur à la ligne ``DEADLY DEMISE`` : aucune cause n'est connue, la faute est
     comptée telle quelle — le journal ne porte pas l'information, on ne l'invente pas.
     """
-    cause = unit_death_cause.get(unit_id)
-    if cause is None or cause.kind != "deadly_demise" or cause.turn != turn or cause.phase != phase:
+    death = deadly_demise_deaths.get(unit_id)
+    if death is None or death[:2] != (turn, phase):
         return False
     last_foreign_attack_line = max(
         (ln for actor, ln in last_attack_line_by_actor.items() if actor != unit_id), default=0
     )
-    return cause.line > last_foreign_attack_line
+    return death[2] > last_foreign_attack_line

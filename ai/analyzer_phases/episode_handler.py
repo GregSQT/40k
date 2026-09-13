@@ -92,7 +92,7 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_deaths = []
     state.unit_kill_context = {}
     state.deadly_demise_pending = {}
-    state.unit_death_cause = {}
+    state.deadly_demise_deaths = {}
     state.last_attack_line_by_actor = {}
     state.phase_activation_seen = {}
     # Réinitialisations critiques pour l'isolation inter-épisodes :

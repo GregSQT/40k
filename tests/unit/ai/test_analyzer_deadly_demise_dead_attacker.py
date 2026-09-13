@@ -11,7 +11,7 @@ donc l'ordre du jeu, et l'analyzer comptait « Dead unit fighting » : 5, toutes
 
 Ce qui manquait pour trancher SANS heuristique : la ligne `DEADLY DEMISE` n'atteignait jamais
 step.log (type absent de `_STEP_LOG_TYPE_MAP`). Elle y est désormais, écrite AVANT les DEAD qu'elle
-cause, et c'est elle qui nomme la cause de la mort (`DeathCause`). La garde
+cause, et c'est elle qui nomme la cause de la mort (`deadly_demise_deaths`). La garde
 `died_in_own_activation` exige cette cause ET l'absence de ligne d'attaque d'une autre unité entre
 le DEAD et la ligne lue.
 """

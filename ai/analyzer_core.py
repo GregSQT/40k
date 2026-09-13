@@ -17,7 +17,7 @@ from ai.analyzer_rules import (
 )
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
-from ai.analyzer_state import AnalyzerState, DeathCause
+from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases import claim_kill_context, died_before_phase
 from ai.analyzer_phases.episode_handler import handle_episode_start
@@ -39,15 +39,6 @@ _PHASE_RANK: Dict[str, int] = {p: i for i, p in enumerate(_PHASE_ORDER)}
 # Phases where kills are tracked (unit_deaths + unit_kill_context). COMMAND exclue :
 # aucune attaque ne peut y survenir et le contexte de tueur n'y a pas de sens.
 _LETHAL_PHASES = frozenset({'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'})
-
-
-def _record_attack_line(state: AnalyzerState, actor_id: Optional[str]) -> None:
-    """Date la dernière ligne d'attaque (SHOT/FOUGHT) de ``actor_id`` — APRÈS le handler, qui lit
-    cette table pour juger la ligne courante (`died_in_own_activation`). ``actor_id`` vient du
-    préfixe `Unit N(` de la ligne ; une ligne d'attaque sans préfixe est un défaut de grammaire
-    que le handler a déjà consigné, elle ne date rien."""
-    if actor_id is not None:
-        state.last_attack_line_by_actor[actor_id] = state.line_number
 
 
 def _check_phase_seq(
@@ -1786,7 +1777,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # de séquence de phases. Le bloc DEAD/DEADLY DEMISE est contigu : toute autre
                 # ligne clôt l'attente des victimes annoncées.
                 _is_dd_event = "[DEADLY DEMISE]" in action_desc
-                if not _is_dead_event and not _is_dd_event:
+                _is_engine_event = _is_dead_event or _is_dd_event
+                if state.deadly_demise_pending and not _is_engine_event:
                     state.deadly_demise_pending.clear()
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
@@ -1835,19 +1827,18 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Lue par `died_in_own_activation` (fight/shoot) : l'unité qui a
                             # détruit le porteur meurt de l'explosion AVANT que ses lignes
                             # d'attaque ne soient écrites, ce n'est pas un cadavre qui attaque.
-                            _dd_source = state.deadly_demise_pending.get(_dead_uid)
-                            if _dead_reason == "hazard" and _dd_source is not None:
-                                state.unit_death_cause[_dead_uid] = DeathCause(
-                                    "deadly_demise", _dd_source, turn, phase, state.line_number
-                                )
-                                # Tueur CONNU : le porteur, déjà mort, n'écrira aucune ligne
-                                # d'attaque. Laisser `None` rendrait la mort revendicable par la
-                                # première attaque tierce de la phase sur ce cadavre
-                                # (`claim_kill_context`), et masquerait « attaque sur unité
-                                # morte » pour toute cette activation.
-                                state.unit_kill_context[_dead_uid] = (_dd_source, turn, phase)
-                            else:
-                                state.unit_kill_context[_dead_uid] = (None, turn, phase)
+                            _dd_source = (
+                                state.deadly_demise_pending.get(_dead_uid)
+                                if _dead_reason == "hazard" else None
+                            )
+                            if _dd_source is not None:
+                                state.deadly_demise_deaths[_dead_uid] = (turn, phase, state.line_number)
+                            # Tueur = la source de l'explosion quand elle est connue. Déjà morte,
+                            # elle n'écrira aucune ligne d'attaque ; laisser `None` rendrait la
+                            # mort revendicable par la première attaque tierce de la phase sur
+                            # ce cadavre (`claim_kill_context`) et masquerait « attaque sur
+                            # unité morte » pour toute cette activation.
+                            state.unit_kill_context[_dead_uid] = (_dd_source, turn, phase)
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
                         _prm.discard(_dead_mid)
@@ -1859,11 +1850,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if _player_seq is None:
                             _player_seq = []
                             state.phase_seq_current_turn[int(player)] = _player_seq
-                        if not _is_dead_event and not _is_dd_event and phase not in _player_seq:
+                        if not _is_engine_event and phase not in _player_seq:
                             _player_seq.append(phase)
                     state.last_phase_by_player[int(player)] = phase
 
-                if phase != state.last_phase and not _is_dead_event and not _is_dd_event:
+                if phase != state.last_phase and not _is_engine_event:
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                     if phase == 'MOVE':
@@ -2146,7 +2137,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
-                        _record_attack_line(state, _dmg_actor_id)
+                        # Ligne sans préfixe `Unit N(` : défaut de grammaire déjà consigné par
+                        # le handler, rien à dater.
+                        if _dmg_actor_id is not None:
+                            state.last_attack_line_by_actor[_dmg_actor_id] = state.line_number
                 elif agent_decision_match:
                         # V11 §9.3 P2 — RELEVE d'une decision d'agent resolue (grammaire 8).
                         # PREMIERE branche de la chaine, et ce n'est pas cosmetique : le libelle
@@ -2491,7 +2485,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     pending_model_removals=None,
                                     dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
-                elif "[DEADLY DEMISE]" in action_desc:
+                elif _is_dd_event:
                         # §24.08 DEADLY DEMISE — blessures mortelles après destruction d'une figurine.
                         # Une entrée par unité dans le rayon (d6 partagé) ; la ligne dit si c'est effectif
                         # (`SUFFERS X MW`) ou nul (`no effect`). Compteur d'EXERCICE seul.
@@ -2506,7 +2500,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
-                        _record_attack_line(state, _dmg_actor_id)
+                        if _dmg_actor_id is not None:
+                            state.last_attack_line_by_actor[_dmg_actor_id] = state.line_number
                 else:
                     action_type = 'other'
 
