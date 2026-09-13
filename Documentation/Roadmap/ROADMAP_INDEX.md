@@ -150,16 +150,30 @@ update à moitié signal. Le critic, lui, reçoit un gradient réel (f_8160 = 0,
 taille de lot n'est pas le levier du plateau contre P0 ; la branche restante est l'objectif et la
 récompense (le gradient d'issue ±150 est nul à la même précision, cosinus non mesurables à
 K = 24). Détail : [training.md#signal-p1-2026-09-13](training.md#signal-p1-2026-09-13).
+**Balayage λ appairé, décomposition de Var(δ) et contrôles, le 2026-09-13 même (suite 123)** :
+descendre λ de 0,95 à 0 sur les MÊMES rollouts rend un gradient détectable (‖G‖² × 3,4, Δf
+appairé −0,038 [−0,070, −0,005]) mais **f(λ=0) = 0,053 [0,036, 0,070]** — cinq fois sous le 0,1
+qui aurait justifié un run P1 à ce λ ; le contrôle `entnorm_20260913-040721` (30 points de holdout
+plus faible) rend le MÊME profil (f = 0,006 à λ = 0,95) et ne discrimine pas, tandis qu'un
+contrôle à **poids aléatoires** rend f = 0,43 [0,27, 0,59] à λ = 0,95 — l'instrument n'est pas à
+réparer ; P0 déterministe : mêmes nombres (l'échantillonnage de l'adversaire n'est pas le bruit).
+**Var(δ) = 0,050 = Var(r) 0,043 + Var(ΔV) 0,065 − 0,058 (ρ = −0,55)** : le critic anticipe la
+récompense façonnée, et ce qui reste dans δ a l'échelle de Var(r) — porté par le tir (part 0,96)
+et le combat (0,7–0,8), quasi nul sur les mouvements (0,12). Issue retenue : **avantage moyenné
+(tête Q ou distillation)**, décomposition à l'appui. Détail :
+[training.md#signal-p1-lambda-2026-09-13](training.md#signal-p1-lambda-2026-09-13).
+
 **🔴 Plafonnement P1 contre P0 — dossier de synthèse ouvert le 2026-09-13 :**
 `Documentation/Chantiers/backlog/plafonnement_p1.md` relate tout ce
 qui a été fait sur le plateau du 2026-09-11 au 2026-09-13 (antécédents P2 compris), inventorie
 les causes possibles (optimisation, exploration, signal de crédit, adversité, mesure, capacité,
 convergence) et les solutions, avec leur statut — testé, réfuté, écarté par décision, ouvert.
 Réfutés comme levier : taille de lot, `target_kl`, `n_epochs`, `learning_rate`, `max_grad_norm`,
-`vf_coef`, `ent_coef`, entropie normalisée. Ouvert : la SOURCE du bruit (variance de transition
-ou point stationnaire). **Décision en attente** : arbitrage A / B / C du dossier (§7),
-recommandation B — sonde étendue (balayage λ appairé, décomposition de Var(δ), contrôle positif,
-P0 déterministe) avant tout run ou chantier de mécanisme.
+`vf_coef`, `ent_coef`, entropie normalisée. **Option B du §7 exécutée le 2026-09-13 (suite 123,
+paragraphe ci-dessus)** : la source du bruit est le crédit lui-même (variance de transition à
+l'échelle de Var(r), pas un point stationnaire — le gradient existe à λ = 0 et le contrôle
+aléatoire est vu) ; ni λ ni l'adversaire déterministe ne le réduisent. **Décision en attente** :
+le mécanisme d'avantage moyenné (tête Q ou distillation, §7 du dossier).
 
 ---
 

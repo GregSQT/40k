@@ -6,6 +6,8 @@ retrouve ‖μ‖² là où la moyenne des carrés de norme le surestime, et tou
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch.nn as nn
@@ -247,3 +249,288 @@ def test_acceptation_liste_les_ecarts_et_accepte_la_reference():
     assert any(f.startswith("explained_variance") for f in failures)
     assert any(f.startswith("returns_mean") for f in failures)
     assert set(ACCEPTANCE_BOUNDS) == set(reference)
+
+
+# ── Balayage λ, décomposition de variance, contrôle positif (2026-09-13) ─────────────────────
+
+
+def _synthetic_rollout(rng: np.random.Generator, n_steps: int = 200, n_envs: int = 4):
+    """Rewards / values / episode_starts (T, N) float32 + last_values / last_dones (N,) plausibles."""
+    rewards = rng.normal(0.0, 1.0, size=(n_steps, n_envs)).astype(np.float32)
+    values = rng.normal(0.5, 2.0, size=(n_steps, n_envs)).astype(np.float32)
+    starts = (rng.random((n_steps, n_envs)) < 0.05)
+    starts[0, :] = rng.random(n_envs) < 0.5  # certains envs reprennent un épisode ouvert avant
+    last_values = rng.normal(0.5, 2.0, size=n_envs).astype(np.float32)
+    last_dones = rng.random(n_envs) < 0.5
+    return rewards, values, starts.astype(np.float32), last_values, last_dones
+
+
+@pytest.mark.parametrize("gae_lambda", [0.95, 0.8, 0.0])
+def test_gae_recalcule_reproduit_sb3_au_1e_6(gae_lambda):
+    import torch as th
+    from gymnasium import spaces
+    from stable_baselines3.common.buffers import RolloutBuffer
+
+    from scripts.grad_signal_probe import GAE_ATOL, gae_advantages
+
+    rng = np.random.default_rng(23)
+    rewards, values, starts, last_values, last_dones = _synthetic_rollout(rng)
+    n_steps, n_envs = rewards.shape
+    gamma = 0.99
+    buf = RolloutBuffer(n_steps, spaces.Box(-1, 1, (2,)), spaces.Discrete(3), device="cpu",
+                        gamma=gamma, gae_lambda=gae_lambda, n_envs=n_envs)
+    buf.rewards = rewards.copy()
+    buf.values = values.copy()
+    buf.episode_starts = starts.copy()
+    buf.compute_returns_and_advantage(th.as_tensor(last_values).reshape(n_envs, 1), last_dones)
+    adv, ret = gae_advantages(rewards, values, starts, last_values, last_dones, gamma, gae_lambda)
+    assert adv.shape == ret.shape == (n_steps, n_envs)
+    assert np.max(np.abs(adv - buf.advantages)) <= GAE_ATOL
+    assert np.max(np.abs(ret - buf.returns)) <= GAE_ATOL
+    # VERT VACANT : les avantages ne sont pas triviaux (épisodes, bootstrap, valeurs non nulles).
+    assert np.abs(adv).max() > 1.0 and starts.sum() > 0
+
+
+def test_lambda_zero_donne_delta_et_lambda_un_le_retour_monte_carlo():
+    from scripts.grad_signal_probe import bootstrap_value_change, gae_advantages
+
+    rng = np.random.default_rng(29)
+    rewards, values, starts, last_values, last_dones = _synthetic_rollout(rng)
+    n_steps, n_envs = rewards.shape
+    gamma = 0.9
+    delta_v = bootstrap_value_change(values, starts, last_values, last_dones, gamma)
+    adv0, _ = gae_advantages(rewards, values, starts, last_values, last_dones, gamma, 0.0)
+    assert adv0 == pytest.approx(rewards.astype(np.float64) + delta_v, abs=1e-5)
+    # ΔV coupe bien au bord d'épisode : là où le pas suivant ouvre un épisode, ΔV = −V(s_t).
+    t, n = np.argwhere(starts[1:] == 1.0)[0]
+    assert delta_v[t, n] == pytest.approx(-float(values[t, n]))
+    # λ = 1 : retour Monte-Carlo actualisé avec bootstrap, calculé indépendamment vers l'avant.
+    adv1, ret1 = gae_advantages(rewards, values, starts, last_values, last_dones, gamma, 1.0)
+    for env in range(n_envs):
+        # Découpe en segments [début, fin[ par les episode_starts et la borne du rollout.
+        bounds = [0, *(np.flatnonzero(starts[1:, env] == 1.0) + 1), n_steps]
+        for seg_start, seg_end in zip(bounds[:-1], bounds[1:], strict=True):
+            closes = seg_end < n_steps or last_dones[env]
+            g = 0.0 if closes else float(last_values[env])
+            for t in range(seg_end - 1, seg_start - 1, -1):
+                g = float(rewards[t, env]) + gamma * g
+                assert ret1[t, env] == pytest.approx(g, abs=1e-4)
+    assert ret1 == pytest.approx(adv1 + values, abs=1e-6)
+
+
+def test_decomposition_de_variance_somme_exacte_globalement_et_par_famille():
+    from scripts.grad_signal_probe import DeltaVarianceAccumulator
+
+    rng = np.random.default_rng(31)
+    acc = DeltaVarianceAccumulator()
+    all_r, all_d, all_f = [], [], []
+    for _ in range(3):  # trois rollouts accumulés ; la variance doit être celle de la concaténation
+        r = rng.normal(0.0, 1.0, size=(50, 4))
+        d = 0.5 * r + rng.normal(0.0, 2.0, size=(50, 4))  # corrélé à r : Cov ≠ 0
+        f = rng.choice(["move_cell", "shoot_slot", "wait"], size=(50, 4), p=[0.6, 0.3, 0.1])
+        acc.add(r, d, f)
+        all_r.append(r.ravel())
+        all_d.append(d.ravel())
+        all_f.append(f.ravel())
+    r, d, f = np.concatenate(all_r), np.concatenate(all_d), np.concatenate(all_f)
+    out = acc.result()
+    for name, mask in [("all", np.ones(r.size, bool)), *[(fam, f == fam) for fam in np.unique(f)]]:
+        got = out["all"] if name == "all" else out["by_family"][name]
+        assert got["n"] == int(mask.sum())
+        assert got["var_reward"] == pytest.approx(np.var(r[mask]))
+        assert got["var_delta_v"] == pytest.approx(np.var(d[mask]))
+        assert got["cov"] == pytest.approx(np.cov(r[mask], d[mask], bias=True)[0, 1])
+        # L'identité Var(δ) = Var(r) + Var(ΔV) + 2 Cov, contre la variance directe de δ = r + ΔV.
+        assert got["var_delta"] == pytest.approx(np.var(r[mask] + d[mask]))
+        assert got["share_reward"] + got["share_delta_v"] + got["share_cov"] == pytest.approx(1.0)
+        assert abs(got["cov"]) > 0.1  # VERT VACANT : la covariance n'est pas nulle par construction
+    assert set(out["by_family"]) == set(np.unique(f))
+    with pytest.raises(ValueError):
+        DeltaVarianceAccumulator().result()
+    # Une famille vue UNE fois sur tout le run : rapportée en nan, jamais levée (lever ici
+    # jetterait toute la collecte pour une ligne auxiliaire).
+    acc.add(np.array([0.7]), np.array([-0.2]), np.array(["shoot_indirect_slot"]))
+    rare = acc.result()["by_family"]["shoot_indirect_slot"]
+    assert rare["n"] == 1 and rare["mean_reward"] == pytest.approx(0.7)
+    assert all(np.isnan(rare[k]) for k in ("var_reward", "var_delta_v", "cov", "var_delta", "share_reward"))
+    assert acc.result()["all"]["n"] == r.size + 1
+
+
+def test_phases_depuis_global_bin_et_familles_dependent_de_la_phase():
+    from engine.macro_intents import ACTION_WAIT, DEPLOY_SLOTS, MOVE_CELLS, SHOOT_SLOTS
+    from engine.observation_entities import GLOBAL_BIN_SIZE, OBS_PHASE_IDS, global_bin_index
+    from scripts.grad_signal_probe import phases_from_global_bin, step_families
+
+    phases = np.array([["deployment", "move"], ["shoot", "move"], ["move", "fight"]], dtype=object)
+    g = np.zeros((3, 2, GLOBAL_BIN_SIZE), dtype=np.float32)
+    for t in range(3):
+        for n in range(2):
+            g[t, n, global_bin_index(f"phase_{phases[t, n]}")] = 1.0
+    assert phases_from_global_bin(g).tolist() == phases.tolist()
+    assert set(OBS_PHASE_IDS) >= set(phases.ravel())
+    deploy_id = DEPLOY_SLOTS[0]  # slot de déploiement EN PHASE deployment, cellule de move ailleurs
+    assert deploy_id in MOVE_CELLS
+    actions = np.array([[deploy_id, deploy_id], [SHOOT_SLOTS[0], ACTION_WAIT], [deploy_id, ACTION_WAIT]])
+    setting_up = np.zeros((3, 2), dtype=bool)
+    setting_up[2, 0] = True  # mise en place depuis les réserves en phase move : slot de POSE
+    fam = step_families(actions, phases_from_global_bin(g), setting_up)
+    assert fam.tolist() == [
+        ["deploy_slot", "move_cell"],
+        ["shoot_slot", "wait"],
+        ["deploy_slot", "wait"],
+    ]
+    # Un one-hot de phase sans bit levé LÈVE.
+    g[1, 1, global_bin_index("phase_move")] = 0.0
+    with pytest.raises(ValueError):
+        phases_from_global_bin(g)
+
+
+def test_resolve_probe_model_charge_le_controle_avec_son_pkl_jamais_celui_du_canonique(tmp_path):
+    from ai.vec_normalize_utils import get_vec_normalize_path
+    from scripts.grad_signal_probe import resolve_probe_model
+
+    canonical = tmp_path / "model_A.zip"
+    control = tmp_path / "ctrl" / "model_B_20260913.zip"
+    control.parent.mkdir()
+    for zip_path in (canonical, control):
+        zip_path.write_bytes(b"zip")
+        Path(get_vec_normalize_path(str(zip_path))).write_bytes(b"pkl")
+    canonical_pkl = get_vec_normalize_path(str(canonical))
+    control_pkl = get_vec_normalize_path(str(control))
+    assert control_pkl != canonical_pkl
+
+    assert resolve_probe_model(str(canonical), None, None) == (str(canonical), canonical_pkl, False)
+    assert resolve_probe_model(str(canonical), str(control), None) == (str(control), control_pkl, True)
+    other_pkl = tmp_path / "other_vec_normalize.pkl"
+    other_pkl.write_bytes(b"pkl")
+    assert resolve_probe_model(str(canonical), str(control), str(other_pkl)) == (str(control), str(other_pkl), True)
+    with pytest.raises(ValueError):
+        resolve_probe_model(str(canonical), None, str(other_pkl))  # stats étrangères sur le canonique
+    with pytest.raises(ValueError):
+        resolve_probe_model(str(canonical), str(control), canonical_pkl)  # pkl du canonique sur le contrôle
+    with pytest.raises(FileNotFoundError):
+        resolve_probe_model(str(canonical), str(tmp_path / "absent.zip"), None)
+    Path(control_pkl).unlink()
+    with pytest.raises(FileNotFoundError):
+        resolve_probe_model(str(canonical), str(control), None)  # pas de repli sur un autre pkl
+
+
+def test_parse_gae_lambdas():
+    from scripts.grad_signal_probe import DEFAULT_GAE_LAMBDAS, parse_gae_lambdas
+
+    assert parse_gae_lambdas(DEFAULT_GAE_LAMBDAS) == [0.95, 0.8, 0.5, 0.2, 0.0]
+    assert parse_gae_lambdas(" 1, 0.5 ,") == [1.0, 0.5]
+    for bad in ("", "1.5", "0.5,0.5", "-0.1"):
+        with pytest.raises(ValueError):
+            parse_gae_lambdas(bad)
+
+
+def test_balayage_lambda_differences_appairees():
+    from scripts.grad_signal_probe import lambda_sweep_stats
+
+    rng = np.random.default_rng(37)
+    mu = rng.normal(0.0, 0.2, size=D)
+    clean, mb_clean = _rollouts(rng, mu, sigma=0.3)   # f ≈ 0,5
+    noisy = clean + rng.normal(0.0, 0.6, size=clean.shape)  # même signal, bruit ajouté : f plus bas
+    mb_noisy = mb_clean + 0.36 * D * MINIBATCHES
+    grams = {0.95: gram_matrix(clean), 0.5: gram_matrix(clean), 0.0: gram_matrix(noisy)}
+    mbs = {0.95: mb_clean, 0.5: mb_clean, 0.0: mb_noisy}
+    out = lambda_sweep_stats(grams, mbs, BATCH_STEPS)
+    assert out["lambdas"] == [0.95, 0.5, 0.0]
+    assert out["per_lambda"][0.95]["f_batch"]["estimate"] == pytest.approx(
+        signal_stats(grams[0.95], mb_clean, BATCH_STEPS)["f_batch"]["estimate"]
+    )
+    by_pair = {(p["lambda_a"], p["lambda_b"]): p for p in out["pairs"]}
+    assert set(by_pair) == {(0.95, 0.5), (0.95, 0.0), (0.5, 0.0)}
+    same = by_pair[(0.95, 0.5)]
+    assert same["f_batch_diff"]["estimate"] == pytest.approx(0.0, abs=1e-12)
+    assert same["f_batch_diff"]["se"] == pytest.approx(0.0, abs=1e-12)
+    assert not same["f_batch_diff_excludes_zero"]
+    diff = by_pair[(0.95, 0.0)]
+    assert diff["f_batch_diff"]["estimate"] > 0.1
+    assert diff["f_batch_diff_excludes_zero"]
+    assert diff["f_batch_diff"]["low"] > 0.0
+    # Le signal vrai est le même des deux côtés : Δ‖G‖² appairé contient 0.
+    assert diff["true_sq_diff"]["low"] <= 0.0 <= diff["true_sq_diff"]["high"]
+    with pytest.raises(ValueError):
+        lambda_sweep_stats(grams, {0.95: mb_clean}, BATCH_STEPS)
+
+
+def test_set_buffer_advantages_rafraichit_les_copies_gpu_du_buffer_de_production():
+    import torch as th
+    from gymnasium import spaces
+
+    from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
+    from scripts.grad_signal_probe import set_buffer_advantages
+
+    n_steps, n_envs, batch = 10, 4, 8
+    buf = GpuMaskableDictRolloutBuffer(
+        n_steps, spaces.Dict({"a": spaces.Box(-1, 1, (3,))}), spaces.Discrete(5), device="cpu", n_envs=n_envs,
+    )
+    buf.reset()
+    for _ in range(n_steps):
+        buf.add({"a": np.zeros((n_envs, 3), np.float32)}, np.zeros((n_envs, 1)), np.zeros(n_envs),
+                np.zeros(n_envs, bool), th.zeros(n_envs), th.zeros(n_envs), action_masks=np.ones((n_envs, 5), bool))
+    buf.compute_returns_and_advantage(th.zeros(n_envs, 1), np.zeros(n_envs, bool))
+    with pytest.raises(RuntimeError):
+        set_buffer_advantages(buf, np.zeros((n_steps, n_envs)), np.zeros((n_steps, n_envs)))  # pas encore aplati
+    np.random.seed(5)
+    served_before = th.cat([rd.advantages for rd in buf.get(batch)])
+    assert th.equal(served_before, th.zeros(n_steps * n_envs))
+    rng = np.random.default_rng(41)
+    adv = rng.normal(size=(n_steps, n_envs)).astype(np.float32)
+    ret = adv + 1.0
+    set_buffer_advantages(buf, adv, ret)
+    perm = np.random.RandomState(5).permutation(n_steps * n_envs)
+    np.random.seed(5)
+    served = [(rd.advantages, rd.returns) for rd in buf.get(batch)]
+    flat_adv = adv.swapaxes(0, 1).reshape(-1)
+    for m, (a, r) in enumerate(served):
+        idx = perm[m * batch:(m + 1) * batch]
+        # Ce que get() SERT (copie GPU) est bien le nouvel avantage, pas l'ancien.
+        assert th.equal(a, th.as_tensor(flat_adv[idx]))
+        assert th.equal(r, th.as_tensor(flat_adv[idx] + 1.0))
+        assert th.equal(a, buf.to_torch(buf.advantages[idx].flatten()))
+    with pytest.raises(ValueError):
+        set_buffer_advantages(buf, adv[:-1], ret[:-1])
+
+
+def test_reset_policy_parameters_change_tout_et_est_reproductible():
+    import torch as th
+
+    from scripts.grad_signal_probe import reset_policy_parameters
+
+    def make() -> nn.Module:
+        th.manual_seed(1)
+        net = nn.Sequential(nn.Linear(6, 5), nn.LayerNorm(5), nn.Linear(5, 2))
+        with th.no_grad():
+            for p in net.parameters():
+                p.add_(3.0)  # « entraîné » loin de l'init
+        return net
+
+    a, b = make(), make()
+    before = th.cat([p.detach().flatten().clone() for p in a.parameters()])
+    assert reset_policy_parameters(a, 7) == 3
+    assert reset_policy_parameters(b, 7) == 3
+    after_a = th.cat([p.detach().flatten() for p in a.parameters()])
+    after_b = th.cat([p.detach().flatten() for p in b.parameters()])
+    assert th.equal(after_a, after_b)  # même graine → mêmes poids
+    assert float((before != after_a).float().mean()) > 0.99
+    # Un module sans reset_parameters garde ses poids : la fonction LÈVE.
+    class Frozen(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.w = nn.Parameter(th.ones(50))
+
+    with pytest.raises(RuntimeError):
+        reset_policy_parameters(nn.Sequential(nn.Linear(2, 2), Frozen()), 7)
+
+
+def test_acceptation_du_controle_ne_juge_que_la_plomberie():
+    from scripts.grad_signal_probe import check_control_acceptance
+
+    ok = {"pool_episode_share": 0.68, "episodes_no_winner": 0, "explained_variance": -5.0, "grad_norm_policy_mb0": 9.0}
+    assert check_control_acceptance(ok) == []
+    failures = check_control_acceptance({"pool_episode_share": 0.2, "episodes_no_winner": 3})
+    assert len(failures) == 2
+    assert failures[0].startswith("pool_episode_share") and failures[1].startswith("episodes_no_winner")

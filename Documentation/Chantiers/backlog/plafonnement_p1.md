@@ -31,21 +31,30 @@ cumulés, seuil de promotion 0,65 jamais approché ; toutes les courbes de jeu s
    vs P0 28 % → 22 %, dans le bruit). [training.md#entropie-normalisee](../../Roadmap/training.md#entropie-normalisee).
 3. **L'early-stop KL coupe chaque update** (761/761 sur P1, 590/590 et 588/588 sur les bras
    entnorm), et cette KL est produite par un pas de bruit, pas par un déplacement dirigé.
+4. **La source du bruit est mesurée (suite 123, 2026-09-13).** Sur les mêmes rollouts, descendre
+   λ de 0,95 à 0 rend un gradient détectable (‖G‖² × 3,4, Δf appairé −0,038 [−0,070, −0,005])
+   mais **f(λ=0) = 0,053 [0,036, 0,070]** : au λ le plus bas l'update reste à 95 % de bruit,
+   B_noise ≈ 147 000 pas. **Var(δ) = 0,050 = Var(r) 0,043 + Var(ΔV) 0,065 − 0,058** (ρ = −0,55) :
+   le critic anticipe la récompense façonnée, δ garde l'échelle de Var(r), portée par le tir
+   (0,96) et le combat (0,7–0,8), quasi nulle sur les mouvements (0,12). P0 déterministe : mêmes
+   nombres. **L'instrument est sain** : un contrôle à poids aléatoires rend f = 0,43 [0,27, 0,59]
+   à λ = 0,95 ; le contrôle `entnorm_040721` (30 points de holdout plus faible) rend f = 0,006
+   comme P1 et ne discriminait pas. [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13).
 
 **Réfuté comme levier.** Taille de lot (n_steps × batch_size), `target_kl`, `n_epochs`,
 `learning_rate`, `max_grad_norm`, part du critic (`vf_coef`), `ent_coef` seul, entropie
 normalisée par l'état : tous règlent une direction qui n'en est pas une, ou ont été testés sans
 effet.
 
-**Ouvert.** La **source** du bruit n'est pas séparée : dés + adversaire stochastique + horizon
-GAE (variance de transition), ou absence réelle de pente (point stationnaire de cette récompense
-contre cet adversaire). Le gradient d'issue (±150) est nul à la même précision. Aucune mesure
-n'a encore ventilé la variance ni posé de contrôle positif.
+**Ouvert.** Le gradient TD(0) détecté est celui d'un estimateur biaisé par l'erreur du critic,
+pas la preuve d'une pente utile ; le gradient d'issue (±150) reste nul à la précision de K = 24.
+Ce qui n'est pas identifiable sans l'espérance : la part de Var(r) qui est du dé (ΔV dépend
+aussi du dé, une cible tuée change s′).
 
-**Décision en attente (§7).** Arbitrage A / B / C — recommandation B : une seule collecte de
-sonde exploitée en appairé (balayage λ, décomposition de la variance de δ, contrôle positif, P0
-déterministe) pour trancher entre « un réglage de config suffit » et « il faut changer la façon
-dont l'acteur reçoit son signal » (avantage moyenné : tête Q, ou distillation par recherche).
+**Décision en attente (§7).** L'option B est exécutée : à lot fixe, ni λ ni l'adversaire
+déterministe ne réduisent le bruit ; ce qui reste est le crédit lui-même. Reste à trancher le
+mécanisme d'avantage moyenné — tête Q (S14) ou distillation par recherche (S15) — et si S11
+(récompense en espérance, bornée à 86 % de Var(δ)) précède.
 
 ---
 
@@ -208,16 +217,16 @@ log-prob 1,7 × 10⁻⁴).
 | B1 | Effondrement des têtes courtes (charge, tir, pose, Oath, arme) | p ≈ 1 sur l'action jouée → gradient nul par construction (∝ p(1−p)) | ☑ **état confirmé**, ✗ **cause suffisante réfutée** | entropies §2.2 ; expérience entnorm : têtes 2–5× plus hésitantes, 0 effet sur le jeu ; `move_cell` **non effondrée** (2,2 nats) n'a pas de signal non plus (f = 0,024 [−0,07, 0,11]) |
 | B2 | `ent_coef` trop faible, moyenne d'entropie dominée par le mouvement | 1,3 % du gradient, n'agit que sur move | ☑ mesuré ; ✗ pousser fort détruit | ent_coef 0,1 sur poids convergés → vs P1 0,118 (2026-09-04) ; 0,07 → détruit (2026-09-06) |
 | B3 | Aucune exploration structurée (température, ε, bruit d'action) | la politique joue toujours le même coup, rien à comparer | ☐ non testé | nécessaire pour charge/pose (p = 0,993), insuffisant seul (B1) ; l'exploration **ajoute** de la variance |
-| B4 | Adversaire P0 stochastique à l'entraînement, déterministe en sonde | variance d'action adverse dans σ² ; métrique désalignée | ☐ non testé | `opponent.deterministic: false` (choix documenté : éviter des parties identiques) ; la sonde joue argmax contre argmax |
+| B4 | Adversaire P0 stochastique à l'entraînement, déterministe en sonde | variance d'action adverse dans σ² ; métrique désalignée | ☑ **testé (2026-09-13) → ✗** | collecte P0 déterministe : f(λ=0,95) = 0,009 [−0,014, 0,031], f(λ=0) = 0,061 [0,029, 0,093], Var(δ) 0,0492 — indistinguable de la collecte stochastique ; l'échantillonnage adverse n'est pas le bruit |
 
 ### C. Signal de crédit et récompense
 
 | # | cause | mécanisme | statut | preuve / observation |
 |---|---|---|---|---|
-| C1 | Variance des retours que l'action ne contrôle pas (dés, jeu adverse, horizon GAE ~17 pas à λγ = 0,94) noyant ΔQ | SNR² = p(1−p)·ΔQ²/σ² | ◐ **hauteur du bruit mesurée, source non décomposée** | f ≈ 0 ; EV 0,89 → le résidu est de l'aléa depuis l'état ; Var(r_t) / Var(γV(s′) − V(s)) / covariance jamais ventilées |
+| C1 | Variance des retours que l'action ne contrôle pas (dés, jeu adverse, horizon GAE ~17 pas à λγ = 0,94) noyant ΔQ | SNR² = p(1−p)·ΔQ²/σ² | ☑ **source décomposée (2026-09-13)** | Var(δ) = 0,050 = Var(r) 0,043 + Var(ΔV) 0,065 + 2 Cov −0,058 (ρ = −0,55) : le critic anticipe la récompense façonnée, δ garde l'échelle de Var(r) ; parts de r : tir 0,96, combat 0,7–0,8, mouvement 0,12 ; ni λ (f plafonne à 0,05) ni l'adversaire déterministe ne la réduisent |
 | C2 | Récompense façonnée dominante (objectifs 62 %, kills, pénalités −97) : l'agent optimise un proxy | issue = terme parmi d'autres | ◐ composition mesurée ; direction non mesurable | gradient d'issue ±150 : ‖G‖² ∋ 0 ; cosinus (façonné, issue) non mesurable à K = 24 |
-| C3 | Point stationnaire réel : plus rien à gagner contre P0 avec cette récompense | le gradient vrai est nul, pas seulement noyé | ☐ **non séparé de C1** | il manque un contrôle positif (politique nettement sous-optimale contre P0) sur le chemin policy de la sonde |
-| C4 | Horizon γ / λ trop long | variance ∝ horizon | ☐ non testé | λ balayable **a posteriori** sur les mêmes rollouts ; γ non (critic entraîné à 0,99) |
+| C3 | Point stationnaire réel : plus rien à gagner contre P0 avec cette récompense | le gradient vrai est nul, pas seulement noyé | ☑ **réfuté à λ ≤ 0,5** | ‖G‖² exclut 0 dès λ = 0,5 sur les mêmes rollouts (λ = 0 : 8,7 × 10⁻⁴ [5,8 × 10⁻⁴, 1,2 × 10⁻³]) ; le contrôle à poids aléatoires est vu à λ = 0,95 (f = 0,43) ; le gradient TD(0) détecté reste biaisé par l'erreur du critic, ce n'est pas la preuve d'une pente utile |
+| C4 | Horizon γ / λ trop long | variance ∝ horizon | ☑ **testé (balayage appairé) → levier insuffisant** | f_8160 : 0,015 (0,95) → 0,007 (0,8) → 0,027 (0,5) → 0,048 (0,2) → **0,053 [0,036, 0,070] (0)** ; Δf(0,95 − 0) = −0,038 [−0,070, −0,005] ; B_noise à λ = 0 : 147 000 pas — l'update reste à 95 % de bruit au λ le plus bas |
 | C5 | Pénalités −97 par épisode, source non ventilée | signal contradictoire ? | ☐ non investigué | `reward/penalties_total` chevauche `base_actions` (wait, charge_fail) ; ventilation absente |
 | C6 | Récompense sur le **jet** de dés plutôt que sur son espérance | variance de r_t | ☐ non testé | modification moteur ; à dimensionner par C1 avant |
 
@@ -239,7 +248,7 @@ log-prob 1,7 × 10⁻⁴).
 | E1 | Sonde argmax contre argmax : blocs corrélés | ±5 points entre sondes voisines | ☑ connu, traité | décision sur la moyenne de 3 sondes ; graines tirées au hasard depuis le 2026-09-07 |
 | E2 | Seuil 0,65 hors de portée de ce dispositif | le même dispositif promouvait à 0,55 | ☑ fait établi ; ✗ **baisser le seuil écarté par décision** (2026-09-12) | §1.4 ; un seuil abaissé promeut un agent qui n'apprend plus |
 | E3 | Fenêtre de lecture trop courte | conclusion prématurée | ☑ écarté | 7 sondes, 4 quarts plats, 1 052 updates |
-| E4 | Instrument de mesure du signal biaisé | faux zéro | ◐ | acceptation tenue au premier rollout ; entropie f = 0,96 et critic f = 0,27 valident deux chemins sur trois ; **contrôle positif du chemin policy manquant** |
+| E4 | Instrument de mesure du signal biaisé | faux zéro | ☑ **réfuté (2026-09-13)** | contrôle à poids aléatoires (`--random-init`) : f = 0,43 [0,27, 0,59] à λ = 0,95, K = 12 ; value f 0,97 ; le contrôle `entnorm_040721` rend f = 0,006 comme P1 — il n'était pas positif, pas l'instrument cassé ; implémentation indépendante (40k-a2) concordante |
 
 ### F. Capacité et architecture
 
@@ -269,11 +278,11 @@ log-prob 1,7 × 10⁻⁴).
 | S7 | Régime scalaire de lignée (lr 0,001, ent_coef 0,01) | rampes reparcourues | ☑ livrée (2026-09-07/08) | config + code | a stoppé les destructions ; n'a pas produit de progression au-delà de 0,60 |
 | S8 | Entropie normalisée par l'état + `ent_coef` × 5 | B1, B2 | ☑ testée (2026-09-12/13) → **sans effet** | code + agent dédié, 2 runs (11 h 44) | exploration ×2–5 sur têtes courtes ; holdout +0,4 pt, vs P0 −6 pts, dans le bruit ; clé conservée, désactivée par défaut |
 | S9 | Température des logits (T ≈ 2) à la collecte **et** dans le ratio PPO, T = 1 en évaluation | B1, B3 | ☐ envisagée (rapport du 2026-09-13, option C) | code (`_action_logits`, côté workers comme `evaluate_actions`) | nécessaire pour charge/pose, insuffisante seule ; ajoute de la variance : à mesurer **après** la question C1 |
-| S10 | `gae_lambda` 0,95 → 0,8 / 0,5 / 0,2 / 0 ; `gamma` 0,97 | C1, C4 | ☐ envisagée | config | λ mesurable a posteriori sur les mêmes rollouts (appairé) ; γ **non** (critic à 0,99 → mesure d'un système jamais entraîné) ; effet attendu de γ seul sous la résolution de la sonde |
-| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☐ envisagée | moteur + contrat d'entraînement | ne retire que la variance de r_t, pas celle de la transition ; à dimensionner par la décomposition de Var(δ) avant |
-| S12 | P0 **déterministe** à l'entraînement | B4 | ☐ envisagée | config (`opponent.deterministic`) | retire la variance d'action adverse, aligne l'entraînement sur la sonde ; risque d'exploitation d'une ligne fixe, mesurable en 20 min |
-| S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ⏳ **arbitrage B, recommandé** | script + tests, ~40 min de GPU | décide entre « config suffit » et « changer le mécanisme » |
-| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ☐ envisagée | code IA | mesurable par la même sonde ; suite naturelle si S13 conclut « le bruit d'un pas noie le ΔQ restant » |
+| S10 | `gae_lambda` 0,95 → 0,8 / 0,5 / 0,2 / 0 ; `gamma` 0,97 | C1, C4 | ☑ **λ mesuré a posteriori (2026-09-13) → ✗ comme levier seul** | config | f(λ=0) = 0,053 [0,036, 0,070] < 0,1 : le critère écrit pour relancer P1 à ce λ n'est pas atteint ; γ non balayé (critic à 0,99) |
+| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☐ envisagée, **dimensionnée** | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
+| S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
+| S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
+| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ⏳ **désignée par S13, décision en attente (§7)** | code IA | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
 | S15 | Distillation par recherche (MCTS S0 → S2, `mcts.md`) | C1, G1 | ☐ gelée « après J3, seulement si la démo l'exige » (ROADMAP_INDEX) | semaines ; clone d'état 745 ms → ≤ 30 ms | remède de principe quand le gradient de politique est du bruit ; à ouvrir sur décision si S13 / S14 échouent |
 | S16 | Pool élargi dès P1 (P0 + exploiteur) ou part de bots | D1 | ☐ non testée | curriculum | rien ne dit que la diversité crée du signal là où P0 n'en donne plus |
 | S17 | Second scénario / rosters (É9) | D5 | ☐ ouvert ailleurs | scénarios | |
@@ -349,17 +358,36 @@ log-prob 1,7 × 10⁻⁴).
 - [x] Analyzer : journalisation Deadly Demise et verdicts §1.7 (116 → 121).
 - [x] Tracker sur une seule abscisse, sondes comptées dans le temps bloqué (2026-09-11).
 
+### 5.8 Sonde étendue — balayage λ, Var(δ), contrôles (2026-09-13, suite 123)
+- [x] `scripts/grad_signal_probe.py` : `--gae-lambdas` (GAE recalculé a posteriori, égal à SB3
+      au 1e-6 sur chaque rollout, gradient policy repris avec la même permutation, différences
+      appairées jackknife), décomposition Var(δ) par famille (`action_family`, phase lue dans le
+      one-hot `global_bin`), `--model` / `--vec-normalize` (autre politique, son pkl, jamais
+      celui du canonique), `--random-init SEED`, `--opponent-deterministic`. 24 tests, rouge/vert
+      par mutation (GAE sans coupure d'épisode, identité de variance, ΔV, pkl du canonique,
+      copies GPU du buffer, réinitialisation).
+- [x] Piège attrapé par la vérification d'alignement : `GpuMaskableDictRolloutBuffer` uploade
+      avantages/retours sur GPU une fois au premier `get()` ; `set_buffer_advantages` rafraîchit
+      les deux exemplaires.
+- [x] Quatre collectes (P1, contrôle 040721, contrôle aléatoire, P0 déterministe) ; résultats
+      §0-4 et [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) ;
+      implémentation indépendante (session 40k-a2) concordante, contrôle synthétique f = 0,667
+      (plafond de l'instrument).
+- Observation : une passe `--random-init` sur trois tuée par le moteur (`engine/w40k_core.py:8703`,
+  incohérence masque/exécution « collision intra-plan » pendant un tour bot) — état atteint par
+  une politique aléatoire seulement ; bug hors chantier, consigné.
+
 ---
 
 ## 6. Ce qui n'a pas été fait
 
-- [ ] **Contrôle positif** de la sonde sur le chemin policy (modèle nettement sous-optimal contre
-      P0, ex. témoin entnorm à 28 %) — sans lui, « ‖G‖² ∋ 0 » ne distingue pas « bruit » de
-      « point stationnaire » (C3, E4).
-- [ ] **Décomposition de Var(δ_t)** en Var(r_t), Var(γV(s′) − V(s)) et covariance, par famille
-      d'action (C1) — dimensionne S11 avant tout travail moteur.
-- [ ] **Balayage λ appairé** sur les mêmes rollouts (C4, S10).
-- [ ] Sonde avec **P0 déterministe** (B4, S12).
+- [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
+      entnorm_040721 ne discrimine pas (f = 0,006 comme P1) ; le contrôle à poids aléatoires
+      (`--random-init`) rend f = 0,43 [0,27, 0,59] (C3, E4 fermés).
+- [x] **Décomposition de Var(δ_t)** — faite le 2026-09-13 (C1) : Var(r) = 86 % de Var(δ),
+      ρ(r, ΔV) = −0,55 ; S11 bornée par là.
+- [x] **Balayage λ appairé** — fait le 2026-09-13 : f(λ=0) = 0,053 [0,036, 0,070] (C4, S10).
+- [x] Sonde avec **P0 déterministe** — faite le 2026-09-13 : mêmes nombres (B4, S12).
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
 - [ ] Récompense en espérance (S11).
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
@@ -402,6 +430,21 @@ changement de config et un chantier de plusieurs semaines. Règle écrite avant 
   S11 vaut la peine avant ;
 - f(contrôle positif) ≈ 0 → le chemin policy de la sonde est cassé, rien d'autre ne se décide ;
 - dans toutes les branches, la température (S9) vient après la question de variance.
+
+**B exécutée le 2026-09-13 (suite 123) — règle appliquée aux nombres.** f_policy(λ = 0) =
+**0,053 [0,036, 0,070]** : exclut 0 mais cinq fois sous 0,1 → pas de run à ce λ. f(contrôle
+040721) = 0,006 [−0,005, 0,017] ≈ 0, mais f(contrôle à poids aléatoires) = **0,43 [0,27, 0,59]**
+→ l'instrument est sain ; c'est le contrôle choisi qui n'était pas positif (même profil que P1 à
+30 points de holdout d'écart). Aucune des trois lignes ne s'applique telle quelle ; ce qui les
+départage : à lot fixe, ni λ (‖G‖² × 3,4 mais f plafonne à 0,05, B_noise 147 000 pas) ni
+l'adversaire déterministe (mêmes nombres) ne réduisent le bruit ; Var(δ) = 0,050 est à
+l'échelle de Var(r) = 0,043 (ρ(r, ΔV) = −0,55, le critic anticipe la récompense façonnée),
+portée par le tir (0,96) et le combat (0,7–0,8). Issue : la deuxième ligne par élimination —
+**avantage moyenné**, S14 (tête Q) ou S15 (recherche) ; S11 bornée à 86 % de Var(δ) sans que sa
+part exacte (Var(r − E[r∣s,a])) soit identifiable avant de l'implémenter.
+
+**Décision restante (nouvel arbitrage à ouvrir) : S14 contre S15, et S11 avant ou non.** Ce
+dossier ne le tranche pas.
 
 ---
 

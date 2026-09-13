@@ -50,13 +50,49 @@ RÈGLE, écrite avant lecture :
   (3) f_B > 0,5 → signal propre, le plateau est ailleurs.
   (4) entre les deux → rapporter les nombres.
 
+BALAYAGE λ APPAIRÉ (`--gae-lambdas`, 2026-09-13). Sur CHAQUE rollout collecté, avantages et
+retours GAE sont recalculés a posteriori (`gae_advantages`, même boucle que
+`rollout_buffer.compute_returns_and_advantage`, vérifiée au 1e-6 au λ du modèle sur chaque
+rollout) depuis les copies NON aplaties de rewards / values / episode_starts, `last_values`
+recalculé sur `model._last_obs` et `last_dones = model._last_episode_starts`. Le gradient policy
+est alors repris par mini-lot avec la MÊME permutation ; f_B, ‖G‖² et intervalles jackknife sont
+rendus par λ, ainsi que les DIFFÉRENCES APPAIRÉES entre λ (jackknife de f_a − f_b sur les mêmes
+rollouts). γ n'est pas balayé : le critic est entraîné à γ = 0,99, un autre γ mesurerait un critic
+qui n'existe pas. λ = 0 rend δ_t = r_t + γV(s_{t+1}) − V(s_t).
+
+DÉCOMPOSITION DE Var(δ_t) sur les mêmes buffers : Var(r_t) + Var(ΔV_t) + 2 Cov(r_t, ΔV_t) avec
+ΔV_t = γ(1 − d_{t+1})V(s_{t+1}) − V(s_t), globalement et par famille d'action
+(`engine.macro_intents.action_family` sur l'action jouée, phase lue dans le one-hot `global_bin`
+de l'observation du pas, `setting_up` lu comme le moteur : `info["action"] == "ingress_move"`).
+Elle dit quelle part de la variance de l'avantage TD(0) une récompense EN ESPÉRANCE retirerait.
+
+CONTRÔLE POSITIF (`--model`, `--vec-normalize`) : une autre politique est sondée dans le MÊME
+environnement P1 (pool, rampe, offset d'épisodes inchangés), avec SES stats VecNormalize (par
+défaut le pkl compagnon du zip, jamais celui du canonique). L'acceptation « reproduit P1 » n'a
+pas de sens pour un modèle de contrôle : elle est remplacée par le seul contrôle de plomberie —
+part d'épisodes contre le pool dans les bornes, 0 épisode sans vainqueur. Le refus
+d'hyperparamètres ne garde que n_steps / batch_size / gamma / gae_lambda. `--random-init SEED`
+réinitialise en mémoire les poids du modèle chargé (contrôle positif FORT : le gradient d'une
+politique aléatoire est certainement grand ; mesuré le 2026-09-13, f_8160 = 0,43 [0,27, 0,59] à
+λ = 0,95 avec K = 12, là où le modèle `entnorm_20260913-040721` rendait 0,006 comme P1).
+
+`--opponent-deterministic` : pose `self_play_deterministic = true` dans le bloc `opponent_mix`
+que `_install_stage_config_overrides` installe (la clé que `curriculum.opponent.deterministic`
+alimente) — seconde collecte, NON appairée avec la première.
+
 LECTURE SEULE. Ni modèle, ni config, ni state, ni `optimizer.step`. Refuse de démarrer si un
 `ai/train.py` tourne (les évaluations relisent les JSON à chaud), et vérifie en sortie que ni le
 zip ni le pkl ni les JSON de l'agent n'ont bougé.
 
 Usage :
     python3 scripts/grad_signal_probe.py --agent ArmageddonAgent_x1 --etape P1 \\
-        --training-config x1_lineage --rollouts 24 --out /tmp/grad_signal_p1.json
+        --training-config x1_lineage --rollouts 24 --gae-lambdas 0.95,0.8,0.5,0.2,0 \\
+        --out /tmp/grad_signal_p1.json
+    # contrôle positif (autre politique, ou poids réinitialisés) :
+    python3 scripts/grad_signal_probe.py ... --model ai/models/<clé>/<zip> [--vec-normalize <pkl>]
+    python3 scripts/grad_signal_probe.py ... --random-init 20260913 --rollouts 12
+    # adversaire déterministe (seconde collecte, non appairée) :
+    python3 scripts/grad_signal_probe.py ... --opponent-deterministic
 """
 from __future__ import annotations
 
@@ -85,6 +121,15 @@ Z_95 = 1.96
 #: Seuils de la règle, fixés avant lecture.
 RULE_F_NOISE = 0.1
 RULE_F_CLEAN = 0.5
+#: Balayage λ par défaut ; γ n'est jamais balayé (critic entraîné à γ = 0,99).
+DEFAULT_GAE_LAMBDAS = "0.95,0.8,0.5,0.2,0"
+#: Tolérance de la vérification « GAE recalculé = SB3 » au λ du modèle, sur chaque rollout.
+GAE_ATOL = 1e-6
+#: Clés d'hyperparamètres dont le checkpoint doit porter les valeurs du profil : toutes pour le
+#: canonique (la mesure doit être celle du run), les seules qui définissent le lot pour un
+#: modèle de contrôle (une autre politique a légitimement d'autres coefficients de loss).
+HP_KEYS_CANONICAL = ("n_steps", "batch_size", "vf_coef", "ent_coef", "gamma", "gae_lambda", "normalize_advantage")
+HP_KEYS_CONTROL = ("n_steps", "batch_size", "gamma", "gae_lambda")
 
 #: Fenêtre du run de référence `run_20260912-065925`, 253 updates dans les trois heures
 #: précédant l'instantané 0,9078 (moyenne ± écart-type, min–max) : policy 0,354 ± 0,052
@@ -346,6 +391,278 @@ def swap_and_flatten(arr: np.ndarray) -> np.ndarray:
     return arr.swapaxes(0, 1).reshape(shape[0] * shape[1], *shape[2:])
 
 
+def _check_rollout_arrays(rewards: np.ndarray, values: np.ndarray, episode_starts: np.ndarray,
+                          last_values: np.ndarray, last_dones: np.ndarray) -> Tuple[int, int]:
+    if not (rewards.shape == values.shape == episode_starts.shape) or rewards.ndim != 2:
+        raise ValueError(
+            f"rewards, values, episode_starts doivent être (T, N) : {rewards.shape}, {values.shape}, "
+            f"{episode_starts.shape}"
+        )
+    n_steps, n_envs = rewards.shape
+    if last_values.shape != (n_envs,) or last_dones.shape != (n_envs,):
+        raise ValueError(
+            f"last_values / last_dones doivent être (N={n_envs},) : {last_values.shape}, {last_dones.shape}"
+        )
+    return n_steps, n_envs
+
+
+def gae_advantages(rewards: np.ndarray, values: np.ndarray, episode_starts: np.ndarray,
+                   last_values: np.ndarray, last_dones: np.ndarray, gamma: float,
+                   gae_lambda: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Avantages GAE(λ) et retours TD(λ), MÊME boucle que `RolloutBuffer.compute_returns_and_advantage`.
+
+    Tableaux (T, N) non aplatis, float32 comme le buffer SB3 (l'accumulation `last_gae_lam` y est
+    en float32 : la reproduire en float64 s'en écarterait au-delà de 1e-6 sur 8160 pas).
+    `last_values` : V(s_T) par env ; `last_dones` : le pas T−1 fermait-il un épisode.
+    Retourne (advantages, returns) avec returns = advantages + values.
+    """
+    r = np.asarray(rewards, dtype=np.float32)
+    v = np.asarray(values, dtype=np.float32)
+    starts = np.asarray(episode_starts, dtype=np.float32)
+    lv = np.asarray(last_values, dtype=np.float32).reshape(-1)
+    ld = np.asarray(last_dones, dtype=bool).reshape(-1)
+    n_steps, _ = _check_rollout_arrays(r, v, starts, lv, ld)
+    if not 0.0 <= gae_lambda <= 1.0:
+        raise ValueError(f"gae_lambda doit être dans [0, 1], reçu {gae_lambda}")
+    if not 0.0 < gamma <= 1.0:
+        raise ValueError(f"gamma doit être dans ]0, 1], reçu {gamma}")
+    advantages = np.zeros_like(r)
+    last_gae_lam = np.zeros(r.shape[1], dtype=np.float32)
+    for step in reversed(range(n_steps)):
+        if step == n_steps - 1:
+            next_non_terminal = 1.0 - ld.astype(np.float32)
+            next_values = lv
+        else:
+            next_non_terminal = 1.0 - starts[step + 1]
+            next_values = v[step + 1]
+        delta = r[step] + gamma * next_values * next_non_terminal - v[step]
+        last_gae_lam = delta + gamma * gae_lambda * next_non_terminal * last_gae_lam
+        advantages[step] = last_gae_lam
+    return advantages, advantages + v
+
+
+def bootstrap_value_change(values: np.ndarray, episode_starts: np.ndarray, last_values: np.ndarray,
+                           last_dones: np.ndarray, gamma: float) -> np.ndarray:
+    """ΔV_t = γ(1 − d_{t+1})V(s_{t+1}) − V(s_t), (T, N) float64 — la part de δ_t qui ne vient pas de r_t.
+
+    δ_t = r_t + ΔV_t exactement : c'est l'avantage GAE à λ = 0 (verrouillé par test).
+    """
+    v = np.asarray(values, dtype=np.float64)
+    starts = np.asarray(episode_starts, dtype=np.float64)
+    lv = np.asarray(last_values, dtype=np.float64).reshape(-1)
+    ld = np.asarray(last_dones, dtype=bool).reshape(-1)
+    _check_rollout_arrays(v, v, starts, lv, ld)
+    next_values = np.vstack([v[1:], lv[None, :]])
+    next_non_terminal = np.vstack([1.0 - starts[1:], 1.0 - ld.astype(np.float64)[None, :]])
+    return gamma * next_values * next_non_terminal - v
+
+
+class DeltaVarianceAccumulator:
+    """Var(δ) = Var(r) + Var(ΔV) + 2 Cov(r, ΔV), globalement et par famille, sur K rollouts.
+
+    Moments cumulés (n, Σr, Σr², ΣΔV, ΣΔV², Σr·ΔV) : la variance rendue est la variance de
+    POPULATION de la concaténation des rollouts, identique à celle du tableau complet.
+    """
+
+    def __init__(self) -> None:
+        self._moments: Dict[str, np.ndarray] = {}
+
+    def add(self, rewards: np.ndarray, delta_v: np.ndarray, families: Any) -> None:
+        r = np.asarray(rewards, dtype=np.float64).reshape(-1)
+        d = np.asarray(delta_v, dtype=np.float64).reshape(-1)
+        fam = np.asarray(families).astype(str).reshape(-1)
+        if not (r.shape == d.shape == fam.shape):
+            raise ValueError(f"rewards, delta_v, families de tailles différentes : {r.shape}, {d.shape}, {fam.shape}")
+        for name in ("all", *np.unique(fam)):
+            mask = np.ones(r.shape, dtype=bool) if name == "all" else (fam == name)
+            rr, dd = r[mask], d[mask]
+            moments = np.array([rr.size, rr.sum(), (rr * rr).sum(), dd.sum(), (dd * dd).sum(), (rr * dd).sum()])
+            self._moments[str(name)] = self._moments.get(str(name), np.zeros(6)) + moments
+
+    @staticmethod
+    def _decompose(m: np.ndarray) -> Dict[str, float]:
+        n, sr, srr, sd, sdd, srd = m
+        if n < 2:
+            # Famille vue une fois sur tout le run : sa variance n'existe pas. Rapportée en nan,
+            # pas levée — lever ici jetterait K rollouts de collecte pour une ligne auxiliaire.
+            return {"n": int(n), "mean_reward": float(sr / n) if n else float("nan"),
+                    "mean_delta_v": float(sd / n) if n else float("nan"),
+                    "mean_delta": float((sr + sd) / n) if n else float("nan"),
+                    "var_reward": float("nan"), "var_delta_v": float("nan"), "cov": float("nan"),
+                    "var_delta": float("nan"), "share_reward": float("nan"),
+                    "share_delta_v": float("nan"), "share_cov": float("nan")}
+        mean_r, mean_d = sr / n, sd / n
+        var_r = srr / n - mean_r ** 2
+        var_d = sdd / n - mean_d ** 2
+        cov = srd / n - mean_r * mean_d
+        var_delta = var_r + var_d + 2.0 * cov
+
+        def share(x: float) -> float:
+            return x / var_delta if var_delta > 0 else float("nan")
+
+        return {
+            "n": int(n), "mean_reward": float(mean_r), "mean_delta_v": float(mean_d),
+            "mean_delta": float(mean_r + mean_d),
+            "var_reward": float(var_r), "var_delta_v": float(var_d), "cov": float(cov),
+            "var_delta": float(var_delta),
+            "share_reward": float(share(var_r)), "share_delta_v": float(share(var_d)),
+            "share_cov": float(share(2.0 * cov)),
+        }
+
+    def result(self) -> Dict[str, Any]:
+        if "all" not in self._moments:
+            raise ValueError("aucun pas accumulé")
+        out: Dict[str, Any] = {"all": self._decompose(self._moments["all"]), "by_family": {}}
+        for name, m in sorted(self._moments.items()):
+            if name != "all":
+                out["by_family"][name] = self._decompose(m)
+        return out
+
+
+def phases_from_global_bin(global_bin: np.ndarray) -> np.ndarray:
+    """Phase de chaque pas depuis le one-hot `phase_*` de `global_bin` (T, N, S) → (T, N) str.
+
+    `global_bin` n'est pas normalisé par VecNormalize (`ai/train._vec_norm_obs_keys`), le one-hot
+    y est intact ; un pas sans exactement un bit levé LÈVE.
+    """
+    from engine.observation_entities import OBS_PHASE_IDS, global_bin_index
+
+    g = np.asarray(global_bin)
+    if g.ndim != 3:
+        raise ValueError(f"global_bin doit être (T, N, S), reçu {g.shape}")
+    idx = [global_bin_index(f"phase_{phase}") for phase in OBS_PHASE_IDS]
+    one_hot = g[:, :, idx]
+    hits = (one_hot == 1.0).sum(axis=2)
+    if not np.all(hits == 1):
+        bad = tuple(np.argwhere(hits != 1)[0])
+        raise ValueError(f"one-hot de phase invalide au pas {bad} : {one_hot[bad]}")
+    return np.asarray(OBS_PHASE_IDS, dtype=object)[one_hot.argmax(axis=2)]
+
+
+def step_families(actions: np.ndarray, phases: np.ndarray, setting_up: np.ndarray) -> np.ndarray:
+    """Famille de l'action jouée à chaque pas (T, N), comme `w40k_core` la compte."""
+    from engine.macro_intents import action_family
+
+    a = np.asarray(actions).reshape(phases.shape)
+    su = np.asarray(setting_up, dtype=bool).reshape(phases.shape)
+    out = np.empty(phases.shape, dtype=object)
+    for t in range(phases.shape[0]):
+        for n in range(phases.shape[1]):
+            out[t, n] = action_family(int(a[t, n]), str(phases[t, n]), setting_up=bool(su[t, n]))
+    return out
+
+
+def parse_gae_lambdas(text: str) -> List[float]:
+    """`--gae-lambdas` : liste de λ dans [0, 1], sans doublon, dans l'ordre donné."""
+    lambdas: List[float] = []
+    for piece in text.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        lam = float(piece)
+        if not 0.0 <= lam <= 1.0:
+            raise ValueError(f"λ hors [0, 1] : {lam}")
+        if lam in lambdas:
+            raise ValueError(f"λ en double : {lam}")
+        lambdas.append(lam)
+    if not lambdas:
+        raise ValueError("--gae-lambdas vide")
+    return lambdas
+
+
+def resolve_probe_model(canonical_path: str, model_path: Optional[str],
+                        vec_normalize_path: Optional[str]) -> Tuple[str, str, bool]:
+    """(zip sondé, pkl VecNormalize, is_control).
+
+    Sans `--model` : le canonique et SON pkl compagnon. Avec `--model` : ce zip et son pkl
+    compagnon, ou le pkl donné par `--vec-normalize`. Le pkl du canonique n'est JAMAIS servi à un
+    modèle de contrôle, et `--vec-normalize` sans `--model` est refusé (le canonique avec les
+    stats d'un autre modèle ne mesure rien).
+    """
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
+    canonical_pkl = get_vec_normalize_path(canonical_path)
+    if model_path is None:
+        if vec_normalize_path is not None:
+            raise ValueError("--vec-normalize exige --model : le canonique se sonde avec ses propres stats.")
+        return canonical_path, canonical_pkl, False
+    model_abs = os.path.abspath(model_path)
+    if not os.path.exists(model_abs):
+        raise FileNotFoundError(f"--model absent : {model_abs}")
+    pkl = os.path.abspath(vec_normalize_path) if vec_normalize_path is not None else get_vec_normalize_path(model_abs)
+    if not os.path.exists(pkl):
+        raise FileNotFoundError(f"stats VecNormalize du modèle de contrôle absentes : {pkl}")
+    if pkl == os.path.abspath(canonical_pkl):
+        raise ValueError("un modèle de contrôle ne se sonde jamais avec le pkl du canonique.")
+    return model_abs, pkl, True
+
+
+def reset_policy_parameters(policy: Any, seed: int) -> int:
+    """Réinitialise CHAQUE module de la policy (`reset_parameters`), graine fixée ; rend le nombre
+    de modules réinitialisés et LÈVE si des paramètres sont restés intacts.
+
+    Contrôle positif FORT : une politique aléatoire a un gradient de politique certainement grand
+    dans l'environnement, quel que soit l'état du canonique. Les hyperparamètres et l'architecture
+    restent ceux du zip chargé ; rien n'est écrit sur disque.
+    """
+    import torch as th
+
+    th.manual_seed(seed)
+    before = th.cat([p.detach().flatten().clone() for p in policy.parameters()])
+    n_reset = 0
+    for module in policy.modules():
+        if hasattr(module, "reset_parameters"):
+            module.reset_parameters()
+            n_reset += 1
+    after = th.cat([p.detach().flatten() for p in policy.parameters()])
+    untouched = int((before == after).sum().item())
+    # Une égalité isolée est possible (biais nul avant comme après) ; une part notable ne l'est
+    # pas : un module sans `reset_parameters` aurait gardé ses poids entraînés.
+    if untouched > 0.01 * before.numel():
+        raise RuntimeError(f"réinitialisation incomplète : {untouched} paramètres inchangés sur {before.numel()}")
+    return n_reset
+
+
+def lambda_sweep_stats(grams: Dict[float, np.ndarray], minibatch_sq_norms: Dict[float, np.ndarray],
+                       batch_steps: int) -> Dict[str, Any]:
+    """f_B, ‖G‖² par λ et différences APPAIRÉES entre λ (jackknife de f_a − f_b, mêmes rollouts).
+
+    `grams[λ]` : (K, K) produits scalaires des gradients policy recalculés à λ ;
+    `minibatch_sq_norms[λ]` : (K, M). Toutes les matrices portent les MÊMES K rollouts dans le
+    même ordre, ce qui rend la différence appairée légitime.
+    """
+    lambdas = list(grams)
+    if set(minibatch_sq_norms) != set(lambdas):
+        raise ValueError("grams et minibatch_sq_norms doivent porter les mêmes λ")
+    k = grams[lambdas[0]].shape[0]
+    per_lambda = {}
+    for lam in lambdas:
+        if grams[lam].shape != (k, k):
+            raise ValueError(f"λ={lam} : gram {grams[lam].shape} ≠ ({k}, {k})")
+        per_lambda[lam] = signal_stats(grams[lam], minibatch_sq_norms[lam], batch_steps)
+
+    def f_at(lam: float, keep: np.ndarray) -> float:
+        t = off_diagonal_mean(_sub(grams[lam], keep))
+        d = diagonal_mean(_sub(grams[lam], keep))
+        return t / d if d > 0 else float("nan")
+
+    def true_at(lam: float, keep: np.ndarray) -> float:
+        return off_diagonal_mean(_sub(grams[lam], keep))
+
+    pairs = []
+    for i, lam_a in enumerate(lambdas):
+        for lam_b in lambdas[i + 1:]:
+            f_diff = jackknife(lambda keep, a=lam_a, b=lam_b: f_at(a, keep) - f_at(b, keep), k)
+            g_diff = jackknife(lambda keep, a=lam_a, b=lam_b: true_at(a, keep) - true_at(b, keep), k)
+            pairs.append({
+                "lambda_a": lam_a, "lambda_b": lam_b, "f_batch_diff": f_diff, "true_sq_diff": g_diff,
+                "f_batch_diff_excludes_zero": bool(
+                    np.isfinite(f_diff["low"]) and (f_diff["low"] > 0.0 or f_diff["high"] < 0.0)
+                ),
+            })
+    return {"lambdas": lambdas, "per_lambda": per_lambda, "pairs": pairs}
+
+
 # ── Groupes de paramètres et gradients (torch) ───────────────────────────────────────────────
 
 
@@ -477,12 +794,21 @@ def snapshot_mtimes(paths: Sequence[Path]) -> Dict[str, float]:
 
 
 def build_probe_context(agent: str, stage_name: str, training_config_name: str, resolution: int,
-                        device: str, log: Callable[[str], None]) -> Dict[str, Any]:
-    """L'environnement et le modèle EXACTS de l'étape, par les briques d'ai/train.py.
+                        device: str, log: Callable[[str], None], model_path: Optional[str] = None,
+                        vec_normalize_path: Optional[str] = None,
+                        opponent_deterministic: bool = False,
+                        random_init_seed: Optional[int] = None) -> Dict[str, Any]:
+    """L'environnement EXACT de l'étape, par les briques d'ai/train.py, et le modèle sondé.
 
     Même ordre que `main()` → `_prepare_curriculum_stage` → `train_with_scenario_rotation`,
     sans les effets de bord d'un run : ni `prepare_run_artifacts` (contrat, archivage, run-meta),
     ni `attach_run_logger` (dossier TensorBoard), ni callbacks d'entraînement.
+    `model_path` / `vec_normalize_path` : un modèle de CONTRÔLE sondé dans cet environnement
+    (cf. `resolve_probe_model`) ; l'offset d'épisodes, le pool et la rampe restent ceux du
+    canonique. `opponent_deterministic` : `self_play_deterministic` posé à vrai dans le bloc
+    `opponent_mix` de l'étape. `random_init_seed` : le modèle chargé (canonique ou `--model`)
+    est réinitialisé en mémoire (`reset_policy_parameters`) — contrôle positif fort, traité
+    comme un modèle de contrôle.
     """
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX, get_config_loader
 
@@ -494,9 +820,9 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     )
     from ai.training_utils import get_scenario_list_for_phase, make_training_env, setup_imports
     from ai.unit_registry import UnitRegistry
-    from ai.vec_normalize_utils import get_vec_normalize_path, load_vec_normalize
     from engine.episode_schedule import episodes_per_env
     from shared.data_validation import require_key, require_present
+    from stable_baselines3.common.vec_env import VecNormalize
 
     config = get_config_loader()
     curriculum = load_curriculum(agent)
@@ -504,12 +830,18 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     canonical_path = T.build_agent_model_path(config.get_models_root(), agent)
     if not os.path.exists(canonical_path):
         raise FileNotFoundError(f"modèle canonique absent : {canonical_path}")
+    probe_model_path, probe_vec_path, is_control = resolve_probe_model(canonical_path, model_path, vec_normalize_path)
+    is_control = is_control or random_init_seed is not None
     warm_start = stage_init_source(stage) is not None
     if not warm_start:
         raise ValueError(f"étape {stage_name} : init 'new', rien à reprendre — la sonde mesure une reprise.")
+    opponent_mix = T._stage_opponent_mix(curriculum, stage, canonical_path)
+    if opponent_mix is None:
+        raise ValueError(f"étape {stage_name} sans pool : la sonde mesure une étape reprise contre son pool.")
+    if opponent_deterministic:
+        opponent_mix["self_play_deterministic"] = True
     T._install_stage_config_overrides(
-        config, agent, T._stage_opponent_mix(curriculum, stage, canonical_path),
-        get_stage_hp_overrides(stage), warm_start, stage_label=stage_name,
+        config, agent, opponent_mix, get_stage_hp_overrides(stage), warm_start, stage_label=stage_name,
     )
     training_config = config.load_agent_training_config(agent, training_config_name)
 
@@ -568,24 +900,25 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         )
         for i in range(n_envs)
     ]))
-    # Stats du checkpoint, FIGÉES (training=False) : `load_vec_normalize` force aussi
-    # norm_reward=False, qui fausserait l'échelle des retours ; le run normalise les récompenses
-    # (cf. `_apply_vec_normalize`), on le rétablit.
-    vec_env = load_vec_normalize(env, canonical_path)
-    if vec_env is None:
-        raise FileNotFoundError(f"stats VecNormalize absentes : {get_vec_normalize_path(canonical_path)}")
+    # Stats du modèle sondé (son pkl compagnon, ou `--vec-normalize`), FIGÉES (training=False)
+    # comme `load_vec_normalize` ; ce dernier force aussi norm_reward=False, qui fausserait
+    # l'échelle des retours — le run normalise les récompenses (cf. `_apply_vec_normalize`).
+    vec_env = VecNormalize.load(probe_vec_path, env)
+    vec_env.training = False
     vec_env.norm_reward = bool(require_key(vec_norm_cfg, "norm_reward"))
-    if vec_env.training:
-        raise RuntimeError("VecNormalize.training doit rester faux : la sonde ne met à jour aucune statistique.")
 
     model_params = dict(require_key(training_config, "model_params"))
     T.apply_rollout_n_steps(model_params, n_envs, vec_env.observation_space, log=log)
     model_params = T._model_params_with_ent_coef_frozen(model_params, log=log)
-    model = T._load_checkpoint(canonical_path, vec_env, device)
+    model = T._load_checkpoint(probe_model_path, vec_env, device)
+    if random_init_seed is not None:
+        n_reset = reset_policy_parameters(model.policy, random_init_seed)
+        log(f"🎲 poids RÉINITIALISÉS en mémoire (graine {random_init_seed}, {n_reset} modules) : contrôle positif aléatoire")
     # Le checkpoint est mesuré TEL QUEL ; il doit porter les hyperparamètres du profil, sinon la
-    # mesure ne serait pas celle du run (refus explicite, jamais une réécriture silencieuse).
+    # mesure ne serait pas celle du run (refus explicite, jamais une réécriture silencieuse). Un
+    # modèle de contrôle n'a à partager que la définition du lot.
     mismatches = []
-    for key in ("n_steps", "batch_size", "vf_coef", "ent_coef", "gamma", "gae_lambda", "normalize_advantage"):
+    for key in HP_KEYS_CONTROL if is_control else HP_KEYS_CANONICAL:
         expected = model_params[key]
         actual = getattr(model, key)
         if actual != expected:
@@ -601,7 +934,11 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         "config": config,
         "training_config": training_config,
         "canonical_path": canonical_path,
-        "vec_normalize_path": get_vec_normalize_path(canonical_path),
+        "model_path": probe_model_path,
+        "vec_normalize_path": probe_vec_path,
+        "is_control": is_control,
+        "random_init_seed": random_init_seed,
+        "opponent_deterministic": bool(opponent_deterministic),
         "scenario_list": scenario_list,
         "n_envs": n_envs,
         "episode_offset": episode_offset,
@@ -631,6 +968,7 @@ def make_recorder(n_envs: int) -> Any:
         def reset_rollout(self) -> None:
             self.dones: List[np.ndarray] = []
             self.outcomes: List[np.ndarray] = []
+            self.setting_up: List[np.ndarray] = []
             self.episodes_total = 0
             self.episodes_pool = 0
             self.episodes_no_winner = 0
@@ -661,12 +999,17 @@ def make_recorder(n_envs: int) -> Any:
                     outcome[env_idx] = OUTCOME_REWARD
                 else:
                     outcome[env_idx] = -OUTCOME_REWARD
+            # `setting_up` lu comme `w40k_core` : `ingress_move` est la seule sémantique d'une
+            # mise en place depuis les réserves ; `get` légitime, clé d'action absente ailleurs.
+            self.setting_up.append(np.array(
+                [infos[i].get("action") == "ingress_move" for i in range(n_envs)], dtype=bool
+            ))
             self.dones.append(dones)
             self.outcomes.append(outcome)
             return True
 
-        def arrays(self) -> Tuple[np.ndarray, np.ndarray]:
-            return np.stack(self.dones), np.stack(self.outcomes)
+        def arrays(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+            return np.stack(self.dones), np.stack(self.outcomes), np.stack(self.setting_up)
 
     return _Recorder()
 
@@ -681,12 +1024,84 @@ def check_acceptance(observed: Dict[str, float]) -> List[str]:
     return failures
 
 
+def check_control_acceptance(observed: Dict[str, Any]) -> List[str]:
+    """Contrôle de PLOMBERIE seul, pour un modèle de contrôle : part pool dans les bornes du run
+    de référence, 0 épisode sans vainqueur. « Reproduit P1 » n'a pas de sens pour une autre
+    politique."""
+    failures = []
+    low, high = ACCEPTANCE_BOUNDS["pool_episode_share"]
+    share = observed["pool_episode_share"]
+    if not (np.isfinite(share) and low <= share <= high):
+        failures.append(f"pool_episode_share = {share:.4g} hors [{low}, {high}]")
+    if int(observed["episodes_no_winner"]) != 0:
+        failures.append(f"episodes_no_winner = {observed['episodes_no_winner']} ≠ 0")
+    return failures
+
+
+def set_buffer_advantages(buf: Any, advantages: np.ndarray, returns: np.ndarray) -> None:
+    """Pose des avantages/retours (T, N) recalculés dans un buffer DÉJÀ aplati par `get()`.
+
+    Le buffer de production est `GpuMaskableDictRolloutBuffer` : ses champs compacts sont
+    uploadés sur le GPU UNE fois, au premier `get()`, et `_get_samples_gpu` sert ces copies —
+    remplacer les seuls tableaux numpy laisserait `get()` servir les anciens avantages (c'est ce
+    que la vérification d'alignement mini-lot par mini-lot a attrapé). Les deux exemplaires
+    sont donc remplacés ensemble.
+    """
+    import torch as th
+
+    from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
+
+    if not buf.generator_ready:
+        raise RuntimeError("set_buffer_advantages exige un buffer déjà aplati par un premier get()")
+    if advantages.shape != (buf.buffer_size, buf.n_envs) or returns.shape != advantages.shape:
+        raise ValueError(f"avantages/retours (T, N) attendus : {advantages.shape}, {returns.shape}")
+    buf.advantages = buf.swap_and_flatten(np.asarray(advantages, dtype=np.float32))
+    buf.returns = buf.swap_and_flatten(np.asarray(returns, dtype=np.float32))
+    if isinstance(buf, GpuMaskableDictRolloutBuffer):
+        buf._gpu_advantages = th.as_tensor(buf.advantages, device=buf.device)
+        buf._gpu_returns = th.as_tensor(buf.returns, device=buf.device)
+
+
+def _policy_rollout_grad(model: Any, buf: Any, batch_size: int, perm: np.ndarray, seed: int,
+                         params: Sequence[Any], n_params: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Gradient policy d'un rollout (moyenne des mini-lots) et carrés de norme par mini-lot,
+    avec la permutation `perm` que `get()` rejoue après `np.random.seed(seed)` — vérifié."""
+    import torch as th
+
+    n_minibatches = perm.size // batch_size
+    np.random.seed(seed)
+    acc = th.zeros(n_params, device=model.device, dtype=th.float32)
+    mb_sq = np.zeros(n_minibatches)
+    zeros = th.zeros(batch_size, device=model.device, dtype=th.float32)
+    for m, rollout_data in enumerate(buf.get(batch_size)):
+        idx = perm[m * batch_size:(m + 1) * batch_size]
+        expected_adv = buf.to_torch(buf.advantages[idx].flatten())
+        if not th.equal(rollout_data.advantages, expected_adv):
+            raise RuntimeError(
+                f"mini-lot {m} : permutation de get() non reproduite (attendu {tuple(expected_adv.shape)} "
+                f"{expected_adv.dtype}, nan {int(th.isnan(expected_adv).sum())} ; reçu "
+                f"{tuple(rollout_data.advantages.shape)} {rollout_data.advantages.dtype}, nan "
+                f"{int(th.isnan(rollout_data.advantages).sum())} ; écart max "
+                f"{float((rollout_data.advantages - expected_adv).abs().max()) if expected_adv.shape == rollout_data.advantages.shape else float('nan'):.3g})"
+            )
+        losses = minibatch_term_losses(model, rollout_data, zeros, zeros)
+        g = flat_grad(losses["policy"], params, retain_graph=False)
+        acc += g
+        mb_sq[m] = float(g.double().pow(2).sum().item())
+    return (acc / n_minibatches).cpu().numpy(), mb_sq
+
+
 def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
-            permutation_seed: int) -> Dict[str, Any]:
-    """K rollouts à politique figée, gradients par terme et par mini-lot, puis statistiques."""
+            permutation_seed: int, gae_lambdas: Sequence[float]) -> Dict[str, Any]:
+    """K rollouts à politique figée, gradients par terme et par mini-lot, puis statistiques.
+
+    Par rollout, après les quatre termes au λ du modèle : GAE recalculé à chaque λ de
+    `gae_lambdas` (vérifié = SB3 au λ du modèle), gradient policy repris avec la MÊME
+    permutation, et décomposition de Var(δ) sur le même buffer.
+    """
     import torch as th
     from stable_baselines3.common.logger import configure as configure_sb3_logger
-    from stable_baselines3.common.utils import explained_variance
+    from stable_baselines3.common.utils import explained_variance, obs_as_tensor
 
     model = ctx["model"]
     env = ctx["env"]
@@ -697,6 +1112,9 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     if batch_steps % batch_size != 0:
         raise ValueError(f"{batch_steps} pas ne se découpent pas en mini-lots de {batch_size}")
     n_minibatches = batch_steps // batch_size
+    gamma = float(model.gamma)
+    model_lambda = float(model.gae_lambda)
+    is_control = bool(ctx["is_control"])
 
     model.set_logger(configure_sb3_logger(ctx["workdir"], ["stdout"]))
     recorder = make_recorder(n_envs)
@@ -713,6 +1131,10 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     rollout_grads = {term: np.zeros((rollouts, n_params), dtype=np.float32) for term in TERMS}
     # Carrés de norme des gradients de mini-lots : (K, M) par terme et par groupe.
     mb_sq = {term: {g: np.zeros((rollouts, n_minibatches)) for g in group_names} for term in TERMS}
+    # Balayage λ : gradient policy (K, D) et carrés de norme des mini-lots (K, M) par λ.
+    sweep_grads = {lam: np.zeros((rollouts, n_params), dtype=np.float32) for lam in gae_lambdas}
+    sweep_mb_sq = {lam: np.zeros((rollouts, n_minibatches)) for lam in gae_lambdas}
+    delta_var = DeltaVarianceAccumulator()
     rollout_log: List[Dict[str, Any]] = []
     acceptance: Dict[str, Any] = {}
 
@@ -724,17 +1146,39 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         buf = model.rollout_buffer
         t_collect = time.perf_counter() - t0
 
-        dones, outcome_at_done = recorder.arrays()
+        dones, outcome_at_done, setting_up = recorder.arrays()
         if dones.shape != (n_steps, n_envs):
             raise RuntimeError(f"recorder : {dones.shape} ≠ ({n_steps}, {n_envs})")
+        # Copies NON aplaties, avant le premier `get()` qui aplatit le buffer en place.
         episode_starts = np.asarray(buf.episode_starts, dtype=bool).reshape(n_steps, n_envs).copy()
-        returns_tn, valid_tn = outcome_returns(episode_starts, dones, outcome_at_done, float(model.gamma))
+        rewards_tn = np.asarray(buf.rewards, dtype=np.float32).reshape(n_steps, n_envs).copy()
+        values_tn = np.asarray(buf.values, dtype=np.float32).reshape(n_steps, n_envs).copy()
+        actions_tn = np.asarray(buf.actions).reshape(n_steps, n_envs).copy()
+        phases_tn = phases_from_global_bin(np.asarray(buf.observations["global_bin"]).reshape(n_steps, n_envs, -1))
+        last_dones = np.asarray(model._last_episode_starts, dtype=bool).reshape(n_envs).copy()
+        with th.no_grad():
+            last_values = model.policy.predict_values(obs_as_tensor(model._last_obs, model.device)).cpu().numpy().reshape(n_envs)
+        # Le GAE recalculé doit reproduire SB3 sur CE rollout, sinon rien du balayage ne vaut.
+        adv_check, ret_check = gae_advantages(rewards_tn, values_tn, episode_starts, last_values, last_dones, gamma, model_lambda)
+        gae_gap = float(np.max(np.abs(adv_check - np.asarray(buf.advantages).reshape(n_steps, n_envs))))
+        ret_gap = float(np.max(np.abs(ret_check - np.asarray(buf.returns).reshape(n_steps, n_envs))))
+        if gae_gap > GAE_ATOL or ret_gap > GAE_ATOL:
+            raise RuntimeError(
+                f"rollout {k} : GAE recalculé ≠ SB3 à λ = {model_lambda} (écart max avantages {gae_gap:.3g}, "
+                f"retours {ret_gap:.3g} > {GAE_ATOL})"
+            )
+        returns_tn, valid_tn = outcome_returns(episode_starts, dones, outcome_at_done, gamma)
         returns_flat = swap_and_flatten(returns_tn)
         valid_flat = swap_and_flatten(valid_tn)
         ev = float(explained_variance(buf.values.flatten(), buf.returns.flatten()))
         returns_mean = float(buf.returns.mean())
         ep_len_mean = float(np.mean(recorder.episode_lengths)) if recorder.episode_lengths else float("nan")
         pool_share = recorder.episodes_pool / recorder.episodes_total if recorder.episodes_total else float("nan")
+
+        # Décomposition de Var(δ) sur ce buffer, par famille de l'action jouée.
+        delta_v_tn = bootstrap_value_change(values_tn, episode_starts, last_values, last_dones, gamma)
+        families_tn = step_families(actions_tn, phases_tn, setting_up)
+        delta_var.add(rewards_tn, delta_v_tn, families_tn)
 
         # Même permutation que `get()` : le générateur global numpy est réensemencé juste avant
         # l'appel, et l'alignement est VÉRIFIÉ mini-lot par mini-lot sur les avantages.
@@ -768,10 +1212,23 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
                     mb_sq[term][gname][k, m] = norms[gname]
                 if m == 0:
                     mb0_norms[term] = float(np.sqrt(norms["all"]))
-        model.policy.set_training_mode(False)
         for term in TERMS:
             rollout_grads[term][k] = (acc[term] / n_minibatches).cpu().numpy()
         del acc
+
+        # Balayage λ : avantages/retours recalculés posés dans le buffer (déjà aplati par le
+        # premier `get()`), même permutation ; au λ du modèle le gradient est celui ci-dessus.
+        for lam in gae_lambdas:
+            if lam == model_lambda:
+                sweep_grads[lam][k] = rollout_grads["policy"][k]
+                sweep_mb_sq[lam][k] = mb_sq["policy"]["all"][k]
+                continue
+            adv_l, ret_l = gae_advantages(rewards_tn, values_tn, episode_starts, last_values, last_dones, gamma, lam)
+            set_buffer_advantages(buf, adv_l, ret_l)
+            sweep_grads[lam][k], sweep_mb_sq[lam][k] = _policy_rollout_grad(
+                model, buf, batch_size, perm, seed_k, params, n_params
+            )
+        model.policy.set_training_mode(False)
         t_grad = time.perf_counter() - t1
 
         entry = {
@@ -782,6 +1239,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             "episodes_pool": recorder.episodes_pool,
             "episodes_no_winner": recorder.episodes_no_winner,
             "valid_outcome_steps": int(valid_tn.sum()),
+            "gae_max_gap": gae_gap,
             "grad_norm_policy_mb0": mb0_norms["policy"],
             "grad_norm_value_mb0": mb0_norms["value"],
             "grad_norm_entropy_mb0": mb0_norms["entropy"],
@@ -798,15 +1256,19 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             f"{recorder.episodes_no_winner} sans vainqueur), mb0 policy {mb0_norms['policy']:.3f} "
             f"value {mb0_norms['value']:.3f} entropy {mb0_norms['entropy']:.4f} outcome "
             f"{mb0_norms['outcome']:.3f}, EV {ev:.3f}, ep_len {ep_len_mean:.1f}, returns {returns_mean:.3f}, "
-            f"part pool {pool_share:.2f}"
+            f"part pool {pool_share:.2f}, écart GAE {gae_gap:.2g}"
         )
         if k == 0:
-            failures = check_acceptance(entry)
-            acceptance = {"passed": not failures, "failures": failures, "observed": entry}
+            failures = check_control_acceptance(entry) if is_control else check_acceptance(entry)
+            acceptance = {"passed": not failures, "failures": failures, "observed": entry, "control": is_control}
             if failures:
                 log("⛔ ACCEPTATION REFUSÉE — plomberie à corriger avant toute lecture :\n  " + "\n  ".join(failures))
-                return {"acceptance": acceptance, "rollouts": rollout_log, "terms": {}, "cosines": {}, "verdict": None}
-            log("✅ acceptation : le premier rollout reproduit le run de référence")
+                return {
+                    "acceptance": acceptance, "rollouts": rollout_log, "terms": {}, "cosines": {},
+                    "lambda_sweep": {}, "delta_variance": {}, "verdict": None,
+                }
+            log("✅ acceptation : " + ("plomberie du modèle de contrôle en règle" if is_control
+                                       else "le premier rollout reproduit le run de référence"))
 
     # Statistiques par terme et par groupe.
     grams: Dict[str, Dict[str, np.ndarray]] = {}
@@ -835,6 +1297,10 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             grams["policy"][gname], grams["outcome"][gname],
         )
     verdict = apply_rule(terms_out["policy"]["all"])
+    lambda_sweep = lambda_sweep_stats(
+        {lam: gram_matrix(sweep_grads[lam]) for lam in gae_lambdas}, sweep_mb_sq, batch_steps
+    )
+    lambda_sweep["model_lambda"] = model_lambda
     return {
         "acceptance": acceptance,
         "rollouts": rollout_log,
@@ -844,6 +1310,8 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         "batch_size": batch_size,
         "terms": terms_out,
         "cosines": cosines,
+        "lambda_sweep": lambda_sweep,
+        "delta_variance": delta_var.result(),
         "verdict": verdict,
     }
 
@@ -875,6 +1343,29 @@ def render_report(result: Dict[str, Any]) -> str:
     for name, c in result["cosines"].items():
         tag = "" if c["measurable"] else f"  ← non mesurable à K={c['rollouts']}"
         lines.append(f"{name:40s} {_fmt(c['cosine'])}{tag}")
+    sweep = result["lambda_sweep"]
+    lines.append(f"\n== balayage λ (terme policy, tous groupes ; λ du modèle {sweep['model_lambda']}) ==")
+    lines.append(f"{'λ':>6s} {'‖G‖² sans biais':>28s} {'f_' + str(b):>26s} {'f_' + str(result['batch_size']):>26s} {'signal':>8s}")
+    for lam, st in sweep["per_lambda"].items():
+        lines.append(
+            f"{float(lam):6.2f} {_fmt(st['true_sq']):>28s} {_fmt(st['f_batch']):>26s} "
+            f"{_fmt(st['f_minibatch']):>26s} {'oui' if st['signal_detected'] else 'non':>8s}"
+        )
+    lines.append(f"{'paire (a − b)':>14s} {'Δf_' + str(b) + ' appairé':>28s} {'Δ‖G‖² appairé':>28s}")
+    for pair in sweep["pairs"]:
+        tag = "  ← exclut 0" if pair["f_batch_diff_excludes_zero"] else ""
+        lines.append(
+            f"{pair['lambda_a']:5.2f} − {pair['lambda_b']:4.2f}  {_fmt(pair['f_batch_diff']):>28s} "
+            f"{_fmt(pair['true_sq_diff']):>28s}{tag}"
+        )
+    dv = result["delta_variance"]
+    lines.append("\n== Var(δ) = Var(r) + Var(ΔV) + 2 Cov (parts de Var(δ)) ==")
+    lines.append(f"{'famille':24s} {'n':>8s} {'Var(δ)':>10s} {'part r':>8s} {'part ΔV':>8s} {'part 2Cov':>10s}")
+    for name, d in [("all", dv["all"]), *sorted(dv["by_family"].items(), key=lambda kv: -kv[1]["n"])]:
+        lines.append(
+            f"{name:24s} {d['n']:8d} {d['var_delta']:10.4g} {d['share_reward']:8.3f} "
+            f"{d['share_delta_v']:8.3f} {d['share_cov']:10.3f}"
+        )
     v = result["verdict"]
     lines.append(f"\n== verdict : branche ({v['branch']}) ==\n{v['text']}")
     return "\n".join(lines)
@@ -891,9 +1382,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--permutation-seed", type=int, default=20260913)
     parser.add_argument("--workdir", default=None, help="dossier de travail (logger SB3) ; temporaire sinon")
     parser.add_argument("--out", default=None, help="JSON de résultat (défaut : <workdir>/grad_signal_probe.json)")
+    parser.add_argument("--gae-lambdas", default=DEFAULT_GAE_LAMBDAS,
+                        help="λ recalculés a posteriori sur chaque rollout (appairés) ; γ n'est pas balayé")
+    parser.add_argument("--model", default=None, help="zip d'un modèle de CONTRÔLE sondé dans le même env")
+    parser.add_argument("--vec-normalize", default=None,
+                        help="pkl VecNormalize du modèle de contrôle (défaut : son pkl compagnon)")
+    parser.add_argument("--opponent-deterministic", action="store_true",
+                        help="self_play_deterministic=true dans le bloc opponent_mix de l'étape")
+    parser.add_argument("--random-init", type=int, default=None, metavar="SEED",
+                        help="réinitialise les poids du modèle chargé en mémoire (contrôle positif fort)")
     args = parser.parse_args(argv)
     if args.rollouts < 3:
         parser.error("--rollouts ≥ 3 (jackknife)")
+    gae_lambdas = parse_gae_lambdas(args.gae_lambdas)
 
     def log(message: str) -> None:
         print(message, flush=True)
@@ -909,20 +1410,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     import ai.train as T
 
-    ctx = build_probe_context(args.agent, args.etape, args.training_config, args.resolution, args.device, log)
+    ctx = build_probe_context(
+        args.agent, args.etape, args.training_config, args.resolution, args.device, log,
+        model_path=args.model, vec_normalize_path=args.vec_normalize,
+        opponent_deterministic=args.opponent_deterministic, random_init_seed=args.random_init,
+    )
     ctx["workdir"] = workdir
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
     guarded = [
-        Path(ctx["canonical_path"]), Path(ctx["vec_normalize_path"]),
+        Path(ctx["canonical_path"]), Path(get_vec_normalize_path(ctx["canonical_path"])),
+        Path(ctx["model_path"]), Path(ctx["vec_normalize_path"]),
         *sorted((PROJECT_ROOT / "config" / "agents" / args.agent).glob("*.json")),
     ]
     before = snapshot_mtimes(guarded)
     log(
         f"🔬 {args.etape} / {args.training_config} : {ctx['n_envs']} envs, {len(ctx['scenario_list'])} entrées "
         f"de scénario, reprise à {ctx['episode_offset']} épisodes ({ctx['episode_start_index']} par env), "
-        f"pool {ctx['pool_labels']}, modèle {ctx['canonical_path']}"
+        f"pool {ctx['pool_labels']}" + (" DÉTERMINISTE" if ctx["opponent_deterministic"] else "") + ", "
+        f"modèle {'de CONTRÔLE ' if ctx['is_control'] else ''}{ctx['model_path']}"
+        + (f" RÉINITIALISÉ (graine {ctx['random_init_seed']})" if ctx["random_init_seed"] is not None else "")
+        + f" (stats {ctx['vec_normalize_path']}), λ balayés {gae_lambdas}"
     )
     try:
-        result = measure(ctx, args.rollouts, log, args.permutation_seed)
+        result = measure(ctx, args.rollouts, log, args.permutation_seed, gae_lambdas)
     finally:
         T.close_training_env(ctx["env"], "fin de sonde", log)
         T._cleanup_wall_override_temp_dir()
@@ -932,7 +1443,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise RuntimeError("fichiers protégés modifiés pendant la sonde : " + ", ".join(changed))
     result["context"] = {
         "agent": args.agent, "etape": args.etape, "training_config": args.training_config,
-        "canonical_path": ctx["canonical_path"], "episode_offset": ctx["episode_offset"],
+        "canonical_path": ctx["canonical_path"], "model_path": ctx["model_path"],
+        "vec_normalize_path": ctx["vec_normalize_path"], "is_control": ctx["is_control"],
+        "random_init_seed": ctx["random_init_seed"],
+        "opponent_deterministic": ctx["opponent_deterministic"], "gae_lambdas": gae_lambdas,
+        "episode_offset": ctx["episode_offset"],
         "n_envs": ctx["n_envs"], "scenario_entries": len(ctx["scenario_list"]),
         "guarded_files_unchanged": True,
     }
