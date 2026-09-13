@@ -650,28 +650,39 @@ def reset_policy_parameters(policy: Any, seed: int) -> int:
     return n_reset
 
 
-def lambda_sweep_stats(grams: Dict[float, np.ndarray], minibatch_sq_norms: Dict[float, np.ndarray],
+def lambda_sweep_stats(grams: Dict[float, Dict[str, np.ndarray]],
+                       minibatch_sq_norms: Dict[float, Dict[str, np.ndarray]],
                        batch_steps: int) -> Dict[str, Any]:
-    """f_B, ‖G‖² par λ et différences APPAIRÉES entre λ (jackknife de f_a − f_b, mêmes rollouts).
+    """f_B, ‖G‖² par λ et par groupe, différences APPAIRÉES entre λ (jackknife de f_a − f_b,
+    mêmes rollouts) sur le groupe « all ».
 
-    `grams[λ]` : (K, K) produits scalaires des gradients policy recalculés à λ ;
-    `minibatch_sq_norms[λ]` : (K, M). Toutes les matrices portent les MÊMES K rollouts dans le
-    même ordre, ce qui rend la différence appairée légitime.
+    `grams[λ][groupe]` : (K, K) produits scalaires des gradients policy recalculés à λ, sur le
+    groupe de paramètres ; `minibatch_sq_norms[λ][groupe]` : (K, M). Toutes les matrices portent
+    les MÊMES K rollouts dans le même ordre, ce qui rend la différence appairée légitime. Les
+    groupes disent OÙ le gradient d'un λ court devient lisible (mesuré : `activate_query_net`
+    f = 0,28 à λ = 0 quand « all » vaut 0,05).
     """
     lambdas = list(grams)
     if set(minibatch_sq_norms) != set(lambdas):
         raise ValueError("grams et minibatch_sq_norms doivent porter les mêmes λ")
-    k = grams[lambdas[0]].shape[0]
+    for lam in lambdas:
+        if set(grams[lam]) != set(minibatch_sq_norms[lam]) or "all" not in grams[lam]:
+            raise ValueError(f"λ={lam} : groupes {sorted(grams[lam])} ≠ {sorted(minibatch_sq_norms[lam])}, « all » requis")
+    k = grams[lambdas[0]]["all"].shape[0]
     per_lambda = {}
     for lam in lambdas:
-        if grams[lam].shape != (k, k):
-            raise ValueError(f"λ={lam} : gram {grams[lam].shape} ≠ ({k}, {k})")
-        per_lambda[lam] = signal_stats(grams[lam], minibatch_sq_norms[lam], batch_steps)
+        for gname, gram in grams[lam].items():
+            if gram.shape != (k, k):
+                raise ValueError(f"λ={lam} groupe {gname} : gram {gram.shape} ≠ ({k}, {k})")
+        per_lambda[lam] = {
+            gname: signal_stats(grams[lam][gname], minibatch_sq_norms[lam][gname], batch_steps)
+            for gname in grams[lam]
+        }
 
     pairs = []
     for i, lam_a in enumerate(lambdas):
         for lam_b in lambdas[i + 1:]:
-            ga, gb = grams[lam_a], grams[lam_b]
+            ga, gb = grams[lam_a]["all"], grams[lam_b]["all"]
             f_diff = jackknife(lambda keep, ga=ga, gb=gb: f_batch_of(ga, keep) - f_batch_of(gb, keep), k)
             g_diff = jackknife(lambda keep, ga=ga, gb=gb: true_sq_of(ga, keep) - true_sq_of(gb, keep), k)
             pairs.append({
@@ -1131,7 +1142,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     # Balayage λ : gradient policy (K, D) et carrés de norme des mini-lots (K, M) par λ
     # supplémentaire ; au λ du modèle ce sont `rollout_grads["policy"]` / `mb_sq["policy"]["all"]`.
     sweep_grads = {lam: np.zeros((rollouts, n_params), dtype=np.float32) for lam in extra_lambdas}
-    sweep_mb_sq = {lam: np.zeros((rollouts, n_minibatches)) for lam in extra_lambdas}
+    sweep_mb_sq = {lam: {g: np.zeros((rollouts, n_minibatches)) for g in group_names} for lam in extra_lambdas}
     delta_var = DeltaVarianceAccumulator()
     rollout_log: List[Dict[str, Any]] = []
     acceptance: Dict[str, Any] = {}
@@ -1159,6 +1170,8 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         actions_tn = np.asarray(buf.actions).reshape(n_steps, n_envs).copy()
         phases_tn = phases_from_global_bin(np.asarray(buf.observations["global_bin"]).reshape(n_steps, n_envs, -1))
         last_dones = np.asarray(model._last_episode_starts, dtype=bool).reshape(n_envs).copy()
+        if not np.array_equal(last_dones, dones[-1]):
+            raise RuntimeError(f"rollout {k} : model._last_episode_starts ≠ dones du dernier pas du recorder")
         with th.no_grad():
             last_values = model.policy.predict_values(obs_as_tensor(model._last_obs, model.device)).cpu().numpy().reshape(n_envs)
         # Le GAE recalculé (last_values / last_dones reconstruits) doit reproduire le buffer de
@@ -1219,16 +1232,17 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             backward = [(term, losses[term]) for term in TERMS] + list(losses["policy_sweep"].items())
             for b_i, (key, loss) in enumerate(backward):
                 g = flat_grad(loss, params, retain_graph=b_i < len(backward) - 1)
+                norms = group_sq_norms(g, groups)
                 if key in acc_sweep:
                     acc_sweep[key] += g
-                    sweep_mb_sq[key][k, m] = group_sq_norms(g, {})["all"]  # « all » seul
-                    continue
-                acc[key] += g
-                norms = group_sq_norms(g, groups)
+                    target_mb_sq = sweep_mb_sq[key]
+                else:
+                    acc[key] += g
+                    target_mb_sq = mb_sq[key]
+                    if m == 0:
+                        mb0_norms[key] = float(np.sqrt(norms["all"]))
                 for gname in group_names:
-                    mb_sq[key][gname][k, m] = norms[gname]
-                if m == 0:
-                    mb0_norms[key] = float(np.sqrt(norms["all"]))
+                    target_mb_sq[gname][k, m] = norms[gname]
         for term in TERMS:
             rollout_grads[term][k] = (acc[term] / n_minibatches).cpu().numpy()
         for lam in extra_lambdas:
@@ -1307,9 +1321,13 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             grams["policy"][gname], grams["outcome"][gname],
         )
     verdict = apply_rule(terms_out["policy"]["all"])
+    sweep_grams = {
+        lam: {"all": gram_matrix(sweep_grads[lam]),
+              **{g: gram_matrix(sweep_grads[lam][:, s:e]) for g, (s, e) in groups.items()}}
+        for lam in extra_lambdas
+    }
     lambda_sweep = lambda_sweep_stats(
-        {model_lambda: grams["policy"]["all"], **{lam: gram_matrix(sweep_grads[lam]) for lam in extra_lambdas}},
-        {model_lambda: mb_sq["policy"]["all"], **sweep_mb_sq}, batch_steps,
+        {model_lambda: grams["policy"], **sweep_grams}, {model_lambda: mb_sq["policy"], **sweep_mb_sq}, batch_steps,
     )
     lambda_sweep["model_lambda"] = model_lambda
     return {
@@ -1360,13 +1378,15 @@ def render_report(result: Dict[str, Any]) -> str:
         tag = "" if c["measurable"] else f"  ← non mesurable à K={c['rollouts']}"
         lines.append(f"{name:40s} {_fmt(c['cosine'])}{tag}")
     sweep = result["lambda_sweep"]
-    lines.append(f"\n== balayage λ (terme policy, tous groupes ; λ du modèle {sweep['model_lambda']}) ==")
-    lines.append(f"{'λ':>6s} {'‖G‖² sans biais':>28s} {'f_' + str(b):>26s} {'f_' + str(result['batch_size']):>26s} {'signal':>8s}")
-    for lam, st in sweep["per_lambda"].items():
-        lines.append(
-            f"{float(lam):6.2f} {_fmt(st['true_sq']):>28s} {_fmt(st['f_batch']):>26s} "
-            f"{_fmt(st['f_minibatch']):>26s} {'oui' if st['signal_detected'] else 'non':>8s}"
-        )
+    lines.append(f"\n== balayage λ (terme policy ; λ du modèle {sweep['model_lambda']}) ==")
+    lines.append(f"{'λ / groupe':28s} {'‖G‖² sans biais':>28s} {'f_' + str(b):>26s} {'f_' + str(result['batch_size']):>26s} {'signal':>8s}")
+    for lam, by_group in sweep["per_lambda"].items():
+        for gname, st in by_group.items():
+            label = f"λ = {float(lam):.2f}" if gname == "all" else f"    {gname}"
+            lines.append(
+                f"{label:28s} {_fmt(st['true_sq']):>28s} {_fmt(st['f_batch']):>26s} "
+                f"{_fmt(st['f_minibatch']):>26s} {'oui' if st['signal_detected'] else 'non':>8s}"
+            )
     lines.append(f"{'paire (a − b)':>14s} {'Δf_' + str(b) + ' appairé':>28s} {'Δ‖G‖² appairé':>28s}")
     for pair in sweep["pairs"]:
         tag = "  ← exclut 0" if pair["f_batch_diff_excludes_zero"] else ""
