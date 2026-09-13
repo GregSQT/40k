@@ -67,21 +67,37 @@ DÉCOMPOSITION DE Var(δ_t) sur les mêmes buffers : Var(r_t) + Var(ΔV_t) + 2 C
 ΔV_t = γ(1 − d_{t+1})V(s_{t+1}) − V(s_t), globalement et par famille d'action
 (`engine.macro_intents.action_family` sur l'action jouée, phase lue dans le one-hot `global_bin`
 de l'observation du pas, `setting_up` lu comme le moteur : `info["action"] == "ingress_move"`).
-Elle dit quelle part de la variance de l'avantage TD(0) une récompense EN ESPÉRANCE retirerait.
+Les parts sont DESCRIPTIVES : Var(r)/Var(δ) n'est pas la part qu'une récompense en espérance
+retirerait — celle-ci vaut Var(ε) + 2 Cov(ε, ΔV) avec ε = r − E[r|s,a], inaccessible sans
+l'espérance ; avec Cov(r, ΔV) < 0 le rapport Var(r)/Var(δ) dépasse même 1 sans rien dire.
 
-CONTRÔLE POSITIF (`--model`, `--vec-normalize`) : une autre politique est sondée dans le MÊME
-environnement P1 (pool, rampe, offset d'épisodes inchangés), avec SES stats VecNormalize (par
-défaut le pkl compagnon du zip, jamais celui du canonique). L'acceptation « reproduit P1 » n'a
-pas de sens pour un modèle de contrôle : elle est remplacée par le seul contrôle de plomberie —
-part d'épisodes contre le pool dans les bornes, 0 épisode sans vainqueur. Le refus
-d'hyperparamètres ne garde que n_steps / batch_size / gamma / gae_lambda. `--random-init SEED`
+CONTRÔLE POSITIF (`--model`) : une autre politique est sondée dans le MÊME environnement P1
+(pool, rampe, offset d'épisodes inchangés), avec SES stats VecNormalize : le pkl compagnon du zip,
+toujours (contrat compagnon par modèle), jamais celui du canonique ni un autre — une politique
+sous les stats d'un autre instantané ne mesure rien. Le canonique lui-même est refusé en
+`--model` (il se sonde sans l'option). Chemins comparés RÉSOLUS (`ai/models` est un lien
+symbolique dans les worktrees). L'acceptation « reproduit P1 » n'a pas de sens pour un modèle de
+contrôle : elle est remplacée par le seul contrôle de plomberie — part d'épisodes contre le pool
+dans les bornes. Ses `vf_coef` / `ent_coef` sont les siens (refus d'hyperparamètres limité à
+n_steps / batch_size / gamma / gae_lambda) et sont RAPPORTÉS (`model_hyperparams`, en-têtes des
+termes value / entropie) : les termes value et entropie de deux modèles ne se comparent qu'à
+coefficients égaux. `--random-init SEED`
 réinitialise en mémoire les poids du modèle chargé (contrôle positif FORT : le gradient d'une
 politique aléatoire est certainement grand ; mesuré le 2026-09-13, f_8160 = 0,43 [0,27, 0,59] à
 λ = 0,95 avec K = 12, là où le modèle `entnorm_20260913-040721` rendait 0,006 comme P1).
 
 `--opponent-deterministic` : pose `self_play_deterministic = true` dans le bloc `opponent_mix`
 que `_install_stage_config_overrides` installe (la clé que `curriculum.opponent.deterministic`
-alimente) — seconde collecte, NON appairée avec la première.
+alimente) — seconde collecte, NON appairée avec la première. L'adversaire n'est plus celui du run
+de référence : l'acceptation est celle de la plomberie, comme pour un modèle de contrôle.
+
+TRONCATURES. Le moteur ne rend jamais un épisode sans vainqueur (la limite anti-runaway de pas
+pose `winner = DRAW_WINNER`, `win_method = "step_limit"`, `truncated = True`) ; le signal gym
+`info["TimeLimit.truncated"]` (posé par les VecEnv, lu comme `ai/training_callbacks`) est le
+seul discriminant. Un épisode tronqué n'est pas une partie : son issue est un faux nul, et le
+collecteur a replié γ·V(s_terminal) dans la récompense de son dernier pas (bootstrap SB3), ce qui
+fausserait Var(r). Toute troncature, sur n'importe quel rollout, ARRÊTE la sonde avec le
+diagnostic du moteur (`truncation_debug`).
 
 LECTURE SEULE. Ni modèle, ni config, ni state, ni `optimizer.step`. Refuse de démarrer si un
 `ai/train.py` tourne (les évaluations relisent les JSON à chaud), et vérifie en sortie que ni le
@@ -92,7 +108,7 @@ Usage :
         --training-config x1_lineage --rollouts 24 --gae-lambdas 0.8,0.5,0.2,0 \\
         --out /tmp/grad_signal_p1.json
     # contrôle positif (autre politique, ou poids réinitialisés) :
-    python3 scripts/grad_signal_probe.py ... --model ai/models/<clé>/<zip> [--vec-normalize <pkl>]
+    python3 scripts/grad_signal_probe.py ... --model ai/models/<clé>/<zip>
     python3 scripts/grad_signal_probe.py ... --random-init 20260913 --rollouts 12
     # adversaire déterministe (seconde collecte, non appairée) :
     python3 scripts/grad_signal_probe.py ... --opponent-deterministic
@@ -127,8 +143,12 @@ RULE_F_CLEAN = 0.5
 #: λ SUPPLÉMENTAIRES balayés par défaut, en plus du λ du modèle ; γ n'est jamais balayé (critic
 #: entraîné à γ = 0,99).
 DEFAULT_GAE_LAMBDAS = "0.8,0.5,0.2,0"
-#: Tolérance de la vérification « GAE recalculé = buffer du rollout » au λ du modèle.
+#: Tolérance de la vérification « GAE recalculé = buffer du rollout » au λ du modèle (même
+#: récurrence float32 : écart mesuré 0 sur 84 rollouts).
 GAE_ATOL = 1e-6
+#: Var(δ) sous cette fraction de Var(r) + Var(ΔV) est un résidu d'arrondi de la décomposition
+#: (δ constant sur la famille) : les parts n'existent pas, rendues nan.
+VAR_DELTA_REL_FLOOR = 1e-9
 #: Clés d'hyperparamètres dont le checkpoint doit porter les valeurs du profil : toutes pour le
 #: canonique (la mesure doit être celle du run), les seules qui définissent le lot pour un
 #: modèle de contrôle (une autre politique a légitimement d'autres coefficients de loss).
@@ -465,7 +485,9 @@ class DeltaVarianceAccumulator:
     """Var(δ) = Var(r) + Var(ΔV) + 2 Cov(r, ΔV), globalement et par famille, sur K rollouts.
 
     Moments cumulés (n, Σr, Σr², ΣΔV, ΣΔV², Σr·ΔV) : la variance rendue est la variance de
-    POPULATION de la concaténation des rollouts, identique à celle du tableau complet.
+    POPULATION de la concaténation des rollouts, identique à celle du tableau complet. Les parts
+    (`share_*`) sont descriptives — cf. docstring du module : `share_reward` n'est pas la part
+    qu'une récompense en espérance retirerait.
     """
 
     def __init__(self) -> None:
@@ -498,9 +520,13 @@ class DeltaVarianceAccumulator:
             var_d = sdd / n - mean_d ** 2
             cov = srd / n - mean_r * mean_d
             var_delta = var_r + var_d + 2.0 * cov
+        # δ constant sur la famille (récompense déterministe, critic exact) laisse un résidu
+        # d'arrondi positif de l'ordre de 1e-16 × (Var(r) + Var(ΔV)) : diviser par lui rendrait
+        # des parts de 1e11. Plancher RELATIF, pas « > 0 » (faux aussi sur nan : n < 2).
+        shares_defined = var_delta > VAR_DELTA_REL_FLOOR * (var_r + var_d)
 
         def share(x: float) -> float:
-            return x / var_delta if var_delta > 0 else float("nan")
+            return x / var_delta if shares_defined else float("nan")
 
         return {
             "n": int(n), "mean_reward": float(mean_r), "mean_delta_v": float(mean_d),
@@ -572,29 +598,28 @@ def parse_gae_lambdas(text: str) -> List[float]:
     return lambdas
 
 
-def resolve_probe_model(canonical_path: str, model_path: Optional[str],
-                        vec_normalize_path: Optional[str]) -> Tuple[str, str, bool]:
-    """(zip sondé, pkl VecNormalize, is_control).
+def resolve_probe_model(canonical_path: str, model_path: Optional[str]) -> Tuple[str, str, bool]:
+    """(zip sondé, pkl VecNormalize, is_control) — chaque zip avec SON pkl compagnon, toujours.
 
-    Sans `--model` : le canonique et SON pkl compagnon. Avec `--model` : ce zip et son pkl
-    compagnon, ou le pkl donné par `--vec-normalize`. Le pkl du canonique n'est JAMAIS servi à un
-    modèle de contrôle, et `--vec-normalize` sans `--model` est refusé (le canonique avec les
-    stats d'un autre modèle ne mesure rien).
+    Sans `--model` : le canonique. Avec `--model` : ce zip, qui doit être un AUTRE fichier que le
+    canonique — comparé par chemin RÉSOLU (`ai/models` est un lien symbolique dans les
+    worktrees : le canonique orthographié par son realpath, comme `ai/train.py` le journalise,
+    serait sinon pris pour un contrôle et sondé sans acceptation ni refus d'hyperparamètres).
+    Le pkl du canonique n'est de ce fait JAMAIS servi à un modèle de contrôle.
     """
     from ai.vec_normalize_utils import get_vec_normalize_path
 
-    canonical_pkl = get_vec_normalize_path(canonical_path)
     if model_path is None:
-        if vec_normalize_path is not None:
-            raise ValueError("--vec-normalize exige --model : le canonique se sonde avec ses propres stats.")
-        return canonical_path, canonical_pkl, False
+        return canonical_path, get_vec_normalize_path(canonical_path), False
     model_abs = os.path.abspath(model_path)
     if not os.path.exists(model_abs):
         raise FileNotFoundError(f"--model absent : {model_abs}")
-    pkl = os.path.abspath(vec_normalize_path) if vec_normalize_path is not None else get_vec_normalize_path(model_abs)
+    if os.path.realpath(model_abs) == os.path.realpath(canonical_path):
+        raise ValueError(f"--model désigne le canonique ({model_abs}) : il se sonde sans --model.")
+    pkl = get_vec_normalize_path(model_abs)
     if not os.path.exists(pkl):
         raise FileNotFoundError(f"stats VecNormalize du modèle de contrôle absentes : {pkl}")
-    if pkl == os.path.abspath(canonical_pkl):
+    if os.path.realpath(pkl) == os.path.realpath(get_vec_normalize_path(canonical_path)):
         raise ValueError("un modèle de contrôle ne se sonde jamais avec le pkl du canonique.")
     return model_abs, pkl, True
 
@@ -797,7 +822,6 @@ def snapshot_mtimes(paths: Sequence[Path]) -> Dict[str, float]:
 
 def build_probe_context(agent: str, stage_name: str, training_config_name: str, resolution: int,
                         device: str, log: Callable[[str], None], model_path: Optional[str] = None,
-                        vec_normalize_path: Optional[str] = None,
                         opponent_deterministic: bool = False,
                         random_init_seed: Optional[int] = None) -> Dict[str, Any]:
     """L'environnement EXACT de l'étape, par les briques d'ai/train.py, et le modèle sondé.
@@ -805,12 +829,14 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     Même ordre que `main()` → `_prepare_curriculum_stage` → `train_with_scenario_rotation`,
     sans les effets de bord d'un run : ni `prepare_run_artifacts` (contrat, archivage, run-meta),
     ni `attach_run_logger` (dossier TensorBoard), ni callbacks d'entraînement.
-    `model_path` / `vec_normalize_path` : un modèle de CONTRÔLE sondé dans cet environnement
+    `model_path` : un modèle de CONTRÔLE sondé dans cet environnement avec son pkl compagnon
     (cf. `resolve_probe_model`) ; l'offset d'épisodes, le pool et la rampe restent ceux du
     canonique. `opponent_deterministic` : `self_play_deterministic` posé à vrai dans le bloc
     `opponent_mix` de l'étape. `random_init_seed` : le modèle chargé (canonique ou `--model`)
     est réinitialisé en mémoire (`reset_policy_parameters`) — contrôle positif fort, traité
-    comme un modèle de contrôle.
+    comme un modèle de contrôle. `plumbing_only` dans le contexte rendu : l'acceptation se
+    limite à la plomberie (contrôle ou adversaire déterministe — le run de référence n'est plus
+    ce que la collecte reproduit).
     """
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX, get_config_loader
 
@@ -833,7 +859,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     canonical_path = T.build_agent_model_path(config.get_models_root(), agent)
     if not os.path.exists(canonical_path):
         raise FileNotFoundError(f"modèle canonique absent : {canonical_path}")
-    probe_model_path, probe_vec_path, is_control = resolve_probe_model(canonical_path, model_path, vec_normalize_path)
+    probe_model_path, probe_vec_path, is_control = resolve_probe_model(canonical_path, model_path)
     canonical_vec_path = get_vec_normalize_path(canonical_path)
     is_control = is_control or random_init_seed is not None
     warm_start = stage_init_source(stage) is not None
@@ -904,7 +930,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         )
         for i in range(n_envs)
     ]))
-    # Stats du modèle sondé (son pkl compagnon, ou `--vec-normalize`), FIGÉES (training=False)
+    # Stats du modèle sondé (son pkl compagnon), FIGÉES (training=False)
     # comme `load_vec_normalize` ; ce dernier force aussi norm_reward=False, qui fausserait
     # l'échelle des retours — le run normalise les récompenses (cf. `_apply_vec_normalize`).
     vec_env = VecNormalize.load(probe_vec_path, env)
@@ -929,6 +955,9 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
             mismatches.append(f"{key}: checkpoint={actual!r} profil={expected!r}")
     if mismatches:
         raise RuntimeError("hyperparamètres du checkpoint ≠ profil " + training_config_name + " : " + "; ".join(mismatches))
+    # Les hyperparamètres RÉELS de la mesure — ceux du checkpoint. Pour un contrôle, vf_coef et
+    # ent_coef échelonnent les termes value / entropie et ne sont pas ceux du profil.
+    model_hyperparams = {key: getattr(model, key) for key in HP_KEYS_CANONICAL}
     if model.rollout_buffer.buffer_size != model.n_steps or model.rollout_buffer.n_envs != n_envs:
         raise RuntimeError(
             f"rollout buffer {model.rollout_buffer.buffer_size}×{model.rollout_buffer.n_envs} ≠ "
@@ -942,6 +971,8 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         "model_path": probe_model_path,
         "vec_normalize_path": probe_vec_path,
         "is_control": is_control,
+        "plumbing_only": bool(is_control or opponent_deterministic),
+        "model_hyperparams": model_hyperparams,
         "random_init_seed": random_init_seed,
         "opponent_deterministic": bool(opponent_deterministic),
         "scenario_list": scenario_list,
@@ -954,11 +985,18 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     }
 
 
-def make_recorder(n_envs: int) -> Any:
-    """Callback SB3 minimal : `dones` et l'issue de chaque épisode fini, pas par pas.
+#: Clés du diagnostic moteur d'une troncature, reprises telles quelles si présentes (une
+#: troncature venue d'un wrapper gym n'en porterait aucune).
+TRUNCATION_INFO_KEYS = ("truncation_reason", "win_method", "truncation_debug")
 
-    Construit ici et non au niveau du module pour ne pas importer SB3 au chargement (les tests
-    des statistiques n'en ont pas besoin).
+
+def make_recorder(n_envs: int) -> Any:
+    """Callback SB3 minimal : `dones`, l'issue de chaque épisode fini et les troncatures, pas par pas.
+
+    Une troncature (`info["TimeLimit.truncated"]`, le signal gym que les VecEnv posent) est
+    enregistrée avec le diagnostic du moteur ; c'est `measure` qui s'arrête dessus. Construit ici
+    et non au niveau du module pour ne pas importer SB3 au chargement (les tests des
+    statistiques n'en ont pas besoin).
     """
     from stable_baselines3.common.callbacks import BaseCallback
 
@@ -976,7 +1014,7 @@ def make_recorder(n_envs: int) -> Any:
             self.setting_up: List[np.ndarray] = []
             self.episodes_total = 0
             self.episodes_pool = 0
-            self.episodes_no_winner = 0
+            self.truncations: List[Dict[str, Any]] = []
             self.episode_lengths: List[int] = []
 
         def _on_rollout_start(self) -> None:
@@ -994,11 +1032,16 @@ def make_recorder(n_envs: int) -> Any:
                 if require_key(info, "opponent_mode") == "self_play":
                     self.episodes_pool += 1
                 self.episode_lengths.append(int(require_key(info, "episode")["l"]))
+                if require_key(info, "TimeLimit.truncated"):
+                    self.truncations.append({
+                        "env": int(env_idx), "step": len(self.dones),
+                        **{key: info[key] for key in TRUNCATION_INFO_KEYS if key in info},
+                    })
                 winner = require_key(info, "winner")
                 controlled = int(require_key(info, "controlled_player"))
                 if winner is None:
-                    self.episodes_no_winner += 1
-                elif int(winner) == DRAW_WINNER:
+                    raise RuntimeError(f"épisode fini sans vainqueur (env {env_idx}) : le moteur en pose toujours un")
+                if int(winner) == DRAW_WINNER:
                     outcome[env_idx] = 0.0
                 elif int(winner) == controlled:
                     outcome[env_idx] = OUTCOME_REWARD
@@ -1031,14 +1074,12 @@ def check_acceptance(observed: Dict[str, Any], keys: Sequence[str] = tuple(ACCEP
     return failures
 
 
-def check_control_acceptance(observed: Dict[str, Any]) -> List[str]:
-    """Contrôle de PLOMBERIE seul, pour un modèle de contrôle : part pool dans les bornes du run
-    de référence, 0 épisode sans vainqueur. « Reproduit P1 » n'a pas de sens pour une autre
-    politique."""
-    failures = check_acceptance(observed, keys=("pool_episode_share",))
-    if int(observed["episodes_no_winner"]) != 0:
-        failures.append(f"episodes_no_winner = {observed['episodes_no_winner']} ≠ 0")
-    return failures
+def check_plumbing_acceptance(observed: Dict[str, Any]) -> List[str]:
+    """Contrôle de PLOMBERIE seul : part d'épisodes contre le pool dans les bornes du run de
+    référence. Pour un modèle de contrôle ou un adversaire déterministe, « reproduit P1 » n'a pas
+    de sens (autre politique, ou autre adversaire) ; les troncatures sont exclues en amont, sur
+    chaque rollout, par `measure`."""
+    return check_acceptance(observed, keys=("pool_episode_share",))
 
 
 def sweep_lambdas(model_lambda: float, extra: Sequence[float]) -> List[float]:
@@ -1070,7 +1111,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     gamma = float(model.gamma)
     model_lambda = float(model.gae_lambda)
     extra_lambdas = sweep_lambdas(model_lambda, extra_gae_lambdas)[1:]
-    is_control = bool(ctx["is_control"])
+    plumbing_only = bool(ctx["plumbing_only"])
 
     model.set_logger(configure_sb3_logger(ctx["workdir"], ["stdout"]))
     recorder = make_recorder(n_envs)
@@ -1102,6 +1143,11 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             raise RuntimeError("collect_rollouts a rendu False")
         buf = model.rollout_buffer
         t_collect = time.perf_counter() - t0
+        if recorder.truncations:
+            raise RuntimeError(
+                f"rollout {k} : {len(recorder.truncations)} épisode(s) TRONQUÉ(S) — pas une partie "
+                f"(faux nul, bootstrap replié dans la récompense) ; diagnostic moteur : {recorder.truncations}"
+            )
 
         dones, outcome_at_done, setting_up = recorder.arrays()
         if dones.shape != (n_steps, n_envs):
@@ -1197,7 +1243,6 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             "grad_s": t_grad,
             "episodes": recorder.episodes_total,
             "episodes_pool": recorder.episodes_pool,
-            "episodes_no_winner": recorder.episodes_no_winner,
             "valid_outcome_steps": int(valid_tn.sum()),
             "gae_max_gap": gae_gap,
             "grad_norm_policy_mb0": mb0_norms["policy"],
@@ -1212,22 +1257,27 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         rollout_log.append(entry)
         log(
             f"🎲 rollout {k + 1}/{rollouts} : collecte {t_collect:.0f}s, gradients {t_grad:.0f}s, "
-            f"{recorder.episodes_total} épisodes ({recorder.episodes_pool} vs pool, "
-            f"{recorder.episodes_no_winner} sans vainqueur), mb0 policy {mb0_norms['policy']:.3f} "
+            f"{recorder.episodes_total} épisodes ({recorder.episodes_pool} vs pool, 0 tronqué), "
+            f"mb0 policy {mb0_norms['policy']:.3f} "
             f"value {mb0_norms['value']:.3f} entropy {mb0_norms['entropy']:.4f} outcome "
             f"{mb0_norms['outcome']:.3f}, EV {ev:.3f}, ep_len {ep_len_mean:.1f}, returns {returns_mean:.3f}, "
             f"part pool {pool_share:.2f}, écart GAE {gae_gap:.2g}"
         )
         if k == 0:
-            failures = check_control_acceptance(entry) if is_control else check_acceptance(entry)
-            acceptance = {"passed": not failures, "failures": failures, "observed": entry, "control": is_control}
+            failures = check_plumbing_acceptance(entry) if plumbing_only else check_acceptance(entry)
+            acceptance = {
+                "passed": not failures, "failures": failures, "observed": entry,
+                "mode": "plumbing" if plumbing_only else "reference",
+            }
             if failures:
                 log("⛔ ACCEPTATION REFUSÉE — plomberie à corriger avant toute lecture :\n  " + "\n  ".join(failures))
                 return {
                     "acceptance": acceptance, "rollouts": rollout_log, "terms": {}, "cosines": {},
                     "lambda_sweep": {}, "delta_variance": {}, "verdict": None,
+                    "model_hyperparams": ctx["model_hyperparams"],
                 }
-            log("✅ acceptation : " + ("plomberie du modèle de contrôle en règle" if is_control
+            log("✅ acceptation : " + ("plomberie en règle (contrôle ou adversaire déterministe : le run de "
+                                       "référence n'est pas ce que la collecte reproduit)" if plumbing_only
                                        else "le premier rollout reproduit le run de référence"))
 
     # Statistiques par terme et par groupe.
@@ -1274,6 +1324,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         "lambda_sweep": lambda_sweep,
         "delta_variance": delta_var.result(),
         "verdict": verdict,
+        "model_hyperparams": ctx["model_hyperparams"],
     }
 
 
@@ -1292,8 +1343,12 @@ def render_report(result: Dict[str, Any]) -> str:
     if not result["terms"]:
         return "acceptation refusée : " + "; ".join(result["acceptance"]["failures"])
     b = result["batch_steps"]
+    hp = result["model_hyperparams"]
+    # Les termes value / entropie portent le coefficient du checkpoint mesuré : deux modèles ne
+    # se comparent sur ces termes qu'à coefficients égaux.
+    term_scale = {"value": f" (× vf_coef {hp['vf_coef']:g})", "entropy": f" (× ent_coef {hp['ent_coef']:g})"}
     for term in TERMS:
-        lines.append(f"\n== terme {term} ==")
+        lines.append(f"\n== terme {term}{term_scale.get(term, '')} ==")
         lines.append(f"{'groupe':28s} {'‖G‖² sans biais':>28s} {'f_' + str(b):>26s} {'f_' + str(result['batch_size']):>26s} {'B_noise':>28s}")
         for gname, st in result["terms"][term].items():
             lines.append(
@@ -1346,9 +1401,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--gae-lambdas", default=DEFAULT_GAE_LAMBDAS,
                         help="λ SUPPLÉMENTAIRES recalculés a posteriori sur chaque rollout (appairés), "
                              "en plus du λ du modèle ; γ n'est pas balayé")
-    parser.add_argument("--model", default=None, help="zip d'un modèle de CONTRÔLE sondé dans le même env")
-    parser.add_argument("--vec-normalize", default=None,
-                        help="pkl VecNormalize du modèle de contrôle (défaut : son pkl compagnon)")
+    parser.add_argument("--model", default=None,
+                        help="zip d'un modèle de CONTRÔLE sondé dans le même env, avec son pkl compagnon")
     parser.add_argument("--opponent-deterministic", action="store_true",
                         help="self_play_deterministic=true dans le bloc opponent_mix de l'étape")
     parser.add_argument("--random-init", type=int, default=None, metavar="SEED",
@@ -1374,7 +1428,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ctx = build_probe_context(
         args.agent, args.etape, args.training_config, args.resolution, args.device, log,
-        model_path=args.model, vec_normalize_path=args.vec_normalize,
+        model_path=args.model,
         opponent_deterministic=args.opponent_deterministic, random_init_seed=args.random_init,
     )
     ctx["workdir"] = workdir
@@ -1392,7 +1446,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f"pool {ctx['pool_labels']}" + (" DÉTERMINISTE" if ctx["opponent_deterministic"] else "") + ", "
         f"modèle {'de CONTRÔLE ' if ctx['is_control'] else ''}{ctx['model_path']}"
         + (f" RÉINITIALISÉ (graine {ctx['random_init_seed']})" if ctx["random_init_seed"] is not None else "")
-        + f" (stats {ctx['vec_normalize_path']}), λ balayés {gae_lambdas}"
+        + f" (stats {ctx['vec_normalize_path']}), hyperparamètres {ctx['model_hyperparams']}, "
+        f"λ balayés {gae_lambdas}, acceptation {'plomberie' if ctx['plumbing_only'] else 'référence'}"
     )
     try:
         result = measure(ctx, args.rollouts, log, args.permutation_seed, extra_gae_lambdas)
@@ -1407,6 +1462,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "agent": args.agent, "etape": args.etape, "training_config": args.training_config,
         "canonical_path": ctx["canonical_path"], "model_path": ctx["model_path"],
         "vec_normalize_path": ctx["vec_normalize_path"], "is_control": ctx["is_control"],
+        "plumbing_only": ctx["plumbing_only"], "model_hyperparams": ctx["model_hyperparams"],
         "random_init_seed": ctx["random_init_seed"],
         "opponent_deterministic": ctx["opponent_deterministic"], "gae_lambdas": gae_lambdas,
         "episode_offset": ctx["episode_offset"],

@@ -438,10 +438,13 @@ premier `get()` — remplacer les seuls tableaux numpy fait servir les anciens a
 par la vérification d'alignement mini-lot par mini-lot. Var(δ_t) = Var(r_t) + Var(ΔV_t) +
 2 Cov sur les mêmes buffers, par famille de l'action jouée (`action_family`, phase lue dans le
 one-hot `global_bin` de l'observation du pas, `setting_up` = `info["action"] == "ingress_move"`).
-`--model` / `--vec-normalize` : autre politique dans le MÊME env P1, avec SON pkl (jamais celui du
-canonique, verrouillé) ; `--random-init SEED` : poids réinitialisés en mémoire ;
+`--model` : autre politique dans le MÊME env P1, avec SON pkl compagnon (jamais celui du
+canonique, verrouillé ; chemins résolus, le canonique refusé en `--model` ; `vf_coef` /
+`ent_coef` du checkpoint rapportés) ; `--random-init SEED` : poids réinitialisés en mémoire ;
 `--opponent-deterministic` : `self_play_deterministic = true` dans le bloc `opponent_mix` de
-l'étape (la clé que `curriculum.opponent.deterministic` alimente). Une implémentation
+l'étape (la clé que `curriculum.opponent.deterministic` alimente), acceptation de plomberie
+(part pool) comme pour un contrôle. Toute troncature moteur (`TimeLimit.truncated`) arrête la
+sonde : « 0 sans vainqueur » ne pouvait rien attraper (limite anti-runaway = nul déclaré). Une implémentation
 indépendante (session 40k-a2, avantages recalculés passés en tenseurs séparés sans toucher le
 buffer) rend les mêmes nombres : λ = 0,95 f = 0,018 [−0,008, 0,045], λ = 0 f = 0,058 [0,027,
 0,089] ; son contrôle synthétique (avantage = log-prob de l'action jouée, crédit cohérent de

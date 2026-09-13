@@ -358,6 +358,26 @@ def test_decomposition_de_variance_somme_exacte_globalement_et_par_famille():
         acc.add(np.zeros(0), np.zeros(0), np.zeros(0, dtype=str))
 
 
+def test_parts_de_variance_nan_quand_delta_est_constant_a_l_arrondi_pres():
+    """Récompense déterministe + critic exact en float32 : δ = 0 à l'arrondi près, Var(δ) est un
+    résidu positif (~5e-14 pour Var(r) ≈ 0,18) ; diviser par lui rendait des parts de 1e12."""
+    from scripts.grad_signal_probe import VAR_DELTA_REL_FLOOR, DeltaVarianceAccumulator
+
+    rng = np.random.default_rng(2)
+    r = rng.choice([0.0, 1.0, 0.3], size=(50, 2))
+    v = np.zeros((51, 2), np.float32)
+    for t in reversed(range(50)):
+        v[t] = (r[t] + 0.99 * v[t + 1]).astype(np.float32)
+    delta_v = (np.float32(0.99) * v[1:] - v[:-1]).astype(np.float64)
+    acc = DeltaVarianceAccumulator()
+    acc.add(r.astype(np.float32).astype(np.float64), delta_v, np.full(r.shape, "shoot_slot"))
+    got = acc.result()["all"]
+    # VERT VACANT : le résidu est bien strictement positif (le garde « > 0 » l'aurait laissé passer).
+    assert 0.0 < got["var_delta"] < VAR_DELTA_REL_FLOOR * (got["var_reward"] + got["var_delta_v"])
+    assert got["var_reward"] > 0.1
+    assert all(np.isnan(got[k]) for k in ("share_reward", "share_delta_v", "share_cov"))
+
+
 def test_phases_depuis_global_bin_et_familles_dependent_de_la_phase():
     from engine.macro_intents import ACTION_WAIT, DEPLOY_SLOTS, MOVE_CELLS, SHOOT_SLOTS
     from engine.observation_entities import GLOBAL_BIN_SIZE, OBS_PHASE_IDS, global_bin_index
@@ -387,11 +407,17 @@ def test_phases_depuis_global_bin_et_familles_dependent_de_la_phase():
         phases_from_global_bin(g)
 
 
-def test_resolve_probe_model_charge_le_controle_avec_son_pkl_jamais_celui_du_canonique(tmp_path):
+def test_resolve_probe_model_charge_le_controle_avec_son_pkl_et_resout_les_liens(tmp_path):
+    """Le canonique vit derrière un lien symbolique (`ai/models` dans les worktrees) : le désigner
+    par son chemin résolu ne doit ni en faire un contrôle, ni servir son pkl à un autre zip."""
     from ai.vec_normalize_utils import get_vec_normalize_path
     from scripts.grad_signal_probe import resolve_probe_model
 
-    canonical = tmp_path / "model_A.zip"
+    real_dir = tmp_path / "real_models"
+    real_dir.mkdir()
+    (tmp_path / "models").symlink_to(real_dir, target_is_directory=True)
+    canonical = tmp_path / "models" / "model_A.zip"  # orthographe via le lien
+    canonical_real = real_dir / "model_A.zip"
     control = tmp_path / "ctrl" / "model_B_20260913.zip"
     control.parent.mkdir()
     for zip_path in (canonical, control):
@@ -399,22 +425,26 @@ def test_resolve_probe_model_charge_le_controle_avec_son_pkl_jamais_celui_du_can
         Path(get_vec_normalize_path(str(zip_path))).write_bytes(b"pkl")
     canonical_pkl = get_vec_normalize_path(str(canonical))
     control_pkl = get_vec_normalize_path(str(control))
-    assert control_pkl != canonical_pkl
+    assert control_pkl != canonical_pkl and str(canonical_real) != str(canonical)
 
-    assert resolve_probe_model(str(canonical), None, None) == (str(canonical), canonical_pkl, False)
-    assert resolve_probe_model(str(canonical), str(control), None) == (str(control), control_pkl, True)
-    other_pkl = tmp_path / "other_vec_normalize.pkl"
-    other_pkl.write_bytes(b"pkl")
-    assert resolve_probe_model(str(canonical), str(control), str(other_pkl)) == (str(control), str(other_pkl), True)
+    assert resolve_probe_model(str(canonical), None) == (str(canonical), canonical_pkl, False)
+    assert resolve_probe_model(str(canonical), str(control)) == (str(control), control_pkl, True)
+    # Le canonique en --model, par le lien ou résolu : refusé, jamais « contrôle ».
+    with pytest.raises(ValueError, match="désigne le canonique"):
+        resolve_probe_model(str(canonical), str(canonical))
+    with pytest.raises(ValueError, match="désigne le canonique"):
+        resolve_probe_model(str(canonical), str(canonical_real))
+    # Un autre zip dont le pkl compagnon EST celui du canonique (lien de fichier) : refusé.
+    alias = tmp_path / "ctrl" / "model_C.zip"
+    alias.write_bytes(b"zip")
+    Path(get_vec_normalize_path(str(alias))).symlink_to(canonical_real.parent / Path(canonical_pkl).name)
     with pytest.raises(ValueError):
-        resolve_probe_model(str(canonical), None, str(other_pkl))  # stats étrangères sur le canonique
-    with pytest.raises(ValueError):
-        resolve_probe_model(str(canonical), str(control), canonical_pkl)  # pkl du canonique sur le contrôle
+        resolve_probe_model(str(canonical), str(alias))
     with pytest.raises(FileNotFoundError):
-        resolve_probe_model(str(canonical), str(tmp_path / "absent.zip"), None)
+        resolve_probe_model(str(canonical), str(tmp_path / "absent.zip"))
     Path(control_pkl).unlink()
     with pytest.raises(FileNotFoundError):
-        resolve_probe_model(str(canonical), str(control), None)  # pas de repli sur un autre pkl
+        resolve_probe_model(str(canonical), str(control))  # pas de repli sur un autre pkl
 
 
 def test_parse_gae_lambdas_et_ancrage_au_lambda_du_modele():
@@ -470,7 +500,7 @@ class _TinyPolicy(nn.Module):
         self.pi = nn.Linear(obs_dim, n_actions)
         self.vf = nn.Linear(obs_dim, 1)
 
-    def evaluate_actions(self, obs, actions, action_masks=None):
+    def evaluate_actions(self, obs, actions, action_masks):
         import torch as th
 
         logits = self.pi(obs).masked_fill(~action_masks, -1e9)
@@ -560,11 +590,49 @@ def test_reset_policy_parameters_change_tout_et_est_reproductible():
         reset_policy_parameters(nn.Sequential(nn.Linear(2, 2), Frozen()), 7)
 
 
-def test_acceptation_du_controle_ne_juge_que_la_plomberie():
-    from scripts.grad_signal_probe import check_control_acceptance
+def test_acceptation_plomberie_ne_juge_que_la_part_pool():
+    from scripts.grad_signal_probe import check_plumbing_acceptance
 
-    ok = {"pool_episode_share": 0.68, "episodes_no_winner": 0, "explained_variance": -5.0, "grad_norm_policy_mb0": 9.0}
-    assert check_control_acceptance(ok) == []
-    failures = check_control_acceptance({"pool_episode_share": 0.2, "episodes_no_winner": 3})
-    assert len(failures) == 2
-    assert failures[0].startswith("pool_episode_share") and failures[1].startswith("episodes_no_winner")
+    ok = {"pool_episode_share": 0.68, "explained_variance": -5.0, "grad_norm_policy_mb0": 9.0}
+    assert check_plumbing_acceptance(ok) == []
+    failures = check_plumbing_acceptance({"pool_episode_share": 0.2})
+    assert len(failures) == 1 and failures[0].startswith("pool_episode_share")
+
+
+def _done_info(winner: int | None, controlled: int = 1, truncated: bool = False, **extra) -> dict:
+    return {"episode": {"l": 90, "r": 1.0}, "opponent_mode": "self_play", "winner": winner,
+            "controlled_player": controlled, "TimeLimit.truncated": truncated, "action": "wait", **extra}
+
+
+def test_recorder_score_les_issues_et_enregistre_les_troncatures_du_moteur():
+    """Le moteur ne rend jamais `winner = None` : sa limite anti-runaway pose un NUL avec
+    `truncated = True`. Le signal gym `TimeLimit.truncated` est le seul discriminant ; sans lui,
+    l'épisode tronqué passait pour un nul et le bootstrap replié dans sa récompense entrait dans
+    Var(r)."""
+    from engine.constants import DRAW_WINNER
+    from scripts.grad_signal_probe import OUTCOME_REWARD, make_recorder
+
+    rec = make_recorder(3)
+    rec.locals = {"dones": np.array([True, False, True]),
+                  "infos": [_done_info(1), {"TimeLimit.truncated": False, "action": "ingress_move"}, _done_info(2)]}
+    assert rec._on_step() is True
+    debug = {"turn": 4, "phase": "move", "steps": 5000}
+    rec.locals = {"dones": np.array([False, True, False]),
+                  "infos": [{"TimeLimit.truncated": False}, _done_info(
+                      DRAW_WINNER, truncated=True, win_method="step_limit",
+                      truncation_reason="episode_steps_limit", truncation_debug=debug), {"TimeLimit.truncated": False}]}
+    rec._on_step()
+    dones, outcomes, setting_up = rec.arrays()
+    assert dones.shape == (2, 3) and outcomes[0].tolist() == [OUTCOME_REWARD, 0.0, -OUTCOME_REWARD]
+    assert outcomes[1].tolist() == [0.0, 0.0, 0.0]
+    assert setting_up.tolist() == [[False, True, False], [False, False, False]]
+    assert rec.episodes_total == 3 and rec.episodes_pool == 3 and rec.episode_lengths == [90, 90, 90]
+    assert rec.truncations == [{"env": 1, "step": 1, "truncation_reason": "episode_steps_limit",
+                                "win_method": "step_limit", "truncation_debug": debug}]
+    # Un vainqueur None sur un épisode fini viole le contrat du moteur : levée, pas comptée.
+    rec.locals = {"dones": np.array([True, False, False]),
+                  "infos": [_done_info(None), {"TimeLimit.truncated": False}, {"TimeLimit.truncated": False}]}
+    with pytest.raises(RuntimeError):
+        rec._on_step()
+    rec._on_rollout_start()
+    assert rec.truncations == [] and rec.episodes_total == 0
