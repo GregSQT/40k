@@ -134,6 +134,7 @@ def special_rule_usage_is_valid(
 def living_datasheets(
     state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str,
     *, exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
+    include_mids: Iterable[str] = (),
 ) -> Optional[Set[str]]:
     """Datasheets des socles VIVANTS de `unit_id`, ou `None` si la composition ne tranche pas.
 
@@ -142,6 +143,11 @@ def living_datasheets(
     alors que la capacité s'est exercée sur la composition d'AVANT — un PainBoy mort qui se
     rendrait lui-même ressortirait VALIDE, c'est-à-dire que le seul cas illégal que la ligne
     doit rendre jugeable serait celui qu'elle ne signale jamais.
+
+    `include_mids` : socles à AJOUTER aux vivants, l'inverse. Sert à 24.08 Deadly Demise, que
+    déclenche une figurine qui vient d'être DÉTRUITE : elle faisait partie de l'unité à l'instant
+    jugé (exemple du PDF : le jet se fait, puis l'Impulsor est retiré), et si elle en était le
+    dernier socle, les vivants seuls ne diraient plus rien.
 
     `unit_model_hp[unit_id]` est l'effectif par socle tenu par `_resync_living_models` : un socle
     mort en sort, donc la datasheet qu'il portait disparaît d'ici avec lui — c'est l'échéance
@@ -163,27 +169,13 @@ def living_datasheets(
     LIMITE CONNUE, qui ne peut que SOUS-compter les fautes : une ligne `DEAD model=` sans
     segment `[MODELS:]` ne fait pas sortir le socle avant la prochaine ligne qui en porte un.
     """
-    return declared_datasheets(
-        state, stats, unit_id, unit_type,
-        (mid for mid in state.unit_model_hp.get(unit_id, {}) if mid not in exclude_mids),  # get allowed : unité jamais vue
-    )
-
-
-def declared_datasheets(
-    state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str, mids: Iterable[str],
-) -> Optional[Set[str]]:
-    """Datasheets des socles `mids` de `unit_id`, ou `None` si la composition ne tranche pas.
-
-    Noyau de `living_datasheets`, qui lui passe les socles VIVANTS. Un relevé qui se juge sur
-    d'autres socles (24.08 : la figurine qui vient d'être DÉTRUITE) passe les siens. Mêmes
-    règles d'abstention et de repli sur `{unit_type}` — voir `living_datasheets`.
-    """
     declared = require_key(stats, 'model_types_by_unit_id').get(unit_id)  # get allowed : entête sans [MODEL_TYPES:]
     if not declared:
         return {unit_type}
     model_types = state.model_types
+    living = (mid for mid in state.unit_model_hp.get(unit_id, {}) if mid not in exclude_mids)  # get allowed : unité jamais vue
     present: Set[str] = set()
-    for mid in mids:
+    for mid in (*living, *include_mids):
         mtype = model_types.get(mid)  # get allowed : socle sans datasheet = abstention
         if mtype is None:
             return None
@@ -201,18 +193,16 @@ def note_special_rule_usage(
     player: int,
     *,
     exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
-    judged_mids: Optional[Iterable[str]] = None,
+    include_mids: Iterable[str] = (),
 ) -> None:
     """Relève un usage de règle §1.7 ET tranche sa validité 19.04 À CET INSTANT.
 
-    `exclude_mids` : cf. `living_datasheets` — les socles rendus par la ligne `RETURNED` dont
-    l'usage est relevé, pour juger la restitution sur la composition d'AVANT.
-
-    `judged_mids` : socles sur lesquels le verdict se rend À LA PLACE des socles vivants. Sert à
-    24.08 Deadly Demise, exercée par une figurine qui vient d'être DÉTRUITE : la composition
-    vivante ne peut ni la voir (si c'était le dernier socle) ni l'isoler (un WeirdBoy encore vivant
-    blanchirait l'explosion d'un Boy de son escouade). La validité est alors « le socle détruit
-    portait la règle ». Vide = abstention (journal sans DEAD préalable), jamais une faute inventée.
+    `exclude_mids` / `include_mids` : cf. `living_datasheets` — les socles rendus par la ligne
+    `RETURNED` dont l'usage est relevé, pour juger la restitution sur la composition d'AVANT ;
+    le socle qui vient d'exploser (24.08), pour le juger dans l'unité dont il faisait partie.
+    24.08 est une règle d'UNITÉ (« each time a model in this unit is destroyed »), conférée à
+    toute l'escouade attachée tant que sa source vit (19.04) : un Boy qui explose pendant que
+    son WeirdBoy est vivant est LÉGAL, un Boy qui explose après sa disparition ne l'est plus.
 
     SITE UNIQUE d'écriture de `special_rule_usage`. Le verdict ne peut pas se rendre a
     posteriori sur la clé `(règle, type d'escouade)` : cette clé ignore QUELLE escouade a
@@ -228,10 +218,8 @@ def note_special_rule_usage(
     sur le run du 2026-09-11 : 0 relevé sur 94 tombe après la mort de son porteur.
     """
     require_key(stats, 'special_rule_usage')[(rule_id, unit_type)][int(player)] += 1
-    present = (
-        living_datasheets(state, stats, unit_id, unit_type, exclude_mids=exclude_mids)
-        if judged_mids is None
-        else declared_datasheets(state, stats, unit_id, unit_type, judged_mids)
+    present = living_datasheets(
+        state, stats, unit_id, unit_type, exclude_mids=exclude_mids, include_mids=include_mids,
     )
     if present is None:
         return  # composition non concluante : on s'abstient plutôt que d'inventer une faute
