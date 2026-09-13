@@ -166,7 +166,7 @@ def _shoot_state(
             "id": mid, "squad_id": sid, "player": 2, "T": 4,
             "HP_CUR": 3, "HP_MAX": 3, "ARMOR_SAVE": defender_armor,
             "INVUL_SAVE": defender_invul, "role": None, "unitType": "Grunt",
-            "points_per_hp": 5.0, "VALUE": 10.0, "col": col, "row": row,
+            "points_per_hp": 5.0, "VALUE": 10.0, "col": col, "row": row, "UNIT_RULES": [],
         }
         squad_models[sid] = [mid]
         squad_cache[sid] = {"model_count_at_start": 1}
@@ -244,7 +244,7 @@ def _fight_state(
                 "col": 0, "row": 0}
     target_model = {"id": "T1", "squad_id": "2", "player": 2, "T": 4, "HP_CUR": 5, "HP_MAX": 5,
                     "ARMOR_SAVE": 6, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
-                    "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0}
+                    "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0, "UNIT_RULES": []}
     units = [_unit("1", 1, attacker_faction), _unit("2", 2, defender_faction, ARMOR_SAVE=6)]
     gs = {
         **turn_state_invariants(),

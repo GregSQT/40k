@@ -273,48 +273,33 @@ def test_collect_fnp_near_objective_figurine_sans_la_regle_pas_de_seuil(monkeypa
     assert result == [], "l'Intercessor ne porte pas Unbreakable Resolve : aucun FNP"
 
 
-def test_collect_fnp_near_objective_position_de_la_figurine_pas_de_l_escouade():
-    """Le prédicat de position est celui de la FIGURINE blessée : l'Ancient loin de tout objectif
-    n'a pas de FNP même si l'escouade en touche un (empreinte d'escouade ignorée)."""
-    ish = 5  # 3" objectif = 15 subhex, 6" centre = 30 subhex ; plateau 100x100, centre (50,50)
+def _ancient_gs(col, row):
+    """Ancient `T1` seul (socle 1 hexe, règle en propre) posé en (col,row) ; plateau 100x100
+    (centre (50,50)), ish=5 (hérité de `_minimal_gs`), une aire d'objectif réduite à (10,10).
+    L'entrée `units_cache` ne porte que l'orientation : c'est la seule clé que lit
+    `iter_living_models_with_footprints`."""
     gs = _minimal_gs([_OBJ_RULE_4])
     gs["board_cols"], gs["board_rows"] = 100, 100
     gs["objectives"] = [{"id": "o1", "hexes": [[10, 10]]}]
-    gs["units_cache"] = {"U1": {
-        "BASE_SHAPE": "round", "BASE_SIZE": 1, "col": 10, "row": 11, "orientation": 0,
-        "occupied_hexes": {(10, 11), (90, 90)}, "player": 1, "HP_CUR": 2,
-    }}
-    ancient = {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1,
-               "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
-    gs["models_cache"] = {
-        "T1": {**ancient, "col": 90, "row": 90},   # Ancient loin de tout (escouade à portée via T2)
-        "T2": {"squad_id": "U1", "UNIT_RULES": [], "HP_CUR": 1, "col": 10, "row": 11,
-               "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
-    }
-    gs["squad_models"] = {"U1": ["T1", "T2"]}
-    gs["inches_to_subhex"] = ish
+    gs["units_cache"] = {"U1": {"orientation": 0}}
+    gs["models_cache"] = {"T1": {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1,
+                                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+                                 "col": col, "row": row}}
+    return gs
+
+
+def test_collect_fnp_near_objective_position_de_la_figurine_pas_de_l_escouade():
+    """Le prédicat de position est celui de la FIGURINE blessée : l'Ancient loin de tout objectif
+    n'a pas de FNP même si l'escouade en touche un (l'Intercessor `T2` est DANS l'aire)."""
+    gs = _ancient_gs(90, 90)   # Ancient loin de tout
+    gs["models_cache"]["T2"] = {"squad_id": "U1", "UNIT_RULES": [], "HP_CUR": 1, "col": 10, "row": 10,
+                                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
+    gs["squad_models"]["U1"].append("T2")
     unit = _unit([_OBJ_RULE_4])
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1") == [], "Ancient loin : pas de FNP"
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T2") == [], "Intercessor : jamais"
     gs["models_cache"]["T1"]["col"], gs["models_cache"]["T1"]["row"] = 10, 10   # Ancient DANS l'aire de l'objectif
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1") == [4], "Ancient à portée : FNP 4+"
-
-
-def _ancient_gs(col, row, *, ish=5, objective_hexes=((10, 10),)):
-    """Ancient seul (socle 1 hexe) posé en (col,row) ; plateau 100x100, centre (50,50) ; une aire
-    d'objectif réduite à `objective_hexes`. Sert au prédicat de position lui-même."""
-    gs = _minimal_gs([_OBJ_RULE_4])
-    gs["board_cols"], gs["board_rows"] = 100, 100
-    gs["inches_to_subhex"] = ish
-    gs["objectives"] = [{"id": "o1", "hexes": [list(h) for h in objective_hexes]}]
-    gs["units_cache"] = {"U1": {
-        "BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row, "orientation": 0,
-        "occupied_hexes": {(col, row)}, "player": 1, "HP_CUR": 1,
-    }}
-    gs["models_cache"] = {"T1": {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1,
-                                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
-                                 "col": col, "row": row}}
-    return gs
 
 
 def test_near_objective_exige_le_recouvrement_de_l_aire_pas_une_distance_de_3_pouces():
@@ -489,6 +474,48 @@ def test_mw_fnp_near_objective_inactif(monkeypatch):
     assert applied == 1, "FNP near_objective inactif : MW non bloquee"
 
 
+def test_mw_seuils_calcules_une_fois_par_figurine_allouee(monkeypatch):
+    """`allocate_mortal_wounds` : les seuils FNP sont ceux de la figurine ALLOUÉE, calculés une
+    fois par figurine et non par blessure. Ancient `T1` (règle en propre, jet 6 → sauve tout)
+    encaisse 3 MW : une seule collecte, 0 appliquée. VERROU : une collecte par blessure → 3."""
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    calls: list = []
+    real = su._collect_fnp_thresholds_mortal
+    monkeypatch.setattr(
+        su, "_collect_fnp_thresholds_mortal",
+        lambda *a, **k: calls.append(k["model_id"]) or real(*a, **k),
+    )
+    gs = _mw_gs([_OBJ_RULE_4])
+    applied = allocate_mortal_wounds(gs, "2", 3, auto_resolve=True, details_sink=[])
+    assert applied == 0 and calls == ["T1"], f"une collecte pour 3 MW sur la même figurine, obtenu {calls}"
+
+
+def test_mw_seuils_recalcules_quand_la_figurine_allouee_change(monkeypatch):
+    """Ancient `T1` (FNP en propre, 1 PV) rate son jet et meurt à la 1re MW ; l'Intercessor `T2`
+    (aucune règle) encaisse les 2 suivantes SANS jet : les seuils sont recollectés pour lui.
+    VERROU : seuils figés sur la première figurine → `T2` jetterait un FNP 4+ et le jet 4 le sauverait."""
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
+    rolls = iter([3, 4, 4])   # T1 rate (3) ; si T2 jetait à tort, 4 sauverait
+    monkeypatch.setattr(random, "randint", lambda a, b: next(rolls))
+    calls: list = []
+    real = su._collect_fnp_thresholds_mortal
+    monkeypatch.setattr(
+        su, "_collect_fnp_thresholds_mortal",
+        lambda *a, **k: calls.append(k["model_id"]) or real(*a, **k),
+    )
+    gs = _mw_gs([_OBJ_RULE_4])
+    gs["models_cache"]["T2"] = {"id": "T2", "squad_id": "2", "player": 1, "HP_CUR": 2, "HP_MAX": 2,
+                                "col": 6, "row": 5, "UNIT_RULES": []}
+    gs["squad_models"]["2"].append("T2")
+    gs["squad_cache"]["2"]["model_count_at_start"] = 2
+    details: list = []
+    applied = allocate_mortal_wounds(gs, "2", 3, auto_resolve=True, details_sink=details)
+    assert applied == 3, f"T1 rate, T2 sans FNP : 3 MW appliquées, obtenu {applied}"
+    assert [d["modelId"] for d in details] == ["T1", "T2", "T2"]
+    assert calls == ["T1", "T2"], f"une collecte par figurine allouée, obtenu {calls}"
+
+
 # ---------------------------------------------------------------------------
 # Chemin de production : Ancient replié inline dans des Intercessors (fold 19.04 réel)
 # ---------------------------------------------------------------------------
@@ -512,9 +539,7 @@ def test_unbreakable_resolve_ancient_inline_ne_couvre_que_l_ancient():
             {"id": 101, "unit_type": "Boyz", "player": 2, "col": 30, "row": 55},
         ],
     }
-    engine = load_engine_from_scenario(
-        scenario, engine_overrides={"controlled_agent": "ArmageddonAgent_x1", "rewards_config": "ArmageddonAgent_x1"}
-    )
+    engine = load_engine_from_scenario(scenario)
     gs = engine.game_state
     unit = gs["unit_by_id"]["1"]
     assert any(r["ruleId"] == "feel_no_pain_near_objective" for r in unit["UNIT_RULES"]), "union 19.04 attendue"

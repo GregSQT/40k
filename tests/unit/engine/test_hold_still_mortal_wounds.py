@@ -67,7 +67,7 @@ def _target_model(*, hp=2):
         "ARMOR_SAVE": 4, "INVUL_SAVE": 7,
         # Exige par `_resolve_one_manual_wound` (valeur detruite par point de vie perdu).
         "points_per_hp": 1.0, "VALUE": float(hp),
-        "role": None,
+        "role": None, "UNIT_RULES": [],
     }
 
 
