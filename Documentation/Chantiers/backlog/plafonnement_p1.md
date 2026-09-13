@@ -368,8 +368,16 @@ log-prob 1,7 × 10⁻⁴).
       par mutation (GAE sans coupure d'épisode, identité de variance, ΔV, pkl du canonique,
       copies GPU du buffer, réinitialisation).
 - [x] Piège attrapé par la vérification d'alignement : `GpuMaskableDictRolloutBuffer` uploade
-      avantages/retours sur GPU une fois au premier `get()` ; `set_buffer_advantages` rafraîchit
-      les deux exemplaires.
+      avantages/retours sur GPU une fois au premier `get()` ; la première version rafraîchissait
+      les deux exemplaires (`set_buffer_advantages`).
+- [x] Simplification après /simplify (2026-09-13, après les quatre collectes) : pertes policy des
+      λ supplémentaires prises dans la même passe avant que les quatre termes (plus de seconde
+      passe `get()` par λ, plus de mutation du buffer, `set_buffer_advantages` supprimé) ;
+      `gae_advantages` délègue à `RolloutBuffer.compute_returns_and_advantage` de SB3 ; le λ du
+      modèle est toujours balayé (`--gae-lambdas` = λ supplémentaires, défaut `0.8,0.5,0.2,0`) ;
+      `f_batch_of` / `true_sq_of` partagés entre `signal_stats` et les différences appairées ;
+      `check_control_acceptance` réutilise `check_acceptance(keys=…)`. 24 tests, rouge/vert par
+      mutation (normalisation oubliée pour le balayage).
 - [x] Quatre collectes (P1, contrôle 040721, contrôle aléatoire, P0 déterministe) ; résultats
       §0-4 et [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) ;
       implémentation indépendante (session 40k-a2) concordante, contrôle synthétique f = 0,667
