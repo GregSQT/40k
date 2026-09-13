@@ -335,6 +335,64 @@ la phrase du `_doc` se corrige avec ce comptage, et toute décision `target_kl` 
 prend dessus — jamais sur `train/time_update`. Aucun JSON de `config/` ne se touche tant que le
 run tourne.
 
+### Fraction de signal des updates P1 — mesurée le 2026-09-13 {#signal-p1-2026-09-13}
+
+**Verdict : branche (1) de la règle écrite avant lecture — le gradient de politique d'une update
+P1 n'est pas distinguable de zéro ; la taille de lot n'est pas un levier.** Instrument :
+`scripts/grad_signal_probe.py` (lecture seule ; verrous `tests/unit/scripts/test_grad_signal_probe.py`),
+sur le canonique du 2026-09-12 18:52 (instantané robuste 0,9078, 110 177 épisodes cumulés), dans
+l'environnement EXACT de P1 (curriculum P1, profil `x1_lineage`, 24 envs, 20 entrées de scénario,
+pool P0 à 0,70, rampe de déploiement figée à 0,90, VecNormalize du checkpoint figée avec
+`norm_reward` rétabli) : **24 rollouts de 8160 pas** collectés par `_collect_rollouts_distributed`
+à politique figée, 8 mini-lots de 1020 par `rollout_buffer.get`, gradients de chaque terme de la
+loss pris séparément, sans `optimizer.step`. Durée 19 min (36 s de collecte + 4 s de gradients
+par rollout). Acceptation tenue au premier rollout : `grad_norm_policy_mb0` 0,378 (référence
+0,354 ± 0,052), value 0,252 (0,218 ± 0,108), `explained_variance` 0,895 (0,889), ep_len 114,8
+(111,9), returns 1,773 (1,644 ± 0,130), part d'épisodes contre P0 0,67 (0,70) ; sur les 24
+rollouts : policy mb0 0,361 en moyenne, EV 0,882, ep_len 111,5, part pool 0,699, 1 743 épisodes,
+0 sans vainqueur.
+
+**Terme policy (3,25 M paramètres, tous groupes)** : ‖G‖² sans biais = 8,3 × 10⁻⁵, intervalle
+jackknife **[−2,0 × 10⁻⁴, +3,7 × 10⁻⁴]** — contient 0 ; E‖G_rollout‖² = 0,0165 (norme 0,128 pour
+la moyenne des 8 mini-lots) et E‖g_minibatch‖² = 0,131 (norme 0,36, la valeur publiée en
+`diag/grad_norm_policy_mb0`). Donc **f_8160 = 0,005 [−0,012, 0,022]** et **f_1020 = 0,0006** :
+plus de 97,8 % du carré de norme d'une update est du bruit, même à la borne haute de
+l'intervalle. B_noise n'est pas estimable (point 1,6 × 10⁶, intervalle contenant 0) ; sa
+**borne basse**, prise à la borne haute de ‖G‖², vaut **≈ 358 000 pas**, soit 44 rollouts de
+8160 pour une update à moitié signal. Aucun groupe de paramètres ne porte de signal détectable :
+sur les 20 groupes, tous les intervalles de ‖G‖² contiennent 0 ; le seul intervalle de f_8160
+qui l'exclut est `shoot_weapon_sel_query_net`, 0,085 [0,015, 0,155], à ~2σ sur 20 groupes —
+ce que le test multiple produit seul.
+Distinguer « zéro » de « 8 × 10⁻⁵ » demanderait K ≈ 316 rollouts (~4 h) ; la règle ne le demande
+pas, et les deux lectures mènent à la même décision.
+
+**Terme value (`vf_coef` × MSE)** : ‖G‖² = 0,0138 **[0,0082, 0,0193]**, f_8160 = **0,27
+[0,14, 0,40]**, f_1020 = 0,23, B_noise = 21 600 [8 100, 35 100] ; sur le `features_extractor`
+f_8160 = 0,32 [0,18, 0,45]. Le critic, lui, reçoit encore un gradient réel — cohérent avec
+`explained_variance` 0,85 → 0,89 sur le run. **Terme entropie** : f_8160 = 0,961 [0,959, 0,963],
+B_noise = 332 — la vérification de l'instrument : un terme sans bruit d'avantage rend f ≈ 1.
+**Gradient d'issue** (REINFORCE ±150 sur les 130 709 pas d'épisodes complets, retour
+Monte-Carlo à γ = 0,99) : ‖G‖² = −6,7 × 10⁻⁵ [−4,4 × 10⁻⁴, +3,0 × 10⁻⁴], pas plus distinguable
+de 0 que le gradient façonné. **Cosinus** (sans biais par produits croisés) : (policy, value) sur
+le features_extractor 0,37 mais intervalle indéfini ; (façonné, issue) indéfini globalement et
+**aucun des 20 groupes mesurable à K = 24** (le seul intervalle excluant 0, `fight_query_net`
+[0,16, 1,72], sort de [−1, 1]). Les deux cosinus se rapportent « non mesurables à K = 24 ».
+
+**Ce que ça tranche.** Le plateau de P1 contre P0 n'est pas un problème de lot : à 8160 pas
+l'update de politique est du bruit à > 97,8 %, et un lot 44 fois plus grand serait le MINIMUM pour
+une update à moitié signal — s'il y a un signal, ce que 24 rollouts ne peuvent pas affirmer.
+Doubler ou quadrupler `n_steps` × `batch_size` ne changerait rien de mesurable. Les 761/761
+updates coupées par l'early-stop KL (suite 110) se relisent avec ce chiffre : la KL qui déclenche
+la coupure est produite par un pas de bruit, pas par un déplacement dirigé. La branche restante
+est celle de l'objectif et de la récompense (le gradient façonné ET le gradient d'issue sont
+nuls à cette précision : la politique est à un point stationnaire des deux, ou leur signal est
+sous 3 × 10⁻⁴), pas celle des hyperparamètres d'optimisation — `target_kl`, `n_epochs`,
+`learning_rate` opèrent sur une direction qui n'en est pas une.
+
+Reproduire : `python3 scripts/grad_signal_probe.py --agent ArmageddonAgent_x1 --etape P1
+--training-config x1_lineage --rollouts 24 --out <json>` (refuse si `ai/train.py` tourne ;
+sort en code 3 si le premier rollout ne reproduit pas la référence).
+
 ### Six défauts de la livraison, fermés le 2026-09-07
 
 **Le premier était bloquant pour toute la chaîne.** `_apply_curriculum_model_params` posait un

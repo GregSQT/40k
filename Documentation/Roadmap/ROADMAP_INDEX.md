@@ -141,6 +141,15 @@ verdict. Détail : [training.md#entropie-normalisee](training.md#entropie-normal
 **91,0 %** (273/300), 20.01 toujours posée au siège modèle (444/1944 = 22,8 %), 5 « dead unit
 fighting » analyzer — qualifiés faux positif le jour même (suite 116) —
 [training.md#holdout-2026-09-13](training.md#holdout-2026-09-13).
+**Fraction de signal des updates P1 mesurée le 2026-09-13 (suite 122, `scripts/grad_signal_probe.py`)**
+sur ce même canonique, dans l'environnement exact de P1, 24 rollouts de 8160 pas à politique
+figée : le gradient de politique d'une update **n'est pas distinguable de zéro** (‖G‖² sans biais
+8 × 10⁻⁵, intervalle jackknife [−2 × 10⁻⁴, +3,7 × 10⁻⁴]), **f_8160 = 0,005 [−0,012, 0,022]** —
+l'update est du bruit à plus de 97,8 %, et un lot 44 fois plus grand serait le minimum pour une
+update à moitié signal. Le critic, lui, reçoit un gradient réel (f_8160 = 0,27 [0,14, 0,40]). La
+taille de lot n'est pas le levier du plateau contre P0 ; la branche restante est l'objectif et la
+récompense (le gradient d'issue ±150 est nul à la même précision, cosinus non mesurables à
+K = 24). Détail : [training.md#signal-p1-2026-09-13](training.md#signal-p1-2026-09-13).
 
 ---
 
