@@ -134,7 +134,7 @@ def special_rule_usage_is_valid(
 def living_datasheets(
     state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str,
     *, exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
-    include_mids: Iterable[str] = (),
+    judged_mids: Optional[Iterable[str]] = None,
 ) -> Optional[Set[str]]:
     """Datasheets des socles VIVANTS de `unit_id`, ou `None` si la composition ne tranche pas.
 
@@ -144,10 +144,12 @@ def living_datasheets(
     rendrait lui-même ressortirait VALIDE, c'est-à-dire que le seul cas illégal que la ligne
     doit rendre jugeable serait celui qu'elle ne signale jamais.
 
-    `include_mids` : socles à AJOUTER aux vivants, l'inverse. Sert à 24.08 Deadly Demise, que
-    déclenche une figurine qui vient d'être DÉTRUITE : elle faisait partie de l'unité à l'instant
-    jugé (exemple du PDF : le jet se fait, puis l'Impulsor est retiré), et si elle en était le
-    dernier socle, les vivants seuls ne diraient plus rien.
+    `judged_mids` : socles jugés À LA PLACE des vivants. Sert à 24.08 Deadly Demise, ability
+    CORE que 19.04 ne confère PAS à l'escouade attachée (décision du 2026-09-13,
+    Documentation/Reference/jeu/couverture_regles.md § Attached Units) : seul le socle qui porte
+    la règle explose, et il vient d'être DÉTRUIT — les vivants ne le contiennent plus (dernier
+    socle) ou blanchiraient un Boy qui explose parce que son WeirdBoy respire encore. Vide =
+    abstention (journal sans DEAD préalable), jamais une faute inventée.
 
     `unit_model_hp[unit_id]` est l'effectif par socle tenu par `_resync_living_models` : un socle
     mort en sort, donc la datasheet qu'il portait disparaît d'ici avec lui — c'est l'échéance
@@ -173,9 +175,12 @@ def living_datasheets(
     if not declared:
         return {unit_type}
     model_types = state.model_types
-    living = (mid for mid in state.unit_model_hp.get(unit_id, {}) if mid not in exclude_mids)  # get allowed : unité jamais vue
+    mids: Iterable[str] = (
+        (mid for mid in state.unit_model_hp.get(unit_id, {}) if mid not in exclude_mids)  # get allowed : unité jamais vue
+        if judged_mids is None else judged_mids
+    )
     present: Set[str] = set()
-    for mid in (*living, *include_mids):
+    for mid in mids:
         mtype = model_types.get(mid)  # get allowed : socle sans datasheet = abstention
         if mtype is None:
             return None
@@ -193,16 +198,13 @@ def note_special_rule_usage(
     player: int,
     *,
     exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
-    include_mids: Iterable[str] = (),
+    judged_mids: Optional[Iterable[str]] = None,
 ) -> None:
     """Relève un usage de règle §1.7 ET tranche sa validité 19.04 À CET INSTANT.
 
-    `exclude_mids` / `include_mids` : cf. `living_datasheets` — les socles rendus par la ligne
+    `exclude_mids` / `judged_mids` : cf. `living_datasheets` — les socles rendus par la ligne
     `RETURNED` dont l'usage est relevé, pour juger la restitution sur la composition d'AVANT ;
-    le socle qui vient d'exploser (24.08), pour le juger dans l'unité dont il faisait partie.
-    24.08 est une règle d'UNITÉ (« each time a model in this unit is destroyed »), conférée à
-    toute l'escouade attachée tant que sa source vit (19.04) : un Boy qui explose pendant que
-    son WeirdBoy est vivant est LÉGAL, un Boy qui explose après sa disparition ne l'est plus.
+    le socle qui vient d'exploser (24.08, ability CORE non conférée par 19.04), jugé seul.
 
     SITE UNIQUE d'écriture de `special_rule_usage`. Le verdict ne peut pas se rendre a
     posteriori sur la clé `(règle, type d'escouade)` : cette clé ignore QUELLE escouade a
@@ -219,7 +221,7 @@ def note_special_rule_usage(
     """
     require_key(stats, 'special_rule_usage')[(rule_id, unit_type)][int(player)] += 1
     present = living_datasheets(
-        state, stats, unit_id, unit_type, exclude_mids=exclude_mids, include_mids=include_mids,
+        state, stats, unit_id, unit_type, exclude_mids=exclude_mids, judged_mids=judged_mids,
     )
     if present is None:
         return  # composition non concluante : on s'abstient plutôt que d'inventer une faute

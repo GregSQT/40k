@@ -222,8 +222,8 @@ class AnalyzerState:
     # explosion écrit UNE ligne par unité à 6", la source comprise tant qu'il lui reste des
     # socles : ses propres pertes `DEAD … reason=hazard` s'intercalent et écraseraient
     # `last_dead_mid_by_unit` avant la ligne suivante du même jet. Le relevé §1.7 se fait une
-    # fois par entrée ici (une par jet de D6), ce socle rejoignant les vivants pour le verdict
-    # (il faisait partie de l'unité à l'instant du jet). Même durée de vie que
+    # fois par entrée ici (une par jet de D6), jugé sur ce seul socle (ability CORE, non
+    # conférée à l'escouade). Même durée de vie que
     # `deadly_demise_pending` : le bloc DEAD/DEADLY DEMISE contigu. Limite : deux porteurs de
     # la même escouade qui explosent dans un seul bloc (l'un tué par l'autre) ne font qu'un
     # relevé, sur le premier — le journal ne distingue pas leurs lignes.
