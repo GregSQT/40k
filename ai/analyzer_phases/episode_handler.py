@@ -92,6 +92,8 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_deaths = []
     state.unit_kill_context = {}
     state.deadly_demise_pending = {}
+    state.last_dead_mid_by_unit = {}
+    state.deadly_demise_exploder = {}
     state.unit_death_cause = {}
     state.last_attack_line_by_actor = {}
     state.phase_activation_seen = {}
