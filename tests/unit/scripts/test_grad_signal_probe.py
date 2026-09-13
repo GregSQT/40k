@@ -469,13 +469,19 @@ def test_balayage_lambda_differences_appairees():
     clean, mb_clean = _rollouts(rng, mu, sigma=0.3)   # f ≈ 0,5
     noisy = clean + rng.normal(0.0, 0.6, size=clean.shape)  # même signal, bruit ajouté : f plus bas
     mb_noisy = mb_clean + 0.36 * D * MINIBATCHES
-    grams = {0.95: gram_matrix(clean), 0.5: gram_matrix(clean), 0.0: gram_matrix(noisy)}
-    mbs = {0.95: mb_clean, 0.5: mb_clean, 0.0: mb_noisy}
+    half = D // 2
+    grams = {0.95: {"all": gram_matrix(clean), "head": gram_matrix(clean[:, :half])},
+             0.5: {"all": gram_matrix(clean), "head": gram_matrix(clean[:, :half])},
+             0.0: {"all": gram_matrix(noisy), "head": gram_matrix(noisy[:, :half])}}
+    mbs = {0.95: {"all": mb_clean, "head": mb_clean / 2}, 0.5: {"all": mb_clean, "head": mb_clean / 2},
+           0.0: {"all": mb_noisy, "head": mb_noisy / 2}}
     out = lambda_sweep_stats(grams, mbs, BATCH_STEPS)
     assert out["lambdas"] == [0.95, 0.5, 0.0]
-    assert out["per_lambda"][0.95]["f_batch"]["estimate"] == pytest.approx(
-        signal_stats(grams[0.95], mb_clean, BATCH_STEPS)["f_batch"]["estimate"]
-    )
+    for gname in ("all", "head"):  # chaque groupe porte SES stats, pas celles de « all »
+        assert out["per_lambda"][0.95][gname]["true_sq"]["estimate"] == pytest.approx(
+            signal_stats(grams[0.95][gname], mbs[0.95][gname], BATCH_STEPS)["true_sq"]["estimate"]
+        )
+    assert out["per_lambda"][0.95]["head"]["true_sq"]["estimate"] < out["per_lambda"][0.95]["all"]["true_sq"]["estimate"]
     by_pair = {(p["lambda_a"], p["lambda_b"]): p for p in out["pairs"]}
     assert set(by_pair) == {(0.95, 0.5), (0.95, 0.0), (0.5, 0.0)}
     same = by_pair[(0.95, 0.5)]
@@ -489,7 +495,9 @@ def test_balayage_lambda_differences_appairees():
     # Le signal vrai est le même des deux côtés : Δ‖G‖² appairé contient 0.
     assert diff["true_sq_diff"]["low"] <= 0.0 <= diff["true_sq_diff"]["high"]
     with pytest.raises(ValueError):
-        lambda_sweep_stats(grams, {0.95: mb_clean}, BATCH_STEPS)
+        lambda_sweep_stats(grams, {0.95: mbs[0.95]}, BATCH_STEPS)
+    with pytest.raises(ValueError):
+        lambda_sweep_stats({lam: {"head": g["head"]} for lam, g in grams.items()}, mbs, BATCH_STEPS)  # « all » requis
 
 
 class _TinyPolicy(nn.Module):

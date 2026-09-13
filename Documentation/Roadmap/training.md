@@ -448,7 +448,11 @@ sonde : « 0 sans vainqueur » ne pouvait rien attraper (limite anti-runaway = n
 indépendante (session 40k-a2, avantages recalculés passés en tenseurs séparés sans toucher le
 buffer) rend les mêmes nombres : λ = 0,95 f = 0,018 [−0,008, 0,045], λ = 0 f = 0,058 [0,027,
 0,089] ; son contrôle synthétique (avantage = log-prob de l'action jouée, crédit cohérent de
-variance unité) donne f = 0,667 [0,637, 0,696] — le plafond de l'instrument pour lire les 0,05.
+variance unité) donne f = 0,667 [0,637, 0,696] — lu d'abord comme « plafond de l'instrument » ;
+c'est en fait un estimateur à un échantillon du gradient d'entropie (E_a[∇log π · log π] = −∇H),
+dont f dépend de la politique (≤ f_entropie) : pas un plafond, non repris dans main, où le
+contrôle à poids aléatoires tient le rôle de contrôle positif. Ses stats par groupe et par λ, elles,
+sont reprises (`lambda_sweep.per_lambda[λ][groupe]`, 2026-09-13 soir).
 
 **P1, canonique 0,9078 dans l'env exact de P1 (24 rollouts, 1 738 épisodes, 0 sans vainqueur,
 part pool 0,702, acceptation tenue : policy mb0 0,313, EV 0,892, part pool 0,66).** Terme policy,
@@ -536,7 +540,8 @@ ai/models/ArmageddonAgent_x1_entnorm/model_ArmageddonAgent_x1_entnorm_20260913-0
 = 145 000 [69 000, 222 000], (λ = 0) = 133 000 [63 000, 203 000] ; par groupe à λ = 0 :
 `activate_query_net` f = 0,28 [0,17, 0,39], `deploy_query_net` 0,125, `features_extractor` 0,052,
 `move_cell_net` non détecté ; contrôle synthétique (crédit = log-prob de l'action, déterministe)
-f = 0,667 [0,637, 0,696], plafond de l'instrument pour un crédit cohérent de variance unité.
+f = 0,667 [0,637, 0,696] (estimateur du gradient d'entropie, dépendant de la politique — pas un
+plafond d'instrument, cf. note de la section précédente).
 Trois points qui complètent le verdict, détaillés au §7 du dossier `plafonnement_p1.md` :
 (1) λ à lot fixe et lot à λ = 0,95 ont été éliminés séparément, pas **ensemble** — à λ = 0,2 et
 B = 32 640 la définition de B_noise prédit f ≈ 0,18 [0,13, 0,32] (S23 : `batch_size` 2 040, le lot de 4 080 mesuré à 7,47 Go de VRAM réservés replanterait ; run ~6 h à jouer avant

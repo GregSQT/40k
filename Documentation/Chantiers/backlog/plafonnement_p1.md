@@ -463,7 +463,12 @@ log-prob 1,7 × 10⁻⁴).
 - [x] Quatre collectes (P1, contrôle 040721, contrôle aléatoire, P0 déterministe) ; résultats
       §0-4 et [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) ;
       implémentation indépendante (session 40k-a2) concordante, contrôle synthétique f = 0,667
-      (plafond de l'instrument).
+      (lu « plafond de l'instrument » ; c'est un estimateur du gradient d'entropie, dépendant de
+      la politique — non repris).
+- [x] Arbitrage des deux implémentations (2026-09-13, suite 125) : main gardée (GAE par SB3,
+      familles lues comme le moteur, trous de la revue fermés) ; repris de 40k-a2 les stats par
+      groupe pour chaque λ (`per_lambda[λ][groupe]`, celles citées dans training.md à λ = 0) et
+      la garde `model._last_episode_starts == dones[-1]` ; branche et worktree 40k-a2 supprimés.
 - Observation : une passe `--random-init` sur trois tuée par le moteur (`engine/w40k_core.py::_process_squad_action`, levée « execute_squad_move a échoué »,
   incohérence masque/exécution « collision intra-plan » pendant un tour bot) — état atteint par
   une politique aléatoire seulement ; bug hors chantier, consigné.
