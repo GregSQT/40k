@@ -1,6 +1,9 @@
-from typing import Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 from shared.data_validation import require_key
+
+if TYPE_CHECKING:
+    from ai.analyzer_state import DeathCause
 
 PHASE_ORDER: dict[str, int] = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
 
@@ -45,3 +48,37 @@ def died_before_phase(
                 if death_phase_order == current_phase_order and death_line_num < current_line:
                     return True
     return False
+
+
+def died_in_own_activation(
+    unit_id: str,
+    turn: int,
+    phase: str,
+    unit_death_cause: Dict[str, "DeathCause"],
+    last_attack_line_by_actor: Dict[str, int],
+) -> bool:
+    """True si la mort de ``unit_id`` appartient à l'activation dont on lit une ligne d'attaque.
+
+    Le moteur écrit les ``DEAD`` PENDANT l'allocation et les lignes d'attaque APRÈS
+    (`_finalize_manual_allocation`) : une unité qui détruit un porteur de Deadly Demise (24.08) et
+    meurt de l'explosion voit son ``DEAD … reason=hazard`` PRÉCÉDER ses propres lignes FOUGHT/SHOT,
+    alors que ses attaques sont résolues avant (« First, any unresolved attacks made by the
+    attacking unit are resolved. Then … Deadly Demise »). C'est la SEULE cause de mort de l'unité
+    qui agit avant ses lignes : l'Exhortation frappe l'ennemi, [HAZARDOUS] se jette après les
+    attaques et sa ligne suit les leurs.
+
+    Deux conditions, toutes deux nécessaires :
+      1. la cause est NOMMÉE Deadly Demise, même tour et même phase — un ``hazard`` sans ligne
+         ``DEADLY DEMISE`` (jet [HAZARDOUS] d'une activation précédente) ne passe pas ;
+      2. aucune ligne d'attaque d'une AUTRE unité entre le DEAD et la ligne lue — sinon l'explosion
+         a eu lieu pendant l'activation d'une tierce unité, et ce combattant est un vrai cadavre.
+    Journal antérieur à la ligne ``DEADLY DEMISE`` : aucune cause n'est connue, la faute est
+    comptée telle quelle — le journal ne porte pas l'information, on ne l'invente pas.
+    """
+    cause = unit_death_cause.get(unit_id)
+    if cause is None or cause.kind != "deadly_demise" or cause.turn != turn or cause.phase != phase:
+        return False
+    last_foreign_attack_line = max(
+        (ln for actor, ln in last_attack_line_by_actor.items() if actor != unit_id), default=0
+    )
+    return cause.line > last_foreign_attack_line

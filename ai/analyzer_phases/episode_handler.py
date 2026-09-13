@@ -91,6 +91,9 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.combi_conflicts_seen = set()
     state.unit_deaths = []
     state.unit_kill_context = {}
+    state.deadly_demise_pending = {}
+    state.unit_death_cause = {}
+    state.last_attack_line_by_actor = {}
     state.phase_activation_seen = {}
     # Réinitialisations critiques pour l'isolation inter-épisodes :
     # shoot_last_activator est lu AVANT le bloc turn-change dans la boucle principale (ligne ~1173),

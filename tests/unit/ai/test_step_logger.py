@@ -660,6 +660,84 @@ def test_reserves_timeout_is_mapped_and_does_not_increment_steps() -> None:
     assert "strategic_reserves_timeout" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
 
 
+# --- 24.08 Deadly Demise : la ligne qui nomme la cause d'un `DEAD … reason=hazard` ----------------
+#
+# Meme chainon du milieu que ci-dessus. Le formateur existait, la branche `[DEADLY DEMISE]` de
+# l'analyzer aussi ; le type n'etait dans aucune entree de `_STEP_LOG_TYPE_MAP` : ZERO ligne dans
+# 29 Mo de journal (eval du 2026-09-13). Sans elle, une escouade tuee par l'explosion de la cible
+# qu'elle venait de detruire etait comptee « Dead unit fighting » — ses lignes FOUGHT suivent son
+# DEAD (cf. tests/unit/ai/test_analyzer_deadly_demise_dead_attacker.py).
+
+
+def test_deadly_demise_is_mapped_and_does_not_increment_steps() -> None:
+    from engine.w40k_core import W40KEngine
+
+    assert W40KEngine._STEP_LOG_TYPE_MAP["deadly_demise"] == "deadly_demise"
+    # Effet d'une mort de figurine, pas action d'agent : l'incrementer decalerait `Steps=`.
+    assert "deadly_demise" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+
+
+def test_format_replay_style_message_deadly_demise_jet_reussi() -> None:
+    """La victime est nommee AVEC sa position : l'analyzer en fait la cause du DEAD qui suit."""
+    logger = StepLogger(enabled=False)
+    assert logger._format_replay_style_message(
+        "105", "deadly_demise",
+        {"source_unit_id": "4", "d6_roll": 6, "deadly_demise_wounds": 2, "unit_with_coords": "105(17,36)"},
+    ) == "Unit 4 DEADLY DEMISE Roll:6 → Unit 105(17,36) SUFFERS 2 MW [DEADLY DEMISE]"
+
+
+def test_format_replay_style_message_deadly_demise_jet_rate() -> None:
+    logger = StepLogger(enabled=False)
+    assert logger._format_replay_style_message(
+        "4", "deadly_demise", {"source_unit_id": "4", "d6_roll": 3, "deadly_demise_wounds": 0},
+    ) == "Unit 4 DEADLY DEMISE Roll:3 → no effect [DEADLY DEMISE]"
+
+
+def test_format_replay_style_message_deadly_demise_requires_source() -> None:
+    logger = StepLogger(enabled=False)
+    with pytest.raises(ConfigurationError, match=r"source_unit_id"):
+        logger._format_replay_style_message("4", "deadly_demise", {"d6_roll": 3, "deadly_demise_wounds": 0})
+
+
+def test_deadly_demise_action_log_atteint_step_log_sans_consommer_de_step(tmp_path: Path) -> None:
+    """De bout en bout : payload moteur (`_apply_deadly_demise`, cles camelCase) -> traduction
+    `_build_step_log_details` -> ligne. Les cles camelCase que le formateur lisait avant n'y
+    arrivaient jamais : la ligne aurait leve des la premiere explosion journalisee."""
+    from engine.w40k_core import W40KEngine
+
+    class _Bridge:
+        _TYPES_SANS_SEGMENT_MODELS = W40KEngine._TYPES_SANS_SEGMENT_MODELS
+
+        def _models_segment_for_unit(self, unit_id):
+            return ""
+
+    build = W40KEngine._build_step_log_details.__get__(_Bridge())
+    out = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
+    logger.episode_number = 1
+    for raw in (
+        {"type": "deadly_demise", "unitId": "105", "sourceUnitId": "4", "d6Roll": 6,
+         "deadlyDemiseWounds": 2, "col": 17, "row": 36, "turn": 5, "phase": "fight", "player": 1,
+         "deadlyDemiseDetails": []},
+        {"type": "deadly_demise", "unitId": "4", "sourceUnitId": "4", "d6Roll": 3,
+         "deadlyDemiseWounds": 0, "turn": 5, "phase": "fight", "player": 1,
+         "deadlyDemiseDetails": []},
+    ):
+        logger.log_action(
+            unit_id=raw["unitId"], action_type="deadly_demise", phase="FIGHT", player=raw["player"],
+            success=True,
+            step_increment="deadly_demise" not in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES,
+            action_details=build(raw, 5),
+        )
+    logger._flush_buffer()
+
+    lines = [l for l in out.read_text(encoding="utf-8").splitlines() if "[DEADLY DEMISE]" in l]
+    assert len(lines) == 2, lines
+    assert "P1 FIGHT : Unit 4 DEADLY DEMISE Roll:6 → Unit 105(17,36) SUFFERS 2 MW [DEADLY DEMISE]" in lines[0], lines[0]
+    assert "P1 FIGHT : Unit 4 DEADLY DEMISE Roll:3 → no effect [DEADLY DEMISE]" in lines[1], lines[1]
+    assert logger.step_count == 0, "une explosion ne consomme pas de step gym"
+
+
 def test_format_replay_style_message_hazardous_mortal_wounds() -> None:
     """VERROU : le formatter HAZARDOUS émet [ALLOC_MODEL:] — supprimer target_model_id rend ce test ROUGE."""
     logger = StepLogger(enabled=False)

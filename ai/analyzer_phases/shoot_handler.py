@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional, Tuple
 
 from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage, note_special_rule_usage, check_anti_x_threshold
-from ai.analyzer_phases import PHASE_ORDER
+from ai.analyzer_phases import PHASE_ORDER, died_in_own_activation
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_state import ShootAllocGroup
 from ai.analyzer_perfig import (
@@ -381,7 +381,11 @@ def handle_shoot(
                     elif death_phase_order == current_phase_order and death_line_num > state.line_number:
                         is_false_positive = True
                         break
-        if unit_died_before_shoot and not is_false_positive:
+        # 24.08, jumeau du contrôle FIGHT : le tireur qui détruit un porteur de Deadly Demise à
+        # ≤ 6" et meurt de l'explosion a son DEAD écrit avant ses lignes SHOT.
+        if unit_died_before_shoot and not is_false_positive and not died_in_own_activation(
+            shooter_id, turn, phase, state.unit_death_cause, state.last_attack_line_by_actor
+        ):
             stats['shoot_dead_unit'][player] += 1
             if stats['first_error_lines']['shoot_dead_unit'][player] is None:
                 stats['first_error_lines']['shoot_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}

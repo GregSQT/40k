@@ -16,7 +16,7 @@
 
 **Plunging Fire §22.05 :** `_manual_roll_intent` dans `shared_utils.py` — +1 BS (seuil amélioré de 1) si plancher ≥3" (chemin a) ou TOWERING ≤12" cible au sol (chemin b) ; `floor_height_by_model` lu dans `units_cache` ; court-circuit 2D (hauteur 0.0 jamais ≥ 3") ; step_logger token `[PLUNGING FIRE]` ; `_build_shot_details` dans `w40k_core.py` émet `hit_rule_modifier`.
 
-**Deadly Demise §24.08 :** `_apply_deadly_demise` + `destroy_model` dans `shared_utils.py` — D6 lancé après disembark, sur 6 chaque unité à ≤6" subit X MW via `allocate_mortal_wounds` ; valeur `deadly_demise` lue dans `units_cache[squad_id]` avant suppression du modèle ; step_logger tag `[DEADLY DEMISE]` ; analyzer + corpus §22.05 et §24.08 câblés.
+**Deadly Demise §24.08 :** `_apply_deadly_demise` + `destroy_model` dans `shared_utils.py` — D6 lancé après disembark, sur 6 chaque unité à ≤6" **qui a encore une figurine** subit X MW via `allocate_mortal_wounds` ; valeur `deadly_demise` lue dans `units_cache[squad_id]` avant suppression du modèle ; analyzer + corpus §22.05 et §24.08 câblés. **Journalisée depuis le 2026-09-13 seulement** : le formateur `[DEADLY DEMISE]` existait mais le type manquait à `_STEP_LOG_TYPE_MAP` (0 ligne dans 29 Mo d'éval) ; la ligne `Unit <source> DEADLY DEMISE Roll:<d6> → Unit <victime>(c,r) SUFFERS N MW` est écrite AVANT les `DEAD … reason=hazard` qu'elle cause, porte le player de la SOURCE (exercice 24.08) et ne consomme pas de step ; c'est elle qui permet à l'analyzer de ne plus compter « Dead unit fighting/shooting » une unité tuée par l'explosion de la cible qu'elle vient de détruire (cf. ROADMAP_INDEX, suite 116).
 
 ---
 

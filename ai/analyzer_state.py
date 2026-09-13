@@ -39,6 +39,22 @@ class SelectTargetsFreeze(NamedTuple):
     wounded_enemies: FrozenSet[str]
 
 
+class DeathCause(NamedTuple):
+    """Cause NOMMÉE de la mort d'une escouade, quand le journal la donne.
+
+    ``kind`` : ``"deadly_demise"`` (24.08) — la seule cause nommée à ce jour ; ``source`` :
+    l'escouade dont l'explosion a tué ; ``turn``/``phase``/``line`` : la ligne ``DEAD`` du
+    dernier socle. Sert à distinguer une unité tuée par SA PROPRE activation (elle détruit un
+    porteur de Deadly Demise, l'explosion la tue, ses lignes d'attaque suivent son DEAD dans le
+    journal) d'une unité détruite avant qui attaquerait quand même.
+    """
+    kind: str
+    source: str
+    turn: int
+    phase: str
+    line: int
+
+
 #: (épisode, tour, tireur, arme, cible, signature `shoot_group_signature`) — cf.
 #: `AnalyzerState.shoot_alloc_groups`.
 ShootAllocKey = Tuple[int, int, str, str, str, Tuple[str, str, str]]
@@ -207,6 +223,18 @@ class AnalyzerState:
     # AVANT les lignes d'attaque de l'activation qui l'a causée : le tueur n'est alors pas encore
     # journalisé, et la première ligne d'attaque du même turn/phase le renseigne.
     unit_kill_context: Dict[str, Tuple[Optional[str], int, str]] = field(default_factory=dict)
+    # 24.08 — victimes annoncées par la dernière ligne `DEADLY DEMISE … SUFFERS N MW` :
+    # victime -> source. Le moteur écrit cette ligne PUIS les `DEAD … reason=hazard` qu'elle
+    # cause (`_apply_deadly_demise` : append_action_log avant allocate_mortal_wounds) ; la table
+    # ne survit qu'au bloc DEAD/DEADLY DEMISE contigu et se vide à la première autre ligne.
+    deadly_demise_pending: Dict[str, str] = field(default_factory=dict)
+    # Cause d'une mort d'ESCOUADE quand elle est connue : dead_id -> DeathCause. Aujourd'hui une
+    # seule cause est nommée, la Deadly Demise ; une mort par attaque n'y figure pas (son
+    # attribution vit dans `unit_kill_context`).
+    unit_death_cause: Dict[str, DeathCause] = field(default_factory=dict)
+    # Numéro de la dernière ligne d'attaque (SHOT/FOUGHT) de chaque acteur. Sert à dater la
+    # frontière d'une activation : « aucune ligne d'attaque d'une AUTRE unité depuis la ligne L ».
+    last_attack_line_by_actor: Dict[str, int] = field(default_factory=dict)
     line_number: int = 0
     dead_units_current_episode: Set[str] = field(default_factory=set)
     revived_units_current_episode: Set[str] = field(default_factory=set)

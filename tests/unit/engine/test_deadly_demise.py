@@ -61,10 +61,16 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
         {**unit_invariants(), "id": "TGT", "player": 2, "hideable": False},
     ]
 
+    # La cible a une figurine VIVANTE : « each unit within 6" » ne vise que les escouades qui en
+    # ont encore une (`select_eligible_models`), une escouade vide n'est plus une unité.
+    tgt_model = {
+        "col": target_col, "row": target_row, "level": 0, "player": 2, "squad_id": "TGT",
+        "HP_CUR": 2, "HP_MAX": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+    }
     return {
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "models_cache": {"SRC#0": src_model},
+        "models_cache": {"SRC#0": src_model, "TGT#0": tgt_model},
         "squad_models": {"SRC": ["SRC#0"], "TGT": ["TGT#0"]},
         "units_cache": {"SRC": src_uc, "TGT": tgt_uc},
         "action_logs": [],
@@ -130,6 +136,52 @@ def test_dd_d6_1_emet_entree_sans_allocation(monkeypatch):
     assert not allocated_calls, "aucune allocation sur d6 < 6"
 
 
+def test_dd_player_est_le_proprietaire_de_la_source_sur_les_deux_formes(monkeypatch):
+    """`player` = proprietaire de la SOURCE (P1 ici), jet reussi comme jet rate.
+
+    Le jet rate portait `-1` : une fois le type journalise, la ligne step.log sortait `P-1`, hors
+    de la grammaire `P(\\d+)` de toutes les lignes — erreur de parse a chaque explosion ratee.
+    Le jet reussi portait le player de la VICTIME : c'est la source qui exerce 24.08."""
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
+    destroy_model(gs, "SRC#0", reason="combat")
+    hit = next(e for e in _dd_logs(gs) if e["unitId"] == "TGT")
+    assert hit["player"] == 1, hit
+
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+    gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
+    destroy_model(gs, "SRC#0", reason="combat")
+    (miss,) = _dd_logs(gs)
+    assert miss["player"] == 1, miss
+
+
+def test_dd_source_videe_n_est_pas_une_unite_dans_le_rayon(monkeypatch):
+    """24.08 « each unit within 6" » : l'escouade source dont la figurine qui explose était la
+    DERNIÈRE n'a plus de figurine — aucune entrée (donc aucune ligne `SUFFERS N MW`) pour elle.
+    `destroy_model` ne la retire d'units_cache qu'après la Deadly Demise : sans ce filtre, le
+    journal écrivait `Unit 4 DEADLY DEMISE … → Unit 4(27,30) SUFFERS 1 MW` sur une unité vide
+    (mesuré, éval du 2026-09-13, E4 T3). Avec une figurine survivante, la source est bien visée."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+
+    gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
+    destroy_model(gs, "SRC#0", reason="combat")
+    assert [e["unitId"] for e in _dd_logs(gs)] == ["TGT"], _dd_logs(gs)
+
+    gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
+    gs["models_cache"]["SRC#1"] = {**gs["models_cache"]["SRC#0"], "col": 1, "HP_MAX": 1}
+    gs["squad_models"]["SRC"].append("SRC#1")
+    gs["units_cache"]["SRC"]["occupied_hexes_by_model"]["SRC#1"] = (1, 0)
+    gs["units_cache"]["SRC"]["floor_height_by_model"]["SRC#1"] = 0.0
+    gs["units_cache"]["SRC"]["level_by_model"]["SRC#1"] = 0
+    destroy_model(gs, "SRC#0", reason="combat")
+    assert sorted(e["unitId"] for e in _dd_logs(gs)) == ["SRC", "TGT"], _dd_logs(gs)
+
+
 def _gs_multi(*, n_targets: int = 3):
     """game_state avec n_targets unités cibles à courte portée (5 subhex chacune)."""
     ish = 5
@@ -149,9 +201,14 @@ def _gs_multi(*, n_targets: int = 3):
     }
     units_cache: dict = {"SRC": src_uc}
     squad_models: dict = {"SRC": ["SRC#0"]}
+    models_cache: dict = {"SRC#0": src_model}
     for i in range(n_targets):
         uid = f"TGT{i}"
         col = i + 1
+        models_cache[f"{uid}#0"] = {
+            "col": col, "row": 0, "level": 0, "player": 2, "squad_id": uid,
+            "HP_CUR": 2, "HP_MAX": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        }
         units_cache[uid] = {
             "col": col, "row": 0, "player": 2, "HP_CUR": 2,
             "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
@@ -170,7 +227,7 @@ def _gs_multi(*, n_targets: int = 3):
     return {
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
-        "models_cache": {"SRC#0": src_model},
+        "models_cache": models_cache,
         "squad_models": squad_models,
         "units_cache": units_cache,
         "action_logs": [],

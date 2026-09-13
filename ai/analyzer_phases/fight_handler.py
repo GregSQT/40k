@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
 from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage, note_special_rule_usage
-from ai.analyzer_phases import claim_kill_context, died_before_phase
+from ai.analyzer_phases import claim_kill_context, died_before_phase, died_in_own_activation
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -545,7 +545,16 @@ def handle_fight(
             )
         attacker_is_dead = fighter_id in state.unit_hp and state.unit_hp[fighter_id] <= 0
         if attacker_is_dead:
-            if died_before_phase(fighter_id, turn, phase, state.line_number, state.unit_deaths):
+            # 24.08 : un combattant tué par la Deadly Demise de la cible qu'il vient de détruire
+            # a son DEAD écrit AVANT ses lignes FOUGHT (ordre du journal, pas du jeu) — ses
+            # attaques étaient résolues. Mesuré le 2026-09-13 : les 5 « Dead unit fighting » de
+            # l'éval étaient les 5 attaques d'une seule activation de ce type.
+            if (
+                died_before_phase(fighter_id, turn, phase, state.line_number, state.unit_deaths)
+                and not died_in_own_activation(
+                    fighter_id, turn, phase, state.unit_death_cause, state.last_attack_line_by_actor
+                )
+            ):
                 attacker_player = require_key(state.unit_player, fighter_id)
                 stats['fight_dead_unit_attacker'][attacker_player] += 1
                 if stats['first_error_lines']['fight_dead_unit_attacker'][attacker_player] is None:
