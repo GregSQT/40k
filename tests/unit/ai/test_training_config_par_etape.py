@@ -147,6 +147,9 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     assert mp["batch_size"] == 2040
     assert mp["gae_lambda"] == pytest.approx(0.2)
     assert mp["vf_coef"] == pytest.approx(0.17)
+    # 16 envs sur 16 cœurs : 32 640 / 16 = 2 040 pas par env, divisible par le lot (mesure du 2026-09-13).
+    assert profil_lignee["n_envs"] == 16
+    assert (mp["n_steps"] // profil_lignee["n_envs"] * profil_lignee["n_envs"]) % mp["batch_size"] == 0
     # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
 
@@ -172,7 +175,9 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
     Avant `extends`, deux profils voisins dupliquaient quinze clés — 15,1 Ko — que seul un test
     empêchait de diverger. Un septième profil écrit à plat aurait ajouté une septième copie.
     """
-    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes"}
+    # `n_envs` surchargé à 16 depuis le 2026-09-13 : 24 workers × 1,04 Go + buffer de 32 640
+    # observations ont mis la VM à 1 Go de RAM disponible sur une machine de 16 cœurs (`_doc`).
+    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes", "n_envs"}
     partagees = [
         cle for cle in profil_froid
         if cle not in surcharge and not cle.endswith(("_normal", "_detail"))
