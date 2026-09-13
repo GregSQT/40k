@@ -115,7 +115,7 @@ def test_deadly_demise_sans_dead_prealable_est_relevee_sans_verdict(tmp_path):
     explose est inconnu, l'usage est relevé et le verdict s'abstient — jamais une faute inventée.
     Un DEAD d'un bloc ANTÉRIEUR (ici le Boy 4#0, avant un MOVE) ne passe pas pour l'exploseur.
 
-    Mutation : ne pas vider `last_dead_mid_by_unit` hors bloc → le second cas juge 4#0 → INVALID 1."""
+    Mutation : garder `last_dead` hors bloc → le second cas juge 4#0 → INVALID 1."""
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS + _DD_EFFET, units=_SANS_PORTEUR, ez_vertical_inches=None,
     ))
@@ -179,7 +179,7 @@ def test_deux_explosions_separees_de_la_meme_source_font_deux_releves(tmp_path):
     """Le bloc se ferme à la première ligne qui n'est ni DEAD ni DEADLY DEMISE : l'explosion
     suivante de la même escouade est un nouveau jet, jugé sur SON socle (ici un Boy : INVALID).
 
-    Mutation : ne pas vider `deadly_demise_exploder` hors bloc → usage 1, INVALID 0."""
+    Mutation : ne pas vider `deadly_demise_recorded` hors bloc → usage 1, INVALID 0."""
     mouvement = "[10:00:03] E1 T1 P2 MOVE : Unit 105(51,50) MOVED from (51,50) to (51,52) [R:+0.0] [MODELS: 105#0@(51,52,z0)] [SUCCESS]\n"
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS_ATTACHE + _dead("4#1") + _DD_RATE + mouvement + _dead("4#0") + _DD_RATE,
