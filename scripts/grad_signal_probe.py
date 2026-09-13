@@ -122,6 +122,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -149,6 +150,10 @@ GAE_ATOL = 1e-6
 #: Var(δ) sous cette fraction de Var(r) + Var(ΔV) est un résidu d'arrondi de la décomposition
 #: (δ constant sur la famille) : les parts n'existent pas, rendues nan.
 VAR_DELTA_REL_FLOOR = 1e-9
+#: Acceptation de PLOMBERIE (contrôle ou adversaire déterministe) : seules ces clés de
+#: `ACCEPTANCE_BOUNDS` sont jugées — « reproduit P1 » n'a pas de sens pour une autre politique
+#: ni un autre adversaire ; les troncatures arrêtent la sonde en amont, dans le recorder.
+PLUMBING_ACCEPTANCE_KEYS = ("pool_episode_share",)
 #: Clés d'hyperparamètres dont le checkpoint doit porter les valeurs du profil : toutes pour le
 #: canonique (la mesure doit être celle du run), les seules qui définissent le lot pour un
 #: modèle de contrôle (une autre politique a légitimement d'autres coefficients de loss).
@@ -267,17 +272,12 @@ def signal_stats(gram: np.ndarray, minibatch_sq_norms: np.ndarray, batch_steps: 
     if batch_steps <= 0:
         raise ValueError(f"batch_steps doit être > 0, reçu {batch_steps}")
 
-    def true_sq(keep: np.ndarray) -> float:
-        return true_sq_of(gram, keep)
-
-    def rollout_sq(keep: np.ndarray) -> float:
-        return rollout_sq_of(gram, keep)
+    true_sq = partial(true_sq_of, gram)
+    rollout_sq = partial(rollout_sq_of, gram)
+    f_batch = partial(f_batch_of, gram)
 
     def mb_sq(keep: np.ndarray) -> float:
         return float(mb[keep].mean())
-
-    def f_batch(keep: np.ndarray) -> float:
-        return f_batch_of(gram, keep)
 
     def f_mb(keep: np.ndarray) -> float:
         return _ratio(true_sq(keep), mb_sq(keep))
@@ -650,34 +650,34 @@ def reset_policy_parameters(policy: Any, seed: int) -> int:
     return n_reset
 
 
-def lambda_sweep_stats(grams: Dict[float, Dict[str, np.ndarray]],
-                       minibatch_sq_norms: Dict[float, Dict[str, np.ndarray]],
-                       batch_steps: int) -> Dict[str, Any]:
-    """f_B, ‖G‖² par λ et par groupe, différences APPAIRÉES entre λ (jackknife de f_a − f_b,
-    mêmes rollouts) sur le groupe « all ».
+def group_grams(grads: np.ndarray, groups: Dict[str, Tuple[int, int]]) -> Dict[str, np.ndarray]:
+    """Matrices de Gram (K, K) d'un jeu de K gradients (K, D) : « all » puis chaque groupe."""
+    g64 = np.asarray(grads, dtype=np.float64)  # une conversion, des vues par groupe
+    return {"all": gram_matrix(g64), **{name: gram_matrix(g64[:, s:e]) for name, (s, e) in groups.items()}}
 
-    `grams[λ][groupe]` : (K, K) produits scalaires des gradients policy recalculés à λ, sur le
-    groupe de paramètres ; `minibatch_sq_norms[λ][groupe]` : (K, M). Toutes les matrices portent
-    les MÊMES K rollouts dans le même ordre, ce qui rend la différence appairée légitime. Les
-    groupes disent OÙ le gradient d'un λ court devient lisible (mesuré : `activate_query_net`
-    f = 0,28 à λ = 0 quand « all » vaut 0,05).
+
+def lambda_sweep_stats(grams: Dict[float, Dict[str, np.ndarray]],
+                       stats: Dict[float, Dict[str, Any]]) -> Dict[str, Any]:
+    """Stats de signal par λ et par groupe (reprises de `stats`, déjà calculées) et différences
+    APPAIRÉES entre λ (jackknife de f_a − f_b, mêmes rollouts) sur le groupe « all ».
+
+    `grams[λ][groupe]` : (K, K) produits scalaires des gradients policy recalculés à λ ;
+    `stats[λ][groupe]` : le `signal_stats` correspondant. Le premier λ est celui du modèle
+    (ancre). Toutes les matrices portent les MÊMES K rollouts dans le même ordre, ce qui rend la
+    différence appairée légitime. Les groupes disent OÙ le gradient d'un λ court devient lisible
+    (mesuré : `activate_query_net` f = 0,28 à λ = 0 quand « all » vaut 0,05).
     """
     lambdas = list(grams)
-    if set(minibatch_sq_norms) != set(lambdas):
-        raise ValueError("grams et minibatch_sq_norms doivent porter les mêmes λ")
+    if set(stats) != set(lambdas):
+        raise ValueError("grams et stats doivent porter les mêmes λ")
     for lam in lambdas:
-        if set(grams[lam]) != set(minibatch_sq_norms[lam]) or "all" not in grams[lam]:
-            raise ValueError(f"λ={lam} : groupes {sorted(grams[lam])} ≠ {sorted(minibatch_sq_norms[lam])}, « all » requis")
+        if set(grams[lam]) != set(stats[lam]) or "all" not in grams[lam]:
+            raise ValueError(f"λ={lam} : groupes {sorted(grams[lam])} ≠ {sorted(stats[lam])}, « all » requis")
     k = grams[lambdas[0]]["all"].shape[0]
-    per_lambda = {}
     for lam in lambdas:
         for gname, gram in grams[lam].items():
             if gram.shape != (k, k):
                 raise ValueError(f"λ={lam} groupe {gname} : gram {gram.shape} ≠ ({k}, {k})")
-        per_lambda[lam] = {
-            gname: signal_stats(grams[lam][gname], minibatch_sq_norms[lam][gname], batch_steps)
-            for gname in grams[lam]
-        }
 
     pairs = []
     for i, lam_a in enumerate(lambdas):
@@ -691,7 +691,7 @@ def lambda_sweep_stats(grams: Dict[float, Dict[str, np.ndarray]],
                     np.isfinite(f_diff["low"]) and (f_diff["low"] > 0.0 or f_diff["high"] < 0.0)
                 ),
             })
-    return {"lambdas": lambdas, "per_lambda": per_lambda, "pairs": pairs}
+    return {"lambdas": lambdas, "per_lambda": {lam: stats[lam] for lam in lambdas}, "pairs": pairs}
 
 
 # ── Groupes de paramètres et gradients (torch) ───────────────────────────────────────────────
@@ -845,9 +845,9 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     canonique. `opponent_deterministic` : `self_play_deterministic` posé à vrai dans le bloc
     `opponent_mix` de l'étape. `random_init_seed` : le modèle chargé (canonique ou `--model`)
     est réinitialisé en mémoire (`reset_policy_parameters`) — contrôle positif fort, traité
-    comme un modèle de contrôle. `plumbing_only` dans le contexte rendu : l'acceptation se
-    limite à la plomberie (contrôle ou adversaire déterministe — le run de référence n'est plus
-    ce que la collecte reproduit).
+    comme un modèle de contrôle. `acceptance` dans le contexte rendu : le mode (`reference` ou
+    `plumbing`) et les clés de `ACCEPTANCE_BOUNDS` jugées — plomberie seule pour un contrôle ou
+    un adversaire déterministe, le run de référence n'étant plus ce que la collecte reproduit.
     """
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX, get_config_loader
 
@@ -859,10 +859,9 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     )
     from ai.training_utils import get_scenario_list_for_phase, make_training_env, setup_imports
     from ai.unit_registry import UnitRegistry
-    from ai.vec_normalize_utils import get_vec_normalize_path
+    from ai.vec_normalize_utils import get_vec_normalize_path, load_vec_normalize
     from engine.episode_schedule import episodes_per_env
     from shared.data_validation import require_key, require_present
-    from stable_baselines3.common.vec_env import VecNormalize
 
     config = get_config_loader()
     curriculum = load_curriculum(agent)
@@ -941,11 +940,12 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         )
         for i in range(n_envs)
     ]))
-    # Stats du modèle sondé (son pkl compagnon), FIGÉES (training=False)
-    # comme `load_vec_normalize` ; ce dernier force aussi norm_reward=False, qui fausserait
-    # l'échelle des retours — le run normalise les récompenses (cf. `_apply_vec_normalize`).
-    vec_env = VecNormalize.load(probe_vec_path, env)
-    vec_env.training = False
+    # Stats du modèle sondé (son pkl compagnon), FIGÉES (training=False) par `load_vec_normalize`,
+    # qui force aussi norm_reward=False — faux ici, le run normalise les récompenses
+    # (cf. `_apply_vec_normalize`) : remis à la valeur du profil.
+    vec_env = load_vec_normalize(env, probe_model_path)
+    if vec_env is None:
+        raise FileNotFoundError(f"stats VecNormalize absentes : {probe_vec_path}")
     vec_env.norm_reward = bool(require_key(vec_norm_cfg, "norm_reward"))
 
     model_params = dict(require_key(training_config, "model_params"))
@@ -982,7 +982,10 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         "model_path": probe_model_path,
         "vec_normalize_path": probe_vec_path,
         "is_control": is_control,
-        "plumbing_only": bool(is_control or opponent_deterministic),
+        "acceptance": (
+            {"mode": "plumbing", "keys": PLUMBING_ACCEPTANCE_KEYS} if is_control or opponent_deterministic
+            else {"mode": "reference", "keys": tuple(ACCEPTANCE_BOUNDS)}
+        ),
         "model_hyperparams": model_hyperparams,
         "random_init_seed": random_init_seed,
         "opponent_deterministic": bool(opponent_deterministic),
@@ -1002,12 +1005,12 @@ TRUNCATION_INFO_KEYS = ("truncation_reason", "win_method", "truncation_debug")
 
 
 def make_recorder(n_envs: int) -> Any:
-    """Callback SB3 minimal : `dones`, l'issue de chaque épisode fini et les troncatures, pas par pas.
+    """Callback SB3 minimal : `dones` et l'issue de chaque épisode fini, pas par pas.
 
-    Une troncature (`info["TimeLimit.truncated"]`, le signal gym que les VecEnv posent) est
-    enregistrée avec le diagnostic du moteur ; c'est `measure` qui s'arrête dessus. Construit ici
-    et non au niveau du module pour ne pas importer SB3 au chargement (les tests des
-    statistiques n'en ont pas besoin).
+    Une troncature (`info["TimeLimit.truncated"]`, le signal gym que les VecEnv posent) LÈVE
+    avec le diagnostic du moteur : l'épisode n'est pas une partie. Construit ici et non au niveau
+    du module pour ne pas importer SB3 au chargement (les tests des statistiques n'en ont pas
+    besoin).
     """
     from stable_baselines3.common.callbacks import BaseCallback
 
@@ -1025,7 +1028,6 @@ def make_recorder(n_envs: int) -> Any:
             self.setting_up: List[np.ndarray] = []
             self.episodes_total = 0
             self.episodes_pool = 0
-            self.truncations: List[Dict[str, Any]] = []
             self.episode_lengths: List[int] = []
 
         def _on_rollout_start(self) -> None:
@@ -1044,10 +1046,11 @@ def make_recorder(n_envs: int) -> Any:
                     self.episodes_pool += 1
                 self.episode_lengths.append(int(require_key(info, "episode")["l"]))
                 if require_key(info, "TimeLimit.truncated"):
-                    self.truncations.append({
-                        "env": int(env_idx), "step": len(self.dones),
-                        **{key: info[key] for key in TRUNCATION_INFO_KEYS if key in info},
-                    })
+                    diagnostic = {key: info[key] for key in TRUNCATION_INFO_KEYS if key in info}
+                    raise RuntimeError(
+                        f"épisode TRONQUÉ (env {env_idx}, pas {len(self.dones)}) — pas une partie (faux nul, "
+                        f"bootstrap replié dans la récompense) ; diagnostic moteur : {diagnostic}"
+                    )
                 winner = require_key(info, "winner")
                 controlled = int(require_key(info, "controlled_player"))
                 if winner is None:
@@ -1085,26 +1088,20 @@ def check_acceptance(observed: Dict[str, Any], keys: Sequence[str] = tuple(ACCEP
     return failures
 
 
-def check_plumbing_acceptance(observed: Dict[str, Any]) -> List[str]:
-    """Contrôle de PLOMBERIE seul : part d'épisodes contre le pool dans les bornes du run de
-    référence. Pour un modèle de contrôle ou un adversaire déterministe, « reproduit P1 » n'a pas
-    de sens (autre politique, ou autre adversaire) ; les troncatures sont exclues en amont, sur
-    chaque rollout, par `measure`."""
-    return check_acceptance(observed, keys=("pool_episode_share",))
-
-
 def sweep_lambdas(model_lambda: float, extra: Sequence[float]) -> List[float]:
     """λ balayés : celui du modèle d'abord (ancre des différences appairées), puis les autres."""
     return [model_lambda, *[lam for lam in extra if lam != model_lambda]]
 
 
 def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
-            permutation_seed: int, extra_gae_lambdas: Sequence[float]) -> Dict[str, Any]:
+            permutation_seed: int, gae_lambdas: Sequence[float]) -> Dict[str, Any]:
     """K rollouts à politique figée, gradients par terme et par mini-lot, puis statistiques.
 
-    Par rollout : GAE recalculé par SB3 au λ du modèle (vérifié = buffer du rollout) et à chaque
-    λ de `extra_gae_lambdas` ; dans la même passe avant que les quatre termes, le gradient policy
-    de chaque λ supplémentaire, mini-lot par mini-lot ; décomposition de Var(δ) sur le même buffer.
+    `gae_lambdas` : λ balayés, celui du modèle en tête (`sweep_lambdas`). Par rollout : GAE
+    recalculé par SB3 au λ du modèle (vérifié = buffer du rollout) et à chaque autre λ ; dans la
+    même passe avant que les quatre termes, le gradient policy de chaque autre λ, mini-lot par
+    mini-lot — une clé de backward par terme et par λ, mêmes accumulateurs ; décomposition de
+    Var(δ) sur le même buffer.
     """
     import torch as th
     from stable_baselines3.common.logger import configure as configure_sb3_logger
@@ -1121,8 +1118,13 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     n_minibatches = batch_steps // batch_size
     gamma = float(model.gamma)
     model_lambda = float(model.gae_lambda)
-    extra_lambdas = sweep_lambdas(model_lambda, extra_gae_lambdas)[1:]
-    plumbing_only = bool(ctx["plumbing_only"])
+    if not gae_lambdas or gae_lambdas[0] != model_lambda:
+        raise ValueError(f"gae_lambdas doit commencer par le λ du modèle {model_lambda} : {list(gae_lambdas)}")
+    extra_lambdas = list(gae_lambdas[1:])
+    # Clés de backward : les quatre termes (str) puis les λ supplémentaires (float), qui
+    # partagent accumulateurs, normes par groupe et matrices de Gram.
+    backward_keys: List[Any] = [*TERMS, *extra_lambdas]
+    acceptance_mode = ctx["acceptance"]
 
     model.set_logger(configure_sb3_logger(ctx["workdir"], ["stdout"]))
     recorder = make_recorder(n_envs)
@@ -1135,14 +1137,10 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     if fe_slice is None:
         raise KeyError("groupe features_extractor absent de named_parameters()")
 
-    # Gradients de rollouts (moyenne des mini-lots), sur CPU : (K, D) par terme.
-    rollout_grads = {term: np.zeros((rollouts, n_params), dtype=np.float32) for term in TERMS}
-    # Carrés de norme des gradients de mini-lots : (K, M) par terme et par groupe.
-    mb_sq = {term: {g: np.zeros((rollouts, n_minibatches)) for g in group_names} for term in TERMS}
-    # Balayage λ : gradient policy (K, D) et carrés de norme des mini-lots (K, M) par λ
-    # supplémentaire ; au λ du modèle ce sont `rollout_grads["policy"]` / `mb_sq["policy"]["all"]`.
-    sweep_grads = {lam: np.zeros((rollouts, n_params), dtype=np.float32) for lam in extra_lambdas}
-    sweep_mb_sq = {lam: {g: np.zeros((rollouts, n_minibatches)) for g in group_names} for lam in extra_lambdas}
+    # Gradients de rollouts (moyenne des mini-lots), sur CPU : (K, D) par clé de backward.
+    rollout_grads = {key: np.zeros((rollouts, n_params), dtype=np.float32) for key in backward_keys}
+    # Carrés de norme des gradients de mini-lots : (K, M) par clé et par groupe.
+    mb_sq = {key: {g: np.zeros((rollouts, n_minibatches)) for g in group_names} for key in backward_keys}
     delta_var = DeltaVarianceAccumulator()
     rollout_log: List[Dict[str, Any]] = []
     acceptance: Dict[str, Any] = {}
@@ -1154,11 +1152,6 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             raise RuntimeError("collect_rollouts a rendu False")
         buf = model.rollout_buffer
         t_collect = time.perf_counter() - t0
-        if recorder.truncations:
-            raise RuntimeError(
-                f"rollout {k} : {len(recorder.truncations)} épisode(s) TRONQUÉ(S) — pas une partie "
-                f"(faux nul, bootstrap replié dans la récompense) ; diagnostic moteur : {recorder.truncations}"
-            )
 
         dones, outcome_at_done, setting_up = recorder.arrays()
         if dones.shape != (n_steps, n_envs):
@@ -1208,8 +1201,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         perm = np.random.RandomState(seed_k).permutation(batch_steps)
         np.random.seed(seed_k)
         model.policy.set_training_mode(True)
-        acc = {term: th.zeros(n_params, device=model.device, dtype=th.float32) for term in TERMS}
-        acc_sweep = {lam: th.zeros(n_params, device=model.device, dtype=th.float32) for lam in extra_lambdas}
+        acc = {key: th.zeros(n_params, device=model.device, dtype=th.float32) for key in backward_keys}
         mb0_norms: Dict[str, float] = {}
         t1 = time.perf_counter()
         for m, rollout_data in enumerate(buf.get(batch_size)):
@@ -1232,22 +1224,15 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             backward = [(term, losses[term]) for term in TERMS] + list(losses["policy_sweep"].items())
             for b_i, (key, loss) in enumerate(backward):
                 g = flat_grad(loss, params, retain_graph=b_i < len(backward) - 1)
+                acc[key] += g
                 norms = group_sq_norms(g, groups)
-                if key in acc_sweep:
-                    acc_sweep[key] += g
-                    target_mb_sq = sweep_mb_sq[key]
-                else:
-                    acc[key] += g
-                    target_mb_sq = mb_sq[key]
-                    if m == 0:
-                        mb0_norms[key] = float(np.sqrt(norms["all"]))
                 for gname in group_names:
-                    target_mb_sq[gname][k, m] = norms[gname]
-        for term in TERMS:
-            rollout_grads[term][k] = (acc[term] / n_minibatches).cpu().numpy()
-        for lam in extra_lambdas:
-            sweep_grads[lam][k] = (acc_sweep[lam] / n_minibatches).cpu().numpy()
-        del acc, acc_sweep
+                    mb_sq[key][gname][k, m] = norms[gname]
+                if m == 0 and key in TERMS:
+                    mb0_norms[key] = float(np.sqrt(norms["all"]))
+        for key in backward_keys:
+            rollout_grads[key][k] = (acc[key] / n_minibatches).cpu().numpy()
+        del acc
         model.policy.set_training_mode(False)
         t_grad = time.perf_counter() - t1
 
@@ -1271,39 +1256,33 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         rollout_log.append(entry)
         log(
             f"🎲 rollout {k + 1}/{rollouts} : collecte {t_collect:.0f}s, gradients {t_grad:.0f}s, "
-            f"{recorder.episodes_total} épisodes ({recorder.episodes_pool} vs pool, 0 tronqué), "
+            f"{recorder.episodes_total} épisodes ({recorder.episodes_pool} vs pool), "
             f"mb0 policy {mb0_norms['policy']:.3f} "
             f"value {mb0_norms['value']:.3f} entropy {mb0_norms['entropy']:.4f} outcome "
             f"{mb0_norms['outcome']:.3f}, EV {ev:.3f}, ep_len {ep_len_mean:.1f}, returns {returns_mean:.3f}, "
             f"part pool {pool_share:.2f}, écart GAE {gae_gap:.2g}"
         )
         if k == 0:
-            failures = check_plumbing_acceptance(entry) if plumbing_only else check_acceptance(entry)
-            acceptance = {
-                "passed": not failures, "failures": failures, "observed": entry,
-                "mode": "plumbing" if plumbing_only else "reference",
-            }
+            failures = check_acceptance(entry, keys=acceptance_mode["keys"])
+            acceptance = {"passed": not failures, "failures": failures, "observed": entry, "mode": acceptance_mode["mode"]}
             if failures:
                 log("⛔ ACCEPTATION REFUSÉE — plomberie à corriger avant toute lecture :\n  " + "\n  ".join(failures))
                 return {
                     "acceptance": acceptance, "rollouts": rollout_log, "terms": {}, "cosines": {},
                     "lambda_sweep": {}, "delta_variance": {}, "verdict": None,
-                    "model_hyperparams": ctx["model_hyperparams"],
                 }
             log("✅ acceptation : " + ("plomberie en règle (contrôle ou adversaire déterministe : le run de "
-                                       "référence n'est pas ce que la collecte reproduit)" if plumbing_only
+                                       "référence n'est pas ce que la collecte reproduit)"
+                                       if acceptance_mode["mode"] == "plumbing"
                                        else "le premier rollout reproduit le run de référence"))
 
-    # Statistiques par terme et par groupe.
-    grams: Dict[str, Dict[str, np.ndarray]] = {}
-    terms_out: Dict[str, Any] = {}
-    for term in TERMS:
-        grams[term] = {"all": gram_matrix(rollout_grads[term])}
-        for gname, (start, end) in groups.items():
-            grams[term][gname] = gram_matrix(rollout_grads[term][:, start:end])
-        terms_out[term] = {
-            gname: signal_stats(grams[term][gname], mb_sq[term][gname], batch_steps) for gname in group_names
-        }
+    # Statistiques par clé de backward et par groupe.
+    grams = {key: group_grams(rollout_grads[key], groups) for key in backward_keys}
+    stats = {
+        key: {gname: signal_stats(grams[key][gname], mb_sq[key][gname], batch_steps) for gname in group_names}
+        for key in backward_keys
+    }
+    terms_out = {term: stats[term] for term in TERMS}
     start, end = fe_slice
     cosines = {
         "policy_value_features_extractor": cosine_stats(
@@ -1321,15 +1300,10 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
             grams["policy"][gname], grams["outcome"][gname],
         )
     verdict = apply_rule(terms_out["policy"]["all"])
-    sweep_grams = {
-        lam: {"all": gram_matrix(sweep_grads[lam]),
-              **{g: gram_matrix(sweep_grads[lam][:, s:e]) for g, (s, e) in groups.items()}}
-        for lam in extra_lambdas
-    }
     lambda_sweep = lambda_sweep_stats(
-        {model_lambda: grams["policy"], **sweep_grams}, {model_lambda: mb_sq["policy"], **sweep_mb_sq}, batch_steps,
+        {model_lambda: grams["policy"], **{lam: grams[lam] for lam in extra_lambdas}},
+        {model_lambda: stats["policy"], **{lam: stats[lam] for lam in extra_lambdas}},
     )
-    lambda_sweep["model_lambda"] = model_lambda
     return {
         "acceptance": acceptance,
         "rollouts": rollout_log,
@@ -1342,7 +1316,6 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         "lambda_sweep": lambda_sweep,
         "delta_variance": delta_var.result(),
         "verdict": verdict,
-        "model_hyperparams": ctx["model_hyperparams"],
     }
 
 
@@ -1361,7 +1334,7 @@ def render_report(result: Dict[str, Any]) -> str:
     if not result["terms"]:
         return "acceptation refusée : " + "; ".join(result["acceptance"]["failures"])
     b = result["batch_steps"]
-    hp = result["model_hyperparams"]
+    hp = result["context"]["model_hyperparams"]
     # Les termes value / entropie portent le coefficient du checkpoint mesuré : deux modèles ne
     # se comparent sur ces termes qu'à coefficients égaux.
     term_scale = {"value": f" (× vf_coef {hp['vf_coef']:g})", "entropy": f" (× ent_coef {hp['ent_coef']:g})"}
@@ -1378,7 +1351,7 @@ def render_report(result: Dict[str, Any]) -> str:
         tag = "" if c["measurable"] else f"  ← non mesurable à K={c['rollouts']}"
         lines.append(f"{name:40s} {_fmt(c['cosine'])}{tag}")
     sweep = result["lambda_sweep"]
-    lines.append(f"\n== balayage λ (terme policy ; λ du modèle {sweep['model_lambda']}) ==")
+    lines.append(f"\n== balayage λ (terme policy ; λ du modèle {sweep['lambdas'][0]}) ==")
     lines.append(f"{'λ / groupe':28s} {'‖G‖² sans biais':>28s} {'f_' + str(b):>26s} {'f_' + str(result['batch_size']):>26s} {'signal':>8s}")
     for lam, by_group in sweep["per_lambda"].items():
         for gname, st in by_group.items():
@@ -1467,10 +1440,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f"modèle {'de CONTRÔLE ' if ctx['is_control'] else ''}{ctx['model_path']}"
         + (f" RÉINITIALISÉ (graine {ctx['random_init_seed']})" if ctx["random_init_seed"] is not None else "")
         + f" (stats {ctx['vec_normalize_path']}), hyperparamètres {ctx['model_hyperparams']}, "
-        f"λ balayés {gae_lambdas}, acceptation {'plomberie' if ctx['plumbing_only'] else 'référence'}"
+        f"λ balayés {gae_lambdas}, acceptation {ctx['acceptance']['mode']}"
     )
     try:
-        result = measure(ctx, args.rollouts, log, args.permutation_seed, extra_gae_lambdas)
+        result = measure(ctx, args.rollouts, log, args.permutation_seed, gae_lambdas)
     finally:
         T.close_training_env(ctx["env"], "fin de sonde", log)
         T._cleanup_wall_override_temp_dir()
@@ -1482,7 +1455,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "agent": args.agent, "etape": args.etape, "training_config": args.training_config,
         "canonical_path": ctx["canonical_path"], "model_path": ctx["model_path"],
         "vec_normalize_path": ctx["vec_normalize_path"], "is_control": ctx["is_control"],
-        "plumbing_only": ctx["plumbing_only"], "model_hyperparams": ctx["model_hyperparams"],
+        "acceptance_mode": ctx["acceptance"]["mode"], "model_hyperparams": ctx["model_hyperparams"],
         "random_init_seed": ctx["random_init_seed"],
         "opponent_deterministic": ctx["opponent_deterministic"], "gae_lambdas": gae_lambdas,
         "episode_offset": ctx["episode_offset"],
