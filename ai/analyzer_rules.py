@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 
 import functools
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
@@ -163,15 +163,28 @@ def living_datasheets(
     LIMITE CONNUE, qui ne peut que SOUS-compter les fautes : une ligne `DEAD model=` sans
     segment `[MODELS:]` ne fait pas sortir le socle avant la prochaine ligne qui en porte un.
     """
+    return declared_datasheets(
+        state, stats, unit_id, unit_type,
+        (mid for mid in state.unit_model_hp.get(unit_id, {}) if mid not in exclude_mids),  # get allowed : unité jamais vue
+    )
+
+
+def declared_datasheets(
+    state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str, mids: Iterable[str],
+) -> Optional[Set[str]]:
+    """Datasheets des socles `mids` de `unit_id`, ou `None` si la composition ne tranche pas.
+
+    Noyau de `living_datasheets`, qui lui passe les socles VIVANTS. Un relevé qui se juge sur
+    d'autres socles (24.08 : la figurine qui vient d'être DÉTRUITE) passe les siens. Mêmes
+    règles d'abstention et de repli sur `{unit_type}` — voir `living_datasheets`.
+    """
     declared = require_key(stats, 'model_types_by_unit_id').get(unit_id)  # get allowed : entête sans [MODEL_TYPES:]
     if not declared:
         return {unit_type}
     model_types = state.model_types
     present: Set[str] = set()
-    for mid in state.unit_model_hp.get(unit_id, {}):  # get allowed : unité jamais vue
-        if mid in exclude_mids:
-            continue
-        mtype = model_types.get(mid)  # get allowed : socle vivant sans datasheet = abstention
+    for mid in mids:
+        mtype = model_types.get(mid)  # get allowed : socle sans datasheet = abstention
         if mtype is None:
             return None
         present.add(mtype)
@@ -188,11 +201,18 @@ def note_special_rule_usage(
     player: int,
     *,
     exclude_mids: "frozenset[str] | Set[str]" = frozenset(),
+    judged_mids: Optional[Iterable[str]] = None,
 ) -> None:
     """Relève un usage de règle §1.7 ET tranche sa validité 19.04 À CET INSTANT.
 
     `exclude_mids` : cf. `living_datasheets` — les socles rendus par la ligne `RETURNED` dont
     l'usage est relevé, pour juger la restitution sur la composition d'AVANT.
+
+    `judged_mids` : socles sur lesquels le verdict se rend À LA PLACE des socles vivants. Sert à
+    24.08 Deadly Demise, exercée par une figurine qui vient d'être DÉTRUITE : la composition
+    vivante ne peut ni la voir (si c'était le dernier socle) ni l'isoler (un WeirdBoy encore vivant
+    blanchirait l'explosion d'un Boy de son escouade). La validité est alors « le socle détruit
+    portait la règle ». Vide = abstention (journal sans DEAD préalable), jamais une faute inventée.
 
     SITE UNIQUE d'écriture de `special_rule_usage`. Le verdict ne peut pas se rendre a
     posteriori sur la clé `(règle, type d'escouade)` : cette clé ignore QUELLE escouade a
@@ -208,7 +228,11 @@ def note_special_rule_usage(
     sur le run du 2026-09-11 : 0 relevé sur 94 tombe après la mort de son porteur.
     """
     require_key(stats, 'special_rule_usage')[(rule_id, unit_type)][int(player)] += 1
-    present = living_datasheets(state, stats, unit_id, unit_type, exclude_mids=exclude_mids)
+    present = (
+        living_datasheets(state, stats, unit_id, unit_type, exclude_mids=exclude_mids)
+        if judged_mids is None
+        else declared_datasheets(state, stats, unit_id, unit_type, judged_mids)
+    )
     if present is None:
         return  # composition non concluante : on s'abstient plutôt que d'inventer une faute
     if not special_rule_usage_is_valid(rule_id, unit_type, present, config.rule_to_units):

@@ -228,6 +228,21 @@ class AnalyzerState:
     # cause (`_apply_deadly_demise` : append_action_log avant allocate_mortal_wounds) ; la table
     # ne survit qu'au bloc DEAD/DEADLY DEMISE contigu et se vide à la première autre ligne.
     deadly_demise_pending: Dict[str, str] = field(default_factory=dict)
+    # 24.08 — dernier socle DÉTRUIT de chaque escouade : unit_id -> model_id, écrit par la
+    # ligne `DEAD model=`. La ligne DEADLY DEMISE ne nomme pas la figurine qui explose ; c'est
+    # `destroy_model` qui la déclenche juste après avoir journalisé SA ligne DEAD, donc le DEAD
+    # qui précède la PREMIÈRE ligne DEADLY DEMISE d'une source est le socle qui explose.
+    last_dead_mid_by_unit: Dict[str, str] = field(default_factory=dict)
+    # 24.08 — socle qui EXPLOSE, par source, figé à sa première ligne DEADLY DEMISE du bloc :
+    # source -> model_id (None si aucun DEAD de la source ne précède : journal tronqué). Une
+    # explosion écrit UNE ligne par unité à 6", la source comprise tant qu'il lui reste des
+    # socles : ses propres pertes `DEAD … reason=hazard` s'intercalent et écraseraient
+    # `last_dead_mid_by_unit` avant la ligne suivante du même jet. Le relevé §1.7 se fait une
+    # fois par entrée ici (une par jet de D6), jugé sur ce socle. Même durée de vie que
+    # `deadly_demise_pending` : le bloc DEAD/DEADLY DEMISE contigu. Limite : deux porteurs de
+    # la même escouade qui explosent dans un seul bloc (l'un tué par l'autre) ne font qu'un
+    # relevé, sur le premier — le journal ne distingue pas leurs lignes.
+    deadly_demise_exploder: Dict[str, Optional[str]] = field(default_factory=dict)
     # Cause d'une mort d'ESCOUADE quand elle est connue : dead_id -> DeathCause. Aujourd'hui une
     # seule cause est nommée, la Deadly Demise ; une mort par attaque n'y figure pas (son
     # attribution vit dans `unit_kill_context`).

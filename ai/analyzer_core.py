@@ -227,6 +227,9 @@ _HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZAR
 _DEADLY_DEMISE_EFFECT_RE = re.compile(
     r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→\s+Unit\s+(\d+)\(-?\d+,-?\d+\)\s+SUFFERS\s+\d+\s+MW'
 )
+#: 24.08 — SOURCE de la ligne, sur ses deux formes (jet réussi comme `→ no effect`) : c'est elle
+#: qui exerce la règle, et c'est sur elle que l'usage §1.7 se relève.
+_DEADLY_DEMISE_SOURCE_RE = re.compile(r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→')
 #: Mort par-figurine : `Unit N DEAD model=<mid> reason=<raison>`. La raison est EXIGÉE par le
 #: formateur (`KeyError` sinon) : elle est donc sur chaque ligne DEAD de toute grammaire.
 _DEAD_EVENT_RE = re.compile(r'Unit (\d+)\S* DEAD model=(\S+) reason=(\w+)')
@@ -1788,10 +1791,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 _is_dd_event = "[DEADLY DEMISE]" in action_desc
                 if not _is_dead_event and not _is_dd_event:
                     state.deadly_demise_pending.clear()
+                    state.deadly_demise_exploder.clear()
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
                     _dead_mid = _dead_event_m.group(2)
                     _dead_reason = _dead_event_m.group(3)
+                    # 24.08 : si ce socle porte Deadly Demise, sa ligne DEADLY DEMISE suit
+                    # immédiatement (`destroy_model`) — c'est lui qu'elle jugera
+                    # (`deadly_demise_exploder`).
+                    state.last_dead_mid_by_unit[_dead_uid] = _dead_mid
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
@@ -2498,6 +2506,30 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'deadly_demise'
                         stats['deadly_demise_triggers'][player] += 1
                         note_rule_usage(stats, "24.08", player)
+                        # §1.7 : UN relevé par jet de D6 (première ligne de la source dans le
+                        # bloc, cf. `deadly_demise_exploder` — pas une par unité à portée, ce
+                        # qui ferait dépendre le compte de la densité du plateau), sur la SOURCE,
+                        # sous le type de son escouade, jugé sur le socle qui vient d'EXPLOSER —
+                        # pas sur la composition vivante, qui ne le contient plus ou qui
+                        # blanchirait un socle sans la règle. Type ou camp inconnus (journal
+                        # tronqué) : abstention, comme la branche MW ci-dessus.
+                        _dd_src_m = _DEADLY_DEMISE_SOURCE_RE.match(action_desc)
+                        if _dd_src_m is None:
+                            _parse_error(
+                                "ligne [DEADLY DEMISE] sans source (attendu : "
+                                "'Unit N DEADLY DEMISE Roll:<d6> →' en tête d'action)"
+                            )
+                        elif (_dd_src := _dd_src_m.group(1)) not in state.deadly_demise_exploder:
+                            _dd_mid = state.last_dead_mid_by_unit.get(_dd_src)  # get allowed : DEAD absent = abstention
+                            state.deadly_demise_exploder[_dd_src] = _dd_mid
+                            _dd_src_type = state.unit_types.get(_dd_src)  # get allowed
+                            _dd_player = state.unit_player.get(_dd_src)  # get allowed
+                            if _dd_src_type and _dd_player is not None:
+                                note_special_rule_usage(
+                                    stats, state, config, 'deadly_demise',
+                                    _dd_src, _dd_src_type, int(_dd_player),
+                                    judged_mids=() if _dd_mid is None else (_dd_mid,),
+                                )
                         # Jet réussi : la victime est annoncée AVANT ses lignes DEAD
                         # (`_apply_deadly_demise` : append_action_log puis allocate_mortal_wounds).
                         _dd_m = _DEADLY_DEMISE_EFFECT_RE.match(action_desc)
