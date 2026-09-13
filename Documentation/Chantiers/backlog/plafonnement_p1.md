@@ -419,6 +419,17 @@ log-prob 1,7 × 10⁻⁴).
       canonique), `--random-init SEED`, `--opponent-deterministic`. 24 tests, rouge/vert
       par mutation (GAE sans coupure d'épisode, identité de variance, ΔV, pkl du canonique,
       copies GPU du buffer, réinitialisation).
+- [x] Piège attrapé par la vérification d'alignement : `GpuMaskableDictRolloutBuffer` uploade
+      avantages/retours sur GPU une fois au premier `get()` ; la première version rafraîchissait
+      les deux exemplaires (`set_buffer_advantages`).
+- [x] Simplification après /simplify (2026-09-13, après les quatre collectes) : pertes policy des
+      λ supplémentaires prises dans la même passe avant que les quatre termes (plus de seconde
+      passe `get()` par λ, plus de mutation du buffer, `set_buffer_advantages` supprimé) ;
+      `gae_advantages` délègue à `RolloutBuffer.compute_returns_and_advantage` de SB3 ; le λ du
+      modèle est toujours balayé (`--gae-lambdas` = λ supplémentaires, défaut `0.8,0.5,0.2,0`) ;
+      `f_batch_of` / `true_sq_of` partagés entre `signal_stats` et les différences appairées ;
+      `check_control_acceptance` réutilise `check_acceptance(keys=…)`. 24 tests, rouge/vert par
+      mutation (normalisation oubliée pour le balayage).
 - [x] Revue de la sonde (2026-09-13, suite 124) — quatre trous fermés, aucun nombre publié ne
       change : (1) `--model` comparé par chemin RÉSOLU (`ai/models` est un lien symbolique dans
       les worktrees : le canonique orthographié par son realpath passait pour un contrôle) et le
@@ -428,15 +439,13 @@ log-prob 1,7 × 10⁻⁴).
       `info["TimeLimit.truncated"]` (comme `ai/training_callbacks`) et S'ARRÊTE sur toute
       troncature, sur chaque rollout (faux nul + bootstrap replié dans la récompense du dernier
       pas → Var(r) faussée). (3) `--opponent-deterministic` jugé sur la plomberie, plus sur les
-      bornes du run de référence (autre adversaire) ; mode écrit dans le JSON (`acceptance.mode`).
+      bornes du run de référence (autre adversaire) ; mode écrit dans le JSON (`acceptance.mode`,
+      `check_control_acceptance` → `check_plumbing_acceptance`).
       (4) `vf_coef` / `ent_coef` du checkpoint mesuré rapportés (`model_hyperparams`, en-têtes
       des termes) — un contrôle a les siens. Doc : « part r » est descriptive, pas la part
       retirable par une récompense en espérance (déjà rétracté §7) ; parts rendues nan quand
       Var(δ) est un résidu d'arrondi. 26 tests, rouge/vert par mutation (realpath zip et pkl,
       plancher, troncature, vainqueur None).
-- [x] Piège attrapé par la vérification d'alignement : `GpuMaskableDictRolloutBuffer` uploade
-      avantages/retours sur GPU une fois au premier `get()` ; `set_buffer_advantages` rafraîchit
-      les deux exemplaires.
 - [x] Quatre collectes (P1, contrôle 040721, contrôle aléatoire, P0 déterministe) ; résultats
       §0-4 et [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) ;
       implémentation indépendante (session 40k-a2) concordante, contrôle synthétique f = 0,667

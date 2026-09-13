@@ -424,14 +424,18 @@ récompense.
 **Instrument.** `scripts/grad_signal_probe.py`, extension lecture seule (verrous :
 `tests/unit/scripts/test_grad_signal_probe.py`, 24 tests). Sur CHAQUE rollout collecté, avantages
 et retours sont recalculés a posteriori depuis les copies non aplaties de rewards / values /
-episode_starts, `last_values` recalculé sur `model._last_obs` (`gae_advantages`, même boucle
-float32 que `compute_returns_and_advantage` : écart max **0** sur les 24 + 24 + 24 + 12 rollouts,
-tolérance 1e-6), puis le gradient policy est repris par mini-lot avec la MÊME permutation ; les
-différences entre λ sont appairées (jackknife de f_a − f_b sur les mêmes rollouts). ⚠️ Piège
-attrapé par la vérification d'alignement mini-lot par mini-lot : le buffer de production
-(`GpuMaskableDictRolloutBuffer`) uploade avantages et retours sur le GPU **une fois** au premier
-`get()` — remplacer les seuls tableaux numpy fait servir les anciens avantages ;
-`set_buffer_advantages` rafraîchit les deux exemplaires. Var(δ_t) = Var(r_t) + Var(ΔV_t) +
+episode_starts, `last_values` recalculé sur `model._last_obs` (`gae_advantages` : écart max **0**
+sur les 24 + 24 + 24 + 12 rollouts, tolérance 1e-6), puis le gradient policy de chaque λ est pris
+mini-lot par mini-lot ; les différences entre λ sont appairées (jackknife de f_a − f_b sur les
+mêmes rollouts). Depuis la simplification du 2026-09-13 (après les quatre collectes) :
+`gae_advantages` appelle `RolloutBuffer.compute_returns_and_advantage` de SB3 sur un buffer
+jetable (une seule source de vérité), le λ du modèle est toujours balayé et `--gae-lambdas` ne
+liste que les λ supplémentaires, et les pertes policy des autres λ sont prises dans la **même
+passe avant** que les quatre termes (mêmes ratios, seuls les avantages changent) — le buffer de
+production n'est plus muté. ⚠️ Piège rencontré par la première version (qui rejouait `get()` par
+λ) : `GpuMaskableDictRolloutBuffer` uploade avantages et retours sur le GPU **une fois** au
+premier `get()` — remplacer les seuls tableaux numpy fait servir les anciens avantages ; attrapé
+par la vérification d'alignement mini-lot par mini-lot. Var(δ_t) = Var(r_t) + Var(ΔV_t) +
 2 Cov sur les mêmes buffers, par famille de l'action jouée (`action_family`, phase lue dans le
 one-hot `global_bin` de l'observation du pas, `setting_up` = `info["action"] == "ingress_move"`).
 `--model` : autre politique dans le MÊME env P1, avec SON pkl compagnon (jamais celui du
@@ -521,7 +525,7 @@ le dé et le crédit le sont.
 Durées : 24 rollouts × (34–73 s de collecte + 9–23 s de gradients pour 5 λ) = 20 à 30 min par
 collecte, 4 collectes. Reproduire : `python3 scripts/grad_signal_probe.py --agent
 ArmageddonAgent_x1 --etape P1 --training-config x1_lineage --rollouts 24 --gae-lambdas
-0.95,0.8,0.5,0.2,0 --out <json>` ; `... --model
+0.8,0.5,0.2,0 --out <json>` (le λ du modèle, 0,95, est toujours balayé) ; `... --model
 ai/models/ArmageddonAgent_x1_entnorm/model_ArmageddonAgent_x1_entnorm_20260913-040721.zip` ;
 `... --random-init 20260913 --rollouts 12` ; `... --opponent-deterministic`. Aucun JSON de
 `config/` ni zip/pkl touché (vérifié par mtime en sortie de chaque collecte).

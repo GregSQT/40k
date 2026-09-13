@@ -50,15 +50,18 @@ RÈGLE, écrite avant lecture :
   (3) f_B > 0,5 → signal propre, le plateau est ailleurs.
   (4) entre les deux → rapporter les nombres.
 
-BALAYAGE λ APPAIRÉ (`--gae-lambdas`, 2026-09-13). Sur CHAQUE rollout collecté, avantages et
-retours GAE sont recalculés a posteriori (`gae_advantages`, même boucle que
-`rollout_buffer.compute_returns_and_advantage`, vérifiée au 1e-6 au λ du modèle sur chaque
-rollout) depuis les copies NON aplaties de rewards / values / episode_starts, `last_values`
-recalculé sur `model._last_obs` et `last_dones = model._last_episode_starts`. Le gradient policy
-est alors repris par mini-lot avec la MÊME permutation ; f_B, ‖G‖² et intervalles jackknife sont
-rendus par λ, ainsi que les DIFFÉRENCES APPAIRÉES entre λ (jackknife de f_a − f_b sur les mêmes
-rollouts). γ n'est pas balayé : le critic est entraîné à γ = 0,99, un autre γ mesurerait un critic
-qui n'existe pas. λ = 0 rend δ_t = r_t + γV(s_{t+1}) − V(s_t).
+BALAYAGE λ APPAIRÉ (`--gae-lambdas`, 2026-09-13). Le λ du modèle est toujours balayé (c'est
+l'ancre des différences appairées) ; `--gae-lambdas` liste les λ SUPPLÉMENTAIRES. Sur CHAQUE
+rollout collecté, avantages et retours GAE sont recalculés a posteriori par SB3 lui-même
+(`gae_advantages` : `RolloutBuffer.compute_returns_and_advantage` sur un buffer jetable, vérifié
+au 1e-6 contre le buffer du rollout au λ du modèle) depuis les copies NON aplaties de rewards /
+values / episode_starts, `last_values` recalculé sur `model._last_obs` et
+`last_dones = model._last_episode_starts`. Les pertes policy des autres λ sont prises dans la
+MÊME passe avant que les quatre termes, mini-lot par mini-lot (mêmes ratios, seuls les avantages
+changent) ; f_B, ‖G‖² et intervalles jackknife sont rendus par λ, ainsi que les DIFFÉRENCES
+APPAIRÉES entre λ (jackknife de f_a − f_b sur les mêmes rollouts). γ n'est pas balayé : le critic
+est entraîné à γ = 0,99, un autre γ mesurerait un critic qui n'existe pas. λ = 0 rend
+δ_t = r_t + γV(s_{t+1}) − V(s_t).
 
 DÉCOMPOSITION DE Var(δ_t) sur les mêmes buffers : Var(r_t) + Var(ΔV_t) + 2 Cov(r_t, ΔV_t) avec
 ΔV_t = γ(1 − d_{t+1})V(s_{t+1}) − V(s_t), globalement et par famille d'action
@@ -102,7 +105,7 @@ zip ni le pkl ni les JSON de l'agent n'ont bougé.
 
 Usage :
     python3 scripts/grad_signal_probe.py --agent ArmageddonAgent_x1 --etape P1 \\
-        --training-config x1_lineage --rollouts 24 --gae-lambdas 0.95,0.8,0.5,0.2,0 \\
+        --training-config x1_lineage --rollouts 24 --gae-lambdas 0.8,0.5,0.2,0 \\
         --out /tmp/grad_signal_p1.json
     # contrôle positif (autre politique, ou poids réinitialisés) :
     python3 scripts/grad_signal_probe.py ... --model ai/models/<clé>/<zip>
@@ -137,10 +140,11 @@ Z_95 = 1.96
 #: Seuils de la règle, fixés avant lecture.
 RULE_F_NOISE = 0.1
 RULE_F_CLEAN = 0.5
-#: Balayage λ par défaut ; γ n'est jamais balayé (critic entraîné à γ = 0,99).
-DEFAULT_GAE_LAMBDAS = "0.95,0.8,0.5,0.2,0"
-#: Tolérance de la vérification « GAE recalculé = SB3 » au λ du modèle, sur chaque rollout
-#: (même récurrence float32 : écart mesuré 0 sur 84 rollouts).
+#: λ SUPPLÉMENTAIRES balayés par défaut, en plus du λ du modèle ; γ n'est jamais balayé (critic
+#: entraîné à γ = 0,99).
+DEFAULT_GAE_LAMBDAS = "0.8,0.5,0.2,0"
+#: Tolérance de la vérification « GAE recalculé = buffer du rollout » au λ du modèle (même
+#: récurrence float32 : écart mesuré 0 sur 84 rollouts).
 GAE_ATOL = 1e-6
 #: Var(δ) sous cette fraction de Var(r) + Var(ΔV) est un résidu d'arrondi de la décomposition
 #: (δ constant sur la famille) : les parts n'existent pas, rendues nan.
@@ -233,9 +237,19 @@ def _ratio(num: float, den: float) -> float:
     return num / den if den > 0 else float("nan")
 
 
+def true_sq_of(gram: np.ndarray, keep: np.ndarray) -> float:
+    """‖G‖² sans biais sur le sous-ensemble `keep` de rollouts d'une matrice de Gram."""
+    return off_diagonal_mean(_sub(gram, keep))
+
+
+def rollout_sq_of(gram: np.ndarray, keep: np.ndarray) -> float:
+    """E‖G_k‖² sur le sous-ensemble `keep`."""
+    return diagonal_mean(_sub(gram, keep))
+
+
 def f_batch_of(gram: np.ndarray, keep: np.ndarray) -> float:
-    """f_B = ‖G‖² sans biais / E‖G_rollout‖² sur les rollouts `keep` d'une matrice de Gram."""
-    return _ratio(off_diagonal_mean(_sub(gram, keep)), diagonal_mean(_sub(gram, keep)))
+    """f_B = ‖G‖² sans biais / E‖G_k‖² sur `keep` ; nan si le dénominateur n'est pas > 0."""
+    return _ratio(true_sq_of(gram, keep), rollout_sq_of(gram, keep))
 
 
 def signal_stats(gram: np.ndarray, minibatch_sq_norms: np.ndarray, batch_steps: int) -> Dict[str, Any]:
@@ -254,10 +268,10 @@ def signal_stats(gram: np.ndarray, minibatch_sq_norms: np.ndarray, batch_steps: 
         raise ValueError(f"batch_steps doit être > 0, reçu {batch_steps}")
 
     def true_sq(keep: np.ndarray) -> float:
-        return off_diagonal_mean(_sub(gram, keep))
+        return true_sq_of(gram, keep)
 
     def rollout_sq(keep: np.ndarray) -> float:
-        return diagonal_mean(_sub(gram, keep))
+        return rollout_sq_of(gram, keep)
 
     def mb_sq(keep: np.ndarray) -> float:
         return float(mb[keep].mean())
@@ -383,8 +397,7 @@ def outcome_returns(
     outcome = np.asarray(outcome_at_done, dtype=np.float64)
     if not (starts.shape == ends.shape == outcome.shape) or starts.ndim != 2:
         raise ValueError(f"trois tableaux (T, N) attendus : {starts.shape}, {ends.shape}, {outcome.shape}")
-    if not 0.0 < gamma <= 1.0:
-        raise ValueError(f"gamma doit être dans ]0, 1], reçu {gamma}")
+    _check_gamma(gamma)
     n_steps, n_envs = starts.shape
     returns = np.zeros((n_steps, n_envs), dtype=np.float64)
     valid = np.zeros((n_steps, n_envs), dtype=bool)
@@ -417,71 +430,55 @@ def swap_and_flatten(arr: np.ndarray) -> np.ndarray:
     return arr.swapaxes(0, 1).reshape(shape[0] * shape[1], *shape[2:])
 
 
-def _check_rollout_arrays(rewards: np.ndarray, values: np.ndarray, episode_starts: np.ndarray,
-                          last_values: np.ndarray, last_dones: np.ndarray) -> Tuple[int, int]:
-    """Formes (T, N) des trois tableaux de pas et (N,) des deux tableaux de fin ; rend (T, N)."""
-    if not (rewards.shape == values.shape == episode_starts.shape) or rewards.ndim != 2:
-        raise ValueError(
-            f"rewards, values, episode_starts doivent être (T, N) : {rewards.shape}, {values.shape}, "
-            f"{episode_starts.shape}"
-        )
-    n_steps, n_envs = rewards.shape
-    if last_values.shape != (n_envs,) or last_dones.shape != (n_envs,):
-        raise ValueError(
-            f"last_values / last_dones doivent être (N={n_envs},) : {last_values.shape}, {last_dones.shape}"
-        )
-    return n_steps, n_envs
+def _check_gamma(gamma: float) -> None:
+    if not 0.0 < gamma <= 1.0:
+        raise ValueError(f"gamma doit être dans ]0, 1], reçu {gamma}")
 
 
 def gae_advantages(rewards: np.ndarray, values: np.ndarray, episode_starts: np.ndarray,
                    last_values: np.ndarray, last_dones: np.ndarray, gamma: float,
                    gae_lambda: float) -> Tuple[np.ndarray, np.ndarray]:
-    """Avantages GAE(λ) et retours TD(λ), MÊME boucle que `RolloutBuffer.compute_returns_and_advantage`.
+    """Avantages GAE(λ) et retours TD(λ) par SB3 LUI-MÊME : `RolloutBuffer.compute_returns_and_advantage`
+    sur un buffer jetable portant ces tableaux (une seule source de vérité, float32 comme le run).
 
-    Tableaux (T, N) non aplatis, float32 comme le buffer SB3 (l'accumulation `last_gae_lam` y est
-    en float32 : la reproduire en float64 s'en écarterait au-delà de 1e-6 sur 8160 pas).
-    `last_values` : V(s_T) par env ; `last_dones` : le pas T−1 fermait-il un épisode.
-    Retourne (advantages, returns) avec returns = advantages + values.
+    Tableaux (T, N) non aplatis. `last_values` : V(s_T) par env ; `last_dones` : le pas T−1
+    fermait-il un épisode. Retourne (advantages, returns) avec returns = advantages + values.
     """
+    import torch as th
+    from gymnasium import spaces
+    from stable_baselines3.common.buffers import RolloutBuffer
+
     r = np.asarray(rewards, dtype=np.float32)
     v = np.asarray(values, dtype=np.float32)
     starts = np.asarray(episode_starts, dtype=np.float32)
     lv = np.asarray(last_values, dtype=np.float32).reshape(-1)
     ld = np.asarray(last_dones, dtype=bool).reshape(-1)
-    n_steps, _ = _check_rollout_arrays(r, v, starts, lv, ld)
+    if not (r.shape == v.shape == starts.shape) or r.ndim != 2:
+        raise ValueError(
+            f"rewards, values, episode_starts doivent être (T, N) : {r.shape}, {v.shape}, {starts.shape}"
+        )
+    n_steps, n_envs = r.shape
+    if lv.shape != (n_envs,) or ld.shape != (n_envs,):
+        raise ValueError(f"last_values / last_dones doivent être (N={n_envs},) : {lv.shape}, {ld.shape}")
     if not 0.0 <= gae_lambda <= 1.0:
         raise ValueError(f"gae_lambda doit être dans [0, 1], reçu {gae_lambda}")
-    if not 0.0 < gamma <= 1.0:
-        raise ValueError(f"gamma doit être dans ]0, 1], reçu {gamma}")
-    advantages = np.zeros_like(r)
-    last_gae_lam = np.zeros(r.shape[1], dtype=np.float32)
-    for step in reversed(range(n_steps)):
-        if step == n_steps - 1:
-            next_non_terminal = 1.0 - ld.astype(np.float32)
-            next_values = lv
-        else:
-            next_non_terminal = 1.0 - starts[step + 1]
-            next_values = v[step + 1]
-        delta = r[step] + gamma * next_values * next_non_terminal - v[step]
-        last_gae_lam = delta + gamma * gae_lambda * next_non_terminal * last_gae_lam
-        advantages[step] = last_gae_lam
-    return advantages, advantages + v
+    _check_gamma(gamma)
+    buf = RolloutBuffer(n_steps, spaces.Box(-1.0, 1.0, (1,)), spaces.Discrete(1), device="cpu",
+                        gamma=gamma, gae_lambda=gae_lambda, n_envs=n_envs)
+    buf.rewards, buf.values, buf.episode_starts = r, v, starts
+    buf.compute_returns_and_advantage(th.as_tensor(lv).reshape(n_envs, 1), ld)
+    return buf.advantages.copy(), buf.returns.copy()
 
 
 def bootstrap_value_change(values: np.ndarray, episode_starts: np.ndarray, last_values: np.ndarray,
                            last_dones: np.ndarray, gamma: float) -> np.ndarray:
-    """ΔV_t = γ(1 − d_{t+1})V(s_{t+1}) − V(s_t), (T, N) float64 — la part de δ_t qui ne vient pas de r_t.
+    """ΔV_t = γ(1 − d_{t+1})V(s_{t+1}) − V(s_t), (T, N) — la part de δ_t qui ne vient pas de r_t.
 
-    δ_t = r_t + ΔV_t exactement : c'est l'avantage GAE à λ = 0 (verrouillé par test).
+    C'est δ_t à récompense nulle : GAE(λ = 0) de SB3 sur des rewards à zéro, donc exactement
+    r_t + ΔV_t = avantage GAE à λ = 0 (verrouillé par test).
     """
-    v = np.asarray(values, dtype=np.float64)
-    starts = np.asarray(episode_starts, dtype=np.float64)
-    lv = np.asarray(last_values, dtype=np.float64).reshape(-1)
-    ld = np.asarray(last_dones, dtype=bool).reshape(-1)
-    _check_rollout_arrays(v, v, starts, lv, ld)
-    next_values = np.vstack([v[1:], lv[None, :]])
-    next_non_terminal = np.vstack([1.0 - starts[1:], 1.0 - ld.astype(np.float64)[None, :]])
-    return gamma * next_values * next_non_terminal - v
+    v = np.asarray(values, dtype=np.float32)
+    return gae_advantages(np.zeros_like(v), v, episode_starts, last_values, last_dones, gamma, 0.0)[0]
 
 
 class DeltaVarianceAccumulator:
@@ -502,6 +499,8 @@ class DeltaVarianceAccumulator:
         fam = np.asarray(families).astype(str).reshape(-1)
         if not (r.shape == d.shape == fam.shape):
             raise ValueError(f"rewards, delta_v, families de tailles différentes : {r.shape}, {d.shape}, {fam.shape}")
+        if r.size == 0:
+            raise ValueError("rollout vide : rien à accumuler")
         for name in ("all", *np.unique(fam)):
             mask = np.ones(r.shape, dtype=bool) if name == "all" else (fam == name)
             rr, dd = r[mask], d[mask]
@@ -511,23 +510,19 @@ class DeltaVarianceAccumulator:
     @staticmethod
     def _decompose(m: np.ndarray) -> Dict[str, float]:
         n, sr, srr, sd, sdd, srd = m
+        mean_r, mean_d = sr / n, sd / n
         if n < 2:
             # Famille vue une fois sur tout le run : sa variance n'existe pas. Rapportée en nan,
             # pas levée — lever ici jetterait K rollouts de collecte pour une ligne auxiliaire.
-            return {"n": int(n), "mean_reward": float(sr / n) if n else float("nan"),
-                    "mean_delta_v": float(sd / n) if n else float("nan"),
-                    "mean_delta": float((sr + sd) / n) if n else float("nan"),
-                    "var_reward": float("nan"), "var_delta_v": float("nan"), "cov": float("nan"),
-                    "var_delta": float("nan"), "share_reward": float("nan"),
-                    "share_delta_v": float("nan"), "share_cov": float("nan")}
-        mean_r, mean_d = sr / n, sd / n
-        var_r = srr / n - mean_r ** 2
-        var_d = sdd / n - mean_d ** 2
-        cov = srd / n - mean_r * mean_d
-        var_delta = var_r + var_d + 2.0 * cov
+            var_r = var_d = cov = var_delta = float("nan")
+        else:
+            var_r = srr / n - mean_r ** 2
+            var_d = sdd / n - mean_d ** 2
+            cov = srd / n - mean_r * mean_d
+            var_delta = var_r + var_d + 2.0 * cov
         # δ constant sur la famille (récompense déterministe, critic exact) laisse un résidu
         # d'arrondi positif de l'ordre de 1e-16 × (Var(r) + Var(ΔV)) : diviser par lui rendrait
-        # des parts de 1e11. Plancher RELATIF, pas « > 0 ».
+        # des parts de 1e11. Plancher RELATIF, pas « > 0 » (faux aussi sur nan : n < 2).
         shares_defined = var_delta > VAR_DELTA_REL_FLOOR * (var_r + var_d)
 
         def share(x: float) -> float:
@@ -673,17 +668,12 @@ def lambda_sweep_stats(grams: Dict[float, np.ndarray], minibatch_sq_norms: Dict[
             raise ValueError(f"λ={lam} : gram {grams[lam].shape} ≠ ({k}, {k})")
         per_lambda[lam] = signal_stats(grams[lam], minibatch_sq_norms[lam], batch_steps)
 
-    def f_at(lam: float, keep: np.ndarray) -> float:
-        return f_batch_of(grams[lam], keep)
-
-    def true_at(lam: float, keep: np.ndarray) -> float:
-        return off_diagonal_mean(_sub(grams[lam], keep))
-
     pairs = []
     for i, lam_a in enumerate(lambdas):
         for lam_b in lambdas[i + 1:]:
-            f_diff = jackknife(lambda keep, a=lam_a, b=lam_b: f_at(a, keep) - f_at(b, keep), k)
-            g_diff = jackknife(lambda keep, a=lam_a, b=lam_b: true_at(a, keep) - true_at(b, keep), k)
+            ga, gb = grams[lam_a], grams[lam_b]
+            f_diff = jackknife(lambda keep, ga=ga, gb=gb: f_batch_of(ga, keep) - f_batch_of(gb, keep), k)
+            g_diff = jackknife(lambda keep, ga=ga, gb=gb: true_sq_of(ga, keep) - true_sq_of(gb, keep), k)
             pairs.append({
                 "lambda_a": lam_a, "lambda_b": lam_b, "f_batch_diff": f_diff, "true_sq_diff": g_diff,
                 "f_batch_diff_excludes_zero": bool(
@@ -748,12 +738,15 @@ def group_sq_norms(flat: Any, groups: Dict[str, Tuple[int, int]]) -> Dict[str, f
     return out
 
 
-def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outcome_valid: Any) -> Dict[str, Any]:
+def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outcome_valid: Any,
+                          sweep_advantages: Optional[Dict[float, Any]] = None) -> Dict[str, Any]:
     """Les termes de la loss PPO d'un mini-lot, comme `PatchedMaskablePPO.train` les calcule.
 
     `outcome_adv` / `outcome_valid` : avantage d'issue standardisé sur les pas valides du
     mini-lot et masque des pas valides, alignés sur `rollout_data`. Le terme d'issue est un
     REINFORCE clipé de même forme que le terme policy, moyenné sur les seuls pas valides.
+    `sweep_advantages` : avantages recalculés à d'autres λ, alignés sur `rollout_data` ; leur
+    terme policy (mêmes ratios, même normalisation par mini-lot) est rendu sous `policy_sweep[λ]`.
     """
     import torch as th
     import torch.nn.functional as F
@@ -770,12 +763,15 @@ def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outco
     values = values.flatten()
     clip_range = model.clip_range(model._current_progress_remaining)
 
-    advantages = rollout_data.advantages
-    if model.normalize_advantage:
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     ratio = th.exp(log_prob - rollout_data.old_log_prob)
     clipped = th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-    policy_loss = -th.min(advantages * ratio, advantages * clipped).mean()
+
+    def policy_loss_of(advantages: Any) -> Any:
+        if model.normalize_advantage:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        return -th.min(advantages * ratio, advantages * clipped).mean()
+
+    policy_loss = policy_loss_of(rollout_data.advantages)
 
     if model.clip_range_vf is None:
         values_pred = values
@@ -802,6 +798,7 @@ def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outco
         "value": model.vf_coef * value_loss,
         "entropy": model.ent_coef * entropy_term,
         "outcome": outcome_loss,
+        "policy_sweep": {lam: policy_loss_of(adv) for lam, adv in (sweep_advantages or {}).items()},
     }
 
 
@@ -851,6 +848,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     )
     from ai.training_utils import get_scenario_list_for_phase, make_training_env, setup_imports
     from ai.unit_registry import UnitRegistry
+    from ai.vec_normalize_utils import get_vec_normalize_path
     from engine.episode_schedule import episodes_per_env
     from shared.data_validation import require_key, require_present
     from stable_baselines3.common.vec_env import VecNormalize
@@ -862,6 +860,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     if not os.path.exists(canonical_path):
         raise FileNotFoundError(f"modèle canonique absent : {canonical_path}")
     probe_model_path, probe_vec_path, is_control = resolve_probe_model(canonical_path, model_path)
+    canonical_vec_path = get_vec_normalize_path(canonical_path)
     is_control = is_control or random_init_seed is not None
     warm_start = stage_init_source(stage) is not None
     if not warm_start:
@@ -968,6 +967,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
         "config": config,
         "training_config": training_config,
         "canonical_path": canonical_path,
+        "canonical_vec_normalize_path": canonical_vec_path,
         "model_path": probe_model_path,
         "vec_normalize_path": probe_vec_path,
         "is_control": is_control,
@@ -1062,10 +1062,12 @@ def make_recorder(n_envs: int) -> Any:
     return _Recorder()
 
 
-def check_acceptance(observed: Dict[str, float]) -> List[str]:
-    """Écarts au run de référence sur le premier rollout ; vide = plomberie acceptée."""
+def check_acceptance(observed: Dict[str, Any], keys: Sequence[str] = tuple(ACCEPTANCE_BOUNDS)) -> List[str]:
+    """Écarts au run de référence sur le premier rollout, sur les clés `keys` de
+    `ACCEPTANCE_BOUNDS` ; vide = plomberie acceptée."""
     failures = []
-    for key, (low, high) in ACCEPTANCE_BOUNDS.items():
+    for key in keys:
+        low, high = ACCEPTANCE_BOUNDS[key]
         value = observed[key]
         if not (np.isfinite(value) and low <= value <= high):
             failures.append(f"{key} = {value:.4g} hors [{low}, {high}]")
@@ -1077,74 +1079,21 @@ def check_plumbing_acceptance(observed: Dict[str, Any]) -> List[str]:
     référence. Pour un modèle de contrôle ou un adversaire déterministe, « reproduit P1 » n'a pas
     de sens (autre politique, ou autre adversaire) ; les troncatures sont exclues en amont, sur
     chaque rollout, par `measure`."""
-    failures = []
-    low, high = ACCEPTANCE_BOUNDS["pool_episode_share"]
-    share = observed["pool_episode_share"]
-    if not (np.isfinite(share) and low <= share <= high):
-        failures.append(f"pool_episode_share = {share:.4g} hors [{low}, {high}]")
-    return failures
+    return check_acceptance(observed, keys=("pool_episode_share",))
 
 
-def set_buffer_advantages(buf: Any, advantages: np.ndarray, returns: np.ndarray) -> None:
-    """Pose des avantages/retours (T, N) recalculés dans un buffer DÉJÀ aplati par `get()`.
-
-    Le buffer de production est `GpuMaskableDictRolloutBuffer` : ses champs compacts sont
-    uploadés sur le GPU UNE fois, au premier `get()`, et `_get_samples_gpu` sert ces copies —
-    remplacer les seuls tableaux numpy laisserait `get()` servir les anciens avantages (c'est ce
-    que la vérification d'alignement mini-lot par mini-lot a attrapé). Les deux exemplaires
-    sont donc remplacés ensemble.
-    """
-    import torch as th
-
-    from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
-
-    if not buf.generator_ready:
-        raise RuntimeError("set_buffer_advantages exige un buffer déjà aplati par un premier get()")
-    if advantages.shape != (buf.buffer_size, buf.n_envs) or returns.shape != advantages.shape:
-        raise ValueError(f"avantages/retours (T, N) attendus : {advantages.shape}, {returns.shape}")
-    buf.advantages = buf.swap_and_flatten(np.asarray(advantages, dtype=np.float32))
-    buf.returns = buf.swap_and_flatten(np.asarray(returns, dtype=np.float32))
-    if isinstance(buf, GpuMaskableDictRolloutBuffer):
-        buf._gpu_advantages = th.as_tensor(buf.advantages, device=buf.device)
-        buf._gpu_returns = th.as_tensor(buf.returns, device=buf.device)
-
-
-def _policy_rollout_grad(model: Any, buf: Any, batch_size: int, perm: np.ndarray, seed: int,
-                         params: Sequence[Any], n_params: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Gradient policy d'un rollout (moyenne des mini-lots) et carrés de norme par mini-lot,
-    avec la permutation `perm` que `get()` rejoue après `np.random.seed(seed)` — vérifié."""
-    import torch as th
-
-    n_minibatches = perm.size // batch_size
-    np.random.seed(seed)
-    acc = th.zeros(n_params, device=model.device, dtype=th.float32)
-    mb_sq = np.zeros(n_minibatches)
-    zeros = th.zeros(batch_size, device=model.device, dtype=th.float32)
-    for m, rollout_data in enumerate(buf.get(batch_size)):
-        idx = perm[m * batch_size:(m + 1) * batch_size]
-        expected_adv = buf.to_torch(buf.advantages[idx].flatten())
-        if not th.equal(rollout_data.advantages, expected_adv):
-            raise RuntimeError(
-                f"mini-lot {m} : permutation de get() non reproduite (attendu {tuple(expected_adv.shape)} "
-                f"{expected_adv.dtype}, nan {int(th.isnan(expected_adv).sum())} ; reçu "
-                f"{tuple(rollout_data.advantages.shape)} {rollout_data.advantages.dtype}, nan "
-                f"{int(th.isnan(rollout_data.advantages).sum())} ; écart max "
-                f"{float((rollout_data.advantages - expected_adv).abs().max()) if expected_adv.shape == rollout_data.advantages.shape else float('nan'):.3g})"
-            )
-        losses = minibatch_term_losses(model, rollout_data, zeros, zeros)
-        g = flat_grad(losses["policy"], params, retain_graph=False)
-        acc += g
-        mb_sq[m] = float(g.double().pow(2).sum().item())
-    return (acc / n_minibatches).cpu().numpy(), mb_sq
+def sweep_lambdas(model_lambda: float, extra: Sequence[float]) -> List[float]:
+    """λ balayés : celui du modèle d'abord (ancre des différences appairées), puis les autres."""
+    return [model_lambda, *[lam for lam in extra if lam != model_lambda]]
 
 
 def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
-            permutation_seed: int, gae_lambdas: Sequence[float]) -> Dict[str, Any]:
+            permutation_seed: int, extra_gae_lambdas: Sequence[float]) -> Dict[str, Any]:
     """K rollouts à politique figée, gradients par terme et par mini-lot, puis statistiques.
 
-    Par rollout, après les quatre termes au λ du modèle : GAE recalculé à chaque λ de
-    `gae_lambdas` (vérifié = SB3 au λ du modèle), gradient policy repris avec la MÊME
-    permutation, et décomposition de Var(δ) sur le même buffer.
+    Par rollout : GAE recalculé par SB3 au λ du modèle (vérifié = buffer du rollout) et à chaque
+    λ de `extra_gae_lambdas` ; dans la même passe avant que les quatre termes, le gradient policy
+    de chaque λ supplémentaire, mini-lot par mini-lot ; décomposition de Var(δ) sur le même buffer.
     """
     import torch as th
     from stable_baselines3.common.logger import configure as configure_sb3_logger
@@ -1161,6 +1110,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     n_minibatches = batch_steps // batch_size
     gamma = float(model.gamma)
     model_lambda = float(model.gae_lambda)
+    extra_lambdas = sweep_lambdas(model_lambda, extra_gae_lambdas)[1:]
     plumbing_only = bool(ctx["plumbing_only"])
 
     model.set_logger(configure_sb3_logger(ctx["workdir"], ["stdout"]))
@@ -1178,9 +1128,10 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
     rollout_grads = {term: np.zeros((rollouts, n_params), dtype=np.float32) for term in TERMS}
     # Carrés de norme des gradients de mini-lots : (K, M) par terme et par groupe.
     mb_sq = {term: {g: np.zeros((rollouts, n_minibatches)) for g in group_names} for term in TERMS}
-    # Balayage λ : gradient policy (K, D) et carrés de norme des mini-lots (K, M) par λ.
-    sweep_grads = {lam: np.zeros((rollouts, n_params), dtype=np.float32) for lam in gae_lambdas}
-    sweep_mb_sq = {lam: np.zeros((rollouts, n_minibatches)) for lam in gae_lambdas}
+    # Balayage λ : gradient policy (K, D) et carrés de norme des mini-lots (K, M) par λ
+    # supplémentaire ; au λ du modèle ce sont `rollout_grads["policy"]` / `mb_sq["policy"]["all"]`.
+    sweep_grads = {lam: np.zeros((rollouts, n_params), dtype=np.float32) for lam in extra_lambdas}
+    sweep_mb_sq = {lam: np.zeros((rollouts, n_minibatches)) for lam in extra_lambdas}
     delta_var = DeltaVarianceAccumulator()
     rollout_log: List[Dict[str, Any]] = []
     acceptance: Dict[str, Any] = {}
@@ -1210,15 +1161,21 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         last_dones = np.asarray(model._last_episode_starts, dtype=bool).reshape(n_envs).copy()
         with th.no_grad():
             last_values = model.policy.predict_values(obs_as_tensor(model._last_obs, model.device)).cpu().numpy().reshape(n_envs)
-        # Le GAE recalculé doit reproduire SB3 sur CE rollout, sinon rien du balayage ne vaut.
+        # Le GAE recalculé (last_values / last_dones reconstruits) doit reproduire le buffer de
+        # CE rollout au λ du modèle, sinon rien du balayage ne vaut.
         adv_check, ret_check = gae_advantages(rewards_tn, values_tn, episode_starts, last_values, last_dones, gamma, model_lambda)
         gae_gap = float(np.max(np.abs(adv_check - np.asarray(buf.advantages).reshape(n_steps, n_envs))))
         ret_gap = float(np.max(np.abs(ret_check - np.asarray(buf.returns).reshape(n_steps, n_envs))))
         if gae_gap > GAE_ATOL or ret_gap > GAE_ATOL:
             raise RuntimeError(
-                f"rollout {k} : GAE recalculé ≠ SB3 à λ = {model_lambda} (écart max avantages {gae_gap:.3g}, "
+                f"rollout {k} : GAE recalculé ≠ buffer à λ = {model_lambda} (écart max avantages {gae_gap:.3g}, "
                 f"retours {ret_gap:.3g} > {GAE_ATOL})"
             )
+        # Avantages des λ supplémentaires, aplatis comme le buffer, indexés par la même permutation.
+        sweep_adv_flat = {
+            lam: swap_and_flatten(gae_advantages(rewards_tn, values_tn, episode_starts, last_values, last_dones, gamma, lam)[0])
+            for lam in extra_lambdas
+        }
         returns_tn, valid_tn = outcome_returns(episode_starts, dones, outcome_at_done, gamma)
         returns_flat = swap_and_flatten(returns_tn)
         valid_flat = swap_and_flatten(valid_tn)
@@ -1239,6 +1196,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         np.random.seed(seed_k)
         model.policy.set_training_mode(True)
         acc = {term: th.zeros(n_params, device=model.device, dtype=th.float32) for term in TERMS}
+        acc_sweep = {lam: th.zeros(n_params, device=model.device, dtype=th.float32) for lam in extra_lambdas}
         mb0_norms: Dict[str, float] = {}
         t1 = time.perf_counter()
         for m, rollout_data in enumerate(buf.get(batch_size)):
@@ -1255,31 +1213,27 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
                 outcome_adv = (raw - mean) / (std + 1e-8) * valid
             else:
                 outcome_adv = th.zeros_like(raw)
-            losses = minibatch_term_losses(model, rollout_data, outcome_adv, valid)
-            for t_i, term in enumerate(TERMS):
-                g = flat_grad(losses[term], params, retain_graph=t_i < len(TERMS) - 1)
-                acc[term] += g
+            sweep_adv_mb = {lam: th.as_tensor(adv[idx], device=model.device) for lam, adv in sweep_adv_flat.items()}
+            losses = minibatch_term_losses(model, rollout_data, outcome_adv, valid, sweep_adv_mb)
+            # Une seule passe avant, un backward par terme puis par λ supplémentaire.
+            backward = [(term, losses[term]) for term in TERMS] + list(losses["policy_sweep"].items())
+            for b_i, (key, loss) in enumerate(backward):
+                g = flat_grad(loss, params, retain_graph=b_i < len(backward) - 1)
+                if key in acc_sweep:
+                    acc_sweep[key] += g
+                    sweep_mb_sq[key][k, m] = group_sq_norms(g, {})["all"]  # « all » seul
+                    continue
+                acc[key] += g
                 norms = group_sq_norms(g, groups)
                 for gname in group_names:
-                    mb_sq[term][gname][k, m] = norms[gname]
+                    mb_sq[key][gname][k, m] = norms[gname]
                 if m == 0:
-                    mb0_norms[term] = float(np.sqrt(norms["all"]))
+                    mb0_norms[key] = float(np.sqrt(norms["all"]))
         for term in TERMS:
             rollout_grads[term][k] = (acc[term] / n_minibatches).cpu().numpy()
-        del acc
-
-        # Balayage λ : avantages/retours recalculés posés dans le buffer (déjà aplati par le
-        # premier `get()`), même permutation ; au λ du modèle le gradient est celui ci-dessus.
-        for lam in gae_lambdas:
-            if lam == model_lambda:
-                sweep_grads[lam][k] = rollout_grads["policy"][k]
-                sweep_mb_sq[lam][k] = mb_sq["policy"]["all"][k]
-                continue
-            adv_l, ret_l = gae_advantages(rewards_tn, values_tn, episode_starts, last_values, last_dones, gamma, lam)
-            set_buffer_advantages(buf, adv_l, ret_l)
-            sweep_grads[lam][k], sweep_mb_sq[lam][k] = _policy_rollout_grad(
-                model, buf, batch_size, perm, seed_k, params, n_params
-            )
+        for lam in extra_lambdas:
+            sweep_grads[lam][k] = (acc_sweep[lam] / n_minibatches).cpu().numpy()
+        del acc, acc_sweep
         model.policy.set_training_mode(False)
         t_grad = time.perf_counter() - t1
 
@@ -1354,7 +1308,8 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None],
         )
     verdict = apply_rule(terms_out["policy"]["all"])
     lambda_sweep = lambda_sweep_stats(
-        {lam: gram_matrix(sweep_grads[lam]) for lam in gae_lambdas}, sweep_mb_sq, batch_steps
+        {model_lambda: grams["policy"]["all"], **{lam: gram_matrix(sweep_grads[lam]) for lam in extra_lambdas}},
+        {model_lambda: mb_sq["policy"]["all"], **sweep_mb_sq}, batch_steps,
     )
     lambda_sweep["model_lambda"] = model_lambda
     return {
@@ -1444,7 +1399,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--workdir", default=None, help="dossier de travail (logger SB3) ; temporaire sinon")
     parser.add_argument("--out", default=None, help="JSON de résultat (défaut : <workdir>/grad_signal_probe.json)")
     parser.add_argument("--gae-lambdas", default=DEFAULT_GAE_LAMBDAS,
-                        help="λ recalculés a posteriori sur chaque rollout (appairés) ; γ n'est pas balayé")
+                        help="λ SUPPLÉMENTAIRES recalculés a posteriori sur chaque rollout (appairés), "
+                             "en plus du λ du modèle ; γ n'est pas balayé")
     parser.add_argument("--model", default=None,
                         help="zip d'un modèle de CONTRÔLE sondé dans le même env, avec son pkl compagnon")
     parser.add_argument("--opponent-deterministic", action="store_true",
@@ -1454,7 +1410,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.rollouts < 3:
         parser.error("--rollouts ≥ 3 (jackknife)")
-    gae_lambdas = parse_gae_lambdas(args.gae_lambdas)
+    extra_gae_lambdas = parse_gae_lambdas(args.gae_lambdas)
 
     def log(message: str) -> None:
         print(message, flush=True)
@@ -1476,11 +1432,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         opponent_deterministic=args.opponent_deterministic, random_init_seed=args.random_init,
     )
     ctx["workdir"] = workdir
-    from ai.vec_normalize_utils import get_vec_normalize_path
-
+    gae_lambdas = sweep_lambdas(float(ctx["model"].gae_lambda), extra_gae_lambdas)
     guarded = [
-        Path(ctx["canonical_path"]), Path(get_vec_normalize_path(ctx["canonical_path"])),
-        Path(ctx["model_path"]), Path(ctx["vec_normalize_path"]),
+        *dict.fromkeys(Path(ctx[key]) for key in (
+            "canonical_path", "canonical_vec_normalize_path", "model_path", "vec_normalize_path",
+        )),
         *sorted((PROJECT_ROOT / "config" / "agents" / args.agent).glob("*.json")),
     ]
     before = snapshot_mtimes(guarded)
@@ -1494,7 +1450,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f"λ balayés {gae_lambdas}, acceptation {'plomberie' if ctx['plumbing_only'] else 'référence'}"
     )
     try:
-        result = measure(ctx, args.rollouts, log, args.permutation_seed, gae_lambdas)
+        result = measure(ctx, args.rollouts, log, args.permutation_seed, extra_gae_lambdas)
     finally:
         T.close_training_env(ctx["env"], "fin de sonde", log)
         T._cleanup_wall_override_temp_dir()

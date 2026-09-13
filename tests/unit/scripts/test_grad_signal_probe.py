@@ -354,6 +354,8 @@ def test_decomposition_de_variance_somme_exacte_globalement_et_par_famille():
     assert rare["n"] == 1 and rare["mean_reward"] == pytest.approx(0.7)
     assert all(np.isnan(rare[k]) for k in ("var_reward", "var_delta_v", "cov", "var_delta", "share_reward"))
     assert acc.result()["all"]["n"] == r.size + 1
+    with pytest.raises(ValueError):
+        acc.add(np.zeros(0), np.zeros(0), np.zeros(0, dtype=str))
 
 
 def test_parts_de_variance_nan_quand_delta_est_constant_a_l_arrondi_pres():
@@ -445,14 +447,18 @@ def test_resolve_probe_model_charge_le_controle_avec_son_pkl_et_resout_les_liens
         resolve_probe_model(str(canonical), str(control))  # pas de repli sur un autre pkl
 
 
-def test_parse_gae_lambdas():
-    from scripts.grad_signal_probe import DEFAULT_GAE_LAMBDAS, parse_gae_lambdas
+def test_parse_gae_lambdas_et_ancrage_au_lambda_du_modele():
+    from scripts.grad_signal_probe import DEFAULT_GAE_LAMBDAS, parse_gae_lambdas, sweep_lambdas
 
-    assert parse_gae_lambdas(DEFAULT_GAE_LAMBDAS) == [0.95, 0.8, 0.5, 0.2, 0.0]
+    assert parse_gae_lambdas(DEFAULT_GAE_LAMBDAS) == [0.8, 0.5, 0.2, 0.0]
     assert parse_gae_lambdas(" 1, 0.5 ,") == [1.0, 0.5]
     for bad in ("", "1.5", "0.5,0.5", "-0.1"):
         with pytest.raises(ValueError):
             parse_gae_lambdas(bad)
+    # Le λ du modèle est toujours balayé, en tête, quel que soit le profil ; jamais en double.
+    assert sweep_lambdas(0.95, [0.8, 0.5]) == [0.95, 0.8, 0.5]
+    assert sweep_lambdas(0.9, [0.95, 0.9, 0.5]) == [0.9, 0.95, 0.5]
+    assert sweep_lambdas(0.9, []) == [0.9]
 
 
 def test_balayage_lambda_differences_appairees():
@@ -486,43 +492,71 @@ def test_balayage_lambda_differences_appairees():
         lambda_sweep_stats(grams, {0.95: mb_clean}, BATCH_STEPS)
 
 
-def test_set_buffer_advantages_rafraichit_les_copies_gpu_du_buffer_de_production():
+class _TinyPolicy(nn.Module):
+    """Policy jouet : logits et valeur linéaires sur une observation plate, masque appliqué."""
+
+    def __init__(self, obs_dim: int, n_actions: int) -> None:
+        super().__init__()
+        self.pi = nn.Linear(obs_dim, n_actions)
+        self.vf = nn.Linear(obs_dim, 1)
+
+    def evaluate_actions(self, obs, actions, action_masks):
+        import torch as th
+
+        logits = self.pi(obs).masked_fill(~action_masks, -1e9)
+        dist = th.distributions.Categorical(logits=logits)
+        return self.vf(obs).flatten(), dist.log_prob(actions), dist.entropy()
+
+
+def test_pertes_policy_des_lambdas_supplementaires_dans_la_meme_passe_avant():
+    """`policy_sweep[λ]` est EXACTEMENT la perte policy qu'un mini-lot portant ces avantages
+    donnerait (mêmes ratios, même normalisation), et son gradient aussi ; au λ du modèle,
+    avantages identiques → perte identique."""
+    from types import SimpleNamespace
+
     import torch as th
     from gymnasium import spaces
 
-    from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
-    from scripts.grad_signal_probe import set_buffer_advantages
+    from scripts.grad_signal_probe import flat_grad, minibatch_term_losses
 
-    n_steps, n_envs, batch = 10, 4, 8
-    buf = GpuMaskableDictRolloutBuffer(
-        n_steps, spaces.Dict({"a": spaces.Box(-1, 1, (3,))}), spaces.Discrete(5), device="cpu", n_envs=n_envs,
+    th.manual_seed(3)
+    obs_dim, n_actions, batch = 6, 5, 32
+    policy = _TinyPolicy(obs_dim, n_actions)
+    model = SimpleNamespace(
+        policy=policy, action_space=spaces.Discrete(n_actions), clip_range=lambda _p: 0.2,
+        _current_progress_remaining=1.0, normalize_advantage=True, clip_range_vf=None,
+        vf_coef=0.5, ent_coef=0.01, entropy_normalize_by_legal=False,
     )
-    buf.reset()
-    for _ in range(n_steps):
-        buf.add({"a": np.zeros((n_envs, 3), np.float32)}, np.zeros((n_envs, 1)), np.zeros(n_envs),
-                np.zeros(n_envs, bool), th.zeros(n_envs), th.zeros(n_envs), action_masks=np.ones((n_envs, 5), bool))
-    buf.compute_returns_and_advantage(th.zeros(n_envs, 1), np.zeros(n_envs, bool))
-    with pytest.raises(RuntimeError):
-        set_buffer_advantages(buf, np.zeros((n_steps, n_envs)), np.zeros((n_steps, n_envs)))  # pas encore aplati
-    np.random.seed(5)
-    served_before = th.cat([rd.advantages for rd in buf.get(batch)])
-    assert th.equal(served_before, th.zeros(n_steps * n_envs))
-    rng = np.random.default_rng(41)
-    adv = rng.normal(size=(n_steps, n_envs)).astype(np.float32)
-    ret = adv + 1.0
-    set_buffer_advantages(buf, adv, ret)
-    perm = np.random.RandomState(5).permutation(n_steps * n_envs)
-    np.random.seed(5)
-    served = [(rd.advantages, rd.returns) for rd in buf.get(batch)]
-    flat_adv = adv.swapaxes(0, 1).reshape(-1)
-    for m, (a, r) in enumerate(served):
-        idx = perm[m * batch:(m + 1) * batch]
-        # Ce que get() SERT (copie GPU) est bien le nouvel avantage, pas l'ancien.
-        assert th.equal(a, th.as_tensor(flat_adv[idx]))
-        assert th.equal(r, th.as_tensor(flat_adv[idx] + 1.0))
-        assert th.equal(a, buf.to_torch(buf.advantages[idx].flatten()))
-    with pytest.raises(ValueError):
-        set_buffer_advantages(buf, adv[:-1], ret[:-1])
+    obs = th.randn(batch, obs_dim)
+    actions = th.randint(0, n_actions, (batch, 1)).float()
+    masks = th.ones(batch, n_actions, dtype=th.bool)
+    with th.no_grad():
+        _, old_log_prob, _ = policy.evaluate_actions(obs, actions.long().flatten(), action_masks=masks)
+    old_log_prob = old_log_prob + 0.1 * th.randn(batch)  # ratios ≠ 1 : le clip mord
+    adv_model = th.randn(batch)
+    adv_other = th.randn(batch) * 3.0
+
+    def data(advantages):
+        return SimpleNamespace(
+            observations=obs, actions=actions, action_masks=masks, old_log_prob=old_log_prob,
+            advantages=advantages, old_values=th.zeros(batch), returns=th.randn(batch),
+        )
+
+    zeros = th.zeros(batch)
+    params = list(policy.parameters())
+    losses = minibatch_term_losses(model, data(adv_model), zeros, zeros, {0.95: adv_model.clone(), 0.5: adv_other})
+    assert set(losses["policy_sweep"]) == {0.95, 0.5}
+    assert th.equal(losses["policy_sweep"][0.95], losses["policy"])
+    direct = minibatch_term_losses(model, data(adv_other), zeros, zeros)
+    assert direct["policy_sweep"] == {}
+    assert th.equal(losses["policy_sweep"][0.5], direct["policy"])
+    # VERT VACANT : les deux λ donnent des pertes différentes, et leurs gradients aussi.
+    assert not th.equal(losses["policy_sweep"][0.5], losses["policy"])
+    g_sweep = flat_grad(losses["policy_sweep"][0.5], params, retain_graph=True)
+    g_direct = flat_grad(direct["policy"], params, retain_graph=False)
+    g_model = flat_grad(losses["policy"], params, retain_graph=False)
+    assert th.allclose(g_sweep, g_direct, atol=1e-7) and g_sweep.abs().max() > 0
+    assert not th.allclose(g_sweep, g_model)
 
 
 def test_reset_policy_parameters_change_tout_et_est_reproductible():
