@@ -426,7 +426,7 @@ log-prob 1,7 × 10⁻⁴).
       §0-4 et [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) ;
       implémentation indépendante (session 40k-a2) concordante, contrôle synthétique f = 0,667
       (plafond de l'instrument).
-- Observation : une passe `--random-init` sur trois tuée par le moteur (`engine/w40k_core.py:8703`,
+- Observation : une passe `--random-init` sur trois tuée par le moteur (`engine/w40k_core.py::_process_squad_action`, levée « execute_squad_move a échoué »,
   incohérence masque/exécution « collision intra-plan » pendant un tour bot) — état atteint par
   une politique aléatoire seulement ; bug hors chantier, consigné.
 
