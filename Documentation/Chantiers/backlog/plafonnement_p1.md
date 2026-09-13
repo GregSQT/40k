@@ -64,6 +64,8 @@ buffer au-delà de la moitié de la mémoire libre (le « 44 Go qui tuaient la V
 KL à ~15 pas couvre alors une epoch entière du rollout, et la prédiction f ≈ 0,18 porte sur le
 gradient du rollout complet (32 640), pas sur la taille du mini-lot.
 
+**Décision prise le 2026-09-13 : ce run est lancé (prompt dans ROADMAP_INDEX, bloc plafonnement).**
+
 **Si ça ne bouge pas.** Le levier « réglages » est épuisé. Il faut alors changer la façon dont
 l'agent reçoit son conseil : soit une tête « Q » qui moyenne les dés (quelques jours de code),
 soit l'entraînement par recherche (MCTS, plusieurs semaines, chantier gelé après J3). C'est
@@ -575,6 +577,18 @@ qui changent l'arbitrage ci-dessus.**
 C — S14 / S15 sans passer par le levier. Recommandation A : la prédiction repose sur une identité
 vérifiée sur les données, B confirmerait ce que les nombres disent déjà, et C engage des semaines
 sans savoir si un changement de config suffisait.
+
+**DÉCISION (utilisateur, 2026-09-13) : A — run P1 avec S23** (`gae_lambda` 0,2, `n_steps`
+32 640, `batch_size` 2 040 dans `x1_lineage`, rien d'autre), 30 000 épisodes d'étape jugés sur
+`03_selfplay/P0` contre le plat à 0,59 du run de référence. Règle écrite avant le run :
+moyenne de `03_selfplay/P0` sur les épisodes d'étape 20 000–30 000 ≥ 0,65, ou promotion par la
+sonde (`pool_eval/vs_P0_3ep` ≥ 0,65) → S23 fonctionne, la lignée reprend sous ce profil (il
+s'applique à toutes les étapes reprises) ; entre 0,62 et 0,65 et courbe montante → laisser
+courir jusqu'à 60 000 ; < 0,62 et plate → levier config épuisé, ouvrir l'arbitrage S14 / S15.
+Plomberie vérifiée avant : `_apply_curriculum_model_params` (ai/train.py) pose `gae_lambda`,
+`batch_size` et `n_steps` sur le modèle repris et reconstruit le buffer avec le nouveau λ
+(`recreate_rollout_buffer`, inconditionnel) ; `n_steps` est converti par env avant le
+chargement (32 640 → 1 360 × 24). Résultat à consigner en §5.9.
 
 ---
 
