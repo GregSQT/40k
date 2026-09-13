@@ -1838,7 +1838,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # côté SHOT comme côté FOUGHT).
                         if phase in _LETHAL_PHASES:
                             state.unit_deaths.append((turn, phase, _dead_uid, state.line_number))
-                            state.unit_kill_context[_dead_uid] = (None, turn, phase)
                             # 24.08 : `reason=hazard` = blessure mortelle ; si une ligne DEADLY
                             # DEMISE du bloc courant nomme cette escouade, la cause est connue.
                             # Lue par `died_in_own_activation` (fight/shoot) : l'unité qui a
@@ -1849,6 +1848,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 state.unit_death_cause[_dead_uid] = DeathCause(
                                     "deadly_demise", _dd_source, turn, phase, state.line_number
                                 )
+                                # Tueur CONNU : le porteur, déjà mort, n'écrira aucune ligne
+                                # d'attaque. Laisser `None` rendrait la mort revendicable par la
+                                # première attaque tierce de la phase sur ce cadavre
+                                # (`claim_kill_context`), et masquerait « attaque sur unité
+                                # morte » pour toute cette activation.
+                                state.unit_kill_context[_dead_uid] = (_dd_source, turn, phase)
+                            else:
+                                state.unit_kill_context[_dead_uid] = (None, turn, phase)
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
                         _prm.discard(_dead_mid)
