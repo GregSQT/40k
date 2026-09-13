@@ -1,23 +1,28 @@
 """§24.08 DEADLY DEMISE — mécanisme générique dans destroy_model.
 
-PDF 24.08 : « When a model with this ability is destroyed, before removing it from play (and
-before making any Emergency Disembark rolls), roll one D6: on a 6, each unit within 6" of it
-suffers a number of mortal wounds as detailed in the ability's entry. »
+PDF 24.08 : « Each time a model in this unit is destroyed, after the units embarked within it
+(if any) have made their emergency disembark moves, roll one D6. On a 6, that model suffers a
+deadly demise; each unit within 6" of that model suffers a number of mortal wounds denoted by X ».
 
-Ce test couvre le MECANISME uniquement (chantier en cours). La valeur `deadly_demise` sur les
-datasheets sera câblée par le chantier 06 (actuellement absente de tous les rosters).
+Ability CORE, propre à la figurine qui la porte (décision du 2026-09-13, couverture_regles.md
+§ Attached Units) : la règle se lit sur `models_cache[mid]["UNIT_RULES"]` de la figurine
+détruite, jamais sur l'union 19.04 de l'escouade — un Boy mené par un WeirdBoy n'explose pas.
 
 Discrimination verrouillee :
 - deadly_demise présente + D6=6 → action_log contient une entrée deadly_demise par unité dans 6"
 - deadly_demise présente + D6=1 → action_log contient une entrée deadly_demise (d6Roll=1) mais
   deadlyDemiseWounds=0 et pas d'allocation
 - deadly_demise absente → aucune entrée deadly_demise dans action_log
+- WeirdBoy replié dans des Boyz : Boy détruit → 0 jet (WeirdBoy vivant ou mort), WeirdBoy → 1 jet
 """
 import random
 import pytest
 
 from engine.phase_handlers.shared_utils import destroy_model
 from tests._state_invariants import unit_invariants
+from tests.unit.engine._config_helpers import load_engine_from_scenario
+
+_DD_RULE_1 = {"ruleId": "deadly_demise", "displayName": "Deadly Demise 1", "rule_args": {"value": 1}}
 
 
 # ── game_state minimal pour destroy_model ────────────────────────────────────
@@ -27,9 +32,11 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
     (target_col, target_row).  inches_to_subhex=5 => 6" = 30 subhex.
     """
     ish = 5
+    # La règle est portée par LA FIGURINE (règles propres de sa datasheet), pas par l'escouade.
     src_model = {
         "col": 0, "row": 0, "level": 0, "player": 1, "squad_id": "SRC",
         "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "UNIT_RULES": [_DD_RULE_1] if with_deadly_demise else [],
     }
     src_uc: dict = {
         "col": 0, "row": 0, "player": 1, "HP_CUR": 1,
@@ -40,8 +47,6 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
         "level_by_model": {"SRC#0": 0},
         "MODEL_HEIGHT": 2.0,
     }
-    if with_deadly_demise:
-        src_uc["deadly_demise"] = 1
 
     tgt_uc = {
         "col": target_col, "row": target_row, "player": 2, "HP_CUR": 2,
@@ -66,6 +71,7 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
     tgt_model = {
         "col": target_col, "row": target_row, "level": 0, "player": 2, "squad_id": "TGT",
         "HP_CUR": 2, "HP_MAX": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "UNIT_RULES": [],
     }
     return {
         "units": units,
@@ -188,6 +194,7 @@ def _gs_multi(*, n_targets: int = 3):
     src_model = {
         "col": 0, "row": 0, "level": 0, "player": 1, "squad_id": "SRC",
         "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "UNIT_RULES": [_DD_RULE_1],
     }
     src_uc: dict = {
         "col": 0, "row": 0, "player": 1, "HP_CUR": 1,
@@ -197,7 +204,6 @@ def _gs_multi(*, n_targets: int = 3):
         "floor_height_by_model": {"SRC#0": 0.0},
         "level_by_model": {"SRC#0": 0},
         "MODEL_HEIGHT": 2.0,
-        "deadly_demise": 1,
     }
     units_cache: dict = {"SRC": src_uc}
     squad_models: dict = {"SRC": ["SRC#0"]}
@@ -208,6 +214,7 @@ def _gs_multi(*, n_targets: int = 3):
         models_cache[f"{uid}#0"] = {
             "col": col, "row": 0, "level": 0, "player": 2, "squad_id": uid,
             "HP_CUR": 2, "HP_MAX": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            "UNIT_RULES": [],
         }
         units_cache[uid] = {
             "col": col, "row": 0, "player": 2, "HP_CUR": 2,
@@ -308,94 +315,81 @@ def test_dd_mutation_verrou(monkeypatch):
     # Cas controle : sans deadly_demise -> 0 log (baseline de la mutation)
     gs_no = _gs(with_deadly_demise=False, target_col=5, target_row=0)
     destroy_model(gs_no, "SRC#0", reason="combat")
-    assert not _dd_logs(gs_no), "baseline : sans la cle, 0 log"
+    assert not _dd_logs(gs_no), "baseline : sans la regle, 0 log"
 
     # Cas actif : avec deadly_demise -> >= 1 log (echoue si le bloc est retire)
     gs_yes = _gs(with_deadly_demise=True, target_col=5, target_row=0)
     destroy_model(gs_yes, "SRC#0", reason="combat")
-    assert _dd_logs(gs_yes), "avec la cle, le log doit apparaitre — echoue si le bloc est mute"
+    assert _dd_logs(gs_yes), "avec la regle, le log doit apparaitre — echoue si le bloc est mute"
 
 
-# ── câblage roster → build_units_cache ───────────────────────────────────────
+# ── portée FIGURINE : WeirdBoy (CORE Deadly Demise D3) replié dans des Boyz ──────────────
+#
+# Fold réel du moteur (`_build_enhanced_unit`, modèle inline avec rôle leader → source
+# `_inline_…`, règles dans `_ATTACHED_RULE_GROUPS`) : l'union 19.04 de l'escouade PORTE
+# deadly_demise tant que le WeirdBoy vit — c'est exactement ce que le moteur ne doit PAS lire.
 
-from typing import Any, Dict
+_ENGINE_OVERRIDES = {"controlled_agent": "ArmageddonAgent_x1", "rewards_config": "ArmageddonAgent_x1"}
 
 
-def _unit(*, unit_id: str, col: int, row: int, with_dd_rule: bool, dd_value: Any = "D3") -> Dict[str, Any]:
-    """Unité minimale compatible avec build_units_cache."""
-    unit_rules: list[Dict[str, Any]] = [{"ruleId": "leader", "displayName": "Leader"}]
-    if with_dd_rule:
-        unit_rules.append({
-            "ruleId": "deadly_demise",
-            "displayName": "Deadly Demise D3",
-            "rule_args": {"value": dd_value},
-        })
+def _boyz_weirdboy_scenario():
     return {
-        "id": unit_id,
-        "col": col, "row": row, "level": 0,
-        "HP_CUR": 4, "HP_MAX": 4, "VALUE": 65, "OC": 1,
-        "T": 5, "ARMOR_SAVE": 5, "INVUL_SAVE": 7,
-        "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
-        "RNG_WEAPONS": [], "CC_WEAPONS": [],
-        "BASE_SHAPE": "round", "BASE_SIZE": 20,
-        "MODEL_HEIGHT": 2.5, "MOVE": 6,
-        "UNIT_RULES": unit_rules,
-        "player": 1,
-        "orientation": 0,
-    }
-
-
-def _build_gs(*units):
-    from engine.phase_handlers.shared_utils import build_units_cache
-    gs = {
-        "units": list(units),
-        "unit_by_id": {str(u["id"]): u for u in units},
-        "config": {
-            "game_rules": {
-                "engagement_zone": 2,
-                "max_base_size_hex": 12,
-                "unit_model_cohesion_range": 2,
-                "unit_global_cohesion_range": 9,
-                "squad_min_neighbors": 1,
-                "cohesion_distance_mode": "euclidean",
-                "plunging_fire_height": 3,
+        "board_ref": "44x60x5",
+        "primary_objectives": ["objectives_control"],
+        "wall_ref": "walls-none.json",
+        "army_faction": {"1": "TYRANIDS", "2": "ORKS"},
+        "units": [
+            {"id": 1, "unit_type": "Hormagaunt", "player": 1, "col": 3, "row": 3},
+            {
+                "id": 101, "unit_type": "Boyz", "player": 2, "col": 12, "row": 10,
+                "models": [
+                    {"col": 12, "row": 10},
+                    {"col": 13, "row": 10},
+                    {"unit_type": "WeirdBoy", "col": 14, "row": 10},
+                ],
             },
-        },
-        "board_cols": 44, "board_rows": 44,
-        "wall_hexes": set(),
-        "terrain_areas": [],
-        "inches_to_subhex": 5,
-        "_unit_move_version": 0,
+        ],
     }
-    build_units_cache(gs)
-    return gs
 
 
-def test_build_units_cache_pose_deadly_demise_depuis_unit_rules():
-    """build_units_cache doit écrire units_cache[id]['deadly_demise'] = 'D3' si la règle est déclarée."""
-    gs = _build_gs(_unit(unit_id="W", col=0, row=0, with_dd_rule=True, dd_value="D3"))
-    assert gs["units_cache"]["W"].get("deadly_demise") == "D3", (
-        "La clé 'deadly_demise' doit valoir 'D3' quand UNIT_RULES la déclare"
-    )
+def _load_boyz_weirdboy():
+    engine = load_engine_from_scenario(_boyz_weirdboy_scenario(), engine_overrides=_ENGINE_OVERRIDES)
+    gs = engine.game_state
+    mc = gs["models_cache"]
+    mids = gs["squad_models"]["101"]
+    weirdboy = [m for m in mids if mc[m].get("unitType") == "WeirdBoy"]
+    boyz = [m for m in mids if mc[m].get("unitType") != "WeirdBoy"]
+    assert len(weirdboy) == 1 and len(boyz) == 2, "fold réel attendu : 2 Boyz + 1 WeirdBoy"
+    # VERT VACANT : l'union d'escouade porte bien la règle (c'est la donnée piégeuse).
+    assert any(r["ruleId"] == "deadly_demise" for r in gs["unit_by_id"]["101"]["UNIT_RULES"])
+    return gs, weirdboy[0], boyz
 
 
-def test_build_units_cache_pas_de_cle_sans_regle():
-    """Sans deadly_demise dans UNIT_RULES, la clé ne doit pas exister dans units_cache."""
-    gs = _build_gs(_unit(unit_id="U", col=0, row=0, with_dd_rule=False))
-    assert "deadly_demise" not in gs["units_cache"]["U"], (
-        "La clé 'deadly_demise' ne doit PAS être présente si la règle est absente"
-    )
+def test_dd_boy_mene_par_weirdboy_vivant_n_explose_pas(monkeypatch):
+    """Boy détruit, WeirdBoy vivant dans l'escouade → aucun jet 24.08 (règle propre au WeirdBoy)."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    gs, _wb, boyz = _load_boyz_weirdboy()
+    destroy_model(gs, boyz[0], reason="combat")
+    assert _dd_logs(gs) == [], "un Boy ne porte pas Deadly Demise : 0 jet, WeirdBoy vivant ou non"
 
 
-def test_build_units_cache_mutation_verrou():
-    """Verrou mutation : retire la règle → clé absente ; la remet → clé présente.
+def test_dd_boy_apres_mort_du_weirdboy_n_explose_pas(monkeypatch):
+    """WeirdBoy détruit (jet raté) puis Boy détruit → le Boy ne déclenche rien (aucune clé d'escouade rémanente)."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+    gs, wb, boyz = _load_boyz_weirdboy()
+    destroy_model(gs, wb, reason="combat")
+    assert len(_dd_logs(gs)) == 1 and _dd_logs(gs)[0]["d6Roll"] == 1
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    destroy_model(gs, boyz[0], reason="combat")
+    assert len(_dd_logs(gs)) == 1, "le Boy détruit après le WeirdBoy ne doit produire aucun jet"
 
-    Prouve que build_units_cache LIT effectivement UNIT_RULES et n'ignore pas la branche.
-    """
-    # Défaut injecté : without rule → clé absente (baseline)
-    gs_no = _build_gs(_unit(unit_id="X", col=0, row=0, with_dd_rule=False))
-    assert "deadly_demise" not in gs_no["units_cache"]["X"], "baseline : sans règle, clé absente"
 
-    # Fix rétabli : with rule → clé présente (échoue si la branche est retirée)
-    gs_yes = _build_gs(_unit(unit_id="X", col=0, row=0, with_dd_rule=True, dd_value=1))
-    assert gs_yes["units_cache"]["X"].get("deadly_demise") == 1, "avec règle, clé doit valoir 1"
+def test_dd_weirdboy_attache_detruit_explose(monkeypatch):
+    """WeirdBoy détruit dans l'escouade → UN jet 24.08, source = l'escouade attachée (101)."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    gs, wb, _boyz = _load_boyz_weirdboy()
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    destroy_model(gs, wb, reason="combat")
+    logs = _dd_logs(gs)
+    assert logs and all(e["sourceUnitId"] == "101" and e["d6Roll"] == 6 for e in logs)

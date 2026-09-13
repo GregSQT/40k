@@ -84,22 +84,22 @@ def _gs() -> Dict[str, Any]:
         "models_cache": {
             ANCHOR_MID: {
                 "col": ANCHOR_POS[0], "row": ANCHOR_POS[1], "level": 0,
-                "player": 1, "squad_id": SQUAD_ID, "HP_CUR": 1,
+                "player": 1, "squad_id": SQUAD_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
             SURVIVOR_ANCHOR_MID: {
                 "col": SURVIVOR_ANCHOR_POS[0], "row": SURVIVOR_ANCHOR_POS[1], "level": 0,
-                "player": 1, "squad_id": SQUAD_ID, "HP_CUR": 1,
+                "player": 1, "squad_id": SQUAD_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
             REMOTE_MID: {
                 "col": REMOTE_POS[0], "row": REMOTE_POS[1], "level": 0,
-                "player": 1, "squad_id": SQUAD_ID, "HP_CUR": 1,
+                "player": 1, "squad_id": SQUAD_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
             "2#0": {
                 "col": ENEMY_POS[0], "row": ENEMY_POS[1], "level": 0,
-                "player": 2, "squad_id": ENEMY_ID, "HP_CUR": 1,
+                "player": 2, "squad_id": ENEMY_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
         },
@@ -300,22 +300,22 @@ def _gs_222() -> Dict[str, Any]:
         "models_cache": {
             "1#0": {
                 "col": 22, "row": 25, "level": 0,
-                "player": 1, "squad_id": _CHARGER_ID, "HP_CUR": 1,
+                "player": 1, "squad_id": _CHARGER_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
             "105#0": {
                 "col": 20, "row": 28, "level": 0,
-                "player": 2, "squad_id": _TARGET_ID, "HP_CUR": 1,
+                "player": 2, "squad_id": _TARGET_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
             "105#1": {
                 "col": 21, "row": 28, "level": 0,
-                "player": 2, "squad_id": _TARGET_ID, "HP_CUR": 1,
+                "player": 2, "squad_id": _TARGET_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
             "105#2": {
                 "col": 22, "row": 28, "level": 0,
-                "player": 2, "squad_id": _TARGET_ID, "HP_CUR": 1,
+                "player": 2, "squad_id": _TARGET_ID, "UNIT_RULES": [], "HP_CUR": 1,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
             },
         },

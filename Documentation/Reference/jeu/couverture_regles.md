@@ -209,7 +209,12 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Ability stops on last leader model destroyed | 19.04 | ✅ |
 | **Core abilities (PDF 24) are NOT conferred to the attached unit** | 19.04 + Rules Commentary | ⚠️ décision |
 
-**Décision du 2026-09-13 (utilisateur) — Core abilities et 19.04.** Les abilities CORE (celles du PDF 24 : Deadly Demise 24.08, Deep Strike 24.09, Feel No Pain 24.12, …) ne se transmettent PAS à l'unité attachée par 19.04 : elles restent propres au(x) modèle(s) dont la datasheet les porte. Source : Rules Commentary GW, **absent de `Documentation/40k_rules/`** (vérifié le 2026-09-13 : aucun des 25 PDF n'énonce cette exclusion ; lu littéralement, 19.04 « abilities/rules that affect a unit (or models in it) apply to every model in an attached unit » l'aurait conférée). Conséquence concrète : un Boy mené par un WeirdBoy (Deadly Demise D3) n'explose pas ; seul le WeirdBoy explose. L'analyzer juge donc 24.08 sur le socle DÉTRUIT (`ai/analyzer_rules.py`, `judged_mids`), et le moteur doit lire la règle sur la figurine détruite, pas sur l'union d'escouade (défaut ouvert, cf. ROADMAP suite 119). Toute règle CORE lue par le moteur via `unit["UNIT_RULES"]` (union 19.04) est suspecte — audit à part.
+**Décision du 2026-09-13 (utilisateur) — Core abilities et 19.04.** Les abilities CORE (celles du PDF 24 : Deadly Demise 24.08, Deep Strike 24.09, Feel No Pain 24.12, …) ne se transmettent PAS à l'unité attachée par 19.04 : elles restent propres au(x) modèle(s) dont la datasheet les porte. Source : Rules Commentary GW, **absent de `Documentation/40k_rules/`** (vérifié le 2026-09-13 : aucun des 25 PDF n'énonce cette exclusion ; lu littéralement, 19.04 « abilities/rules that affect a unit (or models in it) apply to every model in an attached unit » l'aurait conférée). Conséquence concrète : un Boy mené par un WeirdBoy (Deadly Demise D3) n'explose pas ; seul le WeirdBoy explose. L'analyzer juge 24.08 sur le socle DÉTRUIT (`ai/analyzer_rules.py`, `judged_mids`) et le moteur lit la règle sur la figurine détruite (`_get_deadly_demise_value`, `shared_utils.py` — ROADMAP suite 120).
+
+**Critère complet de portée (audit du 2026-09-13, datasheets d'Armageddon relues) :**
+- **Ligne CORE** de la datasheet (Deadly Demise, Deep Strike, Leader…) : propre aux figurines de cette datasheet, jamais conférée (décision ci-dessus). Moteur : `models_cache[mid]["UNIT_RULES"]` (`unit_has_deep_strike`, `_get_deadly_demise_value`).
+- **Ability nommée « This unit has … »** (Dok's Toolz FNP 5+, Psychic Hood, Mental Fortress, Waaagh! Banner, Relic Banner, Might Is Right, Breakin' Heads) : affecte l'unité → conférée à toute l'escouade attachée par 19.04, jusqu'à la mort de sa source. Moteur : union `unit["UNIT_RULES"]`. Le ruleId `feel_no_pain` n'est PAS une exception : il modélise Dok's Toolz, une ability de datasheet d'unité — le tableau « Feel No Pain (PainBoy → Boyz) ✅ » plus bas est juste.
+- **Ability nommée « this model … »** (Unbreakable Resolve « While this model is within range… it has Feel No Pain 4+ », Da Biggest and da Best, Finest Hour, Waaagh! Energy) : 19.04 première clause, « only ever apply to that model » → le porteur seul, à SA position. Moteur : règles propres de la figurine (`_collect_fnp_thresholds*(…, model_id=)`, `_model_is_near_objective_or_center`, `fight_handlers` pour les bonus de mêlée).
 
 ---
 
@@ -419,6 +424,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | Mortal Wounds + Hazard | 06.02–06.03 | ✅ |
 | Allocation manuelle + priorité personnage | 05.03 | ✅ |
 | Feel No Pain (PainBoy → Boyz) | 24.12 | ✅ |
+| Unbreakable Resolve (Ancient seul, à SA position — pas l'escouade menée) | 24.12 + 19.04 1re clause | ✅ |
 | RAPID FIRE, SUSTAINED HITS, EXTRA ATTACKS | 24.30, 24.36, 24.11 | ✅ |
 | PRECISION | 24.28 | ✅ |
 | Deadly Demise (LandSpeeder, WarTrakk) | 24.08 | ✅ |

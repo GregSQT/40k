@@ -1244,11 +1244,6 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         # « dégénère » plus en 2D — elle fait lever `_vertical_classes` au premier test d'engagement.
         # L'invariant s'établit donc ici, à l'écriture unique, et pas aux dizaines de lectures.
         units_cache[unit_id]["MODEL_HEIGHT"] = float(require_key(unit, "MODEL_HEIGHT"))
-        # §24.08 DEADLY DEMISE — valeur X (int ou str dé) lue depuis UNIT_RULES.rule_args.value.
-        # Clée présente uniquement si la règle est déclarée ; absente = mécanisme inactif dans destroy_model.
-        _dd_val = _get_deadly_demise_value(unit)
-        if _dd_val is not None:
-            units_cache[unit_id]["deadly_demise"] = _dd_val
         # Per-model visual meta (icône + échelle + forme/taille de base) : exposé
         # au frontend uniquement pour les escouades hétérogènes (au moins une
         # figurine dont le profil visuel diffère de l'unité parente, ex.
@@ -2639,6 +2634,19 @@ def _get_unit_rule_arg(
     )
 
 
+def _model_rules_view(game_state: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+    """Vue « unité » d une FIGURINE pour les accesseurs de règles (`_get_unit_rule_arg`…).
+
+    Une entrée `models_cache` porte ses règles PROPRES (`UNIT_RULES`, celles de SA datasheet —
+    `build_models_cache`), jamais l union 19.04 de l escouade. Les accesseurs lisent
+    `UNIT_RULES` et nomment `id` dans leurs erreurs : la vue fournit les deux, sans copier
+    les règles. `UNIT_RULES` est EXIGÉ : toute figurine construite par `_build_enhanced_unit`
+    la porte ; son absence est un état de figurine incomplet, pas « aucune règle ».
+    """
+    model = require_key(game_state, "models_cache")[model_id]
+    return {"id": model_id, "UNIT_RULES": require_key(model, "UNIT_RULES")}
+
+
 def _get_fnp_threshold_for_rule(unit: Dict[str, Any], rule_id: str, label: str) -> Optional[int]:
     """Lit et valide le seuil FNP d'une règle donnée (24.12). Lève si mal configurée."""
     raw = _get_unit_rule_arg(unit, rule_id, "threshold", (int,))
@@ -2667,50 +2675,60 @@ def _get_feel_no_pain_near_objective_threshold(unit: Dict[str, Any]) -> Optional
     return _get_fnp_threshold_for_rule(unit, "feel_no_pain_near_objective", "FNP near objective")
 
 
-def _unit_is_near_objective_or_center(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
-    """True si l'unité est à portée d'un objectif (3") ou à 6" du centre (Unbreakable Resolve).
+def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str) -> bool:
+    """True si LA FIGURINE est à portée d'un objectif (3") ou à 6" du centre (Unbreakable Resolve).
 
-    Condition positionnelle de feel_no_pain_near_objective (24.12).
+    Condition positionnelle de feel_no_pain_near_objective (24.12) : « While THIS MODEL is
+    within range of an objective or within 6" of the centre of the battlefield, IT has Feel No
+    Pain 4+ » (datasheet Ancient) — 19.04, première clause : une ability qui désigne une
+    figurine ne s applique qu à elle. C est donc l empreinte de la figurine qui compte, pas
+    celle de l escouade qu elle mène. Hors table ou morte → False.
     """
-    # Lazy import pour eviter le cycle shared_utils ← fight_handlers ← shared_utils.
-    from engine.phase_handlers.fight_handlers import _fight_v11_objectives_within_range  # noqa: PLC0415
-    if _fight_v11_objectives_within_range(game_state, unit, 3):
-        return True
-    ish = int(require_key(game_state, "inches_to_subhex"))
-    center_range = 6 * ish
-    board_cols = int(require_key(game_state, "board_cols"))
-    board_rows = int(require_key(game_state, "board_rows"))
-    center_col = board_cols // 2
-    center_row = board_rows // 2
-    units_cache = require_key(game_state, "units_cache")
-    uid = str(require_key(unit, "id"))
-    entry = units_cache.get(uid)
-    if entry is None or not entry_is_on_battlefield(entry):
-        return False
+    from engine.game_state import iter_living_models_with_footprints, objective_hex_zones  # noqa: PLC0415
     from engine.hex_utils import min_distance_between_sets  # noqa: PLC0415
-    ufp = entry_footprint(entry)
-    return min_distance_between_sets(ufp, {(center_col, center_row)}, max_distance=center_range) <= center_range
+    model = require_key(game_state, "models_cache")[model_id]
+    squad_id = str(require_key(model, "squad_id"))
+    footprint = next(
+        (fp for mid, fp in iter_living_models_with_footprints(game_state, squad_id) if mid == model_id),
+        None,
+    )
+    if footprint is None:
+        return False
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    obj_range = 3 * ish
+    for _oid, hexes in objective_hex_zones(game_state):
+        if min_distance_between_sets(footprint, hexes, max_distance=obj_range) <= obj_range:
+            return True
+    center_range = 6 * ish
+    center = (int(require_key(game_state, "board_cols")) // 2, int(require_key(game_state, "board_rows")) // 2)
+    return min_distance_between_sets(footprint, {center}, max_distance=center_range) <= center_range
 
 
 def _collect_fnp_thresholds(
-    unit: Dict[str, Any], game_state: Dict[str, Any], weapon: Dict[str, Any]
+    unit: Dict[str, Any], game_state: Dict[str, Any], weapon: Dict[str, Any], *, model_id: str
 ) -> List[int]:
-    """Seuils FNP applicables à une blessure normale (tir/mêlée), dans l'ordre de tentative.
+    """Seuils FNP applicables à une blessure normale (tir/mêlée) allouée à `model_id`.
 
     Générique d'abord, puis conditionnel PSYCHIC si l'arme porte le mot-clé, puis conditionnel
-    near_objective si l'unité est à portée d'un objectif ou du centre (24.12).
+    near_objective si la FIGURINE porte la règle et est à portée d'un objectif ou du centre (24.12).
     """
     return _collect_fnp_thresholds_mortal(
-        unit, game_state, is_psychic=weapon_has_rule(weapon, "PSYCHIC")
+        unit, game_state, is_psychic=weapon_has_rule(weapon, "PSYCHIC"), model_id=model_id
     )
 
 
 def _collect_fnp_thresholds_mortal(
-    unit: Dict[str, Any], game_state: Dict[str, Any], *, is_psychic: bool = False
+    unit: Dict[str, Any], game_state: Dict[str, Any], *, is_psychic: bool = False, model_id: str
 ) -> List[int]:
-    """Seuils FNP applicables à une blessure mortelle, dans l'ordre de tentative.
+    """Seuils FNP applicables à une blessure mortelle allouée à `model_id`, dans l'ordre de tentative.
 
     is_psychic=True si la source est une attaque ou capacité PSYCHIC (ex. Da Jump).
+
+    `feel_no_pain` (Dok's Toolz « This unit has Feel No Pain 5+ ») et `feel_no_pain_vs_psychic`
+    (Psychic Hood « This unit has… ») affectent l UNITÉ : lus sur l union 19.04 `unit["UNIT_RULES"]`.
+    `feel_no_pain_near_objective` (Unbreakable Resolve « While THIS MODEL… IT has ») ne vaut que
+    pour la figurine qui la porte (19.04, première clause) : l union dit seulement qu un porteur
+    est dans l escouade, le seuil se lit sur les règles PROPRES de la figurine blessée.
     """
     thresholds: List[int] = []
     th = _get_feel_no_pain_threshold(unit)
@@ -2719,9 +2737,10 @@ def _collect_fnp_thresholds_mortal(
     th_psy = _get_feel_no_pain_vs_psychic_threshold(unit)
     if th_psy is not None and is_psychic:
         thresholds.append(th_psy)
-    th_obj = _get_feel_no_pain_near_objective_threshold(unit)
-    if th_obj is not None and _unit_is_near_objective_or_center(game_state, unit):
-        thresholds.append(th_obj)
+    if _get_feel_no_pain_near_objective_threshold(unit) is not None:
+        th_obj = _get_feel_no_pain_near_objective_threshold(_model_rules_view(game_state, model_id))
+        if th_obj is not None and _model_is_near_objective_or_center(game_state, model_id):
+            thresholds.append(th_obj)
     return thresholds
 
 
@@ -2740,13 +2759,18 @@ def _roll_fnp_sequential(n_wounds: int, thresholds: List[int]) -> int:
     return remaining
 
 
-def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
-    """Retourne la valeur X de Deadly Demise (int ou expression dé comme 'D3'), ou None.
+def _get_deadly_demise_value(game_state: Dict[str, Any], model_id: str) -> Optional[Any]:
+    """Valeur X de Deadly Demise (int ou expression dé comme 'D3') de LA FIGURINE, ou None.
 
-    Lue depuis UNIT_RULES[i].rule_args.value (24.08). Lève si la règle est présente
-    mais mal configurée — aucun repli silencieux.
+    24.08 est une ability CORE : elle est propre aux figurines de la datasheet qui la porte et
+    n est PAS conférée à l escouade par 19.04 (décision du 2026-09-13, couverture_regles.md
+    § Attached Units). Lue sur `models_cache[model_id]["UNIT_RULES"]` — jamais sur l union
+    `unit["UNIT_RULES"]`, dans laquelle un WeirdBoy replié dans des Boyz ferait exploser chaque
+    Boy détruit. Lève si la règle est présente mais mal configurée — aucun repli silencieux.
     """
-    return _get_unit_rule_arg(unit, "deadly_demise", "value", (int, str))
+    return _get_unit_rule_arg(
+        _model_rules_view(game_state, model_id), "deadly_demise", "value", (int, str)
+    )
 
 
 #: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
@@ -4415,8 +4439,7 @@ def _apply_deadly_demise(
     # reussi) : c est lui qui exerce 24.08, et c est ce joueur que l analyzer credite. La valeur
     # `-1` qui vivait ici rendait `P-1` dans step.log, hors de la grammaire `P(\d+)` de toutes les
     # lignes — le jet rate devenait une erreur de parse des que le type a ete journalise. L entree
-    # est encore dans units_cache : `destroy_model` lit `deadly_demise` dessus juste avant et ne la
-    # retire qu APRES cet appel.
+    # est encore dans units_cache : `destroy_model` ne la retire qu APRES cet appel.
     owner_player = _squad_owner_player(game_state, squad_id)
 
     if d6_roll < 6:
@@ -4514,10 +4537,10 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     squad_id = str(model["squad_id"])
     old_col = int(model["col"])
     old_row = int(model["row"])
-    # §24.08 DEADLY DEMISE : lire la valeur de la capacite AVANT suppression (units_cache peut
-    # disparaitre si c est la derniere figurine). La cle est posee par le chantier 06 sur chaque
-    # unite concernee ; absente sur les unites ordinaires = regle inactive, aucun jet.
-    _deadly_demise_val = (game_state["units_cache"].get(squad_id) or {}).get("deadly_demise")
+    # §24.08 DEADLY DEMISE : lue sur LA FIGURINE detruite, AVANT son retrait de models_cache.
+    # Ability CORE, propre a la figurine : un Boy mene par un WeirdBoy n explose pas, le WeirdBoy
+    # explose (attache ou non). None = la figurine ne porte pas la regle, aucun jet.
+    _deadly_demise_val = _get_deadly_demise_value(game_state, model_id)
 
     # 1. Retire du models_cache.
     del game_state["models_cache"][model_id]
@@ -6394,10 +6417,7 @@ def allocate_mortal_wounds(
     sid = str(squad_id)
     remaining = int(n_wounds)
     applied = 0
-    # FNP thresholds constants pour toute l'allocation : la règle et la position de l'escouade
-    # ne changent pas entre blessures mortelles successives.
     _fnp_unit = require_unit_by_id(game_state, sid)
-    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=is_psychic)
     while remaining > 0:
         eligibles = select_eligible_models(game_state, sid)
         if not eligibles:
@@ -6407,6 +6427,11 @@ def allocate_mortal_wounds(
                 "allocate_mortal_wounds: chemin humain non supporté ici "
                 "(utiliser build_manual_hazard_allocation pour le défenseur humain)"
             )
+        # Seuils FNP PAR BLESSURE : la figurine allouée change d une blessure a l autre, et
+        # feel_no_pain_near_objective ne vaut que pour la figurine qui la porte, a SA position.
+        _fnp_ths = _collect_fnp_thresholds_mortal(
+            _fnp_unit, game_state, is_psychic=is_psychic, model_id=eligibles[0]
+        )
         rec = _inflict_one_mortal_wound(game_state, eligibles[0], _fnp_ths, details_sink)
         if not rec.get("fnpSaved"):  # get allowed : absent = blessure non sauvee
             applied += 1
@@ -12038,7 +12063,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     # Feel No Pain (24.12) : jet D6 par HP perdu ; sur threshold+, la blessure est ignorée.
     # Inclut les variantes conditionnelles (PSYCHIC, near_objective) via _collect_fnp_thresholds.
     _def_squad_fnp = require_unit_by_id(game_state, str(batch["target_sid"]))
-    _fnp_ths = _collect_fnp_thresholds(_def_squad_fnp, game_state, require_key(g, "weapon"))
+    _fnp_ths = _collect_fnp_thresholds(_def_squad_fnp, game_state, require_key(g, "weapon"), model_id=cur)
     if _fnp_ths:
         _fnp_attempts = dmg_dealt
         dmg_dealt = _roll_fnp_sequential(dmg_dealt, _fnp_ths)
@@ -12577,7 +12602,7 @@ def _resolve_one_mortal_wound(
     # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
     # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent ici.
     _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
-    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False)
+    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False, model_id=cur)
     rec = _inflict_one_mortal_wound(game_state, cur, _fnp_ths, details)
     _count_mortal_details_in_summary(alloc["summary"], [rec])
     batch["pool_index"] += 1

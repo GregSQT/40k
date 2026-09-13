@@ -60,11 +60,11 @@ def _game_state(target_unit_rules, *, dmg=1, hp=3, sv=2):
         "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun",
     }
     attacker = {
-        "id": "A1", "squad_id": "1", "player": 0, "T": 4,
+        "id": "A1", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4,
         "SHOOT_LEFT": 1, "col": 0, "row": 0, "RNG_WEAPONS": [weapon],
     }
     target = {
-        "id": "T1", "squad_id": "2", "player": 1, "T": 4,
+        "id": "T1", "squad_id": "2", "UNIT_RULES": [], "player": 1, "T": 4,
         "HP_CUR": hp, "HP_MAX": hp, "ARMOR_SAVE": sv, "INVUL_SAVE": 7,
         "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
         "col": 9, "row": 9,
@@ -101,7 +101,7 @@ def _game_state(target_unit_rules, *, dmg=1, hp=3, sv=2):
 def _mw_game_state(target_unit_rules, *, hp=3):
     """État minimal pour allocate_mortal_wounds sur l unité '2' (1 figurine HP1)."""
     target = {
-        "id": "T1", "squad_id": "2", "player": 1,
+        "id": "T1", "squad_id": "2", "UNIT_RULES": [], "player": 1,
         "HP_CUR": 1, "HP_MAX": 1, "col": 5, "row": 5,
     }
     target_unit = {"id": "2", "player": 1, "UNIT_RULES": target_unit_rules}

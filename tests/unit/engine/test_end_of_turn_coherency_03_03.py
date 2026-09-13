@@ -40,7 +40,7 @@ def _gs(positions, squad_id="1", player=1):
     models_cache = {
         mid: {
             "col": int(col), "row": int(row), "level": 0, "player": player,
-            "squad_id": squad_id, "HP_CUR": 1, "HP_MAX": 2,
+            "squad_id": squad_id, "UNIT_RULES": [], "HP_CUR": 1, "HP_MAX": 2,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
         }
@@ -403,7 +403,7 @@ def test_opponent_non_mute_squads_resolved_geometrically():
     for mid, (col, row) in zip(mids2, sq2_positions):
         gs["models_cache"][mid] = {
             "col": col, "row": row, "level": 0, "player": 2,
-            "squad_id": "2", "HP_CUR": 1, "HP_MAX": 2,
+            "squad_id": "2", "UNIT_RULES": [], "HP_CUR": 1, "HP_MAX": 2,
             "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
         }
