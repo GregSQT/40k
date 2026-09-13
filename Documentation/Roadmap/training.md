@@ -539,7 +539,7 @@ ai/models/ArmageddonAgent_x1_entnorm/model_ArmageddonAgent_x1_entnorm_20260913-0
 f = 0,667 [0,637, 0,696], plafond de l'instrument pour un crédit cohérent de variance unité.
 Trois points qui complètent le verdict, détaillés au §7 du dossier `plafonnement_p1.md` :
 (1) λ à lot fixe et lot à λ = 0,95 ont été éliminés séparément, pas **ensemble** — à λ = 0,2 et
-B = 32 640 la définition de B_noise prédit f ≈ 0,18 [0,13, 0,32] (S23, run ~6 h à jouer avant
+B = 32 640 la définition de B_noise prédit f ≈ 0,18 [0,13, 0,32] (S23 : `batch_size` 2 040, le lot de 4 080 mesuré à 7,47 Go de VRAM réservés replanterait ; run ~6 h à jouer avant
 S14 / S15) ; (2) Var(r) / Var(δ) = 0,86 n'est pas une borne de ce qu'une récompense en espérance
 retirerait (covariance négative, Var(E[r∣s,a]) conservée) ; (3) le contrôle aléatoire valide le
 code, pas le régime (son f vient du facteur p(1−p) d'une politique d'entropie maximale) — le fait

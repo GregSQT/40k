@@ -46,11 +46,23 @@ appris », c'est que ce régime ne laisse passer presque aucun signal.
 **La recommandation.** Relancer P1 avec trois valeurs changées dans le profil `x1_lineage`
 (`config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json`, bloc
 `model_params`) et rien d'autre : `gae_lambda` 0,95 → **0,2**, `n_steps` 8160 → **32640**,
-`batch_size` 1020 → **4080**. Commande habituelle (`python3 ai/train.py --agent
+`batch_size` 1020 → **2040**. Commande habituelle (`python3 ai/train.py --agent
 ArmageddonAgent_x1 --training-config x1_lineage --scenario bot --etape P1`), 30 000 épisodes
-(~6 h), à juger sur la courbe `03_selfplay/P0`, aujourd'hui plate à 0,59. Un point à surveiller :
-la mémoire du GPU au premier lot de 4 080 (un essai avait planté le 7 septembre ; la cause a été
-levée depuis, mais ce n'est pas revérifié) — si ça plante, `batch_size` 2 040.
+(~6 h), à juger sur la courbe `03_selfplay/P0`, aujourd'hui plate à 0,59.
+
+**Pourquoi 2 040 et pas 4 080 — mesuré le 2026-09-13 au soir sur la vraie politique et de
+vraies observations** (48 états d'un moteur, tuilés ; un forward + backward comme dans
+l'update) : la mémoire GPU d'un lot croît linéairement, 1,47 Go alloués (1,92 réservés) à
+1 020, 2,88 (3,80) à 2 040, **5,69 Go alloués et 7,47 Go réservés à 4 080** — sur une carte de
+8,19 Go dont l'hôte Windows prend 0,5 à 2,4 Go selon le moment : le lot de 4 080 replante
+comme le 7 septembre. À 2 040 il reste plus de 2 Go de marge dans le pire cas. **La RAM de la
+VM ne craint rien** : le buffer d'observations passe de 0,93 Go à 3,72 Go (119 Ko par
+observation, 32 640 observations), plus autant en transit au retour des 24 workers, soit ~7,5 Go
+de pic pour 35 Go disponibles ; la garde d'`apply_rollout_n_steps` refuse de toute façon un
+buffer au-delà de la moitié de la mémoire libre (le « 44 Go qui tuaient la VM » étaient
+393 216 observations, douze fois plus). Avec 2 040, le rollout fait 16 mini-lots ; la coupure
+KL à ~15 pas couvre alors une epoch entière du rollout, et la prédiction f ≈ 0,18 porte sur le
+gradient du rollout complet (32 640), pas sur la taille du mini-lot.
 
 **Si ça ne bouge pas.** Le levier « réglages » est épuisé. Il faut alors changer la façon dont
 l'agent reçoit son conseil : soit une tête « Q » qui moyenne les dés (quelques jours de code),
@@ -343,7 +355,7 @@ log-prob 1,7 × 10⁻⁴).
 | S20 | Ventiler les pénalités −97 | C5 | ☐ non investigué | tracker | |
 | S21 | K ≈ 316 rollouts pour distinguer ‖G‖² = 0 de 8 × 10⁻⁵ | C3 | ✗ jugé inutile pour la décision | ~4 h | même à la borne haute, l'update est du bruit à > 97,8 % |
 | S22 | Second run traité entnorm (variance entre entraînements) | B1 | ☐ non fait | ~6 h | écart holdout < 10 points → « pas de verdict » selon le critère écrit ; remplacé par la mesure S13 plus directe |
-| S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 4 080 (8 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ⏳ **proposé (§7, complément 40k-a2)**, prédiction chiffrée | config `x1_lineage`, run ~6 h | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; risque VRAM du lot 4 080 à revoir |
+| S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (16 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ⏳ **proposé (§7, complément 40k-a2)**, prédiction chiffrée | config `x1_lineage`, run ~6 h | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; VRAM mesurée : 3,80 Go réservés à 2 040, 7,47 à 4 080 (replanterait) ; RAM buffer 3,72 Go |
 
 ---
 
@@ -533,9 +545,11 @@ qui changent l'arbitrage ci-dessus.**
    B_noise, vérifiée sur les rollouts — donne à λ = 0,2 (B_noise 145 000 [69 000, 222 000]) et
    B = 32 640 : **f ≈ 0,18 [0,13, 0,32], dix fois aujourd'hui** ; à λ = 0,95 : ≈ 0,07, non
    distinguable de 0. Config `x1_lineage` : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size`
-   4 080, `target_kl` inchangé — les 8 mini-lots rendent la coupure KL à ~15 pas ≈ 2 epochs de
-   tout le rollout (l'objection du 32ᵉ/128 de 2026-09-07 disparaît) ; risque VRAM du lot
-   4 080 à revoir dès la première update (obs non résidentes depuis le 2026-09-07). Un run P1
+   **2 040**, `target_kl` inchangé — 16 mini-lots, la coupure KL à ~15 pas ≈ une epoch entière
+   du rollout (l'objection du 32ᵉ/128 de 2026-09-07 disparaît). Pas 4 080 : VRAM mesurée le
+   soir même sur la vraie politique, 7,47 Go réservés par lot de 4 080 contre 3,80 à 2 040, sur
+   8,19 Go partagés avec l'hôte (0,5 à 2,4 Go) — le 4 080 replante comme le 7 septembre ;
+   RAM hôte du buffer 3,72 Go (+ autant en transit), sans risque pour la VM. Un run P1
    de 30 000 épisodes jugé sur `03_selfplay/P0` contre le plat à 0,59 coûte ~6 h et tranche si
    la lignée repart avant d'engager des semaines sur S14 / S15 ; s'il ne bouge rien avec
    f ≈ 0,18, le levier config est épuisé et S14 / S15 restent seuls.
