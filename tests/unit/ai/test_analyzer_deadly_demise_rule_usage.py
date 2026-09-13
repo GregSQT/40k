@@ -189,7 +189,7 @@ def test_deux_explosions_separees_de_la_meme_source_font_deux_releves(tmp_path):
     suivante de la même escouade est un nouveau jet. Ici le WeirdBoy reste dans la composition
     connue (aucun `[MODELS:]` de l'escouade 4 entre les deux) : les deux jets sont VALID.
 
-    Mutation : ne pas vider `deadly_demise_exploder` hors bloc → usage 1."""
+    Mutation : ne pas vider `deadly_demise_recorded` hors bloc → usage 1."""
     mouvement = "[10:00:03] E1 T1 P2 MOVE : Unit 105(51,50) MOVED from (51,50) to (51,52) [R:+0.0] [MODELS: 105#0@(51,52,z0)] [SUCCESS]\n"
     stats = _parse(tmp_path, entete_step_log(
         _DEPLOIEMENTS_ATTACHE + _dead("4#1") + _DD_RATE + mouvement + _dead("4#0") + _DD_RATE,
@@ -215,3 +215,21 @@ def test_le_socle_exploseur_compte_meme_deja_sorti_de_la_composition_vivante(tmp
     assert stats["parse_errors"] == [], stats["parse_errors"]
     assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
     assert ("deadly_demise", "Boyz") not in stats["special_rule_usage_invalid"]
+
+
+def test_un_dead_anterieur_de_la_source_hors_bloc_ne_rejoint_pas_les_vivants(tmp_path):
+    """Journal tronqué APRÈS une perte antérieure : le WeirdBoy 4#1 est mort et sorti de la
+    composition dans un bloc clos (le MOVE l'a fermé), puis une ligne DEADLY DEMISE de 4 arrive
+    sans DEAD immédiat. Le socle exploseur est inconnu → vivants seuls (un Boy : INVALID), pas le
+    WeirdBoy périmé qui blanchirait le jet.
+
+    Mutation : garder le dernier DEAD par escouade pour toute la durée de l'épisode → INVALID 0."""
+    weirdboy_mort_recale = "[10:00:02] E1 T1 P2 FIGHT : Unit 4 DEAD model=4#1 reason=combat [MODELS: 4#0@(50,50,z0)] [SUCCESS]\n"
+    mouvement = "[10:00:03] E1 T1 P2 MOVE : Unit 105(51,50) MOVED from (51,50) to (51,52) [R:+0.0] [MODELS: 105#0@(51,52,z0)] [SUCCESS]\n"
+    stats = _parse(tmp_path, entete_step_log(
+        _DEPLOIEMENTS_ATTACHE + weirdboy_mort_recale + mouvement + _DD_RATE,
+        units=_WEIRDBOY_ATTACHE, ez_vertical_inches=None,
+    ))
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    assert stats["special_rule_usage"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
+    assert stats["special_rule_usage_invalid"][("deadly_demise", "Boyz")] == {1: 1, 2: 0}
