@@ -1104,7 +1104,7 @@
       },
       "controls": [],
       "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : activé si l'unité est à ≤3\" d'un objectif (_fight_v11_objectives_within_range) OU à ≤6\" du centre (inches_to_subhex). Porté par Ancient."
+      "status_note": "Passe 3/6 : activé si le socle de la FIGURINE recouvre l'aire d'un objectif (14.02, _model_is_near_objective_or_center) OU est à ≤6\" du centre (inches_to_subhex). Porté par Ancient."
     },
     {
       "id": "01.01",

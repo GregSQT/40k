@@ -2676,13 +2676,22 @@ def _get_feel_no_pain_near_objective_threshold(unit: Dict[str, Any]) -> Optional
 
 
 def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str) -> bool:
-    """True si LA FIGURINE est à portée d'un objectif (3") ou à 6" du centre (Unbreakable Resolve).
+    """True si LA FIGURINE est à portée d'un objectif ou à 6" du centre (Unbreakable Resolve).
 
     Condition positionnelle de feel_no_pain_near_objective (24.12) : « While THIS MODEL is
     within range of an objective or within 6" of the centre of the battlefield, IT has Feel No
     Pain 4+ » (datasheet Ancient) — 19.04, première clause : une ability qui désigne une
     figurine ne s applique qu à elle. C est donc l empreinte de la figurine qui compte, pas
     celle de l escouade qu elle mène. Hors table ou morte → False.
+
+    « Within range of an objective » n est PAS une distance : « A model is within range of a
+    terrain objective while it is within that terrain area » (14.02, PDF 14 Objectives). Le
+    socle doit donc RECOUVRIR l aire de l objectif — même lecture que `unit_is_within_objective`
+    et que le contrôle d objectif. La lecture précédente accordait le FNP jusqu à 3" hors de
+    l aire (héritée de `_fight_v11_objectives_within_range(unit, 3)`, dont le 3" est celui de
+    la consolidation 12.08, pas de la portée 14.02) : un Ancient à un subhex hors de l aire
+    jetait un FNP 4+ alors que le même état ne le comptait pas sur l objectif.
+    Seul le centre est une distance (« within 6" of the centre »).
     """
     from engine.game_state import iter_living_models_with_footprints, objective_hex_zones  # noqa: PLC0415
     from engine.hex_utils import min_distance_between_sets  # noqa: PLC0415
@@ -2694,11 +2703,9 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
     )
     if footprint is None:
         return False
+    if any(not footprint.isdisjoint(hexes) for _oid, hexes in objective_hex_zones(game_state)):
+        return True
     ish = int(require_key(game_state, "inches_to_subhex"))
-    obj_range = 3 * ish
-    for _oid, hexes in objective_hex_zones(game_state):
-        if min_distance_between_sets(footprint, hexes, max_distance=obj_range) <= obj_range:
-            return True
     center_range = 6 * ish
     center = (int(require_key(game_state, "board_cols")) // 2, int(require_key(game_state, "board_rows")) // 2)
     return min_distance_between_sets(footprint, {center}, max_distance=center_range) <= center_range
@@ -2710,7 +2717,7 @@ def _collect_fnp_thresholds(
     """Seuils FNP applicables à une blessure normale (tir/mêlée) allouée à `model_id`.
 
     Générique d'abord, puis conditionnel PSYCHIC si l'arme porte le mot-clé, puis conditionnel
-    near_objective si la FIGURINE porte la règle et est à portée d'un objectif ou du centre (24.12).
+    near_objective si la FIGURINE porte la règle et est dans l'aire d'un objectif (14.02) ou à 6" du centre (24.12).
     """
     return _collect_fnp_thresholds_mortal(
         unit, game_state, is_psychic=weapon_has_rule(weapon, "PSYCHIC"), model_id=model_id

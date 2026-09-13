@@ -424,7 +424,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | Mortal Wounds + Hazard | 06.02–06.03 | ✅ |
 | Allocation manuelle + priorité personnage | 05.03 | ✅ |
 | Feel No Pain (PainBoy → Boyz) | 24.12 | ✅ |
-| Unbreakable Resolve (Ancient seul, à SA position — pas l'escouade menée) | 24.12 + 19.04 1re clause | ✅ |
+| Unbreakable Resolve (Ancient seul, à SA position — pas l'escouade menée ; « within range of an objective » = socle dans l'aire de terrain, 14.02, pas 3") | 24.12 + 19.04 1re clause + 14.02 | ✅ |
 | RAPID FIRE, SUSTAINED HITS, EXTRA ATTACKS | 24.30, 24.36, 24.11 | ✅ |
 | PRECISION | 24.28 | ✅ |
 | Deadly Demise (LandSpeeder, WarTrakk) | 24.08 | ✅ |
