@@ -329,8 +329,6 @@ def test_dd_mutation_verrou(monkeypatch):
 # `_inline_…`, règles dans `_ATTACHED_RULE_GROUPS`) : l'union 19.04 de l'escouade PORTE
 # deadly_demise tant que le WeirdBoy vit — c'est exactement ce que le moteur ne doit PAS lire.
 
-_ENGINE_OVERRIDES = {"controlled_agent": "ArmageddonAgent_x1", "rewards_config": "ArmageddonAgent_x1"}
-
 
 def _boyz_weirdboy_scenario():
     return {
@@ -353,7 +351,7 @@ def _boyz_weirdboy_scenario():
 
 
 def _load_boyz_weirdboy():
-    engine = load_engine_from_scenario(_boyz_weirdboy_scenario(), engine_overrides=_ENGINE_OVERRIDES)
+    engine = load_engine_from_scenario(_boyz_weirdboy_scenario())
     gs = engine.game_state
     mc = gs["models_cache"]
     mids = gs["squad_models"]["101"]

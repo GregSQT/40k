@@ -2693,7 +2693,7 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
     jetait un FNP 4+ alors que le même état ne le comptait pas sur l objectif.
     Seul le centre est une distance (« within 6" of the centre »).
     """
-    from engine.game_state import iter_living_models_with_footprints, objective_hex_zones  # noqa: PLC0415
+    from engine.game_state import iter_living_models_with_footprints, objective_hexes_union  # noqa: PLC0415
     from engine.hex_utils import min_distance_between_sets  # noqa: PLC0415
     model = require_key(game_state, "models_cache")[model_id]
     squad_id = str(require_key(model, "squad_id"))
@@ -2703,7 +2703,10 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
     )
     if footprint is None:
         return False
-    if any(not footprint.isdisjoint(hexes) for _oid, hexes in objective_hex_zones(game_state)):
+    # Question de RÈGLE : la clé `objectives` est exigée, comme dans `unit_is_within_objective`
+    # (liste vide = pas d objectif sur la table ; clé absente = état corrompu).
+    require_key(game_state, "objectives")
+    if not footprint.isdisjoint(objective_hexes_union(game_state)):
         return True
     ish = int(require_key(game_state, "inches_to_subhex"))
     center_range = 6 * ish
@@ -2744,10 +2747,9 @@ def _collect_fnp_thresholds_mortal(
     th_psy = _get_feel_no_pain_vs_psychic_threshold(unit)
     if th_psy is not None and is_psychic:
         thresholds.append(th_psy)
-    if _get_feel_no_pain_near_objective_threshold(unit) is not None:
-        th_obj = _get_feel_no_pain_near_objective_threshold(_model_rules_view(game_state, model_id))
-        if th_obj is not None and _model_is_near_objective_or_center(game_state, model_id):
-            thresholds.append(th_obj)
+    th_obj = _get_feel_no_pain_near_objective_threshold(_model_rules_view(game_state, model_id))
+    if th_obj is not None and _model_is_near_objective_or_center(game_state, model_id):
+        thresholds.append(th_obj)
     return thresholds
 
 
@@ -6425,6 +6427,8 @@ def allocate_mortal_wounds(
     remaining = int(n_wounds)
     applied = 0
     _fnp_unit = require_unit_by_id(game_state, sid)
+    _fnp_mid: Optional[str] = None
+    _fnp_ths: List[int] = []
     while remaining > 0:
         eligibles = select_eligible_models(game_state, sid)
         if not eligibles:
@@ -6434,12 +6438,18 @@ def allocate_mortal_wounds(
                 "allocate_mortal_wounds: chemin humain non supporté ici "
                 "(utiliser build_manual_hazard_allocation pour le défenseur humain)"
             )
-        # Seuils FNP PAR BLESSURE : la figurine allouée change d une blessure a l autre, et
-        # feel_no_pain_near_objective ne vaut que pour la figurine qui la porte, a SA position.
-        _fnp_ths = _collect_fnp_thresholds_mortal(
-            _fnp_unit, game_state, is_psychic=is_psychic, model_id=eligibles[0]
-        )
-        rec = _inflict_one_mortal_wound(game_state, eligibles[0], _fnp_ths, details_sink)
+        # Seuils FNP PAR FIGURINE allouée : feel_no_pain_near_objective ne vaut que pour la
+        # figurine qui la porte, a SA position. Tant que la meme figurine encaisse, rien dont
+        # les seuils dependent ne bouge (position gelee, regles propres immuables, union 19.04
+        # recalculee seulement a une mort — qui change la figurine allouee) : calcules une fois
+        # par figurine, pas par blessure.
+        mid = eligibles[0]
+        if mid != _fnp_mid:
+            _fnp_mid = mid
+            _fnp_ths = _collect_fnp_thresholds_mortal(
+                _fnp_unit, game_state, is_psychic=is_psychic, model_id=mid
+            )
+        rec = _inflict_one_mortal_wound(game_state, mid, _fnp_ths, details_sink)
         if not rec.get("fnpSaved"):  # get allowed : absent = blessure non sauvee
             applied += 1
         remaining -= 1

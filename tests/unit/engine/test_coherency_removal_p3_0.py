@@ -43,7 +43,7 @@ def _model(col: int, row: int, player: int = 1, squad_id: str = "1") -> Dict[str
         "col": col, "row": row, "level": 0, "player": player,
         "squad_id": squad_id, "HP_CUR": 1, "HP_MAX": 1,
         "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
-        "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0, "UNIT_RULES": [],
     }
 
 

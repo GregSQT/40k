@@ -42,7 +42,7 @@ def _game_state(weapon_rules, *, dmg=1, hp=2):
                 "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": hp, "HP_MAX": hp, "ARMOR_SAVE": 2,
               "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
-              "col": 9, "row": 9}
+              "col": 9, "row": 9, "UNIT_RULES": []}
     gs = {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",

@@ -47,7 +47,8 @@ def _shooter_model(mid, weapon, *, keywords=("INFANTRY",)):
     return {"id": mid, "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
             "HP_CUR": 2, "HP_MAX": 2, "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None,
             "unitType": "Shooter", "points_per_hp": 5.0, "VALUE": 10.0,
-            "col": 0, "row": 0, "UNIT_KEYWORDS": _kw(*keywords), "RNG_WEAPONS": [weapon]}
+            "col": 0, "row": 0, "UNIT_KEYWORDS": _kw(*keywords), "RNG_WEAPONS": [weapon],
+            "UNIT_RULES": []}
 
 
 def _game_state(weapon_rules, *, shooters=1, shooter_keywords=("INFANTRY",)):
@@ -63,7 +64,7 @@ def _game_state(weapon_rules, *, shooters=1, shooter_keywords=("INFANTRY",)):
     models["T1"] = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
                     "points_per_hp": 5.0, "VALUE": 10.0, "col": 9, "row": 9,
-                    "UNIT_KEYWORDS": _kw("INFANTRY")}
+                    "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []}
     return {**turn_state_invariants(),
         "gym_training_mode": True,
         # Zone d'engagement : exigee des que le moteur resout un type de tir (10.04-10.06),
