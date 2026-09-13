@@ -1,4 +1,4 @@
-"""24.08 Deadly Demise dans la table §1.7 : relevé par unité SOURCE, verdict sur le socle DÉTRUIT.
+"""24.08 Deadly Demise dans la table §1.7 : relevé par unité SOURCE, verdict sur les vivants ∪ le socle qui explose.
 
 Mesuré sur l'éval du 2026-09-13 : `deadly_demise_triggers` = 90 + 63 alors que la table §1.7
 affichait `deadly_demise WeirdBoy 0 0` — la branche `[DEADLY DEMISE]` incrémentait le compteur
