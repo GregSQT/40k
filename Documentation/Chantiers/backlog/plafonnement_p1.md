@@ -219,7 +219,8 @@ log-prob 1,7 × 10⁻⁴).
 - **2026-09-07** — `vf_coef` 0,5 → 0,25 (`run_20260907-000919` : part policy 0,235 → 0,50, EV
   intacte) puis **0,17** dans le profil de lignée (part policy 0,62). `n_steps` 32 640 essayé :
   **55/55 updates coupées par la KL vers le 32ᵉ mini-lot sur 128**, trois quarts du rollout
-  jamais vus, ×3,8 plus lent par épisode ; `batch_size` 4 080 : crash VRAM (8,89 Go / 8,19).
+  jamais vus, déplacement de politique ×3,8 plus lent par épisode (`target_kl` plafonne l'update ;
+  horloge inchangée, ~126 s par 32 640 pas) ; `batch_size` 4 080 : crash VRAM (8,89 Go / 8,19).
   Régime de lignée « option A » : profil `x1_lineage` scalaire pour toute étape reprise (lr
   0,001, ent_coef 0,03 puis 0,01), P00 supprimée, verrou de parité, décisions sur la moyenne de
   3 sondes, graines d'évaluation tirées au hasard, part de bots 30 % en P1 (bots saturés
@@ -335,7 +336,7 @@ log-prob 1,7 × 10⁻⁴).
 
 | # | solution | cause visée | statut | coût | observation |
 |---|---|---|---|---|---|
-| S1 | `n_steps` × 4 (32 640) | A1 | ☑ testée (P2, 2026-09-07) → ✗ | config | coupure KL au 32ᵉ/128, ×3,8 plus lent ; mesure du 2026-09-13 : ×44 serait le minimum |
+| S1 | `n_steps` × 4 (32 640) | A1 | ☑ testée (P2, 2026-09-07) → ✗ | config | coupure KL au 32ᵉ/128, déplacement par épisode ×3,8 plus lent (horloge inchangée) ; mesure du 2026-09-13 : ×44 serait le minimum |
 | S2 | `batch_size` 4 080 | A1 | ☑ testée → ✗ | config | crash VRAM (8,89 Go) ; VRAM libérée depuis (obs non résidentes), mais levier réfuté par f |
 | S3 | `target_kl` relevé / `n_epochs` | A2 | ✗ écarté | config | 0,03 prendrait des pas de 0,045 nat hors région de confiance ; direction = bruit |
 | S4 | `learning_rate` | A3 | ✗ écarté | config | idem ; antécédent de destruction |
@@ -609,6 +610,16 @@ moyenne de `03_selfplay/P0` sur les épisodes d'étape 20 000–30 000 ≥ 0,65,
 sonde (`pool_eval/vs_P0_3ep` ≥ 0,65) → S23 fonctionne, la lignée reprend sous ce profil (il
 s'applique à toutes les étapes reprises) ; entre 0,62 et 0,65 et courbe montante → laisser
 courir jusqu'à 60 000 ; < 0,62 et plate → levier config épuisé, ouvrir l'arbitrage S14 / S15.
+**Complétée le 2026-09-13 à 23:10, avant le lancement (validée par l'utilisateur)** : deux branches
+manquaient. (d) < 0,62 mais courbe montante (Q3 > Q2 hors bruit) → laisser courir jusqu'à 60 000 et
+rejuger sur 50 000–60 000 — S23 fait 4× moins d'updates par épisode que la référence (`target_kl`
+plafonne chaque update), ~105 updates à 30 000 contre ~280 quand la référence a atteint son plat.
+(e) < 0,585 sur 20 000–30 000 (sous le plat de référence) → arrêter, verdict « λ court biaise vers
+le proxy du critic » (C3 : le gradient TD détecté est biaisé par l'erreur du critic), S11-λ écartée,
+arbitrage S14 / S15 ouvert. Décision utilisateur du même soir : « plat » n'est pas rejoué à 60 000
+— un plateau est un symptôme, la cause est ailleurs ; GPU rendu aux sondes (modèle entnorm traité,
+checkpoint S23 avec balayage λ). Contrôle de plomberie, pas de jugement : `train/n_minibatches_done`
+attendu ~15–20 sur 64 ; ≤ 8 → rollout non vu en entier, prédiction f ≈ 0,18 inapplicable.
 Plomberie vérifiée avant : `_apply_curriculum_model_params` (ai/train.py) pose `gae_lambda`,
 `batch_size` et `n_steps` sur le modèle repris et reconstruit le buffer avec le nouveau λ
 (`recreate_rollout_buffer`, inconditionnel) ; `n_steps` est converti par env avant le

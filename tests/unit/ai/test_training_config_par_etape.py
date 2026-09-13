@@ -131,18 +131,21 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     l'early-stop `target_kl`, soit une epoch sur quatre : le rollout quadruplé divisait par quatre
     l'apprentissage par épisode), `ent_coef` 0.03 → 0.01 et `vf_coef` 0.15 → 0.17.
 
-    `batch_size` est lu ici alors qu'il n'est PLUS surchargé, et c'est le point : le profil le
-    rend à l'héritage de `x1_long` depuis le 2026-09-07, donc seule la valeur RÉSOLUE dit s'il
-    vaut encore 1020. Le 4080 qu'il portait a tué P2 à sa première update — le rollout de 32640
-    est monté ENTIER en VRAM (3,37 Go) et le pic atteignait 8,89 Go sur une carte de 8,19, d'où un
-    `CUDA driver error: device not ready` que rien dans le message ne rattachait à `batch_size`.
-    Aucun garde-fou ne rattrape ce cas : `apply_rollout_n_steps` dimensionne sur la RAM SYSTÈME.
+    Trois valeurs redécidées le 2026-09-13 (run S23, dossier `plafonnement_p1.md` §7, mesure
+    `scripts/grad_signal_probe.py`) : `n_steps` 8160 → 32640, `batch_size` 1020 → 2040 (surchargé
+    à nouveau) et `gae_lambda` 0.95 → 0.2 (surchargé pour la première fois). Le gradient d'une
+    update était du bruit à 98 % ; λ court ET lot ×4 ensemble prédisent f ≈ 0,18. Pas 4080 : la VRAM
+    mesurée à 4080 (7,47 Go réservés sur 8,19 partagés avec l'hôte) replanterait comme le 2026-09-07,
+    où le pic atteignait 8,89 Go — `CUDA driver error: device not ready` que rien ne rattachait à
+    `batch_size`. Aucun garde-fou ne rattrape ce cas : `apply_rollout_n_steps` dimensionne sur la
+    RAM SYSTÈME. 2040 = 16 mini-lots, la coupure KL à ~15 pas couvre une epoch entière.
     """
     mp = profil_lignee["model_params"]
     assert mp["learning_rate"] == pytest.approx(0.001)
     assert mp["ent_coef"] == pytest.approx(0.01)
-    assert mp["n_steps"] == 8160
-    assert mp["batch_size"] == 1020
+    assert mp["n_steps"] == 32640
+    assert mp["batch_size"] == 2040
+    assert mp["gae_lambda"] == pytest.approx(0.2)
     assert mp["vf_coef"] == pytest.approx(0.17)
     # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
@@ -183,7 +186,8 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
     assert not divergentes, f"clés non héritées : {sorted(divergentes)}"
 
     # Et dans `model_params`, tout ce que la lignée ne redéclare pas vient aussi du parent.
-    for cle in ("n_epochs", "gamma", "gae_lambda", "clip_range", "target_kl", "max_grad_norm"):
+    # `gae_lambda` et `batch_size` ne sont plus dans cette liste : surchargés depuis le 2026-09-13 (S23).
+    for cle in ("n_epochs", "gamma", "clip_range", "target_kl", "max_grad_norm"):
         assert profil_lignee["model_params"][cle] == profil_froid["model_params"][cle], cle
 
 
