@@ -479,6 +479,7 @@ log-prob 1,7 × 10⁻⁴).
       ρ(r, ΔV) = −0,55 ; S11 bornée par là.
 - [x] **Balayage λ appairé** — fait le 2026-09-13 : f(λ=0) = 0,053 [0,036, 0,070] (C4, S10).
 - [x] Sonde avec **P0 déterministe** — faite le 2026-09-13 : mêmes nombres (B4, S12).
+- [ ] **Levier S23** (λ 0,2 + 32 640 / 2 040) : décidé le 2026-09-13, run à lancer ; résultat attendu en §5.9.
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
 - [ ] Récompense en espérance (S11).
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).

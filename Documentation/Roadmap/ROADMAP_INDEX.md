@@ -179,7 +179,11 @@ reste non joué — λ court ET lot ×4 ensemble (S23 du dossier : `gae_lambda` 
 32 640, `batch_size` 2 040 — pas 4 080 : 7,47 Go de VRAM réservés mesurés, replanterait), f attendu ≈ 0,18 [0,13, 0,32] par la définition même de B_noise,
 dix fois aujourd'hui ; « S11 bornée à 86 % » n'est pas une borne (covariance r / ΔV négative) ;
 le contrôle aléatoire valide le code, pas le régime (facteur p(1−p)). Arbitrage A / B / C au §7
-du dossier, recommandation A : run P1 direct avec S23 (~6 h) avant d'engager S14 / S15.**
+du dossier, recommandation A : run P1 direct avec S23 (~6 h) avant d'engager S14 / S15.
+**DÉCISION (utilisateur, 2026-09-13) : A.** Run P1 sous `x1_lineage` avec `gae_lambda` 0,2,
+`n_steps` 32 640, `batch_size` 2 040 ; règle de lecture écrite dans le dossier §7 (≥ 0,65 sur
+`03_selfplay/P0` entre 20 000 et 30 000 épisodes d'étape, ou promotion → la lignée reprend ;
+< 0,62 et plat → arbitrage S14 / S15).**
 
 ---
 
