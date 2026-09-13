@@ -204,7 +204,7 @@ def test_ordre_auto_passe_la_validation_humaine(monkeypatch):
 
 def _e2e_model(mid: str, hp_cur: int, hp_max: int, *, sv: int, role: Any, row: int) -> Dict[str, Any]:
     return {
-        "id": mid, "squad_id": "2", "player": 1, "T": 4, "HP_CUR": hp_cur, "HP_MAX": hp_max,
+        "id": mid, "squad_id": "2", "UNIT_RULES": [], "player": 1, "T": 4, "HP_CUR": hp_cur, "HP_MAX": hp_max,
         "ARMOR_SAVE": sv, "INVUL_SAVE": 7, "role": role, "unitType": "Grunt",
         "points_per_hp": 5.0, "VALUE": 10.0, "col": 9, "row": row,
         "RNG_WEAPONS": [], "CC_WEAPONS": [],
@@ -230,7 +230,7 @@ def _e2e_gs() -> Dict[str, Any]:
     }
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 4, "RNG": 24,
               "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
-    attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 0,
+    attacker = {"id": "A1", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4, "SHOOT_LEFT": 0,
                 "col": 0, "row": 0, "RNG_WEAPONS": [weapon], "CC_WEAPONS": []}
     pool = [
         {"save_roll": 1, "rec": {"strengthResult": "SUCCESS"}, "attacker_mid": "A1", "devastating": False}

@@ -63,7 +63,7 @@ def _target_model(index):
     exactement le nombre de blessures ALLOUÉES — c'est ce qui rend le compte lisible. Les jets
     de sauvegarde restent tirés (ils trient le pool, 05.04), aucun ne sauve.
     """
-    return {"id": f"T{index}", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 1, "HP_MAX": 1,
+    return {"id": f"T{index}", "squad_id": "2", "UNIT_RULES": [], "player": 1, "T": 4, "HP_CUR": 1, "HP_MAX": 1,
             "ARMOR_SAVE": 7, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
             "points_per_hp": 5.0, "VALUE": 10.0, "col": 9, "row": 9 + index,
             "RNG_WEAPONS": [], "CC_WEAPONS": [],
@@ -83,7 +83,7 @@ def _game_state(phase, n_target_models, n_attacks):
     melee = phase == "fight"
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": n_attacks, "RNG": 24,
               "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
-    attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4,
+    attacker = {"id": "A1", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4,
                 "SHOOT_LEFT": 1, "ATTACK_LEFT": n_attacks, "col": 0, "row": 0,
                 "RNG_WEAPONS": [] if melee else [weapon],
                 "CC_WEAPONS": [weapon] if melee else []}

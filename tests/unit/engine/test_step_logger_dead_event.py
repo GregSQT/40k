@@ -16,7 +16,7 @@ def _minimal_gs(n_models: int = 2) -> Dict[str, Any]:
     squad_id = "1"
     model_ids = [f"1#{i}" for i in range(n_models)]
     models_cache = {mid: {"col": 10 + i, "row": 10, "level": 0,
-                           "player": 1, "squad_id": squad_id, "HP_CUR": 1,
+                           "player": 1, "squad_id": squad_id, "UNIT_RULES": [], "HP_CUR": 1,
                            "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
                    for i, mid in enumerate(model_ids)}
     occupied = {mid: (10 + i, 10) for i, mid in enumerate(model_ids)}

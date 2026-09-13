@@ -5,6 +5,9 @@ Invariants verifies :
 - _get_feel_no_pain_near_objective_threshold : getter, types, bornes
 - _collect_fnp_thresholds : PSYCHIC actif/inactif, near_objective actif/inactif
 - _collect_fnp_thresholds_mortal : is_psychic flag
+- Portée FIGURINE d'Unbreakable Resolve (« While THIS MODEL … IT has Feel No Pain 4+ », 19.04
+  première clause) : le seuil ne vaut que pour la figurine qui porte la règle, à SA position —
+  jamais pour un Intercessor de l'escouade que l'Ancient mène (l'union 19.04 la porte pourtant)
 - _roll_fnp_sequential : sauvegardes sequentielles multi-seuils
 - Integration shoot : arme PSYCHIC + Librarian FNP 4+ vs psychic
 - Integration MW : near_objective + allocate_mortal_wounds
@@ -57,12 +60,15 @@ _NORMAL_WEAPON = {
 }
 
 
-def _minimal_gs():
+def _minimal_gs(model_rules=()):
     """Game state minimal sans spatial : suffisant pour _collect_fnp_thresholds
-    quand near_objective est absent ou monkeypatche."""
+    quand near_objective est absent ou monkeypatche. La figurine blessée `T1` porte
+    `model_rules` en propre (règles de SA datasheet, ce que lit near_objective)."""
     return {
         "objectives": [],
         "units_cache": {},
+        "models_cache": {"T1": {"squad_id": "U1", "UNIT_RULES": list(model_rules)}},
+        "squad_models": {"U1": ["T1"]},
         "inches_to_subhex": 5,
         "board_cols": 30,
         "board_rows": 22,
@@ -96,7 +102,7 @@ def _shoot_gs(target_unit_rules, weapon):
         "id": "T1", "squad_id": "2", "player": 1, "T": 4,
         "HP_CUR": 1, "HP_MAX": 1, "ARMOR_SAVE": 2, "INVUL_SAVE": 7,
         "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
-        "col": 9, "row": 9,
+        "col": 9, "row": 9, "UNIT_RULES": target_unit_rules,
     }
     attacker_unit = {"id": "1", "player": 0, "UNIT_RULES": []}
     target_unit = {"id": "2", "player": 1, "UNIT_RULES": target_unit_rules}
@@ -141,7 +147,7 @@ def _shoot_gs(target_unit_rules, weapon):
 def _mw_gs(target_unit_rules):
     target = {
         "id": "T1", "squad_id": "2", "player": 1,
-        "HP_CUR": 1, "HP_MAX": 1, "col": 5, "row": 5,
+        "HP_CUR": 1, "HP_MAX": 1, "col": 5, "row": 5, "UNIT_RULES": target_unit_rules,
     }
     target_unit = {"id": "2", "player": 1, "UNIT_RULES": target_unit_rules}
     return {
@@ -221,38 +227,75 @@ def test_fnp_near_objective_hors_bornes():
 
 def test_collect_fnp_psychic_weapon_ajoute_seuil(monkeypatch):
     """Arme PSYCHIC + rule feel_no_pain_vs_psychic -> seuil inclus."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: False)
-    gs = _minimal_gs()
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: False)
+    gs = _minimal_gs([_PSY_RULE_4])
     unit = _unit([_PSY_RULE_4])
-    result = _collect_fnp_thresholds(unit, gs, _PSYCHIC_WEAPON)
+    result = _collect_fnp_thresholds(unit, gs, _PSYCHIC_WEAPON, model_id="T1")
     assert 4 in result, "seuil PSYCHIC attendu avec arme PSYCHIC"
 
 
 def test_collect_fnp_arme_normale_nactive_pas_seuil_psychic(monkeypatch):
     """Arme normale + rule feel_no_pain_vs_psychic -> seuil absent."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: False)
-    gs = _minimal_gs()
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: False)
+    gs = _minimal_gs([_PSY_RULE_4])
     unit = _unit([_PSY_RULE_4])
-    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON)
+    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1")
     assert 4 not in result, "seuil PSYCHIC absent pour arme non-PSYCHIC"
 
 
 def test_collect_fnp_near_objective_ajoute_seuil(monkeypatch):
-    """Unité près d'un objectif + rule feel_no_pain_near_objective -> seuil inclus."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: True)
-    gs = _minimal_gs()
+    """Figurine porteuse près d'un objectif + rule feel_no_pain_near_objective -> seuil inclus."""
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
+    gs = _minimal_gs([_OBJ_RULE_4])
     unit = _unit([_OBJ_RULE_4])
-    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON)
+    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1")
     assert 4 in result
 
 
 def test_collect_fnp_loin_objectif_nactive_pas_seuil(monkeypatch):
-    """Unité loin des objectifs -> seuil near_objective absent."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: False)
-    gs = _minimal_gs()
+    """Figurine porteuse loin des objectifs -> seuil near_objective absent."""
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: False)
+    gs = _minimal_gs([_OBJ_RULE_4])
     unit = _unit([_OBJ_RULE_4])
-    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON)
+    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1")
     assert 4 not in result
+
+
+def test_collect_fnp_near_objective_figurine_sans_la_regle_pas_de_seuil(monkeypatch):
+    """Unbreakable Resolve dans l'UNION de l'escouade (Ancient replié) mais pas sur la figurine
+    blessée (Intercessor) -> aucun seuil, même à portée d'un objectif (19.04, 1re clause)."""
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
+    gs = _minimal_gs([])
+    unit = _unit([_OBJ_RULE_4])
+    result = _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1")
+    assert result == [], "l'Intercessor ne porte pas Unbreakable Resolve : aucun FNP"
+
+
+def test_collect_fnp_near_objective_position_de_la_figurine_pas_de_l_escouade():
+    """Le prédicat de position est celui de la FIGURINE blessée : l'Ancient loin de tout objectif
+    n'a pas de FNP même si l'escouade en touche un (empreinte d'escouade ignorée)."""
+    ish = 5  # 3" objectif = 15 subhex, 6" centre = 30 subhex ; plateau 100x100, centre (50,50)
+    gs = _minimal_gs([_OBJ_RULE_4])
+    gs["board_cols"], gs["board_rows"] = 100, 100
+    gs["objectives"] = [{"id": "o1", "hexes": [[10, 10]]}]
+    gs["units_cache"] = {"U1": {
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "col": 10, "row": 11, "orientation": 0,
+        "occupied_hexes": {(10, 11), (90, 90)}, "player": 1, "HP_CUR": 2,
+    }}
+    ancient = {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1,
+               "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
+    gs["models_cache"] = {
+        "T1": {**ancient, "col": 90, "row": 90},   # Ancient loin de tout (escouade à portée via T2)
+        "T2": {"squad_id": "U1", "UNIT_RULES": [], "HP_CUR": 1, "col": 10, "row": 11,
+               "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
+    }
+    gs["squad_models"] = {"U1": ["T1", "T2"]}
+    gs["inches_to_subhex"] = ish
+    unit = _unit([_OBJ_RULE_4])
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1") == [], "Ancient loin : pas de FNP"
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T2") == [], "Intercessor : jamais"
+    gs["models_cache"]["T1"]["col"], gs["models_cache"]["T1"]["row"] = 10, 12   # Ancient à 2 subhex de l'objectif
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1") == [4], "Ancient à portée : FNP 4+"
 
 
 # ---------------------------------------------------------------------------
@@ -261,19 +304,19 @@ def test_collect_fnp_loin_objectif_nactive_pas_seuil(monkeypatch):
 
 def test_collect_fnp_mortal_psychic_flag_actif(monkeypatch):
     """is_psychic=True + rule feel_no_pain_vs_psychic -> seuil inclus."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: False)
-    gs = _minimal_gs()
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: False)
+    gs = _minimal_gs([_PSY_RULE_4])
     unit = _unit([_PSY_RULE_4])
-    result = _collect_fnp_thresholds_mortal(unit, gs, is_psychic=True)
+    result = _collect_fnp_thresholds_mortal(unit, gs, is_psychic=True, model_id="T1")
     assert 4 in result
 
 
 def test_collect_fnp_mortal_psychic_flag_inactif(monkeypatch):
     """is_psychic=False + rule feel_no_pain_vs_psychic -> seuil absent."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: False)
-    gs = _minimal_gs()
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: False)
+    gs = _minimal_gs([_PSY_RULE_4])
     unit = _unit([_PSY_RULE_4])
-    result = _collect_fnp_thresholds_mortal(unit, gs, is_psychic=False)
+    result = _collect_fnp_thresholds_mortal(unit, gs, is_psychic=False, model_id="T1")
     assert 4 not in result
 
 
@@ -378,7 +421,7 @@ def test_shoot_fnp_vs_psychic_inactif_arme_normale(monkeypatch):
 
 def test_mw_fnp_near_objective_sauve(monkeypatch):
     """FNP 4+ near_objective actif, jet 4 -> MW sauvee, fnpSaved=True dans details."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: True)
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
     gs = _mw_gs([_OBJ_RULE_4])
     details: list = []
@@ -389,7 +432,7 @@ def test_mw_fnp_near_objective_sauve(monkeypatch):
 
 def test_mw_fnp_near_objective_echoue(monkeypatch):
     """FNP 4+ near_objective actif, jet 3 -> MW appliquee."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: True)
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
     monkeypatch.setattr(random, "randint", lambda a, b: 3)
     gs = _mw_gs([_OBJ_RULE_4])
     details: list = []
@@ -399,9 +442,51 @@ def test_mw_fnp_near_objective_echoue(monkeypatch):
 
 def test_mw_fnp_near_objective_inactif(monkeypatch):
     """FNP near_objective inactif (loin) -> aucun jet FNP, MW appliquee meme avec jet 6."""
-    monkeypatch.setattr(su, "_unit_is_near_objective_or_center", lambda gs, u: False)
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: False)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     gs = _mw_gs([_OBJ_RULE_4])
     details: list = []
     applied = allocate_mortal_wounds(gs, "2", 1, auto_resolve=True, details_sink=details)
     assert applied == 1, "FNP near_objective inactif : MW non bloquee"
+
+
+# ---------------------------------------------------------------------------
+# Chemin de production : Ancient replié inline dans des Intercessors (fold 19.04 réel)
+# ---------------------------------------------------------------------------
+
+def test_unbreakable_resolve_ancient_inline_ne_couvre_que_l_ancient():
+    """Armée d'entraînement : l'Ancient est un modèle inline de l'escouade Intercessor. L'union
+    19.04 porte feel_no_pain_near_objective ; seul l'Ancient, à portée d'un objectif, a le seuil."""
+    from tests.unit.engine._config_helpers import load_engine_from_scenario
+    scenario = {
+        "board_ref": "44x60x5",
+        "primary_objectives": ["objectives_control"],
+        "wall_ref": "walls-none.json",
+        "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
+        "uses_codex_detachment": {"1": True, "2": True},
+        "units": [
+            {
+                "id": 1, "unit_type": "Intercessor", "player": 1, "col": 10, "row": 10,
+                "models": [{"col": 10, "row": 10}, {"col": 11, "row": 10},
+                           {"unit_type": "Ancient", "col": 40, "row": 40}],
+            },
+            {"id": 101, "unit_type": "Boyz", "player": 2, "col": 30, "row": 55},
+        ],
+    }
+    engine = load_engine_from_scenario(
+        scenario, engine_overrides={"controlled_agent": "ArmageddonAgent_x1", "rewards_config": "ArmageddonAgent_x1"}
+    )
+    gs = engine.game_state
+    unit = gs["unit_by_id"]["1"]
+    assert any(r["ruleId"] == "feel_no_pain_near_objective" for r in unit["UNIT_RULES"]), "union 19.04 attendue"
+    mc = gs["models_cache"]
+    ancient = next(m for m in gs["squad_models"]["1"] if mc[m].get("unitType") == "Ancient")
+    intercessor = next(m for m in gs["squad_models"]["1"] if mc[m].get("unitType") != "Ancient")
+    # Objectif à côté des Intercessors, loin de l'Ancient (et loin du centre pour tous).
+    gs["objectives"] = [{"id": "o1", "hexes": [[10, 11]]}]
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=intercessor) == []
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=ancient) == []
+    # Objectif à côté de l'Ancient : lui seul gagne FNP 4+.
+    gs["objectives"] = [{"id": "o1", "hexes": [[40, 41]]}]
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=intercessor) == []
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=ancient) == [4]

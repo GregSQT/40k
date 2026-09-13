@@ -45,7 +45,7 @@ EZ = 2
 
 
 def _model(col, row, player, squad):
-    return {"col": col, "row": row, "level": 0, "player": player, "squad_id": squad,
+    return {"col": col, "row": row, "level": 0, "player": player, "squad_id": squad, "UNIT_RULES": [],
             "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
 
 

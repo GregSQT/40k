@@ -78,7 +78,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
     """
     weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
               "WEAPON_RULES": list(weapon_rules), "code": weapon_name, "display_name": weapon_name}
-    attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
+    attacker = {"id": "1#0", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "ATTACK_LEFT": n_attacks,
                 "col": SHOOTER[0], "row": SHOOTER[1],
                 "RNG_WEAPONS": [] if melee else [weapon],
@@ -89,7 +89,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         mid = f"101#{index}"
         pos = (target[0], target[1] + index)
         models_cache[mid] = {
-            "id": mid, "squad_id": "101", "player": 1, "T": 4, "HP_CUR": hp_cur, "HP_MAX": hp_cur,
+            "id": mid, "squad_id": "101", "UNIT_RULES": [], "player": 1, "T": 4, "HP_CUR": hp_cur, "HP_MAX": hp_cur,
             "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
             "points_per_hp": 5.0, "VALUE": 10.0, "col": pos[0], "row": pos[1],
             "RNG_WEAPONS": [], "CC_WEAPONS": [],
@@ -1726,7 +1726,7 @@ def test_l1_roll_battle_shock_fournit_les_champs(monkeypatch):
         **turn_state_invariants(),
         "action_logs": [], "action_log_seq": 0,
         "models_cache": {
-            "7#0": {"id": "7#0", "squad_id": "7", "player": 1, "unitType": "AssaultIntercessor",
+            "7#0": {"id": "7#0", "squad_id": "7", "UNIT_RULES": [], "player": 1, "unitType": "AssaultIntercessor",
                     "col": 10, "row": 12, "HP_CUR": 5, "HP_MAX": 5, "LD": 7},
         },
         "squad_models": {"7": ["7#0"]},
