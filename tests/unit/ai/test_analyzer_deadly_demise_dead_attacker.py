@@ -101,6 +101,28 @@ DD_TUE_LE_TIREUR_LOG = entete_step_log(
     units=_UNITS, ez_vertical_inches=None,
 )
 
+# 6. Cadavre ATTAQUÉ : 105 tue 4, l'explosion tue 105, les FOUGHT de 105 suivent (ils revendiquent
+# la mort de 4) — puis 5 frappe 105, mort depuis le début de la phase. Vraie faute de P1.
+# Le contexte de mort de 105 doit nommer 4 (source de la Deadly Demise) et non rester
+# « à revendiquer » : sinon le premier FOUGHT tiers de la phase sur ce cadavre passe
+# `claim_kill_context` et la faute est masquée.
+DD_PUIS_ATTAQUE_SUR_LE_CADAVRE_LOG = entete_step_log(
+    _DEPLOIEMENTS + _DEAD_4 + _DD_4_TUE_105 + _DEAD_105_HAZARD + _FOUGHT_105_x2
+    + _fought("5", "(53,50)", "105", "(51,50)", "10:00:05", dmg=False),
+    units=_UNITS, ez_vertical_inches=None,
+)
+
+# 7. Jumeau TIR du cas 6 : le SHOT de 5 sur le cadavre 105 doit être compté.
+DD_PUIS_TIR_SUR_LE_CADAVRE_LOG = entete_step_log(
+    _DEPLOIEMENTS
+    + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEAD model=4#0 reason=combat [SUCCESS]\n"
+    + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEADLY DEMISE Roll:6 → Unit 105(51,50) SUFFERS 2 MW [DEADLY DEMISE] [SUCCESS]\n"
+    + "[10:00:02] E1 T1 P2 SHOOT : Unit 105 DEAD model=105#0 reason=hazard [SUCCESS]\n"
+    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
+    + "[10:00:05] E1 T1 P1 SHOOT : Unit 5(53,50) SHOT Unit 105(51,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 105#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 5#0] [ALLOC_MODEL: 105#0] [SUCCESS]\n",
+    units=_UNITS, ez_vertical_inches=None,
+)
+
 
 def _parse(tmp_path, contenu: str):
     import ai.analyzer as an
@@ -150,4 +172,20 @@ def test_jumeau_tir_le_tireur_tue_par_la_deadly_demise_n_est_pas_compte(tmp_path
     """Mutation : retirer `died_in_own_activation` de shoot_handler → 2 fautes P2."""
     stats = _parse(tmp_path, DD_TUE_LE_TIREUR_LOG)
     assert stats["shoot_dead_unit"] == {1: 0, 2: 0}, stats["first_error_lines"]["shoot_dead_unit"]
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+
+
+def test_une_attaque_tierce_sur_la_victime_de_la_deadly_demise_reste_une_faute(tmp_path):
+    """Mutation : écrire `(None, turn, phase)` dans unit_kill_context pour la victime DD malgré
+    une source connue → 0 (le FOUGHT de 5 revendique la mort de 105 et est excusé)."""
+    stats = _parse(tmp_path, DD_PUIS_ATTAQUE_SUR_LE_CADAVRE_LOG)
+    assert stats["fight_dead_unit_attacker"] == {1: 0, 2: 0}, stats["first_error_lines"]["fight_dead_unit_attacker"]
+    assert stats["fight_dead_unit_target"] == {1: 1, 2: 0}, stats["first_error_lines"]["fight_dead_unit_target"]
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+
+
+def test_jumeau_tir_un_tir_tiers_sur_la_victime_de_la_deadly_demise_reste_une_faute(tmp_path):
+    stats = _parse(tmp_path, DD_PUIS_TIR_SUR_LE_CADAVRE_LOG)
+    assert stats["shoot_dead_unit"] == {1: 0, 2: 0}, stats["first_error_lines"]["shoot_dead_unit"]
+    assert stats["shoot_at_dead_unit"] == {1: 1, 2: 0}, stats["first_error_lines"]["shoot_at_dead_unit"]
     assert stats["parse_errors"] == [], stats["parse_errors"]
