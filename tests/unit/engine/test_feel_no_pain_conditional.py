@@ -5,6 +5,8 @@ Invariants verifies :
 - _get_feel_no_pain_near_objective_threshold : getter, types, bornes
 - _collect_fnp_thresholds : PSYCHIC actif/inactif, near_objective actif/inactif
 - _collect_fnp_thresholds_mortal : is_psychic flag
+- « Within range of an objective » = socle DANS l'aire de terrain (14.02), jamais une distance
+  de 3" ; seul le centre est une distance (6")
 - Portée FIGURINE d'Unbreakable Resolve (« While THIS MODEL … IT has Feel No Pain 4+ », 19.04
   première clause) : le seuil ne vaut que pour la figurine qui porte la règle, à SA position —
   jamais pour un Intercessor de l'escouade que l'Ancient mène (l'union 19.04 la porte pourtant)
@@ -294,8 +296,45 @@ def test_collect_fnp_near_objective_position_de_la_figurine_pas_de_l_escouade():
     unit = _unit([_OBJ_RULE_4])
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1") == [], "Ancient loin : pas de FNP"
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T2") == [], "Intercessor : jamais"
-    gs["models_cache"]["T1"]["col"], gs["models_cache"]["T1"]["row"] = 10, 12   # Ancient à 2 subhex de l'objectif
+    gs["models_cache"]["T1"]["col"], gs["models_cache"]["T1"]["row"] = 10, 10   # Ancient DANS l'aire de l'objectif
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id="T1") == [4], "Ancient à portée : FNP 4+"
+
+
+def _ancient_gs(col, row, *, ish=5, objective_hexes=((10, 10),)):
+    """Ancient seul (socle 1 hexe) posé en (col,row) ; plateau 100x100, centre (50,50) ; une aire
+    d'objectif réduite à `objective_hexes`. Sert au prédicat de position lui-même."""
+    gs = _minimal_gs([_OBJ_RULE_4])
+    gs["board_cols"], gs["board_rows"] = 100, 100
+    gs["inches_to_subhex"] = ish
+    gs["objectives"] = [{"id": "o1", "hexes": [list(h) for h in objective_hexes]}]
+    gs["units_cache"] = {"U1": {
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row, "orientation": 0,
+        "occupied_hexes": {(col, row)}, "player": 1, "HP_CUR": 1,
+    }}
+    gs["models_cache"] = {"T1": {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1,
+                                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+                                 "col": col, "row": row}}
+    return gs
+
+
+def test_near_objective_exige_le_recouvrement_de_l_aire_pas_une_distance_de_3_pouces():
+    """14.02 : « A model is within range of a terrain objective while it is within that terrain
+    area ». Un Ancient à UN subhex hors de l'aire n'est pas à portée — le même état le dit
+    hors objectif pour le contrôle (`unit_is_within_objective`). VERROU : remettre la lecture
+    `min_distance ≤ 3"` rend le cas « 1 subhex hors de l'aire » vrai → rouge."""
+    assert su._model_is_near_objective_or_center(_ancient_gs(10, 10), "T1") is True, "dans l'aire"
+    assert su._model_is_near_objective_or_center(_ancient_gs(10, 11), "T1") is False, "1 subhex hors de l'aire"
+    assert su._model_is_near_objective_or_center(_ancient_gs(10, 24), "T1") is False, "14 subhex (< 3\")"
+    from engine.game_state import unit_is_within_objective
+    assert unit_is_within_objective(_ancient_gs(10, 11), "U1") is False, "montage : même verdict que 14.02 contrôle"
+
+
+def test_near_objective_le_centre_reste_une_distance_de_6_pouces():
+    """« within 6" of the centre of the battlefield » est une DISTANCE : 30 subhex à ish=5.
+    Plateau 100x100 → centre (50,50)."""
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 50), "T1") is True, "sur le centre"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 80), "T1") is True, "à 30 subhex = 6\""
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 81), "T1") is False, "à 31 subhex > 6\""
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +525,11 @@ def test_unbreakable_resolve_ancient_inline_ne_couvre_que_l_ancient():
     gs["objectives"] = [{"id": "o1", "hexes": [[10, 11]]}]
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=intercessor) == []
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=ancient) == []
-    # Objectif à côté de l'Ancient : lui seul gagne FNP 4+.
-    gs["objectives"] = [{"id": "o1", "hexes": [[40, 41]]}]
+    # Aire d'objectif SOUS l'Ancient : lui seul gagne FNP 4+.
+    gs["objectives"] = [{"id": "o1", "hexes": [[40, 40]]}]
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=intercessor) == []
     assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=ancient) == [4]
+    # Aire à UN subhex du socle de l'Ancient (40 mm à ish=5 : rows 37..43 en col 40), sans
+    # recouvrement : pas « within range » (14.02), pas de FNP.
+    gs["objectives"] = [{"id": "o1", "hexes": [[40, 44]]}]
+    assert _collect_fnp_thresholds(unit, gs, _NORMAL_WEAPON, model_id=ancient) == []
