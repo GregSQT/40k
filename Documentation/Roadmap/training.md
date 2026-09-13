@@ -145,9 +145,9 @@ horizon plus long, ni sur un roster où le tir fractionné offrirait plus souven
 
 ---
 
-## 🔴 Entropie normalisée par l'état — contrôle vs traité, deux runs à faire {#entropie-normalisee}
+## 🟡 Entropie normalisée par l'état — contrôle vs traité mesurés, arbitrage ouvert {#entropie-normalisee}
 
-**Code livré le 2026-09-12 ; reste à faire : les deux runs, puis la lecture.** Décision utilisateur
+**Code livré le 2026-09-12 ; deux runs terminés le 2026-09-13 (résultats en fin de section) ; reste à trancher : second run traité ou clôture.** Décision utilisateur
 du 2026-09-13, option B deux fois : normalisation **par l'état** plutôt qu'un poids d'entropie par
 phase ; **témoin même code** plutôt que P0 du 2026-09-10, invalide comme témoin (70 commits
 moteur/IA depuis, dont overrun 12.06 et New Foes sur le chemin gym).
@@ -206,6 +206,45 @@ vs traité (300 ép./bot, IC95 ±5,7 par bras) et `00_critical/s_win_rate_deploy
 finaux ; écart rapporté **avec son intervalle** — un run par bras ne mesure pas la variance
 entre entraînements, jamais un verdict sur un point. Écart holdout < ~10 points → proposer le
 second run traité (option C), ne pas conclure.
+
+**RÉSULTATS du 2026-09-13** (contrôle 22:04 → 04:07, traité 04:07 → 09:48, même code
+d'apprentissage — seuls `ai/{train,model_artifacts,training_contract,curriculum}.py`, artefacts et
+contrat, diffèrent entre les deux départs, `2265c2d63` → `096ff93a2` ; contrôle archivé
+`model_ArmageddonAgent_x1_entnorm_20260913-040721.zip`, traité = canonique).
+
+| mesure | contrôle `x1_40k` | traité `x1_40k_entnorm` |
+|---|---|---|
+| **holdout final, 6 bots × 300** | **87,5 %** | **87,9 %** (écart +0,4 pt ; IC95 de l'écart ≈ ±2,2 pt) |
+| par bot (±5,7) | alpha 90,7 · attrition 84,3 · decapitation 90,0 · endgame 91,3 · racer 82,0 · scorer 86,7 | 91,7 · 85,7 · 93,3 · 91,0 · 82,0 · 83,7 |
+| bot_eval intermédiaire (30 ép./bot, ±7 pt) à 10k / 20k / 30k / 40k | 0,672 / 0,750 / 0,767 / 0,856 | 0,556 / 0,772 / 0,856 / 0,879 |
+| `s_win_rate_deploy_auto`, 50 derniers points | 0,574 | 0,528 |
+| `d_win_rate` (entraînement), 50 derniers | 0,788 | 0,766 |
+| `train/entropy_loss` (brut), 50 derniers | −0,79 | −1,07 |
+| `train/entropy_loss_normalized`, 50 derniers | −0,47 | −0,70 |
+| `diag/grad_norm_entropy_mb0`, 50 derniers | 0,0062 | 0,0139 |
+| `diag/grad_share_policy_mb0`, 50 derniers | 0,66 | 0,64 |
+| `train/n_minibatches_done` moy (plan 32) | 15,2 (13,4 → 18,2 par quart) | 15,9 (17,8 → 18,0) |
+| `train/approx_kl_max` > 0,0225 | 590/590 updates | 588/588 |
+
+**Table H / KL par famille** (`logs/entnorm_probe.log`, 6 épisodes échantillonnés par le traité ;
+H en nats, H_max = ln n) — traité / contrôle : activate_slot **0,90 / 0,41** (1,12), shoot_slot
+**0,77 / 0,34** (1,30), shoot_weapon_sel_slot **0,85 / 0,36** (1,35), oath **1,00 / 0,60** (1,64),
+charge_slot **0,24 / 0,05** (0,80), fight_weapon_slot 0,45 / 0,25 (1,08), wait 0,75 / 0,23 (1,20),
+deploy_slot 0,29 / 0,36 (1,95 — figé dans les deux bras), move_cell **3,00 / 2,28** (5,14) ;
+argmax différents sur 49–86 % des états selon la famille.
+
+**Lecture.** Le mécanisme fait ce qu'il devait sur l'entropie : les têtes courtes du traité
+hésitent 2 à 5 fois plus que celles du contrôle, et `entropy_loss_normalized` reste à −0,70 contre
+−0,47. Deux écarts avec le plan : le mouvement explore AUSSI davantage (3,00 contre 2,28, alors que
+la pression y était calculée inchangée), et `deploy_slot` reste figé dans les deux bras. Sur la
+métrique décisive, **aucun effet mesurable** : +0,4 pt de holdout, dans le bruit ; les deux
+politiques sont très différentes (KL 1,5–8 nat par famille), ce qui est attendu de deux
+entraînements indépendants et ne dit rien du régime. L'early-stop KL coupe toujours chaque update
+dans les deux bras (~15 pas de gradient sur 32). Conformément au critère : écart < 10 points →
+**pas de verdict** ; la variance entre entraînements n'est pas mesurée. Réserve d'interprétation :
+le holdout bots est proche de sa saturation (90 % de référence, 87,5–87,9 ici), alors que le
+plateau de P1 se mesurait contre P0 dans le pool de lignée — une métrique que ces bras ne
+produisent pas.
 
 ---
 
@@ -544,6 +583,64 @@ les rend comptables, ce qui était impossible avant :
 - 1.7 « special rules usage » : `mortal_wounds_on_critical_wound` / Boyz 1 invalide sur 4, et
   `mortal_wounds_on_fight_activation` / VanguardVeteranSquadJumpPack **59 invalides sur 90** — ce
   second chiffre est trop élevé pour être ignoré.
+
+---
+
+## Win-rate HOLDOUT du 2026-09-13 — canonique après l'arrêt de P1 {#holdout-2026-09-13}
+
+**Nouveau point de départ, PAS un avant/après**, pour les raisons données par le prompt qui l'a
+demandé : le canonique a été remis à P0 (`robust_0.8683`, 2026-09-10 22:31) puis repris par P1 ; la
+référence 90,0 % ([#holdout-2026-09-11](#holdout-2026-09-11)) portait sur le modèle du 2026-09-11
+13:09 (`robust_0.8933`) ; 35 commits moteur hors 20.01 sont entrés depuis (fight/pile-in/overrun
+12.06 gym, New Foes gym, zone d'engagement 09.05…). Un écart n'est attribuable à rien.
+**Prémisse corrigée** : P1 n'a PAS été promu — plateau contre P0 (0,547 → 0,601 entre 60 000 et
+120 000 épisodes cumulés, seuil 0,65), run arrêté le 2026-09-12 à 70 000 épisodes d'étape sans
+sauvegarde d'urgence. Le modèle mesuré est son instantané robuste **0,9078** (2026-09-12 18:52,
+110 177 épisodes cumulés = 60 000 d'étape), identique octet pour octet à
+`ArmageddonAgent_x1_12345_robust_0.9078.zip`.
+
+Mesure : `python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --resolution 1
+--test-only --step`, 2026-09-13 09:53–10:03, 300 épisodes, 6 bots × 50, deux rosters holdout,
+siège alterné (132 en P1, 168 en P2), **0 troncature** (garde anti-runaway muet), 0 nul.
+Dépouillement `ai/analyzer.py` (`analyzer.log`) et comptage siège/roster sur `step.log`.
+
+**WIN-RATE HOLDOUT : 273/300 = 91,0 %** (σ binomiale 1,7 pt, IC95 ≈ ±3,2). 266 victoires aux
+objectifs, 7 au départage de valeur, **zéro par élimination**.
+
+| dimension | résultat | référence 2026-09-11 |
+|---|---|---|
+| EndgameBot | 48/50 = 96,0 % | 96,0 % |
+| RacerBot | 47/50 = 94,0 % | 88,0 % |
+| AlphaStrikeBot / DecapitationBot / ScorerBot | 45/50 = 90,0 % | 94,0 / 94,0 / 82,0 % |
+| AttritionBot | 43/50 = 86,0 % | 86,0 % |
+| roster Space Marines | 151/156 = 96,8 % | 95,5 % |
+| roster Orks | 122/144 = 84,7 % | 84,0 % |
+| siège P1 (joue premier) | 129/132 = 97,7 % | 95,5 % |
+| siège P2 | 144/168 = 85,7 % | 85,7 % |
+| pire scénario | holdout_regular_bot-03 = 83,3 % | — |
+
+L'écart de siège reste de **12,0 points** (9,8 sur la référence) et l'écart de roster de 12,1 —
+les deux asymétries structurelles n'ont pas bougé.
+
+**Décisions d'agent** (`agent_decision_option_rate`, les deux sièges additionnés) :
+
+- **déclaration de réserves 20.01 : 444/1944 = 22,8 %** de `CHOICE_0` — la question est toujours
+  posée au siège modèle après le passage en déclaration par camp. Numérateur ET dénominateur
+  identiques à la référence : mêmes graines, mêmes rosters, politique déterministe en évaluation,
+  et la déclaration se joue à l'état initial de la partie — l'égalité n'est pas anormale, mais
+  elle n'a pas été vérifiée épisode par épisode. Le dénominateur attendu « plus bas » (camp machine
+  saturé sauté) ne s'est pas produit : 1944 questions, comme avant ;
+- `fly_declaration` : 1 916/2 922 = 65,6 % de montées (référence 71,8 %) ;
+- `waaagh_call` : 290/424 = 68,4 % d'appels (référence 68,9 %).
+
+**Constats analyzer non traités**, rapportés sans être qualifiés : **2.1 « Dead unit fighting » : 5
+occurrences, toutes côté joueur 2** (première : épisode 248, T5, `Unit 105(17,36) FOUGHT Unit
+4(18,36) with [Choppa]`) — absent de la référence ; 1.8 : 18 règles d'arme jamais exercées
+(inchangé). Aucune erreur de move, de tir, de charge ni de phase.
+
+Éval incidente contre les 6 checkpoints figés (25 ép. chacun, hors gate) : 0,44 à 0,64, moyenne
+0,553 — dont 0,64 contre `ckpt_0.9078`, qui EST le modèle mesuré : 25 parties ne distinguent
+rien, l'indicateur est au bruit.
 
 ---
 

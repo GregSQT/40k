@@ -120,8 +120,10 @@ un tour sur `full_pool_probe_every` (3). Sonder tout le pool à chaque fois coû
 lit toujours le pool entier, avec la dernière moyenne connue des membres non sondés.
 Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-09-07).
 
-**🔴 Entropie normalisée par l'état — expérience contrôle / traité (décision du 2026-09-13, code
-livré le 2026-09-12, deux runs à faire).** Cause mesurée le 2026-09-12 (6 épisodes, 1 301
+**🟡 Entropie normalisée par l'état — expérience contrôle / traité (décision du 2026-09-13, code
+livré le 2026-09-12, deux runs terminés le 2026-09-13 : holdout 87,5 % contre 87,9 %, +0,4 pt dans
+le bruit ; les têtes courtes du traité hésitent 2 à 5 fois plus mais rien ne se voit sur le
+win-rate ; pas de verdict, arbitrage second run / clôture ouvert).** Cause mesurée le 2026-09-12 (6 épisodes, 1 301
 décisions) : `train/entropy_loss` est une moyenne dominée par `move_cell` (H 2,23 sur ln n moyen
 5,07) alors que `charge_slot` vaut 0,007 nat sur 0,86 possible, `shoot_slot` 0,23 / 1,58,
 `deploy_slot` 0,16 / 1,95 — `ent_coef` 0,01 pèse 1,3 % du gradient et n'agit que sur le
@@ -132,9 +134,12 @@ de la config) plutôt que P0 du 2026-09-10, invalide comme témoin après 70 com
 Bras : `x1_40k` (= `x1_long` à **40 000** épisodes, décision du 2026-09-12 : la stagnation de P1
 se lit en 30 à 40 000 épisodes, 100 000 par bras aurait coûté ~25 h) et `x1_40k_entnorm` (= `x1_40k`
 + clé + `ent_coef` ×5, 0,5 → 0,05). P1 arrêté à 70 000 épisodes d'étape (plateau vs P0 ~0,60 sous
-le seuil 0,65) ; les deux runs s'enchaînent sur le GPU libéré. Métrique décisive : win-rate holdout
-final (300 ép./bot, IC95 ±5,7 par bras) ; écart < ~10 points = second run traité, pas de verdict.
-Détail : [training.md#entropie-normalisee](training.md#entropie-normalisee).
+le seuil 0,65) ; les deux runs se sont enchaînés sur le GPU libéré. Métrique décisive : win-rate
+holdout final (300 ép./bot, IC95 ±5,7 par bras) ; écart < ~10 points = second run traité, pas de
+verdict. Détail : [training.md#entropie-normalisee](training.md#entropie-normalisee).
+**Point HOLDOUT du 2026-09-13** sur le canonique x1 (instantané robuste 0,9078 de P1, non promu) :
+**91,0 %** (273/300), 20.01 toujours posée au siège modèle (444/1944 = 22,8 %), 5 « dead unit
+fighting » analyzer non qualifiés — [training.md#holdout-2026-09-13](training.md#holdout-2026-09-13).
 
 ---
 
