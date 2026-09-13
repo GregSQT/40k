@@ -145,6 +145,18 @@ horizon plus long, ni sur un roster où le tir fractionné offrirait plus souven
 
 ---
 
+## 🔴 Plafonnement P1 contre P0 — dossier de synthèse {#plafonnement-p1}
+
+**Ouvert le 2026-09-13.** `Documentation/Chantiers/backlog/plafonnement_p1.md`
+rassemble le symptôme mesuré (sondes, courbes par quart, holdouts), la chronologie du
+2026-09-11 au 2026-09-13 et ses antécédents P2, l'inventaire des causes possibles et des
+solutions avec leur statut, et l'arbitrage en attente (§7 du dossier). Les mesures de détail
+restent dans les sections ci-dessous ([#entropie-normalisee](#entropie-normalisee),
+[#signal-p1-2026-09-13](#signal-p1-2026-09-13), [#holdout-2026-09-13](#holdout-2026-09-13)) ;
+toute nouvelle mesure s'ajoute aux deux endroits.
+
+---
+
 ## 🟡 Entropie normalisée par l'état — contrôle vs traité mesurés, arbitrage ouvert {#entropie-normalisee}
 
 **Code livré le 2026-09-12 ; deux runs terminés le 2026-09-13 (résultats en fin de section) ; reste à trancher : second run traité ou clôture.** Décision utilisateur

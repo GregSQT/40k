@@ -163,6 +163,18 @@ et le combat (0,7–0,8), quasi nul sur les mouvements (0,12). Issue retenue : *
 (tête Q ou distillation)**, décomposition à l'appui. Détail :
 [training.md#signal-p1-lambda-2026-09-13](training.md#signal-p1-lambda-2026-09-13).
 
+**🔴 Plafonnement P1 contre P0 — dossier de synthèse ouvert le 2026-09-13 :**
+`Documentation/Chantiers/backlog/plafonnement_p1.md` relate tout ce
+qui a été fait sur le plateau du 2026-09-11 au 2026-09-13 (antécédents P2 compris), inventorie
+les causes possibles (optimisation, exploration, signal de crédit, adversité, mesure, capacité,
+convergence) et les solutions, avec leur statut — testé, réfuté, écarté par décision, ouvert.
+Réfutés comme levier : taille de lot, `target_kl`, `n_epochs`, `learning_rate`, `max_grad_norm`,
+`vf_coef`, `ent_coef`, entropie normalisée. **Option B du §7 exécutée le 2026-09-13 (suite 123,
+paragraphe ci-dessus)** : la source du bruit est le crédit lui-même (variance de transition à
+l'échelle de Var(r), pas un point stationnaire — le gradient existe à λ = 0 et le contrôle
+aléatoire est vu) ; ni λ ni l'adversaire déterministe ne le réduisent. **Décision en attente** :
+le mécanisme d'avantage moyenné (tête Q ou distillation, §7 du dossier).
+
 ---
 
 ## J3 — Mesure de référence
