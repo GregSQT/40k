@@ -1130,7 +1130,7 @@ class TestDistributedRolloutMaskPropagation:
 
         subproc_mock = MagicMock()
         subproc_mock.num_envs = self.N_ENVS
-        subproc_mock.collect_trajectories.return_value = trajectories
+        subproc_mock.iter_trajectories.return_value = list(enumerate(trajectories))
 
         env_mock = MagicMock()
         env_mock.num_envs = self.N_ENVS
@@ -1171,6 +1171,133 @@ class TestDistributedRolloutMaskPropagation:
         assert np.all(buf.action_masks[:, 1, 2:] == 1.0), (
             f"env 1 actions 2-3 attendu 1.0 : {buf.action_masks[:, 1, 2:]}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# 3.4c — _collect_rollouts_distributed : observations copiées trajectoire par trajectoire
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+
+class TestDistributedRolloutObservationsLandInBuffer:
+    """Les observations de chaque trajectoire sont copiées dans buf.observations[key][:, env] dès
+    la réception, puis libérées (traj["norm_obs_seq"] disparaît). Verrou du 2026-09-14 : l'ancien
+    chemin recevait toute la liste puis l'empilait (obs_all) avant de remplir le buffer pas à pas —
+    trois exemplaires des observations dans le learner, run S23 tué à 2 Go de RAM disponible.
+    ROUGE si l'axe env/step est permuté, si les steps sont réordonnés ou si les obs restent
+    attachées aux trajectoires."""
+
+    N_ENVS = 3
+    N_STEPS = 4
+    N_ACTIONS = 2
+    GC_DIM = 5
+
+    def _make_trajectory(self, env_idx: int) -> dict:
+        # Valeur unique par (env, step, dim) : env*100 + step*10 + dim.
+        gc = np.array(
+            [[env_idx * 100 + t * 10 + d for d in range(self.GC_DIM)] for t in range(self.N_STEPS)],
+            dtype=np.float32,
+        )
+        return {
+            "norm_obs_seq": {"global_cont": gc},
+            "actions_seq": [0] * self.N_STEPS,
+            "rewards_seq": [0.0] * self.N_STEPS,
+            "raw_rewards_seq": np.zeros(self.N_STEPS, dtype=np.float32),
+            "bootstrap_seq": np.zeros(self.N_STEPS, dtype=np.float32),
+            "dones_seq": [False] * self.N_STEPS,
+            "episode_starts_seq": [True] + [False] * (self.N_STEPS - 1),
+            "values_seq": [0.0] * self.N_STEPS,
+            "log_probs_seq": [-1.0] * self.N_STEPS,
+            "masks_seq": [np.ones(self.N_ACTIONS, dtype=bool) for _ in range(self.N_STEPS)],
+            "infos_seq": [{}] * self.N_STEPS,
+            "last_norm_obs": {"global_cont": np.zeros(self.GC_DIM, dtype=np.float32)},
+            "last_done": False,
+            "last_value": 0.0,
+            "raw_global_cont": np.zeros((self.N_STEPS, self.GC_DIM), dtype=np.float64),
+            "discounted_returns": np.zeros(self.N_STEPS, dtype=np.float64),
+            "final_discounted_return": 0.0,
+            "episode_wall_seconds_seq": [0.0] * self.N_STEPS,
+        }
+
+    def _run(self, trajectories: list, n_rollout_steps: int):
+        from gymnasium import spaces
+        from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
+        from ai.patched_ppo import PatchedMaskablePPO
+
+        obs_space = spaces.Dict({
+            "global_cont": spaces.Box(-1e4, 1e4, (self.GC_DIM,), dtype=np.float32),
+        })
+        act_space = spaces.Discrete(self.N_ACTIONS)
+        buf = MaskableDictRolloutBuffer(
+            buffer_size=self.N_STEPS, observation_space=obs_space, action_space=act_space,
+            device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=self.N_ENVS,
+        )
+
+        class StubPolicy:
+            def set_training_mode(self, mode): pass
+            def cpu(self): return self
+            def predict_values(self, obs):
+                return torch.zeros(next(iter(obs.values())).shape[0])
+
+        with patch.object(PatchedMaskablePPO, "_setup_model"):
+            model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
+        model.policy = StubPolicy()  # type: ignore[assignment]
+        model.device = torch.device("cpu")
+        model.action_space = act_space
+        model.num_timesteps = 0
+        model._last_obs = {"global_cont": np.zeros((self.N_ENVS, self.GC_DIM), dtype=np.float32)}
+        model._last_episode_starts = np.zeros(self.N_ENVS, dtype=bool)
+        model._update_info_buffer = MagicMock()
+
+        subproc_mock = MagicMock()
+        subproc_mock.num_envs = self.N_ENVS
+        # Générateur réel : la copie doit se faire au fil de la consommation, pas après.
+        subproc_mock.iter_trajectories.return_value = iter(list(enumerate(trajectories)))
+        env_mock = MagicMock()
+        env_mock.num_envs = self.N_ENVS
+        env_mock.observation_space = obs_space
+        env_mock.action_space = act_space
+        callback = MagicMock()
+        callback.on_step.return_value = True
+
+        with patch("ai.vec_normalize_frozen.snapshot_vec_normalize", return_value=MagicMock()), \
+             patch("ai.vec_normalize_frozen.update_vec_normalize_from_trajectories", return_value=None), \
+             patch("ai.vec_normalize_frozen._unwrap_vec_normalize", return_value=None), \
+             patch("cloudpickle.dumps", return_value=b"stub_policy"):
+            model._collect_rollouts_distributed(
+                env_mock, subproc_mock, callback, buf, n_rollout_steps, use_masking=True
+            )
+        return buf
+
+    def test_each_observation_lands_at_its_env_and_step(self):
+        trajectories = [self._make_trajectory(i) for i in range(self.N_ENVS)]
+        buf = self._run(trajectories, self.N_STEPS)
+        assert buf.observations["global_cont"].shape == (self.N_STEPS, self.N_ENVS, self.GC_DIM)
+        for env_idx in range(self.N_ENVS):
+            for t in range(self.N_STEPS):
+                expected = np.array(
+                    [env_idx * 100 + t * 10 + d for d in range(self.GC_DIM)], dtype=np.float32
+                )
+                np.testing.assert_array_equal(
+                    buf.observations["global_cont"][t, env_idx], expected,
+                    err_msg=f"obs (step {t}, env {env_idx}) ne vient pas de la trajectoire {env_idx} au step {t}",
+                )
+
+    def test_observations_are_released_from_trajectories(self):
+        """Le learner ne garde pas d'exemplaire des observations hors buffer : `norm_obs_seq`
+        est retiré de chaque trajectoire dès la copie (c'est le mécanisme qui libère la RAM)."""
+        trajectories = [self._make_trajectory(i) for i in range(self.N_ENVS)]
+        self._run(trajectories, self.N_STEPS)
+        assert all("norm_obs_seq" not in traj for traj in trajectories), (
+            "norm_obs_seq encore attaché à une trajectoire après la collecte"
+        )
+
+    def test_wrong_trajectory_length_is_refused(self):
+        """Une trajectoire d'une autre longueur que n_rollout_steps est refusée explicitement,
+        jamais tronquée ou diffusée en silence dans le buffer."""
+        trajectories = [self._make_trajectory(i) for i in range(self.N_ENVS)]
+        trajectories[1]["norm_obs_seq"]["global_cont"] = trajectories[1]["norm_obs_seq"]["global_cont"][:-1]
+        with pytest.raises(ValueError, match="observations pour 'global_cont'"):
+            self._run(trajectories, self.N_STEPS)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1424,8 +1551,8 @@ class TestCriticOutputsNotRescaled:
 
         subproc = MagicMock()
         subproc.num_envs = self.N_ENVS
-        subproc.collect_trajectories.return_value = [
-            self._make_trajectory(i, raw_reward=raw_reward) for i in range(self.N_ENVS)
+        subproc.iter_trajectories.return_value = [
+            (i, self._make_trajectory(i, raw_reward=raw_reward)) for i in range(self.N_ENVS)
         ]
 
         buf = MaskableDictRolloutBuffer(

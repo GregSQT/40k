@@ -562,20 +562,36 @@ class PatchedMaskablePPO(MaskablePPO):
         callback.on_rollout_start()
         assert self._last_episode_starts is not None
         initial_episode_starts = self._last_episode_starts.copy()
-        trajectories = subproc.collect_trajectories(
+        # Les observations de chaque trajectoire sont copiées dans le buffer dès sa réception, puis
+        # libérées : le learner ne tient jamais plus d'UNE trajectoire d'observations hors buffer.
+        # Jusqu'au 2026-09-14 il recevait la liste complète puis l'empilait (obs_all) avant de
+        # remplir le buffer pas à pas : trois exemplaires des observations (3 × 3,4 Go à 32 640
+        # pas), ce qui a tué le run S23 à 2 Go de RAM disponible (mem_s23_12envs, 00:08).
+        obs_keys = list(rollout_buffer.observations.keys())
+        trajectories: list[dict] = []
+        for env_idx, traj in subproc.iter_trajectories(
             policy_bytes, n_rollout_steps, snapshots, initial_episode_starts
-        )
+        ):
+            norm_obs_seq = traj.pop("norm_obs_seq")
+            for key in obs_keys:
+                seq = norm_obs_seq[key]
+                if seq.shape[0] != n_rollout_steps:
+                    raise ValueError(
+                        f"trajectoire de l'env {env_idx} : {seq.shape[0]} observations pour "
+                        f"'{key}', {n_rollout_steps} attendues (n_rollout_steps)"
+                    )
+                rollout_buffer.observations[key][:, env_idx] = seq
+            trajectories.append(traj)
 
         # 4. Remplir le buffer depuis les trajectoires.
-        # Pré-empilement : (n_envs, n_steps, ...) par clé — remplace n_steps × n_keys np.stack par n_keys np.stack.
-        obs_keys = list(trajectories[0]["norm_obs_seq"].keys())
-        obs_all = {key: np.stack([traj["norm_obs_seq"][key] for traj in trajectories]) for key in obs_keys}
         # Pré-empilement raw rewards + bootstrap pour la normalisation correcte à l'étape 6.
         raw_rewards_all = np.stack([traj["raw_rewards_seq"] for traj in trajectories]).T  # (n_steps, n_envs)
         bootstrap_all = np.stack([traj["bootstrap_seq"] for traj in trajectories]).T       # (n_steps, n_envs)
 
         for step_idx in range(n_rollout_steps):
-            obs_step = {key: obs_all[key][:, step_idx] for key in obs_keys}
+            # Les observations sont déjà à leur place : `add` les relit depuis le buffer (copie
+            # d'une ligne de n_envs obs, puis réécriture au même index — identité).
+            obs_step = {key: rollout_buffer.observations[key][step_idx] for key in obs_keys}
 
             actions_step = np.array([traj["actions_seq"][step_idx] for traj in trajectories])
             # Le buffer est rempli avec les rewards brutes ; elles seront normalisées à l'étape 6

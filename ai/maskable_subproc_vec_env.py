@@ -22,7 +22,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import os
 from multiprocessing.connection import Connection as _MpConnection
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import gymnasium as gym
 import numpy as np
@@ -55,7 +55,12 @@ def _run_worker_trajectory(
     import time as _time
 
     # Stockage de la trajectoire
-    norm_obs_lists: dict[str, list] = {}   # accumulateur → converti en dict-of-arrays en fin
+    # Observations normalisées : UN tableau (n_steps, ...) par clé, préalloué au premier step et
+    # rempli en place. Jusqu'au 2026-09-14 c'était une liste de n_steps copies puis np.stack :
+    # deux exemplaires de la trajectoire au pic, et les n_steps petits blocs (104 Ko, sous le
+    # seuil mmap de glibc) restaient dans le tas du worker après l'envoi — mesuré à 32 640 pas
+    # sur 12 workers : 0,75 → 1,7 Go de RSS par worker, jamais rendus (mem_s23_12envs).
+    norm_obs_arrays: dict[str, np.ndarray] = {}
     raw_gc_seq: list[np.ndarray] = []     # seul global_cont est utilisé pour VecNormalize
     actions_seq: list[int] = []
     rewards_seq: list[float] = []      # reward normalisée (avec bootstrap)
@@ -109,7 +114,7 @@ def _run_worker_trajectory(
         if done:
             # Copie : observation_raw vit dans le scratch réutilisé du moteur, et cet info
             # est stocké dans infos_seq jusqu'à la fin de la trajectoire (même contrat que
-            # les obs de norm_obs_lists ci-dessous).
+            # les obs de norm_obs_arrays ci-dessous).
             info["terminal_observation"] = copy_obs_dict(observation_raw)
 
         # Tracking VecNormalize.returns avec raw_reward (avant normalisation).
@@ -165,9 +170,9 @@ def _run_worker_trajectory(
         # (normalize_obs_with_snapshot copie AVANT env.step — copier ici serait trop tard,
         # le scratch du moteur est déjà muté par le step).
         for k, v in norm_obs.items():
-            if k not in norm_obs_lists:
-                norm_obs_lists[k] = []
-            norm_obs_lists[k].append(v)
+            if k not in norm_obs_arrays:
+                norm_obs_arrays[k] = np.empty((n_steps, *v.shape), dtype=v.dtype)
+            norm_obs_arrays[k][_step] = v
         # Lecture POST-step voulue (contrairement aux obs ci-dessus) : parité avec le flux
         # que VecNormalize voit en stepwise — step_wait met à jour obs_rms avec l'obs
         # RETOURNÉE par le step. Le seul consommateur (update_vec_normalize_from_trajectories)
@@ -198,8 +203,9 @@ def _run_worker_trajectory(
         }
         last_value = float(frozen_policy.predict_values(obs_last).cpu().numpy().flat[0])
 
-    # norm_obs_seq : dict-of-arrays (n_steps, ...) par clé — évite n_steps × n_keys np.stack côté learner.
-    norm_obs_seq = {k: np.stack(v) for k, v in norm_obs_lists.items()}
+    # norm_obs_seq : dict-of-arrays (n_steps, ...) par clé, déjà contigus — aucun np.stack ici ni
+    # côté learner, qui copie chaque clé directement dans rollout_buffer.observations[key][:, env].
+    norm_obs_seq = norm_obs_arrays
     # raw_global_cont : seul global_cont brut, shape (n_steps, 13), pour mise à jour VecNormalize obs_rms.
     raw_global_cont = np.array(raw_gc_seq, dtype=np.float64)
 
@@ -337,7 +343,7 @@ def _maskable_worker(
 class MaskableSubprocVecEnv(SubprocVecEnv):
     """SubprocVecEnv dont le worker inclut action_masks dans les infos de step() (Phase 2.3).
 
-    Phase 3 : ajoute collect_trajectories() pour la collecte distribuée sans lockstep.
+    Phase 3 : ajoute iter_trajectories() pour la collecte distribuée sans lockstep.
     Drop-in replacement de SubprocVecEnv pour le pipeline PPO maskable. Compatible avec
     VecNormalize et les autres wrappers SB3.
     """
@@ -374,21 +380,27 @@ class MaskableSubprocVecEnv(SubprocVecEnv):
 
         VecEnv.__init__(self, len(env_fns), observation_space, action_space)
 
-    def collect_trajectories(
+    def iter_trajectories(
         self,
         policy_bytes: bytes,
         n_steps: int,
         snapshots: list[Any],
         initial_episode_starts: np.ndarray,
-    ) -> list[dict]:
-        """Envoie COLLECT_TRAJECTORY à tous les workers et récupère les trajectoires.
+    ) -> Iterator[tuple[int, dict]]:
+        """Envoie COLLECT_TRAJECTORY à tous les workers et rend les trajectoires UNE PAR UNE.
 
-        Chaque worker tourne indépendamment ses n_steps steps avec la policy gelée.
-        Retourne une liste de trajectoires (une par worker), dans l'ordre des workers.
+        Chaque worker tourne indépendamment ses n_steps steps avec la policy gelée. Générateur :
+        rend (index d'env, trajectoire) dans l'ordre des workers, dès que chacun a répondu, pour
+        que le learner copie les observations dans son buffer et les libère AVANT de recevoir la
+        suivante. L'ancien `collect_trajectories()` rendait la liste complète : à 32 640 pas, les
+        n_envs trajectoires reçues (3,4 Go) coexistaient avec leur empilement et le buffer — trois
+        copies des observations dans le learner (mesuré le 2026-09-14, run tué à 2 Go de RAM).
+        Le générateur DOIT être consommé jusqu'au bout : chaque `remote.recv()` non fait laisse
+        une réponse en attente dans le tube du worker.
         """
         if self.waiting:
             raise RuntimeError(
-                "collect_trajectories() appelé alors que le VecEnv attend des résultats step."
+                "iter_trajectories() appelé alors que le VecEnv attend des résultats step."
             )
         assert len(snapshots) == len(self.remotes), (
             f"Nombre de snapshots ({len(snapshots)}) ≠ nombre de workers ({len(self.remotes)})"
@@ -402,11 +414,8 @@ class MaskableSubprocVecEnv(SubprocVecEnv):
                 bool(initial_episode_starts[i]),
             )))
 
-        trajectories = []
-        for remote in self.remotes:
+        for env_idx, remote in enumerate(self.remotes):
             result = remote.recv()
             if isinstance(result, Exception):
                 raise result
-            trajectories.append(result)
-
-        return trajectories
+            yield env_idx, result
