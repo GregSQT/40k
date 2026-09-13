@@ -393,6 +393,124 @@ Reproduire : `python3 scripts/grad_signal_probe.py --agent ArmageddonAgent_x1 --
 --training-config x1_lineage --rollouts 24 --out <json>` (refuse si `ai/train.py` tourne ;
 sort en code 3 si le premier rollout ne reproduit pas la référence).
 
+#### Balayage λ appairé, décomposition de Var(δ), contrôles — 2026-09-13, suite 123 {#signal-p1-lambda-2026-09-13}
+
+**Verdict : aucune des trois issues écrites avant lecture ne s'applique telle quelle ; la
+lecture qui reste est la branche « avantage moyenné » (tête Q ou distillation), avec la
+décomposition à l'appui.** La règle disait : f(λ=0) > 0,1 excluant 0 → run P1 30 000 épisodes à
+ce λ ; f(λ=0) ≈ 0 et f(contrôle) > 0 → avantage moyenné ; f(contrôle) ≈ 0 → instrument à
+réparer. Mesuré : **f(λ=0) = 0,053 [0,036, 0,070]** — exclut 0 mais reste cinq fois sous 0,1 :
+le λ le plus bas rend une update encore à 95 % de bruit ; **f(contrôle 040721) = 0,006
+[−0,005, 0,017]** — le contrôle choisi n'est pas positif ; **f(contrôle à poids ALÉATOIRES) =
+0,43 [0,27, 0,59]** — l'instrument voit un gradient qui existe. Donc pas de run à λ = 0 (le
+critère n'est pas atteint), pas d'instrument à réparer (réfuté par le contrôle aléatoire), et la
+branche 2 par élimination argumentée : à lot fixe, ni λ (×3,4 sur ‖G‖², f plafonne à 0,05), ni le
+hasard de l'adversaire (P0 déterministe : mêmes nombres) ne réduisent le bruit ; ce qui reste
+est la variance du crédit lui-même, et la décomposition dit qu'elle est à l'échelle de la
+récompense.
+
+**Instrument.** `scripts/grad_signal_probe.py`, extension lecture seule (verrous :
+`tests/unit/scripts/test_grad_signal_probe.py`, 24 tests). Sur CHAQUE rollout collecté, avantages
+et retours sont recalculés a posteriori depuis les copies non aplaties de rewards / values /
+episode_starts, `last_values` recalculé sur `model._last_obs` (`gae_advantages`, même boucle
+float32 que `compute_returns_and_advantage` : écart max **0** sur les 24 + 24 + 24 + 12 rollouts,
+tolérance 1e-6), puis le gradient policy est repris par mini-lot avec la MÊME permutation ; les
+différences entre λ sont appairées (jackknife de f_a − f_b sur les mêmes rollouts). ⚠️ Piège
+attrapé par la vérification d'alignement mini-lot par mini-lot : le buffer de production
+(`GpuMaskableDictRolloutBuffer`) uploade avantages et retours sur le GPU **une fois** au premier
+`get()` — remplacer les seuls tableaux numpy fait servir les anciens avantages ;
+`set_buffer_advantages` rafraîchit les deux exemplaires. Var(δ_t) = Var(r_t) + Var(ΔV_t) +
+2 Cov sur les mêmes buffers, par famille de l'action jouée (`action_family`, phase lue dans le
+one-hot `global_bin` de l'observation du pas, `setting_up` = `info["action"] == "ingress_move"`).
+`--model` / `--vec-normalize` : autre politique dans le MÊME env P1, avec SON pkl (jamais celui du
+canonique, verrouillé) ; `--random-init SEED` : poids réinitialisés en mémoire ;
+`--opponent-deterministic` : `self_play_deterministic = true` dans le bloc `opponent_mix` de
+l'étape (la clé que `curriculum.opponent.deterministic` alimente). Une implémentation
+indépendante (session 40k-a2, avantages recalculés passés en tenseurs séparés sans toucher le
+buffer) rend les mêmes nombres : λ = 0,95 f = 0,018 [−0,008, 0,045], λ = 0 f = 0,058 [0,027,
+0,089] ; son contrôle synthétique (avantage = log-prob de l'action jouée, crédit cohérent de
+variance unité) donne f = 0,667 [0,637, 0,696] — le plafond de l'instrument pour lire les 0,05.
+
+**P1, canonique 0,9078 dans l'env exact de P1 (24 rollouts, 1 738 épisodes, 0 sans vainqueur,
+part pool 0,702, acceptation tenue : policy mb0 0,313, EV 0,892, part pool 0,66).** Terme policy,
+tous groupes, par λ (‖G‖² sans biais ; f_8160) :
+λ = 0,95 : 2,6 × 10⁻⁴ [−1,7 × 10⁻⁴, 6,8 × 10⁻⁴] ; **0,015 [−0,010, 0,039]** (non détecté — reproduit
+la mesure du matin, 8 × 10⁻⁵ / 0,005) ;
+λ = 0,80 : 1,0 × 10⁻⁴ [−1,9 × 10⁻⁴, 4,0 × 10⁻⁴] ; 0,007 [−0,014, 0,028] (non détecté) ;
+λ = 0,50 : 3,9 × 10⁻⁴ [1,5 × 10⁻⁴, 6,3 × 10⁻⁴] ; 0,027 [0,010, 0,044] (détecté) ;
+λ = 0,20 : 7,5 × 10⁻⁴ [4,8 × 10⁻⁴, 1,0 × 10⁻³] ; 0,048 [0,031, 0,065] ;
+λ = 0 : 8,7 × 10⁻⁴ [5,8 × 10⁻⁴, 1,2 × 10⁻³] ; **0,053 [0,036, 0,070]**, B_noise = 147 000 pas
+[97 000, 196 000] (18 rollouts de 8160 pour une update à moitié signal, contre > 358 000 à
+λ = 0,95).
+Différences appairées Δf_8160 (a − b) : 0,95 − 0 = **−0,038 [−0,070, −0,005]** (exclut 0) ;
+0,95 − 0,20 = −0,033 [−0,064, −0,001] (exclut 0) ; 0,95 − 0,50 = −0,012 [−0,039, +0,015] ;
+0,95 − 0,80 = +0,008 [−0,006, +0,022] ; 0,50 − 0 = −0,026 [−0,039, −0,013] ; 0,20 − 0 = −0,005
+[−0,010, −0,0002]. Lecture : descendre λ fait apparaître un gradient détectable (‖G‖² × 3,4,
+E‖G_rollout‖² inchangé à 0,017), mais ce gradient — celui d'un estimateur TD(0) BIAISÉ par
+l'erreur du critic, pas nécessairement une direction d'amélioration — reste à f = 0,05. Termes de
+contrôle interne inchangés : value f = 0,28 [0,16, 0,41] (0,27 le matin), entropie 0,96.
+
+**Décomposition de Var(δ_t), 195 840 pas (P1) :** Var(δ) = **0,0500** = Var(r) **0,0432**
+(part 0,864) + Var(ΔV) 0,0652 (part 1,303) + 2 Cov **−0,0584** (part −1,168) ; ρ(r, ΔV) =
+**−0,55**. Le critic anticipe la récompense façonnée : V(s_t) monte avant qu'elle tombe et
+ΔV_t = γV(s_{t+1}) − V(s_t) redescend quand elle est tombée, d'où la covariance négative qui
+annule la plus grande part de Var(r) + Var(ΔV). Ce qui reste, δ, a la variance de r à 15 % près.
+Par famille (part de Var(r) dans Var(δ) ; n) : shoot_slot **0,955** (18 467, Var(δ) 0,115),
+fight_slot 0,82 (4 740), choice 0,79 (51 464), fight_weapon_slot 0,70 (5 853, Var(δ) 0,258 — la
+plus haute), activate_slot 0,55 (60 419), **move_cell 0,12** (37 742 : un mouvement ne reçoit pas
+de récompense immédiate, son δ est du seul changement de valeur), deploy_slot 0,015 (8 893),
+charge_slot 0 (3 147, Var(δ) 0,003 : δ ≈ 0, ni récompense ni surprise) ; oath / coherency /
+fight_no_target / wait : parts > 1 des deux côtés et covariance −2 à −5 (r et ΔV grands et
+opposés, échantillons < 4 500). Ce que ça dit pour une récompense EN ESPÉRANCE : elle retire
+Var(r − E[r | s, a]), part non identifiable ici parce que ΔV dépend aussi du dé (une cible tuée
+change s_{t+1}) ; la borne est Var(r) = 86 % de Var(δ), et les familles où le dé décide
+(tir, combat) sont celles où δ est le plus dispersé et le plus porté par r. Une tête Q ou une
+distillation d'avantage moyenné vise exactement ces familles.
+
+**Contrôle positif `--model` (entnorm_20260913-040721 = bras x1_40k, 40 002 épisodes à froid,
+holdout ~0,79, dans l'env P1 avec SON pkl ; 24 rollouts, 1 783 épisodes, 0 sans vainqueur, part
+pool 0,700).** Policy λ = 0,95 : ‖G‖² 1,2 × 10⁻⁴ [−9 × 10⁻⁵, 3,4 × 10⁻⁴], **f = 0,006 [−0,005,
+0,017]** — même profil que P1 ; λ = 0,80 : 0,019 [0,003, 0,035] (détecté) ; λ = 0 : 9,7 × 10⁻⁴
+[5,1 × 10⁻⁴, 1,4 × 10⁻³], f = 0,054 [0,028, 0,079], B_noise 144 000. Terme value : ‖G‖² 0,46,
+**f = 0,876 [0,81, 0,94]**, B_noise 1 150 — son critic n'est pas ajusté à cet env (pool P0 à
+70 %, jamais vu), le gradient de valeur est massif et l'instrument le voit sans ambiguïté.
+Var(δ) 0,0493 : Var(r) 0,0524, Var(ΔV) 0,0685, Cov −0,0358 (ρ = −0,60). Conclusion : une
+politique 30 points de holdout plus faible que le canonique a, à λ = 0,95 et B = 8160, aussi peu
+de gradient de politique détectable — ce contrôle ne discrimine pas.
+
+**Contrôle positif `--random-init 20260913` (poids du canonique réinitialisés en mémoire, mêmes
+hyperparamètres, stats du canonique ; 12 rollouts, 962 épisodes, 0 sans vainqueur, part pool
+0,697, ep_len 100).** Policy λ = 0,95 : ‖G‖² 5,6 × 10⁻⁵ [1,6 × 10⁻⁵, 9,5 × 10⁻⁵] (exclut 0),
+E‖G_rollout‖² 1,3 × 10⁻⁴, **f_8160 = 0,43 [0,27, 0,59]**, f_1020 = 0,08, B_noise 10 800 ;
+λ = 0,80 : 0,63 [0,52, 0,75] ; λ ≤ 0,5 : 0,71–0,73 ; value f = 0,97 ; entropie ‖G‖² ≈ 2 × 10⁻⁹
+(politique uniforme = entropie maximale, gradient nul — attendu). Une première passe équivalente
+(zip réinitialisé hors dépôt, autre tirage) avait donné 0,40 [0,12, 0,68]. L'instrument détecte
+un gradient de politique à λ = 0,95 quand il existe, avec deux fois moins de rollouts. À noter :
+la politique aléatoire a un gradient 130 fois plus PETIT en norme que P1 (E‖G_rollout‖²
+1,3 × 10⁻⁴ contre 0,017) — ce qui grandit avec l'entraînement, c'est le bruit par échantillon
+d'une politique devenue tranchée, pas le signal. ⚠️ Une passe `--random-init` sur trois a été
+tuée par le MOTEUR, pas par la sonde : `engine/w40k_core.py:8703` lève « execute_squad_move a
+échoué […] la destination vient du pool BFS du masque, elle DOIT être exécutable — collision
+intra-plan : deux figurines en (19,29) » pendant un tour BOT (`_run_bot_until_not_bot_turn`),
+dans un état que seule une politique aléatoire produit ; bug d'invariant masque/exécution,
+consigné en suite, hors de ce chantier.
+
+**P0 déterministe (`--opponent-deterministic`, seconde collecte NON appairée ; 24 rollouts,
+1 748 épisodes, 0 sans vainqueur, part pool 0,699, acceptation tenue).** Policy λ = 0,95 :
+‖G‖² 1,5 × 10⁻⁴ [−2,2 × 10⁻⁴, 5,3 × 10⁻⁴], f = 0,009 [−0,014, 0,031] ; λ = 0 : 9,0 × 10⁻⁴
+[4,1 × 10⁻⁴, 1,4 × 10⁻³], f = 0,061 [0,029, 0,093], B_noise 126 000 ; value f = 0,26 [0,13,
+0,38] ; Var(δ) 0,0492 (parts 0,877 / 1,326 / −1,203, ρ = −0,56). Indistinguable de la collecte
+stochastique : l'échantillonnage de l'adversaire figé n'est pas une source de bruit mesurable —
+le dé et le crédit le sont.
+
+Durées : 24 rollouts × (34–73 s de collecte + 9–23 s de gradients pour 5 λ) = 20 à 30 min par
+collecte, 4 collectes. Reproduire : `python3 scripts/grad_signal_probe.py --agent
+ArmageddonAgent_x1 --etape P1 --training-config x1_lineage --rollouts 24 --gae-lambdas
+0.95,0.8,0.5,0.2,0 --out <json>` ; `... --model
+ai/models/ArmageddonAgent_x1_entnorm/model_ArmageddonAgent_x1_entnorm_20260913-040721.zip` ;
+`... --random-init 20260913 --rollouts 12` ; `... --opponent-deterministic`. Aucun JSON de
+`config/` ni zip/pkl touché (vérifié par mtime en sortie de chaque collecte).
+
 ### Six défauts de la livraison, fermés le 2026-09-07
 
 **Le premier était bloquant pour toute la chaîne.** `_apply_curriculum_model_params` posait un
