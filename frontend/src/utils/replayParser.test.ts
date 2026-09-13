@@ -685,6 +685,33 @@ describe("replayParser", () => {
     expect(Object.keys(unit1!.occupied_hexes_by_model ?? {}).sort()).toEqual(["1#0", "1#1"]);
   });
 
+  // 24.08 : la ligne `DEADLY DEMISE` atteint step.log depuis le 2026-09-13 (elle nomme la cause
+  // d'un `DEAD … reason=hazard` pour l'analyzer). Le replay n'en fait rien : elle tombe au bout
+  // de la chaîne des motifs, sans action ni erreur — c'est ce contrat qu'on verrouille, pour
+  // qu'un motif générique ajouté plus tard ne la prenne pas pour une attaque de l'unité 4.
+  it("ignore la ligne DEADLY DEMISE sans erreur ni action fantôme", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 4 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 105 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 4(-1,-1) DEPLOYED from (-1,-1) to (0,0) [MODELS: 4#0@(0,0)]",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 105(-1,-1) DEPLOYED from (-1,-1) to (2,0) [MODELS: 105#0@(2,0)]",
+      "[12:00:02] T1 P1 FIGHT : Unit 4 DEAD model=4#0 reason=combat [SUCCESS]",
+      "[12:00:02] T1 P1 FIGHT : Unit 4 DEADLY DEMISE Roll:6 → Unit 105(2,0) SUFFERS 2 MW [DEADLY DEMISE] [SUCCESS]",
+      "[12:00:02] T1 P1 FIGHT : Unit 4 DEADLY DEMISE Roll:3 → no effect [DEADLY DEMISE] [SUCCESS]",
+      "[12:00:02] T1 P2 FIGHT : Unit 105 DEAD model=105#0 reason=hazard [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    const types = parsed.episodes[0].actions.map((a) => (a as { type?: string }).type);
+    expect(types).toEqual(["deploy", "deploy"]);
+  });
+
   // 24.10 en MÊLÉE : `relic_greataxe` et `thunder_hammer_terminator` portent DEVASTATING
   // WOUNDS. La branche FOUGHT n'avait pas la reconnaissance que la branche SHOT possède, donc
   // `saveMatch` restait nul et la blessure — pourtant réussie, et dont les dégâts étaient

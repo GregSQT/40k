@@ -1431,17 +1431,20 @@ class StepLogger:
 
         elif action_type == "deadly_demise":
             # §24.08 DEADLY DEMISE — déclenchée dans destroy_model, après emergency disembark.
-            src_id = require_key(details, "sourceUnitId")
-            tgt_id = require_key(details, "unitId")
-            d6 = require_key(details, "d6Roll")
-            x_wounds = require_key(details, "deadlyDemiseWounds")
+            # Clés snake_case posées par `_build_step_log_details` (w40k_core), comme tout autre
+            # type : les clés camelCase du payload moteur que ce formateur lisait n'y arrivaient
+            # jamais. `unit_id` = la victime (jet réussi) ou la source (jet raté) ; sur un jet
+            # réussi `unit_with_coords` nomme la victime AVEC sa position, exigée par l'analyzer
+            # pour attribuer le `DEAD … reason=hazard` qui suit.
+            src_id = require_key(details, "source_unit_id")
+            d6 = require_key(details, "d6_roll")
+            x_wounds = require_key(details, "deadly_demise_wounds")
             if int(d6) < 6:
                 return f"Unit {src_id} DEADLY DEMISE Roll:{d6} → no effect [DEADLY DEMISE]"
-            tgt_col = details.get("col", "?")
-            tgt_row = details.get("row", "?")
+            victim_with_coords = require_key(details, "unit_with_coords")
             return (
                 f"Unit {src_id} DEADLY DEMISE Roll:{d6} → "
-                f"Unit {tgt_id}({tgt_col},{tgt_row}) SUFFERS {x_wounds} MW [DEADLY DEMISE]"
+                f"Unit {victim_with_coords} SUFFERS {x_wounds} MW [DEADLY DEMISE]"
             )
 
         elif action_type == "charge" and details:

@@ -633,10 +633,16 @@ les deux asymétries structurelles n'ont pas bougé.
 - `fly_declaration` : 1 916/2 922 = 65,6 % de montées (référence 71,8 %) ;
 - `waaagh_call` : 290/424 = 68,4 % d'appels (référence 68,9 %).
 
-**Constats analyzer non traités**, rapportés sans être qualifiés : **2.1 « Dead unit fighting » : 5
-occurrences, toutes côté joueur 2** (première : épisode 248, T5, `Unit 105(17,36) FOUGHT Unit
-4(18,36) with [Choppa]`) — absent de la référence ; 1.8 : 18 règles d'arme jamais exercées
-(inchangé). Aucune erreur de move, de tir, de charge ni de phase.
+**Constats analyzer** : **2.1 « Dead unit fighting » : 5 occurrences, toutes côté joueur 2**
+(première : épisode 248, T5, `Unit 105(17,36) FOUGHT Unit 4(18,36) with [Choppa]`) — **qualifiées
+le 2026-09-13 : faux positif analyzer, une seule activation.** Le WarTrakk 105 tue le WeirdBoy 4
+(Deadly Demise D3), l'explosion tue le WarTrakk ; le moteur résout toutes les attaques avant
+d'allouer, écrit les `DEAD` pendant l'allocation et les `FOUGHT` après — le journal inversait
+l'ordre du jeu, et la ligne `DEADLY DEMISE` qui aurait nommé la cause n'atteignait pas step.log.
+Corrigé (ROADMAP_INDEX, suite 116) : ligne journalisée + garde `died_in_own_activation` ; **sur ce
+journal-ci, antérieur à la ligne, le compteur reste à 5** (la cause n'y est pas écrite, l'analyzer
+ne la devine pas). 1.8 : 18 règles d'arme jamais exercées (inchangé). Aucune erreur de move, de
+tir, de charge ni de phase.
 
 Éval incidente contre les 6 checkpoints figés (25 ép. chacun, hors gate) : 0,44 à 0,64, moyenne
 0,553 — dont 0,64 contre `ckpt_0.9078`, qui EST le modèle mesuré : 25 parties ne distinguent

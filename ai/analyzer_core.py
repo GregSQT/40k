@@ -17,7 +17,7 @@ from ai.analyzer_rules import (
 )
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
-from ai.analyzer_state import AnalyzerState
+from ai.analyzer_state import AnalyzerState, DeathCause
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases import claim_kill_context, died_before_phase
 from ai.analyzer_phases.episode_handler import handle_episode_start
@@ -39,6 +39,15 @@ _PHASE_RANK: Dict[str, int] = {p: i for i, p in enumerate(_PHASE_ORDER)}
 # Phases where kills are tracked (unit_deaths + unit_kill_context). COMMAND exclue :
 # aucune attaque ne peut y survenir et le contexte de tueur n'y a pas de sens.
 _LETHAL_PHASES = frozenset({'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'})
+
+
+def _record_attack_line(state: AnalyzerState, actor_id: Optional[str]) -> None:
+    """Date la dernière ligne d'attaque (SHOT/FOUGHT) de ``actor_id`` — APRÈS le handler, qui lit
+    cette table pour juger la ligne courante (`died_in_own_activation`). ``actor_id`` vient du
+    préfixe `Unit N(` de la ligne ; une ligne d'attaque sans préfixe est un défaut de grammaire
+    que le handler a déjà consigné, elle ne date rien."""
+    if actor_id is not None:
+        state.last_attack_line_by_actor[actor_id] = state.line_number
 
 
 def _check_phase_seq(
@@ -211,6 +220,16 @@ _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 _RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
 _HAZARDOUS_TAG_RE = re.compile(r'\[HAZARDOUS(?::\d+)?\]')
 _HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]')
+#: 24.08 — jet de Deadly Demise RÉUSSI : `Unit <source> DEADLY DEMISE Roll:6 → Unit <victime>(c,r)
+#: SUFFERS N MW [DEADLY DEMISE]` (formateur `deadly_demise`, step_logger). Le jet raté (`→ no
+#: effect`) ne nomme aucune victime et ne matche pas. « MW » et non « Mortal Wounds » : la ligne
+#: ne doit tomber dans aucune branche SUFFERS des capacités (`_MW_ABILITY_SUFFERS_RE`).
+_DEADLY_DEMISE_EFFECT_RE = re.compile(
+    r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→\s+Unit\s+(\d+)\(-?\d+,-?\d+\)\s+SUFFERS\s+\d+\s+MW'
+)
+#: Mort par-figurine : `Unit N DEAD model=<mid> reason=<raison>`. La raison est EXIGÉE par le
+#: formateur (`KeyError` sinon) : elle est donc sur chaque ligne DEAD de toute grammaire.
+_DEAD_EVENT_RE = re.compile(r'Unit (\d+)\S* DEAD model=(\S+) reason=(\w+)')
 #: 24.12 Feel No Pain sur les blessures MORTELLES. Le journal porte le total BRUT ; le tag dit
 #: combien de blessures la sauvegarde a annulées. Attention, ce n'est PAS le même tag que celui
 #: des dégâts d'attaque (`[FNP:{saves}/{seuil}+ ×{tentatives}]`, `step_logger.py:280`), qui est
@@ -1759,11 +1778,20 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # représentent pas une action volontaire du joueur victime → exclues du suivi.
                 # Regex `\S*` absorbe les coordonnées optionnelles `(col,row)` — présentes quand
                 # `unit_with_coords` est fourni au step_logger, absentes sur les journaux antérieurs.
-                _dead_event_m = re.match(r'Unit (\d+)\S* DEAD model=(\S+)', action_desc)
+                _dead_event_m = _DEAD_EVENT_RE.match(action_desc)
                 _is_dead_event = _dead_event_m is not None
+                # 24.08 : la ligne DEADLY DEMISE est du même régime que DEAD — un effet moteur
+                # écrit au moment de la mort, porteur du player de la SOURCE (pas forcément le
+                # joueur dont c'est la phase), pas une action volontaire → même exclusion du suivi
+                # de séquence de phases. Le bloc DEAD/DEADLY DEMISE est contigu : toute autre
+                # ligne clôt l'attente des victimes annoncées.
+                _is_dd_event = "[DEADLY DEMISE]" in action_desc
+                if not _is_dead_event and not _is_dd_event:
+                    state.deadly_demise_pending.clear()
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
                     _dead_mid = _dead_event_m.group(2)
+                    _dead_reason = _dead_event_m.group(3)
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
@@ -1803,6 +1831,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if phase in _LETHAL_PHASES:
                             state.unit_deaths.append((turn, phase, _dead_uid, state.line_number))
                             state.unit_kill_context[_dead_uid] = (None, turn, phase)
+                            # 24.08 : `reason=hazard` = blessure mortelle ; si une ligne DEADLY
+                            # DEMISE du bloc courant nomme cette escouade, la cause est connue.
+                            # Lue par `died_in_own_activation` (fight/shoot) : l'unité qui a
+                            # détruit le porteur meurt de l'explosion AVANT que ses lignes
+                            # d'attaque ne soient écrites, ce n'est pas un cadavre qui attaque.
+                            _dd_source = state.deadly_demise_pending.get(_dead_uid)
+                            if _dead_reason == "hazard" and _dd_source is not None:
+                                state.unit_death_cause[_dead_uid] = DeathCause(
+                                    "deadly_demise", _dd_source, turn, phase, state.line_number
+                                )
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
                         _prm.discard(_dead_mid)
@@ -1814,11 +1852,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if _player_seq is None:
                             _player_seq = []
                             state.phase_seq_current_turn[int(player)] = _player_seq
-                        if not _is_dead_event and phase not in _player_seq:
+                        if not _is_dead_event and not _is_dd_event and phase not in _player_seq:
                             _player_seq.append(phase)
                     state.last_phase_by_player[int(player)] = phase
 
-                if phase != state.last_phase and not _is_dead_event:
+                if phase != state.last_phase and not _is_dead_event and not _is_dd_event:
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                     if phase == 'MOVE':
@@ -2101,6 +2139,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
+                        _record_attack_line(state, _dmg_actor_id)
                 elif agent_decision_match:
                         # V11 §9.3 P2 — RELEVE d'une decision d'agent resolue (grammaire 8).
                         # PREMIERE branche de la chaine, et ce n'est pas cosmetique : le libelle
@@ -2452,9 +2491,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'deadly_demise'
                         stats['deadly_demise_triggers'][player] += 1
                         note_rule_usage(stats, "24.08", player)
+                        # Jet réussi : la victime est annoncée AVANT ses lignes DEAD
+                        # (`_apply_deadly_demise` : append_action_log puis allocate_mortal_wounds).
+                        _dd_m = _DEADLY_DEMISE_EFFECT_RE.match(action_desc)
+                        if _dd_m is not None:
+                            state.deadly_demise_pending[_dd_m.group(2)] = _dd_m.group(1)
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
+                        _record_attack_line(state, _dmg_actor_id)
                 else:
                     action_type = 'other'
 

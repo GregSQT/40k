@@ -7100,6 +7100,9 @@ class W40KEngine(gym.Env):
         "waaagh_call", "oath_selection",
         # Mort par-figurine : pas une action d'agent, pas un step gym.
         "dead",
+        # 24.08 — jet de Deadly Demise, declenche par une mort de figurine : effet moteur, pas
+        # une action d'agent. Meme statut que `dead`, dont la ligne le precede toujours.
+        "deadly_demise",
         # Figurines RENDUES (Grot Orderly, phase de commandement) : evenement moteur qui suit
         # les decisions `returned_models_*`, pas un step d'agent.
         "return_destroyed_models",
@@ -7205,6 +7208,13 @@ class W40KEngine(gym.Env):
         # chaque suppression dans step.log — sans cet event, une figurine peut disparaître de
         # [MODELS:] d'une action ultérieure sans aucun signal intermédiaire (flush LIVE post-mort).
         "dead": "dead",
+        # 24.08 DEADLY DEMISE. Le formateur (`step_logger`) et la branche `[DEADLY DEMISE]` de
+        # l'analyzer existaient ; sans cette entree, l'event tombait sur le `continue` « type sans
+        # formateur » : ZERO ligne dans 29 Mo de journal (eval du 2026-09-13), et la seule trace
+        # d'une escouade tuee par l'explosion etait un `DEAD … reason=hazard` sans cause — que
+        # l'analyzer comptait « Dead unit fighting » quand la victime etait l'attaquant lui-meme
+        # (ses lignes d'attaque suivent son DEAD, cf. `_finalize_manual_allocation`).
+        "deadly_demise": "deadly_demise",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
@@ -7947,6 +7957,12 @@ class W40KEngine(gym.Env):
             # avale par `log_action` — chaque mort disparait silencieusement de step.log.
             ("model_id", "model_id"),
             ("reason", "reason"),
+            # 24.08 — jet de Deadly Demise : source, D6, blessures. `unitId` (la victime, ou la
+            # source sur un jet rate) est deja le `unit_id` de la ligne ; col/row de la victime
+            # suivent le chemin `col`/`row` commun plus haut (`unit_with_coords`).
+            ("sourceUnitId", "source_unit_id"),
+            ("d6Roll", "d6_roll"),
+            ("deadlyDemiseWounds", "deadly_demise_wounds"),
             # L24 — motif du skip (no_valid_move_destinations, no_valid_actions, …).
             ("skipReason", "skip_reason"),
             # L10 — type de move EXPLICITE dans step.log : normal / advance / fall_back /

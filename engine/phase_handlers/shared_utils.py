@@ -4410,6 +4410,14 @@ def _apply_deadly_demise(
     d6_roll = random.randint(1, 6)
     turn = game_state["turn"]
     phase = game_state.get("phase", "")
+    units_cache = require_key(game_state, "units_cache")
+    # `player` = PROPRIETAIRE DE LA SOURCE, sur les deux formes de la ligne (jet rate comme jet
+    # reussi) : c est lui qui exerce 24.08, et c est ce joueur que l analyzer credite. La valeur
+    # `-1` qui vivait ici rendait `P-1` dans step.log, hors de la grammaire `P(\d+)` de toutes les
+    # lignes — le jet rate devenait une erreur de parse des que le type a ete journalise. L entree
+    # est encore dans units_cache : `destroy_model` lit `deadly_demise` dessus juste avant et ne la
+    # retire qu APRES cet appel.
+    owner_player = _squad_owner_player(game_state, squad_id)
 
     if d6_roll < 6:
         # Jet raté : un seul log "no effect", aucun jet de dé supplémentaire.
@@ -4421,12 +4429,11 @@ def _apply_deadly_demise(
             "deadlyDemiseWounds": 0,
             "turn": turn,
             "phase": phase,
-            "player": -1,
+            "player": owner_player,
             "deadlyDemiseDetails": [],
         })
         return
 
-    units_cache = require_key(game_state, "units_cache")
     ish = int(require_key(game_state, "inches_to_subhex"))
     radius = 6 * ish
     _is_hex = geometry_is_hex(game_state)
@@ -4444,6 +4451,14 @@ def _apply_deadly_demise(
             continue
         if _dist(u_col, u_row) > radius:
             continue
+        # « each unit within 6" » : une escouade sans figurine vivante n est plus une unite sur
+        # le plateau. C est le cas de la SOURCE quand la figurine qui explose etait sa derniere :
+        # `destroy_model` ne la retire d units_cache qu APRES cet appel. `allocate_mortal_wounds`
+        # n aurait rien inflige, mais la ligne `SUFFERS N MW` aurait ete ecrite quand meme —
+        # mesure sur l eval du 2026-09-13 (E4 T3 : `Unit 4 DEADLY DEMISE … → Unit 4(27,30)
+        # SUFFERS 1 MW`, unite 4 vide).
+        if not select_eligible_models(game_state, str(uid)):
+            continue
         # X peut etre aleatoire : resolu SEPAREMENT par unite.
         x_wounds = int(resolve_dice_value(deadly_demise_value, f"deadly_demise_{squad_id}_{uid}"))
         _dd_details: List[Dict[str, Any]] = []
@@ -4457,7 +4472,7 @@ def _apply_deadly_demise(
             "row": u_row,
             "turn": turn,
             "phase": phase,
-            "player": int(uentry.get("player", -1)),
+            "player": owner_player,
             "deadlyDemiseDetails": _dd_details,
         })
         if x_wounds > 0:
