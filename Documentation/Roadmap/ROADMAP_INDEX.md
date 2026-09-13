@@ -150,6 +150,16 @@ update à moitié signal. Le critic, lui, reçoit un gradient réel (f_8160 = 0,
 taille de lot n'est pas le levier du plateau contre P0 ; la branche restante est l'objectif et la
 récompense (le gradient d'issue ±150 est nul à la même précision, cosinus non mesurables à
 K = 24). Détail : [training.md#signal-p1-2026-09-13](training.md#signal-p1-2026-09-13).
+**🔴 Plafonnement P1 contre P0 — dossier de synthèse ouvert le 2026-09-13 :**
+`Documentation/Chantiers/backlog/plafonnement_p1.md` relate tout ce
+qui a été fait sur le plateau du 2026-09-11 au 2026-09-13 (antécédents P2 compris), inventorie
+les causes possibles (optimisation, exploration, signal de crédit, adversité, mesure, capacité,
+convergence) et les solutions, avec leur statut — testé, réfuté, écarté par décision, ouvert.
+Réfutés comme levier : taille de lot, `target_kl`, `n_epochs`, `learning_rate`, `max_grad_norm`,
+`vf_coef`, `ent_coef`, entropie normalisée. Ouvert : la SOURCE du bruit (variance de transition
+ou point stationnaire). **Décision en attente** : arbitrage A / B / C du dossier (§7),
+recommandation B — sonde étendue (balayage λ appairé, décomposition de Var(δ), contrôle positif,
+P0 déterministe) avant tout run ou chantier de mécanisme.
 
 ---
 
