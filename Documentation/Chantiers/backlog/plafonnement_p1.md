@@ -691,9 +691,27 @@ comportement récompensé. Seconde hypothèse : le proxy linéaire des kills (E[
 une blessure partielle comme un tiers de kill, donc ne récompense plus **finir** une figurine
 (concentration de tir) ; les kills réels du run ne baissent pourtant pas. À départager par une
 sonde d'entropie par famille sur le checkpoint S11 (`scripts/family_entropy_probe.py`) et une
-sonde stochastique contre P0 (est-ce l'argmax seul qui perd ?). Ce que S11 ferme : tel quel, sur
-P1 repris de P0, il détruit la politique déterministe. Clé `reward_on_expectation` remise à
-`false` ; le code reste (verrouillé, réversible).
+sonde stochastique contre P0 (est-ce l'argmax seul qui perd ?).
+
+**Verdict (2026-09-14, utilisateur).** Le run avait pour but de valider S11 tel que codé, par la
+règle §7 ; la garde a tranché avant la fenêtre de jugement. **S11 tel que codé est réfuté comme
+levier** : reprendre P0 avec cette récompense détruit la politique déterministe. Ce que le test ne
+dit pas : si c'est l'**idée** (payer l'espérance plutôt que le jet) ou son **exécution** (proxy
+linéaire des kills E[dmg] / HP_MAX qui ne paie plus « finir » une figurine ; aplatissement des
+têtes courtes quand les avantages deviennent honnêtes) qui est en cause. La courbe échantillonnée
+au niveau de la référence et l'entropie montante pointent vers l'exécution, mais ce n'est pas
+prouvé. Clé `reward_on_expectation` remise à `false` ; le code reste, verrouillé et réversible.
+
+**Ce qui départagerait idée et exécution, sans run (≈ 1 h de GPU, à décider)** :
+1. `scripts/family_entropy_probe.py --model-a <checkpoint S11 20 000> --model-b <P1 référence robust_0.9078>` :
+   quelles têtes ont gagné de l'entropie (tir/cible → aplatissement des avantages honnêtes ;
+   mouvement → autre chose).
+2. Sonde stochastique contre P0 du checkpoint S11 (`opponent.deterministic` et agent échantillonné,
+   300 parties) : si ≈ 0,55 comme la courbe, c'est l'argmax seul qui perd — l'idée tient, la
+   distribution s'est aplatie ; si ≈ 0,47, la politique a réellement régressé.
+3. Variante d'exécution S11b : espérance pour le terme **dégâts** seulement, bonus de kill et de wipe
+   sur le résultat **réel** (finir une figurine reste payé au jet) — une clé de plus, 5 lignes dans
+   `_squad_combat_shaping`, testable en 6 h. À ne lancer que si 1-2 désignent le proxy des kills.
 
 ## 6. Ce qui n'a pas été fait
 
