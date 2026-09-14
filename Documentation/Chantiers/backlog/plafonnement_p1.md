@@ -858,7 +858,12 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   6 × Δmarge, delta adverse hors tour, deux appels → 0, filigrane, erreur si clé absente,
   ventilation) — rouge sur « filtre `current_player` réintroduit » et « filigrane non écrit » ;
   `test_s11_reward_on_expectation_e2e.py` : somme des `vp_margin` sur une partie moteur réelle =
-  6 × marge finale (rouge sur le filtre, marge 25 → 150 attendus manqués) ;
+  6 × marge finale, paramétré siège p1 / p2 × graines 42 / 7 depuis le 2026-09-14 soir (second
+  avis : le siège p2 et le marquage du second joueur en fin de phase fight du round 5 n'étaient pas
+  verrouillés), avec garde « VP > 0 » contre le vert vacant et, en p2, versement vu sur le step
+  terminal (turn 5, fight, game_over) ; RandomBot semé par `random.seed` (module global) ; rouge
+  sur le filtre `current_player` en siège p1 (dernier versement = celui de l'adversaire, jamais
+  rattrapé) ; en p2 le filtre ne fait que retarder les deltas, c'est le test unitaire qui le voit ;
   `tests/unit/ai/test_critic_warmup.py` (13) : politique immobile / critic mobile pendant le
   warmup (rouge si la loss complète revient), compteur saturant, kwarg accepté en `--new`,
   ni clé ni compteur hérités du zip + modèle rechargé sans warmup (rouge si la clé voyage), zip
