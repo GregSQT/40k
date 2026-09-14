@@ -1,0 +1,13 @@
+{
+  "uses_codex_detachment": { "1": true, "2": true },
+  "_comment": "Fixture de TEST du chantier 04c (ingress du bot). Volontairement nommee SANS le motif 'scenario_' : l'enumeration de training et d'evaluation (ai/training_utils.py) ne cherche que 'scenario_*.json' et '*_scenario_*.json', donc ce fichier n'entre dans AUCUNE rotation. Il ne sert qu'a etre charge explicitement par tests/unit/ai/test_bot_ingress_reserves.py, qui a besoin d'un adversaire dont la liste porte des reserves.",
+  "deployment_type": "active",
+  "scale": "500pts",
+  "agent_roster_ref": "training/agent_training_roster_space_marines.json",
+  "opponent_roster_ref": "training/opponent_training_roster_space_marines_reserves.json",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "board_ref": "44x60x5",
+  "terrain_ref": "terrain-mc1.json"
+}
