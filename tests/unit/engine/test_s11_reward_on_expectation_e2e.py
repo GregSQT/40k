@@ -37,7 +37,8 @@ SCENARIO = os.path.join(
 COMBAT_ACTIONS = ("squad_shoot", "squad_shoot_split_target", "squad_fight")
 
 
-def _make_env(reward_on_expectation: bool):
+def _make_env(reward_on_expectation: bool, agent_seat_mode: str = "p1"):
+    """`agent_seat_mode` : "p1" ou "p2" — le siège de l'agent (BotControlledEnv le tire du mode)."""
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.env_wrappers import BotControlledEnv
     from ai.evaluation_bots import RandomBot
@@ -61,7 +62,9 @@ def _make_env(reward_on_expectation: bool):
             agent_cfg["squad_shaping"]["reward_on_expectation"] = reward_on_expectation
     engine.reward_calculator.rewards_config = rewards
     masked = ActionMasker(engine, lambda _env: engine.get_action_mask())
-    return BotControlledEnv(masked, RandomBot(), UnitRegistry(), agent_seat_mode="p1", env_rank=0)
+    return BotControlledEnv(
+        masked, RandomBot(), UnitRegistry(), agent_seat_mode=agent_seat_mode, env_rank=0
+    )
 
 
 def _play_and_spy(env, seed: int, max_steps: int) -> List[Dict[str, Any]]:
@@ -154,22 +157,47 @@ def test_la_recompense_du_tir_est_l_esperance_pas_le_jet() -> None:
     assert n_differ > 0, "espérance et jet identiques sur toutes les activations de l'agent : suspect"
 
 
-def test_somme_vp_margin_egal_facteur_fois_marge_finale() -> None:
-    """La somme des versements vp_margin sur toute la partie = factor × marge finale.
+@pytest.mark.parametrize("agent_seat_mode", ["p1", "p2"])
+@pytest.mark.parametrize("seed", [42, 7])
+def test_somme_vp_margin_egal_facteur_fois_marge_finale(agent_seat_mode: str, seed: int) -> None:
+    """La somme des versements vp_margin sur toute la partie = factor × marge finale, DEUX sièges.
 
-    Propriété télescopique (B6) : chaque appel à _calculate_vp_margin_reward verse
+    Propriété télescopique (B6) : chaque appel à `_calculate_vp_margin_reward` verse
     factor × Δ(marge − filigrane). La somme = factor × (marge_finale − 0) puisque
-    vp_margin_paid démarre à 0 au reset. Vérifiée sur un VRAI run moteur (deux joueurs,
+    `vp_margin_paid` démarre à 0 au reset. Vérifiée sur un VRAI run moteur (deux joueurs,
     toutes transitions), pas sur des fixtures isolées.
 
-    VERROU. Un filtre current_player réintroduit dans _calculate_vp_margin_reward ferait
-    rater la moitié des deltas (ceux du tour adverse) et romprait l'égalité.
+    Trois verrous :
+    (a) des VP ont été marqués — sans cela l'égalité 0 == 0 ne prouverait rien (vert vacant) ;
+    (b) somme des versements == factor × marge finale ;
+    (c) en siège p2, le marquage du SECOND joueur au round 5 tombe en fin de phase FIGHT
+        (`config/primary_objective/Objectives_Control.json`, `timing.round5_second_player_phase`)
+        et termine la partie : ce versement doit être vu sur le step terminal (turn 5, phase
+        fight, game_over), c'est-à-dire par le step de la dernière action de l'agent, dont la
+        cascade de phases franchit la frontière. La porte « pool vide → advance_phase » de
+        `W40KEngine.step_with_mask`, autre chemin possible pour ce même versement, n'est PAS
+        atteinte par ces graines : elle a son propre verrou,
+        `test_terminal_info_all_paths.py::test_pool_empty_gate_pays_the_ledger_and_the_outcome`.
+
+    Mutation rouge mesurée (2026-09-14) : filtre `current_player` réintroduit dans
+    `_calculate_vp_margin_reward` → (b) rouge en siège p1 pour les deux graines — le dernier
+    versement de la partie est celui de l'adversaire (round 5, phase fight) et il n'est jamais
+    rattrapé. En siège p2 le même filtre ne fait que RETARDER les deltas adverses jusqu'au tour
+    de l'agent, dont le versement est le dernier : la somme reste juste, c'est le verrou
+    unitaire `test_objective_turn_reward.py::test_delta_adverse_verse_sans_filtre_current_player`
+    qui le détecte par step.
+
+    DÉPENDANCE À LA GRAINE, assumée et visible : le jeu est aléatoire des deux côtés (l'agent
+    par `default_rng(seed)`, RandomBot par le module `random`, semé ici avec la même graine).
+    Une graine qui donnerait une partie sans VP ou finie avant le round 5 rendrait (a) ou (c)
+    ROUGE, jamais silencieusement vert — c'est le rôle de ces deux assertions. Les graines 42 et
+    7 atteignent le round 5 avec des VP dans les deux sièges (mesuré le 2026-09-14).
     """
+    import random
+
     from config_loader import get_config_loader
 
-    env = _make_env(reward_on_expectation=True)
-    controlled = int(require_key(env.engine.reward_calculator.config, "controlled_player"))
-    opp = 2 if controlled == 1 else 1
+    env = _make_env(reward_on_expectation=True, agent_seat_mode=agent_seat_mode)
     cfg = get_config_loader().load_agent_rewards_config("ArmageddonAgent_x1")["ArmageddonAgent_x1"]
     factor = float(cfg["objective_rewards"]["vp_margin_factor"])
 
@@ -177,19 +205,28 @@ def test_somme_vp_margin_egal_facteur_fois_marge_finale() -> None:
     original_cr = calc.calculate_reward
     vp_margin_total = 0.0
     last_vp: Dict[Any, float] = {}
+    # Un triplet (turn, phase, game_over) par versement NON NUL, dans l'ordre du moteur.
+    versements: List[tuple[int, str, bool]] = []
 
     def spy(success, result, game_state):
         nonlocal vp_margin_total, last_vp
         reward = original_cr(success, result, game_state)
-        bd = game_state.get("last_reward_breakdown", {})
-        vp_margin_total += float(bd.get("vp_margin", 0.0))
-        last_vp = {k: float(v) for k, v in game_state.get("victory_points", {}).items()}
+        delta = float(require_key(require_key(game_state, "last_reward_breakdown"), "vp_margin"))
+        vp_margin_total += delta
+        if delta != 0.0:
+            versements.append((
+                int(require_key(game_state, "turn")),
+                str(require_key(game_state, "phase")),
+                bool(require_key(game_state, "game_over")),
+            ))
+        last_vp = {k: float(v) for k, v in require_key(game_state, "victory_points").items()}
         return reward
 
     calc.calculate_reward = spy  # type: ignore[method-assign]
     try:
-        rng = np.random.default_rng(42)
-        env.reset(seed=42)
+        random.seed(seed)
+        rng = np.random.default_rng(seed)
+        env.reset(seed=seed)
         terminated = truncated = False
         while not (terminated or truncated):
             legal = np.flatnonzero(np.asarray(env.action_masks()))
@@ -198,11 +235,31 @@ def test_somme_vp_margin_egal_facteur_fois_marge_finale() -> None:
     finally:
         calc.calculate_reward = original_cr  # type: ignore[method-assign]
 
+    # Le siège est tiré par BotControlledEnv AU RESET (`agent_seat_mode`), pas à la construction.
+    controlled = int(require_key(env.engine.reward_calculator.config, "controlled_player"))
+    assert controlled == (1 if agent_seat_mode == "p1" else 2)
+    opp = 2 if controlled == 1 else 1
     assert last_vp, "aucune transition de reward capturée : le test ne prouve rien"
-    final_margin = last_vp.get(controlled, 0.0) - last_vp.get(opp, 0.0)
+    my_vp = last_vp[controlled]
+    opp_vp = last_vp[opp]
+    # (a) vert non vacant
+    assert my_vp + opp_vp > 0, (
+        f"partie sans VP (siège {agent_seat_mode}, graine {seed}) : l'égalité ne prouve rien"
+    )
+    # (b) télescopage
+    final_margin = my_vp - opp_vp
     expected = factor * final_margin
-
     assert vp_margin_total == pytest.approx(expected, abs=0.01), (
         f"somme vp_margin {vp_margin_total:.4f} ≠ factor×marge_finale {expected:.4f} "
-        f"(VP moi={last_vp.get(controlled)}, lui={last_vp.get(opp)}, marge={final_margin:.1f})"
+        f"(VP moi={my_vp}, lui={opp_vp}, marge={final_margin:.1f}, versements={versements})"
     )
+    # (c) le marquage du second joueur en fin de round 5 est versé sur le step terminal
+    gs = env.engine.game_state
+    assert require_key(gs, "turn_limit_reached"), (
+        f"partie finie avant le round 5 (siège {agent_seat_mode}, graine {seed}) : "
+        f"le marquage du second joueur n'est pas exercé, changer de graine"
+    )
+    if agent_seat_mode == "p2":
+        assert (5, "fight", True) in versements, (
+            f"aucun versement vu sur le step terminal du round 5 en phase fight : {versements}"
+        )
