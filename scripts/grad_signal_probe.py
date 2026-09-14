@@ -132,6 +132,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from shared.json_atomic import json_draft  # noqa: E402  (dépend du sys.path ci-dessus)
+
 #: Récompense d'issue du profil de récompenses (`situational_modifiers.win` / `lose`) ; la
 #: valeur exacte est sans effet sur le cosinus (avantages standardisés), elle est gardée pour
 #: que le retour affiché soit lisible dans l'échelle de la config.
@@ -1462,7 +1464,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "n_envs": ctx["n_envs"], "scenario_entries": len(ctx["scenario_list"]),
         "guarded_files_unchanged": True,
     }
-    with open(out_path, "w", encoding="utf-8") as f:
+    # Brouillon puis renommage : une interruption (Ctrl-C, OOM) pendant l'écriture ne laisse
+    # pas un JSON tronqué à la place du résultat précédent. `default=float` (scalaires numpy)
+    # et `indent=1` sont la forme de CE fichier : `json_draft`, pas `write_json_atomic`.
+    with json_draft(out_path) as f:
         json.dump(result, f, indent=1, default=float)
     log(render_report(result))
     log(f"\n📄 résultat : {out_path}")

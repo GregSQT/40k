@@ -370,12 +370,36 @@ def test_entnorm_treated_profile_is_control_plus_two_overrides() -> None:
     assert "2026-09-13" in treated["_doc"]
 
 
+def _sans_notes(bloc: Any) -> Any:
+    """Le bloc privé de ses clés-commentaires, à toute profondeur.
+
+    Une clé-commentaire d'un JSON de config, c'est un suffixe `_normal` ET une valeur TEXTE
+    (même critère que `_comparable` de `test_schedule_decay_fraction.py`) : la note qui documente
+    le réglage voisin — et l'HISTORIQUE de ses runs (« DESACTIVE après le run S11 »), propre à
+    chaque agent. Le miroir porte sur les VALEURS de récompense : deux agents peuvent annoter
+    différemment le même réglage sans que la comparaison rougisse.
+    """
+    if not isinstance(bloc, dict):
+        return bloc
+    return {
+        k: _sans_notes(v) for k, v in bloc.items()
+        if not (k.endswith("_normal") and isinstance(v, str))
+    }
+
+
 def test_entnorm_rewards_config_is_keyed_on_the_new_agent() -> None:
-    """`load_agent_rewards_config` indexe la table par la clé d'agent : elle doit être renommée."""
+    """`load_agent_rewards_config` indexe la table par la clé d'agent : elle doit être renommée,
+    et ses VALEURS sont le miroir de `ArmageddonAgent_x1` (le traitement est dans la config
+    d'entraînement, jamais dans les récompenses)."""
     from config_loader import get_config_loader
 
     loader = get_config_loader()
     rewards = loader.load_agent_rewards_config("ArmageddonAgent_x1_entnorm")
     base = loader.load_agent_rewards_config("ArmageddonAgent_x1")
-    assert rewards["ArmageddonAgent_x1_entnorm"] == base["ArmageddonAgent_x1"]
+    treated = _sans_notes(rewards["ArmageddonAgent_x1_entnorm"])
+    control = _sans_notes(base["ArmageddonAgent_x1"])
+    assert treated == control
+    assert "objective_rewards" in treated and "squad_shaping" in treated, (
+        "VERT VACANT : le retrait des notes a vidé les sections comparées"
+    )
     assert "ArmageddonAgent_x1" not in rewards

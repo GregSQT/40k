@@ -327,9 +327,9 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
 1. **Actions non-contrôlées** : seuls les rewards objectifs par tour et situationnels sont retournés.
 2. **Actions contrôlées** : reward complète (`base_action + result_bonuses + objective + situational`).
 
-La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, `objective`, `situational`, `penalties` et `total`. La clé `objective` agrège le versement de fin de tour (`_calculate_objective_reward_per_turn`) et le bonus « se poser sur un objectif » (`_calculate_on_objective_reward`).
+La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, `objective`, `vp_margin`, `situational`, `penalties` et `total`. La clé `objective` ne porte que le bonus « se poser sur un objectif » (`_calculate_on_objective_reward`) ; `vp_margin` porte le ledger de marge de VP (`_calculate_vp_margin_reward`, B6 2026-09-14), hors pénalité de cohérence.
 
-**`reward/objective_share`** : part de l'objectif dans ce que l'épisode a rapporté — `objective⁺ / (base_actions⁺ + result_bonuses⁺ + objective⁺)`, flux positifs accumulés pas à pas.
+**`reward/objective_share`** : part de SCORE dans ce que l'épisode a rapporté — `(objective⁺ + vp_margin⁺) / (base_actions⁺ + result_bonuses⁺ + objective⁺ + vp_margin⁺)`, flux positifs accumulés pas à pas. `reward/vp_margin_total` : somme nette du ledger sur l'épisode (= `vp_margin_factor` × marge finale).
 
 **Accumulation côté moteur** : dans `episode_tactical_data['reward_breakdown']`, alimenté à chaque step moteur, pas dans le callback. Le callback ne voit qu'un `info` par step gym — les wrappers d'adversaire remplacent `info` par celui de l'adversaire. Corrigé le 2026-07-31.
 
@@ -340,7 +340,7 @@ La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, 
    - `winner == opponent_player` → pénalité lose
    - `winner == -1` → reward draw
 
-4. **Reward objectifs par tour** (`_calculate_objective_reward_per_turn`) : `objective_reward_factor` × **les VP que la mission attribue ce tour-là**. Appliqué une fois par tour, à la transition vers la phase move **du joueur contrôlé**.
+4. **Ledger de marge de VP** (`_calculate_vp_margin_reward`, B6 2026-09-14) : à CHAQUE appel de `calculate_reward`, `vp_margin_factor` × Δ(VP_moi − VP_lui) depuis le dernier versement, `game_state["vp_margin_paid"]` servant de filigrane (initialisé à 0 au reset, `ConfigurationError` s'il manque). Aucun filtre sur le joueur dont c'est le tour : les VP concédés pendant le tour adverse sont versés (−6 chacun) et accumulés dans le step gym de l'agent par `BotControlledEnv` comme par `SelfPlayWrapper`. Somme télescopique = `vp_margin_factor` × marge finale, élimination et portes « pool vide » / « limite de tours » comprises. Remplace l'ancien `objective_reward_factor` × VP propres versé une fois par tour (Corr(ΔVP_moi, Δmarge) = 0,82 : les deux ensemble auraient valu +11 / −5).
 
 5. **Bonus « sur un objectif »** (`_calculate_on_objective_reward`) : versé quand une action qui porte une destination laisse l'unité **dans** une zone d'objectif que l'agent ne contrôle pas encore. La présence se juge **par figurine, sur l'empreinte de socle** (14.02), via `unit_is_within_objective`. Une unité **battle-shocked** ne touche rien (01.07).
 

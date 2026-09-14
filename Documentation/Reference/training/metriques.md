@@ -369,7 +369,7 @@ là-dessus.
 
 **Notes techniques :**
 - `e_objectives_held` / `d_objectives_held_diff` : échantillonnés par `GameStateManager._sample_objectives_held`, à l'instant exact où les VP sont attribués (4 échantillons sur une partie complète à `start_turn: 2` / `max_turns: 5`). Absentes si l'épisode se termine avant le premier tour marquant.
-- `f_obj_rewards` : montant d'objectif réellement versé (`objective_reward_factor × VP marqués` **par construction**). Limite : au round 5 le second joueur marque à la fin de la phase fight alors que le reward se calcule à la frontière command → move.
+- `f_obj_rewards` : montant du ledger de marge réellement versé sur l'épisode (`vp_margin_factor × (VP_moi − VP_lui)` finaux, **exact par télescopage** depuis B6 2026-09-14 — le ledger avance à chaque step où les VP bougent, y compris le marquage du second joueur en fin de round 5). Lu sur `victory_points_diff_controlled_minus_opponent`, jamais recalculé depuis les échantillons.
 
 ---
 
@@ -416,7 +416,7 @@ Chaque ratio n'est émis **que si son dénominateur est > 0**.
 
 **Agent focus kills mais perd les objectifs :**
 - `02_combat/k_units_killed_ratio` élevé, `01_VP/a_vp_diff` négatif, `01_VP/e_objectives_held` faible
-- → Augmenter `objective_reward_factor` dans rewards_config.json.
+- → Augmenter `objective_rewards.vp_margin_factor` dans rewards_config.json (6 depuis B6 : +6 par VP propre, −6 par VP cédé).
 
 **Agent passif :**
 - `g_shoot_model_kills` + `h_melee_model_kills` faibles, `b_kill_rewards` ≈ 0
