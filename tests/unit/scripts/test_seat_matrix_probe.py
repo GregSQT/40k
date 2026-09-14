@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.seat_matrix_probe import board_path_for_agent, summarize
+import json
+import os
+
+from scripts.seat_matrix_probe import apply_training_env, board_path_for_agent, summarize
 
 
 def test_summarize_reprend_le_score_et_les_compteurs_de_l_archive() -> None:
@@ -30,3 +33,23 @@ def test_le_plateau_suit_le_suffixe_de_resolution_de_l_agent() -> None:
 def test_un_agent_sans_resolution_connue_est_refuse(agent: str) -> None:
     with pytest.raises(ValueError, match=agent):
         board_path_for_agent(agent)
+
+
+def test_training_env_pose_les_limites_de_threads_sans_ecraser_l_appelant(tmp_path, monkeypatch) -> None:
+    # Mesuré le 2026-09-14 : sans ce bloc, 12 workers × 38 threads sur 16 cœurs, 300 parties
+    # jamais finies en 63 min. `setdefault` : une valeur déjà posée par l'appelant gagne.
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"training_env": {"OMP_NUM_THREADS": 1, "TORCH_LOGS": "-dynamo"}}))
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    monkeypatch.setenv("TORCH_LOGS", "deja-la")
+    applied = apply_training_env(str(cfg))
+    assert os.environ["OMP_NUM_THREADS"] == "1"
+    assert os.environ["TORCH_LOGS"] == "deja-la"
+    assert applied == {"OMP_NUM_THREADS": "1", "TORCH_LOGS": "deja-la"}
+
+
+def test_training_env_absent_est_refuse(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"torch": {}}))
+    with pytest.raises(KeyError):
+        apply_training_env(str(cfg))

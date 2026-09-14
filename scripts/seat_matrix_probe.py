@@ -21,6 +21,12 @@ PLATEAU : `W40K_BOARD_PATH` est posé AVANT tout import du moteur, depuis le suf
 de l'agent (`board_path_for_agent`) — sans lui `config/config.json` impose le plateau x5 et
 la grille d'observation, à taille fixe, ne refuse rien : des modèles x1 joueraient à x5 en
 silence (même règle que `ai/train.py` et `scripts/grad_signal_probe.py`).
+
+THREADS : le bloc `training_env` de `config/config.json` (OMP/MKL/OPENBLAS à 1) est posé dans
+l'environnement AVANT tout import de torch, comme le fait `ai/train.py` en tête de module ; les
+workers d'évaluation (`multiprocessing` spawn) en héritent. MESURÉ le 2026-09-14 : sans lui,
+12 workers portaient 38 threads chacun (456 sur 16 cœurs), et 300 parties P0 contre P0 n'étaient
+pas finies après 63 min — sondes tuées, aucune valeur retenue.
 """
 from __future__ import annotations
 
@@ -32,7 +38,25 @@ import sys
 import time
 from typing import Any, Dict
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
+
+def apply_training_env(config_path: str) -> Dict[str, str]:
+    """Pose le bloc `training_env` de `config/config.json` dans `os.environ` ; rend ce qui est posé.
+
+    `setdefault` : une valeur déjà présente dans l'environnement de l'appelant gagne, comme dans
+    `ai/train.py`. Lève si le fichier ou le bloc manque — un run sans limite de threads n'est pas
+    une mesure, c'est ce que le 2026-09-14 a coûté (voir l'en-tête).
+    """
+    with open(config_path, "r", encoding="utf-8") as handle:
+        block = json.load(handle)["training_env"]
+    applied: Dict[str, str] = {}
+    for key, value in block.items():
+        text = str(int(value)) if isinstance(value, (int, float)) else str(value)
+        os.environ.setdefault(key, text)
+        applied[key] = os.environ[key]
+    return applied
 
 
 def board_path_for_agent(agent: str) -> str:
@@ -87,6 +111,8 @@ def main() -> None:
     args = parser.parse_args()
 
     os.environ["W40K_BOARD_PATH"] = board_path_for_agent(args.agent)
+    env_applied = apply_training_env(os.path.join(PROJECT_ROOT, "config", "config.json"))
+    print("env: " + " ".join(f"{key}={value}" for key, value in env_applied.items()))
     from ai.bot_evaluation import evaluate_against_checkpoints
 
     started = time.time()
