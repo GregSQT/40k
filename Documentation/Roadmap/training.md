@@ -23,9 +23,10 @@ Un `--new` n'a rien à faire : il écrit le contrat lui-même. Les **valeurs** d
 pas comparées — régler un poids reste libre, seule la disparition d'une clé arrête un run.
 
 **Migration du 2026-09-12 (suite 115)** : le contrat est devenu un **compagnon par modèle**
-(`<stem>_training_contract.json`), et `--resume-from` installe celui du modèle promu — un artefact
-sans contrat n'est plus promouvable. **Règle** : dans chaque dossier d'agent, renommer
-`training_contract.json` en `model_<agent>_training_contract.json`, puis copier ce contrat sous le
+(`*_training_contract.json`, un par stem de modèle), et `--resume-from` installe celui du modèle
+promu — un artefact sans contrat n'est plus promouvable. **Règle** : dans chaque dossier d'agent, renommer
+l'ancien contrat unique du dossier (`training_contract`, sans préfixe de modèle) en
+`model_*_training_contract.json` (stem du canonique), puis copier ce contrat sous le
 nom de chaque artefact reprenable **de la même lignée** (modèles d'étape `_P<n>`, `ppo_checkpoint_*`,
 `_interrupted`).
 
@@ -36,14 +37,15 @@ inchangé »).
 
 🟡 **Reste à faire, run entnorm terminé** (PID en cours sous l'ancien code, dont la rotation ne
 retire pas un contrat compagnon — copier maintenant laisserait des orphelins) : copier
-`model_ArmageddonAgent_x1_entnorm_training_contract.json` sous le nom des checkpoints survivants
-(`ppo_checkpoint_<n>_steps_training_contract.json`, trois attendus) et du canonique s'il n'en a pas.
+le contrat du canonique entnorm (`model_*_training_contract.json`) sous le nom des checkpoints
+survivants (`ppo_checkpoint_*_steps_training_contract.json`, trois attendus) et du canonique s'il
+n'en a pas.
 
 `model_ArmageddonAgent_x1_P00.zip` (1er septembre, `obs_size` antérieur) n'est pas de cette lignée :
 pas de contrat. `CoreAgent/` n'a jamais eu de contrat : inchangé (sa reprise demande `--init`, comme
 avant). Les `training_contract_<stamp>.json` et `training_contract_pre_resume_<stamp>.json` déjà
 écartés décrivent les archives `model_ArmageddonAgent_x1_<stamp>.zip` / `_pre_resume_<stamp>.zip` du
-même horodatage : les renommer en `<stem de l'archive>_training_contract.json` seulement si l'on
+même horodatage : les renommer en `*_training_contract.json` (stem de l'archive) seulement si l'on
 compte reprendre une de ces archives.
 
 **Correctif du 2026-09-09** : un contrat enregistré **abîmé** (section absente, vide, du mauvais
@@ -452,8 +454,8 @@ sous 3 × 10⁻⁴), pas celle des hyperparamètres d'optimisation — `target_k
 `learning_rate` opèrent sur une direction qui n'en est pas une.
 
 Reproduire : `python3 scripts/grad_signal_probe.py --agent ArmageddonAgent_x1 --etape P1
---training-config x1_lineage --rollouts 24 --out <json>` (refuse si `ai/train.py` tourne ;
-sort en code 3 si le premier rollout ne reproduit pas la référence).
+--training-config x1_lineage --rollouts 24 --out <json>`
+(refuse si `ai/train.py` tourne ; sort en code 3 si le premier rollout ne reproduit pas la référence).
 
 #### Balayage λ appairé, décomposition de Var(δ), contrôles — 2026-09-13, suite 123 {#signal-p1-lambda-2026-09-13}
 
@@ -562,7 +564,7 @@ un gradient de politique à λ = 0,95 quand il existe, avec deux fois moins de r
 la politique aléatoire a un gradient 130 fois plus PETIT en norme que P1 (E‖G_rollout‖²
 1,3 × 10⁻⁴ contre 0,017) — ce qui grandit avec l'entraînement, c'est le bruit par échantillon
 d'une politique devenue tranchée, pas le signal. ⚠️ Une passe `--random-init` sur trois a été
-tuée par le MOTEUR, pas par la sonde : `engine/w40k_core.py:8703` lève « execute_squad_move a
+tuée par le MOTEUR, pas par la sonde : `def _process_squad_action` (`engine/w40k_core.py`) lève « execute_squad_move a
 échoué […] la destination vient du pool BFS du masque, elle DOIT être exécutable — collision
 intra-plan : deux figurines en (19,29) » pendant un tour BOT (`_run_bot_until_not_bot_turn`),
 dans un état que seule une politique aléatoire produit ; bug d'invariant masque/exécution,
@@ -584,7 +586,7 @@ ai/models/ArmageddonAgent_x1_entnorm/model_ArmageddonAgent_x1_entnorm_20260913-0
 `... --random-init 20260913 --rollouts 12` ; `... --opponent-deterministic`. Aucun JSON de
 `config/` ni zip/pkl touché (vérifié par mtime en sortie de chaque collecte).
 
-**Complément 40k-a2 (collecte indépendante, `main.json`, 24 rollouts, même env) :** λ 0,95 →
+**Complément 40k-a2 (collecte indépendante, sortie `--out` nommée « main », 24 rollouts, même env) :** λ 0,95 →
 0,8 → 0,5 → 0,2 → 0 : f_8160 = 0,018 [−0,008, 0,045] (non détecté) → 0,016 → 0,036 → 0,053 →
 **0,058 [0,027, 0,089]** (Δ‖G‖² appairé vs profil +7,6 × 10⁻⁴ [0,6, 15] × 10⁻⁴) ; B_noise(λ = 0,2)
 = 145 000 [69 000, 222 000], (λ = 0) = 133 000 [63 000, 203 000] ; par groupe à λ = 0 :

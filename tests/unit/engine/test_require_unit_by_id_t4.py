@@ -76,6 +76,9 @@ def _gs_mortal_wounds(squad_in_unit_by_id: bool) -> dict:
     target_model = {
         "id": "T1", "squad_id": "2", "player": 1,
         "HP_CUR": 2, "HP_MAX": 2, "col": 5, "row": 5,
+        # Règles PROPRES de la figurine (Unbreakable Resolve se lit sur `models_cache`, jamais
+        # sur l'union 19.04) : exigées par `_model_rules_view`, absence = figurine incomplète.
+        "UNIT_RULES": [],
     }
     return {
         "models_cache": {"T1": target_model},
