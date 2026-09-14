@@ -1212,6 +1212,41 @@ contrat P0 (0 écart, même empreinte de table `7470725e7d0095b8`) ; `scripts/se
 | R2 | le canonique de fin de S25 (`model_ArmageddonAgent_x1_expl.zip`) sera le meilleur instantané **holdout bots** (`save_best_robust`), pas les poids finaux de l'exploiteur ; `_close_exploiter_stage` ne promeut aucun `_E0.zip` | | signalé (`ai/train.py:1538-1559`) | toute mesure a posteriori sur l'exploiteur vise le dernier `ppo_checkpoint` (rotation 3) ; noté, pas modifié |
 | R3 | S27 : seuls les profils forcés mesurent un siège, ils n'existent que dans l'agent expl | | signalé (`ai/bot_evaluation.py:2650-2660`) | toutes les cellules S27 passent `--agent ArmageddonAgent_x1_expl` (tables identiques), y compris P1 `robust_0.9078` |
 
+### 9.7 S27 — mesures statiques par siège (2026-09-14, 21:47 → 21:56) {#s27-2026-09-14}
+
+`scripts/seat_matrix_probe.py`, agent `ArmageddonAgent_x1_expl` (tables identiques à x1), profils
+`x1_seat_p1` / `x1_seat_p2`, 300 parties par cellule, argmax des deux côtés, holdout, graine tirée
+au hasard, 12 workers à 1 thread (139 à 145 s par cellule ; la première tentative sans limite de
+threads n'avait pas fini une cellule en 63 min, cf. §9.6). JSON dans le scratchpad de session.
+
+| modèle évalué | siège 1 | siège 2 | moyenne (siège 0,5) |
+|---|---|---|---|
+| **P0 (`model_..._expl_P0.zip`, copie identique) vs P0** | **0,610** (183/300) | **0,403** (121/300) | **0,507** |
+| **P1 (`robust_0.9078`) vs P0** | **0,690** (207/300, 1 nul) | **0,593** (178/300) | **0,642** |
+
+Lecture.
+- **Verrou de parité tenu** : 0,507 dans [0,40, 0,60] — les copies zip / pkl de P0 sont appariées,
+  S25 peut partir (la sonde de parité n'existe pas pour un exploiteur, §9.6 A2).
+- **L'avantage du premier joueur vaut 21 points dans le miroir** (0,61 contre 0,40, argmax contre
+  argmax, dés seuls). C'est la part structurelle du jeu dans tout score contre P0 : un exploiteur
+  à siège 0,5 doit gagner les deux sièges pour dépasser 0,65, et le siège 2 seul plafonne
+  mécaniquement plus bas.
+- **P1 gagne +8 points sur P0 en siège 1 et +19 en siège 2** : la lignée a surtout appris à jouer
+  second (70 % des épisodes de P1 en siège 2), et sa moyenne à sièges égaux (0,642) est exactement
+  ce que les sondes du run de référence rendaient (0,59–0,66) — la sonde de curriculum joue bien
+  50/50, elle ne biaise pas vers le siège faible.
+- Ce que ça ne dit pas : si 0,90 est atteignable. C'est S25.
+
+### 9.8 S25 — run lancé le 2026-09-14 à 21:57 {#s25-run}
+
+`run_20260914-215728` (`tensorboard/x1_lineage_ArmageddonAgent_x1_expl/`), log
+`training_x1_expl_01-e00-s25.log`, commande `python3 ai/train.py --agent ArmageddonAgent_x1_expl
+--training-config x1_lineage --scenario bot --etape E0`. Prologue vérifié dans le log : reprise à
+50 000 épisodes, 24 envs, `n_steps` 340 × 24, lr **0,0005** appliqué, ent 0,01, siège 0,50, pool
+P0 1,00 (part de bots 0), VecNormalize chargée, **échauffement critic 20 updates** (table
+`7470725e7d0095b8`, jamais échauffée). Fin attendue vers 04:00 (60 000 épisodes d'étape). Lecture
+par la règle §9.5 sur les sondes exploiteur du log (100 parties / 2 000 épisodes) et `03_selfplay/P0`.
+
 ## 8. Références
 
 - Runs : `tensorboard/x1_lineage_ArmageddonAgent_x1/run_20260912-065925` (P1) ;
