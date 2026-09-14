@@ -27,6 +27,7 @@ Quatre overrides, sans changer les maths :
 """
 from __future__ import annotations
 
+import itertools
 import time
 from copy import deepcopy
 from typing import Any, TypeVar
@@ -194,6 +195,24 @@ class PatchedMaskablePPO(MaskablePPO):
     def _excluded_save_params(self) -> list[str]:
         return super()._excluded_save_params() + ["_vwu_done"]
 
+    def _critic_only_param_ids(self) -> frozenset[int]:
+        """Identités des paramètres que l'échauffement critic (B6) laisse apprendre.
+
+        Le tronc critic de `MlpExtractor` et la tête de valeur : les deux seuls que
+        `evaluate_actions` traverse SANS que la politique les lise. Tout le reste — extracteur
+        de features PARTAGÉ, tronc pi, têtes pointeur et dense — est gelé pendant le warmup
+        (`grad = None` avant `optimizer.step()`, voir `train`). `ActorCriticPolicy` garantit
+        ces deux attributs ; `PointerMaskablePolicy` les construit elle-même
+        (ai/pointer_policy.py).
+        """
+        return frozenset(
+            id(p)
+            for p in itertools.chain(
+                self.policy.mlp_extractor.value_net.parameters(),
+                self.policy.value_net.parameters(),
+            )
+        )
+
     # ── 2.1 — GPU-resident buffer ─────────────────────────────────────────────────────────────
 
     def _setup_model(self) -> None:
@@ -262,6 +281,12 @@ class PatchedMaskablePPO(MaskablePPO):
         _diag_grad_norms_mb0: dict[str, float] | None = None
         continue_training = True
         loss: th.Tensor = th.tensor(float("nan"))
+        # Échauffement critic (B6) : les paramètres que le warmup laisse apprendre, calculés une
+        # fois par update et SEULEMENT pendant le régime (voir `_critic_only_param_ids`).
+        _in_warmup: bool = self._vwu_done < self.value_warmup_updates
+        critic_only_param_ids: frozenset[int] = (
+            self._critic_only_param_ids() if _in_warmup else frozenset()
+        )
 
         _t0_update = time.perf_counter()
         for epoch in range(self.n_epochs):
@@ -345,9 +370,14 @@ class PatchedMaskablePPO(MaskablePPO):
                 # ECHAUFFEMENT CRITIC (décision B) : pendant les `value_warmup_updates`
                 # premières updates du run, seul le critic s'ajuste. La politique et l'entropie
                 # sont annulées (pas seulement réduites) pour éviter tout déplacement de la
-                # politique pendant que le critic recalibre sa cible. L'early-stop KL n'est pas
-                # applicable : sans gradient de politique, approx_kl n'a pas de sens.
-                _in_warmup: bool = self._vwu_done < self.value_warmup_updates
+                # politique pendant que le critic recalibre sa cible. Annuler les termes ne
+                # suffit PAS : l'extracteur de features est PARTAGÉ (`PointerMaskablePolicy`
+                # exige `share_features_extractor=True`, et ses logits `q · e_i` lisent les
+                # embeddings de l'extracteur), donc la value loss seule le déplacerait, et la
+                # politique avec lui — sans clip ni early-stop KL. D'où le gel plus bas : seuls
+                # les paramètres du critic (`mlp_extractor.value_net` + `value_net`) gardent un
+                # gradient avant `optimizer.step()`. L'early-stop KL n'est pas applicable : la
+                # politique est immobile, approx_kl vaut 0 par construction.
                 if _in_warmup:
                     loss = self.vf_coef * value_loss
                 else:
@@ -396,6 +426,14 @@ class PatchedMaskablePPO(MaskablePPO):
 
                 self.policy.optimizer.zero_grad()
                 loss.backward()
+                if _in_warmup:
+                    # Gel de tout ce qui n'est pas le critic : `grad = None` fait sauter le
+                    # paramètre par Adam, donc l'extracteur partagé et les têtes de politique
+                    # restent identiques au bit près. La norme clippée ci-dessous ne porte alors
+                    # que sur le gradient du critic (clip_grad_norm_ ignore les grads None).
+                    for _param in self.policy.parameters():
+                        if id(_param) not in critic_only_param_ids:
+                            _param.grad = None
                 grad_norms_t.append(
                     th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 )

@@ -361,6 +361,9 @@ class TestPatchedTrainNumericalParity:
         model.vf_coef = 0.5
         model.max_grad_norm = 0.5
         model.entropy_normalize_by_legal = False
+        # B6 : attributs d'instance posés par __init__, que ce montage contourne.
+        model.value_warmup_updates = 0
+        model._vwu_done = 0
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -444,6 +447,9 @@ class TestPatchedTrainNumericalParity:
         model.vf_coef = 0.5
         model.max_grad_norm = 0.5
         model.entropy_normalize_by_legal = False
+        # B6 : attributs d'instance posés par __init__, que ce montage contourne.
+        model.value_warmup_updates = 0
+        model._vwu_done = 0
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -679,6 +685,9 @@ class TestPatchedVsReferenceParity:
         model.vf_coef = 0.5
         model.max_grad_norm = 0.5
         model.entropy_normalize_by_legal = False
+        # B6 : attributs d'instance posés par __init__, que ce montage contourne.
+        model.value_warmup_updates = 0
+        model._vwu_done = 0
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -823,6 +832,9 @@ class TestPatchedVsReferenceParity:
             model.vf_coef = 0.5
             model.max_grad_norm = 0.5
             model.entropy_normalize_by_legal = False
+            # B6 : attributs d'instance posés par __init__, que ce montage contourne.
+            model.value_warmup_updates = 0
+            model._vwu_done = 0
             model.target_kl = None
             model.clip_range_vf = None
             model._current_progress_remaining = 1.0

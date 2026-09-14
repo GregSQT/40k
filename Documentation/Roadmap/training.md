@@ -188,8 +188,12 @@ termes ensemble auraient valu +11 / −5. Nouveau composant de ventilation `vp_m
 Le critic ayant appris une cible qui ignorait les VP cédés, la reprise s'ouvre par
 `model_params.value_warmup_updates` updates où seule la value loss est optimisée (politique et
 entropie annulées, KL désactivé, `train/value_warmup_active`) — régime de run, jamais hérité
-d'un checkpoint. **Livré en worktree `worktree-marge-vp-b6`, non mergé** : le run S11 lit main
-et `config/` à chaud. Après le verdict S11 : merge, `ai.training_contract --init` +
+d'un checkpoint. Review du 2026-09-14 : l'extracteur étant PARTAGÉ (`PointerMaskablePolicy`),
+tout ce qui n'est pas le critic (`mlp_extractor.value_net` + `value_net`) est GELÉ pendant le
+warmup, sinon la value loss déplaçait la politique via l'extracteur ; `SelfPlayWrapper` accumule
+désormais chaque step de P2 comme `BotControlledEnv` (le ledger était perdu sur le chemin
+self-play pur) ; format de save bumpé en `W40KTL10` (`vp_margin_paid`). **Livré en worktree
+`worktree-marge-vp-b6`, non mergé** : le run S11 lit main et `config/` à chaud. Après le verdict S11 : merge, `ai.training_contract --init` +
 `write_contract` sur le zip P0 (les clés de récompense changent), `value_warmup_updates` dans
 `x1_lineage`, run « S11 + marge » par la commande habituelle `--etape P1`. Détail, tests et
 mutations constatées : dossier §5.12.

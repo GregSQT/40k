@@ -699,14 +699,39 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   d'un checkpoint. Motif : le critic a appris une cible qui payait +6 par VP propre et 0 par VP
   cédé ; à la reprise, sa cible change, et le premier gradient de politique serait calculé sur
   des avantages faux.
+  **Gel hors critic (review du 2026-09-14).** Annuler les termes ne suffit pas : l'extracteur
+  de features est PARTAGÉ (`PointerMaskablePolicy` exige `share_features_extractor=True`, et
+  ses logits `q · e_i` lisent les embeddings de l'extracteur), donc la value loss seule
+  déplaçait l'extracteur, et la politique avec lui — sans clip ni early-stop KL. Le test
+  initial était vert parce que `MlpPolicy` a un extracteur `Flatten` sans paramètre. Désormais,
+  pendant le warmup, seuls `mlp_extractor.value_net` et `value_net` gardent un gradient
+  (`_critic_only_param_ids`, `grad = None` sur le reste avant `optimizer.step()`) : politique
+  immobile au bit près, mesuré sur `PointerMaskablePolicy` + `SpatialCombinedExtractor`. Coût
+  assumé : l'extracteur n'apprend pas la nouvelle cible pendant le warmup, seule la tête critic
+  (2 × 512 + linéaire) la remappe ; l'apprentissage joint reprend après.
+- **`SelfPlayWrapper` accumule les steps de P2** (`ai/env_wrappers.py`, review du 2026-09-14).
+  Le wrapper ne rendait à P0 que le step TERMINAL de P2 et jetait les autres — le ledger
+  avançait, l'agent ne touchait rien, et la somme téléscopique était fausse sur le chemin
+  self-play pur (`ai/train.py`, branche sans bots) : mesuré sur 4 parties aléatoires, vp_margin
+  perdu +180 / +270 / +120 / +180 pour des marges finales +5 / +20 / −10 / −5. Jumeau de
+  `BotControlledEnv` (`accumulate_reward=True`, 0 écart sur 20 parties) : les deux boucles P2
+  (avant et après l'action de P0) additionnent maintenant chaque step, pénalité défensive
+  comprise. Test : `tests/unit/ai/test_selfplay_wrapper_reward_accumulation.py` (3, rouge sur
+  l'ancien wrapper).
+- **Format de save `W40KTL10`** (`services/game_saves.py`) : `vp_margin_paid` est une clé
+  mutable de premier niveau lue par `require_key` à chaque step, PvP compris — une row TL09
+  rendrait un état amputé et le premier step lèverait. Bump + TL09 en `_LEGACY_LOSSES`,
+  `_TL10_KEYS` (132 clés) dans `test_save_format_key_contract.py`.
 - Tests (rouge par mutation, constatés) : `test_objective_turn_reward.py` réécrit (versement =
   6 × Δmarge, delta adverse hors tour, deux appels → 0, filigrane, erreur si clé absente,
   ventilation) — rouge sur « filtre `current_player` réintroduit » et « filigrane non écrit » ;
   `test_s11_reward_on_expectation_e2e.py` : somme des `vp_margin` sur une partie moteur réelle =
   6 × marge finale (rouge sur le filtre, marge 25 → 150 attendus manqués) ;
-  `tests/unit/ai/test_critic_warmup.py` (8) : politique immobile / critic mobile pendant le
+  `tests/unit/ai/test_critic_warmup.py` (12) : politique immobile / critic mobile pendant le
   warmup (rouge si la loss complète revient), compteur saturant, kwarg accepté en `--new`,
-  `_vwu_done` non hérité (rouge sans `_excluded_save_params`), zip antérieur à B6 chargé à 0.
+  `_vwu_done` non hérité (rouge sans `_excluded_save_params`), zip antérieur à B6 chargé à 0,
+  extracteur partagé à paramètres immobile (rouge sans le gel), `PointerMaskablePolicy` réelle :
+  seuls les tenseurs `mlp_extractor.value_net.*` / `value_net.*` bougent.
   Fixtures adaptées : `test_reward_calculator.py`, `test_agent_decision_mechanism.py`,
   `test_terminal_info_all_paths.py`, `test_metrics_single_writer.py`, `test_metrics_tracker_utils.py`,
   `test_train_helpers.py` (couverture synthétique de la clé). 241 verts sur les onze fichiers touchés.

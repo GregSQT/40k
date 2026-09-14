@@ -223,3 +223,158 @@ def test_un_checkpoint_anterieur_a_b6_charge_sans_warmup(tmp_path) -> None:
     assert loaded.value_warmup_updates == 0
     recorded = _run_one_update(loaded)
     assert recorded.get("train/value_warmup_active") == pytest.approx(0.0)
+
+
+# --- Extracteur PARTAGÉ à paramètres (le cas de production) --------------------------------
+#
+# `MlpPolicy` a un extracteur `Flatten` SANS paramètre : les cinq tests ci-dessus ne prouvent
+# l'immobilité de la politique que pour lui. En production, `PointerMaskablePolicy` exige
+# `share_features_extractor=True` (ai/pointer_policy.py) et ses logits `q · e_i` lisent les
+# embeddings de l'extracteur : un gradient de value loss qui traverse l'extracteur déplace la
+# politique — sans clip (policy_loss hors de la loss) et sans early-stop KL. Le montage
+# ci-dessous reproduit la structure : un extracteur `Linear` partagé par l'acteur et le critic.
+
+import torch as th
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+
+
+class _LinearExtractor(BaseFeaturesExtractor):
+    """Extracteur partagé À PARAMÈTRES : une couche linéaire 3 -> 6."""
+
+    def __init__(self, observation_space: spaces.Box) -> None:
+        super().__init__(observation_space, features_dim=6)
+        self.proj = th.nn.Linear(3, 6)
+
+    def forward(self, observations: th.Tensor) -> th.Tensor:
+        return th.tanh(self.proj(observations))
+
+
+def _model_with_shared_extractor(n_warmup: int) -> PatchedMaskablePPO:
+    model = PatchedMaskablePPO(
+        "MlpPolicy",
+        _TinyMaskedEnv(),
+        n_steps=8,
+        batch_size=4,
+        n_epochs=1,
+        seed=0,
+        device="cpu",
+        policy_kwargs={
+            "net_arch": [8],
+            "features_extractor_class": _LinearExtractor,
+            "share_features_extractor": True,
+        },
+    )
+    model.value_warmup_updates = n_warmup
+    return model
+
+
+def _extractor_params(model: PatchedMaskablePPO) -> list:
+    return [t.detach().clone() for t in model.policy.features_extractor.parameters()]
+
+
+def _policy_logits(model: PatchedMaskablePPO) -> np.ndarray:
+    """Logits de la politique sur une grille d'observations fixes : ce que voit l'agent."""
+    obs = th.tensor([[0.1, 0.2, 0.3], [-0.4, 0.0, 0.4], [0.3, -0.3, 0.3]], dtype=th.float32)
+    with th.no_grad():
+        dist = model.policy.get_distribution(obs)
+    inner = dist.distribution
+    assert isinstance(inner, th.distributions.Categorical), type(inner).__name__
+    return inner.logits.numpy().copy()
+
+
+def test_l_extracteur_partage_a_des_parametres() -> None:
+    """VERT VACANT : sans paramètre dans l'extracteur, le test suivant ne prouverait rien de
+    plus que ceux à `Flatten`."""
+    model = _model_with_shared_extractor(n_warmup=1)
+    assert model.policy.share_features_extractor is True
+    assert len(_extractor_params(model)) == 2, "Linear 3->6 : un poids et un biais attendus"
+
+
+def test_avec_extracteur_partage_les_logits_de_la_politique_sont_immobiles_pendant_le_warmup() -> None:
+    """Le cas de production : extracteur partagé, la politique ne doit pas bouger d'un bit.
+
+    VERROU. Sans le gel des paramètres hors critic (`_critic_only_param_ids` dans
+    `PatchedMaskablePPO.train`), la value loss rétropropage à travers l'extracteur partagé, ses
+    poids changent et les logits de la politique avec eux — ROUGE constaté avant le gel.
+    CONTRÔLE NON VACANT : le critic doit bouger sur la même update.
+    """
+    model = _model_with_shared_extractor(n_warmup=1)
+    ext_before = _extractor_params(model)
+    pi_before = _policy_head_params(model)
+    logits_before = _policy_logits(model)
+    vf_before = _value_head_params(model)
+
+    _run_one_update(model)
+
+    assert all(np.array_equal(a.numpy(), b.numpy()) for a, b in zip(ext_before, _extractor_params(model))), (
+        "l'extracteur partagé a bougé pendant le warmup critic : la politique qui le lit a bougé"
+    )
+    assert all(np.array_equal(a.numpy(), b.numpy()) for a, b in zip(pi_before, _policy_head_params(model)))
+    assert np.array_equal(logits_before, _policy_logits(model)), (
+        "les logits de la politique ont changé pendant le warmup critic"
+    )
+    assert any(not np.array_equal(a.numpy(), b.numpy()) for a, b in zip(vf_before, _value_head_params(model))), (
+        "le critic n'a pas bougé : l'update n'a rien appris, le test ne prouve rien"
+    )
+
+
+def test_avec_extracteur_partage_l_extracteur_bouge_hors_warmup() -> None:
+    """Miroir : hors warmup, la même update déplace l'extracteur partagé (le gel est bien
+    limité au régime warmup, pas permanent)."""
+    model = _model_with_shared_extractor(n_warmup=0)
+    ext_before = _extractor_params(model)
+    logits_before = _policy_logits(model)
+
+    _run_one_update(model)
+
+    assert any(not np.array_equal(a.numpy(), b.numpy()) for a, b in zip(ext_before, _extractor_params(model)))
+    assert not np.array_equal(logits_before, _policy_logits(model))
+
+
+# --- Le VRAI chemin : PointerMaskablePolicy + SpatialCombinedExtractor --------------------------
+
+
+def test_sur_la_policy_de_production_seul_le_critic_bouge_pendant_le_warmup() -> None:
+    """`PointerMaskablePolicy` (extracteur partagé imposé) : pendant le warmup, l'extracteur,
+    le tronc pi et TOUTES les têtes restent identiques au bit près ; seuls
+    `mlp_extractor.value_net` et `value_net` changent.
+
+    C'est le montage qui manquait : `MlpPolicy` a un extracteur sans paramètre, et son vert ne
+    disait rien de la policy réellement entraînée.
+    """
+    from ai.pointer_policy import PointerMaskablePolicy
+    from ai.spatial_extractor import SpatialCombinedExtractor
+    from tests.unit.ai.test_pointer_head import _ToyEnv
+
+    th.manual_seed(7)
+    model = PatchedMaskablePPO(
+        PointerMaskablePolicy, _ToyEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
+        device="cpu", verbose=0,
+        policy_kwargs={
+            "net_arch": [16, 16],
+            "features_extractor_class": SpatialCombinedExtractor,
+            "features_extractor_kwargs": {"cnn_features": 8},
+        },
+        value_warmup_updates=1,
+    )
+    pol = model.policy
+    critic_ids = {id(p) for p in pol.mlp_extractor.value_net.parameters()} | {
+        id(p) for p in pol.value_net.parameters()
+    }
+    named_before = {n: p.detach().clone() for n, p in pol.named_parameters()}
+    assert len(named_before) > 20, "VERT VACANT : la policy de production porte des dizaines de tenseurs"
+    non_critic = [n for n, p in pol.named_parameters() if id(p) not in critic_ids]
+    assert any(n.startswith("features_extractor.") for n in non_critic)
+    assert any("query_net" in n for n in non_critic)
+
+    _run_one_update(model)
+
+    moved = sorted(
+        n for n, p in pol.named_parameters()
+        if not th.equal(named_before[n], p.detach())
+    )
+    assert moved, "le critic n'a pas bougé : l'update n'a rien appris, le test ne prouve rien"
+    assert all(n.startswith(("mlp_extractor.value_net.", "value_net.")) for n in moved), (
+        f"des paramètres hors critic ont bougé pendant le warmup : "
+        f"{[n for n in moved if not n.startswith(('mlp_extractor.value_net.', 'value_net.'))]}"
+    )
