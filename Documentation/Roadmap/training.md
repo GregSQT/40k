@@ -199,10 +199,11 @@ la politique via l'extracteur ; `SelfPlayWrapper` accumule désormais chaque ste
 `BotControlledEnv` (le ledger était perdu sur le chemin self-play pur) ; la porte « pool vide →
 advance_phase » du moteur passe par `calculate_reward` (le dernier delta du ledger et le
 ±situational y étaient perdus quand la transition terminait la partie) ; format de save bumpé
-en `W40KTL10` (`vp_margin_paid`). **Mergé dans main le 2026-09-14** (S11 arrêté). Reste :
-`ai.training_contract --init` + `write_contract` sur le zip P0 (les clés de récompense
-changent), `value_warmup_updates` dans `x1_lineage`, run « marge » par la commande habituelle
-`--etape P1`. Détail, tests et mutations constatées : dossier §5.12.
+en `W40KTL10` (`vp_margin_paid`). **Mergé dans main le 2026-09-14** (S11 arrêté), puis
+préparé : contrat du snapshot P0 réécrit (archive `_pre_b6_20260914`), `value_warmup_updates:
+20` dans `x1_lineage` (≈ 1 440 épisodes). **Reste : lancer le run « marge »** par la commande
+habituelle `--etape P1`, jugé par la règle §7. Détail, tests et mutations constatées : dossier
+§5.12.
 
 ---
 

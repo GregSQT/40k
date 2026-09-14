@@ -395,8 +395,10 @@
             "learning_rate": 0.001,
             "ent_coef": 0.01,
             "n_steps": 8160,
-            "vf_coef": 0.17
+            "vf_coef": 0.17,
+            "value_warmup_updates": 20
         },
+        "value_warmup_updates_normal": "20 (pose le 2026-09-14 pour le run marge B6, dossier plafonnement_p1.md 5.12) : ECHAUFFEMENT DU CRITIC en debut de run — pendant les 20 premieres updates (1 update = 8160 pas ~ 72 episodes, mesure sur S11 : 480 000 pas pour 4 223 episodes), seule la value loss est optimisee ; politique, entropie, extracteur partage et statistiques EntityRunningNorm sont figes au bit pres (ai/patched_ppo.py, train/value_warmup_active = 1 puis 0). Motif : B6 change la cible du critic (marge de VP au lieu des VP propres, jusqu'a -300 par partie qu'il ne comptait pas) ; sans echauffement, les premiers avantages sont calcules sur un critic faux. 20 et non 10 : seule la tete critic apprend pendant le regime (extracteur gele), 10 x 4 epochs est court pour lire les objectifs adverses ; cout ~1 440 episodes, 0,7 % du run. Controle a l'update 21 : train/explained_variance doit etre remontee vers son niveau d'avant B6 (~0,87) ; sinon le warmup etait trop court, l'apprentissage joint reprend de toute facon. Regime de RUN : ni la cle ni le compteur ne voyagent dans le zip, un --append sans cette cle ne rejoue rien. Retirer la cle = pas d'echauffement (comportement anterieur).",
         "early_stop": {
             "promote_min_episodes": 30000
         }

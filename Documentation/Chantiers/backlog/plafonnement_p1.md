@@ -872,11 +872,20 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   `test_terminal_info_all_paths.py`, `test_metrics_single_writer.py`, `test_metrics_tracker_utils.py`,
   `test_train_helpers.py` (couverture synthétique de la clé). 241 verts sur les onze fichiers touchés.
 
-**Reste à faire (mergé le 2026-09-14)** : `python3 -m ai.training_contract --init`
-et `write_contract(P0_zip, build_contract(rewards, agent))` (la table de récompense change de
-clés, le contrat refuserait la reprise) ; `value_warmup_updates` dans le profil `x1_lineage`
-(valeur à choisir, ~10 updates = 81 600 pas) ; run « marge » (`reward_on_expectation: false`,
-régime de référence) par la commande habituelle `--etape P1`, jugé par la règle §7.
+**Préparation faite le 2026-09-14 (18:20), run NON lancé.**
+- Contrat du snapshot P0 réécrit sur les nouvelles clés de récompense (`write_contract` sur
+  `model_ArmageddonAgent_x1_P0.zip`, écart après : aucun). C'est CE contrat que `--etape P1`
+  copie sur le canonique avant `enforce_training_contract` — le `--init` du canonique est sans
+  effet sur ce chemin. Archive préalable : `model_ArmageddonAgent_x1_P0_pre_b6_20260914.zip`
+  (copie identique, `cmp`) + `..._pre_b6_20260914_training_contract.json` (ancien contrat).
+- `value_warmup_updates: 20` dans `x1_lineage.model_params` (note `value_warmup_updates_normal`
+  dans le profil). Conversion mesurée sur S11 : 1 update = 8 160 pas ≈ 72 épisodes (480 000 pas
+  pour 4 223 épisodes entre deux checkpoints), donc ≈ 1 440 épisodes, ~15 min. Contrôle à
+  l'update 21 : `train/explained_variance` remontée vers ~0,87.
+- `reward_on_expectation: false` (régime de référence), aucun `ai/train.py` en cours.
+- **À lancer par l'utilisateur** : commande habituelle `--etape P1`, log
+  `training_x1_06-p01-marge.log`, jugé par la règle §7 contre 0,601 / 0,585 ; surveiller
+  `01_VP/a_vp_diff` à côté de `03_selfplay/P0`.
 
 ## 6. Ce qui n'a pas été fait
 
@@ -890,7 +899,7 @@ régime de référence) par la commande habituelle `--etape P1`, jugé par la r�
 - [x] **Levier S23** (λ 0,2 + 32 640 / 2 040) — testé dans la nuit du 2026-09-13 au 14, réfuté (§5.9).
 - [x] **`vf_coef` 0,3** — run du 2026-09-14 02:36 → 10:26, réfuté (§5.10).
 - [x] **S11** — code livré et mergé ; run du 2026-09-14 10:37 → 14:05 arrêté par la garde (moyenne des sondes 0,473 < 0,50) ; entropie montante, argmax perd, échantillonné tient (§5.11).
-- [ ] **B6 / S24** — code livré et mergé le 2026-09-14 (§5.12) ; reste : contrat, `value_warmup_updates` dans le profil, run.
+- [ ] **B6 / S24** — code livré et mergé, contrat P0 réécrit, `value_warmup_updates: 20` posé (§5.12) ; reste : lancer le run « marge » et le juger.
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
 - [ ] Ventilation des pénalités −97 (C5) ; déploiement auto à 0,50 (D4).
