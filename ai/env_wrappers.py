@@ -2227,7 +2227,6 @@ class SelfPlayWrapper(gym.Wrapper):
                     except (OSError, IOError):
                         pass
                 self.episode_length += 1
-                p1_actions_after += 1
 
                 # If P1's action ended the game, P0 needs the situational reward (win/lose)
                 # The engine returns P0's perspective reward even for P1's actions
