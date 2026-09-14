@@ -39,10 +39,11 @@ def _game_state(weapon_rules, *, target_row):
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
               "WEAPON_RULES": weapon_rules, "code": "test_melta", "display_name": "Melta"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
+                "col": 0, "row": 0, "RNG_WEAPONS": [weapon], "UNIT_RULES": []}
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 5, "HP_MAX": 5,
               "ARMOR_SAVE": 7, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
-              "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": target_row}
+              "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": target_row,
+              "UNIT_RULES": []}
     return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",

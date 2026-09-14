@@ -35,13 +35,13 @@ def _game_state(weapon_rules):
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
               "WEAPON_RULES": list(weapon_rules), "code": "test_syringe", "display_name": "Syringe"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "ATTACK_LEFT": 1,
-                "col": 0, "row": 0, "CC_WEAPONS": [weapon]}
+                "col": 0, "row": 0, "CC_WEAPONS": [weapon], "UNIT_RULES": []}
     grunt = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2,
              "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
-             "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0}
+             "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0, "UNIT_RULES": []}
     leader = {"id": "T2", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 4, "HP_MAX": 4,
               "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": "leader", "unitType": "Boss",
-              "points_per_hp": 20.0, "VALUE": 80.0, "col": 1, "row": 1}
+              "points_per_hp": 20.0, "VALUE": 80.0, "col": 1, "row": 1, "UNIT_RULES": []}
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
               "n_attacks_resolved": 1, "target_squad_size_at_declaration": 2}
     return {**turn_state_invariants(),
@@ -102,7 +102,7 @@ def test_precision_choisit_le_character_le_plus_cher(monkeypatch):
     gs["models_cache"]["T3"] = {
         "id": "T3", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 6, "HP_MAX": 6,
         "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": "support", "unitType": "Warlord",
-        "points_per_hp": 30.0, "VALUE": 180.0, "col": 2, "row": 1,
+        "points_per_hp": 30.0, "VALUE": 180.0, "col": 2, "row": 1, "UNIT_RULES": [],
     }
     gs["squad_models"]["2"].append("T3")
 

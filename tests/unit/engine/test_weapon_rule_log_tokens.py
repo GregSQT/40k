@@ -86,7 +86,7 @@ def _game_state(
                     # 10.06 volet MONSTER/VEHICLE : le test se lit sur les keywords PROPRES de
                     # la figurine (`_model_is_monster_or_vehicle`), pas sur l'union 19.03.
                     "UNIT_KEYWORDS": ["VEHICLE"] if attacker_is_vehicle else [],
-                    "RNG_WEAPONS": [], "CC_WEAPONS": []}
+                    "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": []}
         attacker[weapons_key] = [weapon]
         models_cache[mid] = attacker
         intents.append({"model_id": mid, "target_unit_id": "2", "weapon_index": 0,
@@ -107,7 +107,7 @@ def _game_state(
                 "ARMOR_SAVE": target_save, "INVUL_SAVE": 7,
                 "role": "leader" if target_is_character else None, "unitType": "Grunt",
                 "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": row,
-                "RNG_WEAPONS": [], "CC_WEAPONS": []}
+                "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": []}
 
     models_cache["T1"] = _target_model("T1", "2", target_row)
     squad_models = {"1": [mid for mid in models_cache if mid.startswith("A")], "2": ["T1"]}
