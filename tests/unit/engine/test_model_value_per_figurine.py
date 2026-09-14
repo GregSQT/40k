@@ -109,13 +109,15 @@ def _calculator() -> RewardCalculator:
     return RewardCalculator(config={"quiet": True}, rewards_config={}, unit_registry=None, state_manager=None)
 
 
-_SHAPING = {"hp_damage_weight": 1.0, "model_kill_bonus_factor": 1.0, "squad_kill_bonus_factor": 0.0}
+_SHAPING = {"hp_damage_weight": 1.0, "model_kill_bonus_factor": 1.0, "squad_kill_bonus_factor": 0.0,
+            "reward_on_expectation": False}
 
 
 def _combat(events: List[Dict[str, Any]], squad_value: int, mcs: int) -> Dict[str, Any]:
     return {
         "events": events,
         "squads_wiped": [],
+        "expected_damage_by_target": {},
         "targets_meta": {"9": {"value": squad_value, "model_count_at_start": mcs, "player": 2}},
     }
 
@@ -324,3 +326,75 @@ class TestObservationEnemySquadValue:
         """Le signal reste monotone en points (garde-fou de sens)."""
         gretchins = [{"col": 20 + i, "row": 20, "VALUE": 5} for i in range(10)]
         assert self._obs_enemy_slot0(self._boyz(nob_index=0)) > self._obs_enemy_slot0(gretchins)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S11 — `reward_on_expectation` : la récompense lit l'espérance, pas les événements
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _combat_s11(*, expected: float, alive: int, hp_max: int, events: List[Dict[str, Any]],
+                player: int = 2) -> Dict[str, Any]:
+    return {
+        "events": events,
+        "squads_wiped": [],
+        "expected_damage_by_target": {"9": expected},
+        "targets_meta": {"9": {
+            "value": 75, "model_count_at_start": 10, "player": player,
+            "alive_count": alive, "hp_max": hp_max,
+            "points_per_hp_mean": 5.0, "model_value_mean": 10.0,
+        }},
+    }
+
+
+class TestS11RewardOnExpectation:
+    _ON = {**_SHAPING, "reward_on_expectation": True}
+
+    def test_l_esperance_remplace_le_jet(self):
+        """E[dmg] 1,5 sur des figurines à 1 PV (3 vivantes) : 5 × 1,5 + 10 × min(1,5, 3) = 22,5,
+        quels que soient les événements réels (ici un jet à 2 dégâts et un kill)."""
+        calc = _calculator()
+        ev = _event(model_value=10.0, points_per_hp=5.0, damage=2, destroyed=True)
+        combat = _combat_s11(expected=1.5, alive=3, hp_max=1, events=[ev])
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == pytest.approx(22.5)
+        # Même choix, jet nul : même récompense.
+        combat_miss = _combat_s11(expected=1.5, alive=3, hp_max=1, events=[])
+        assert calc._squad_combat_shaping(combat_miss, lambda p: p == 2, self._ON) == pytest.approx(22.5)
+
+    def test_le_drapeau_a_faux_garde_l_ancienne_formule(self):
+        calc = _calculator()
+        ev = _event(model_value=10.0, points_per_hp=5.0, damage=2, destroyed=True)
+        combat = _combat_s11(expected=1.5, alive=3, hp_max=1, events=[ev])
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, _SHAPING) == pytest.approx(5.0 * 2 + 10.0)
+
+    def test_les_figurines_tuees_esperees_sont_plafonnees_par_les_vivantes(self):
+        """E[dmg] 10 sur 3 figurines à 1 PV : kills = min(10, 3) = 3 -> 5 × 10 + 10 × 3 = 80."""
+        calc = _calculator()
+        combat = _combat_s11(expected=10.0, alive=3, hp_max=1, events=[])
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == pytest.approx(80.0)
+
+    def test_hp_max_divise_les_kills_esperes(self):
+        """E[dmg] 3 sur des figurines à 2 PV : kills = 1,5 -> 5 × 3 + 10 × 1,5 = 30."""
+        calc = _calculator()
+        combat = _combat_s11(expected=3.0, alive=5, hp_max=2, events=[])
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == pytest.approx(30.0)
+
+    def test_victime_du_mauvais_joueur_ignoree(self):
+        calc = _calculator()
+        combat = _combat_s11(expected=3.0, alive=5, hp_max=2, events=[], player=1)
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == 0.0
+
+    def test_le_bonus_de_wipe_reste_sur_le_resultat_reel(self):
+        calc = _calculator()
+        shaping = {**self._ON, "squad_kill_bonus_factor": 2.0}
+        combat = _combat_s11(expected=0.0, alive=1, hp_max=1, events=[])
+        combat["squads_wiped"] = ["9"]
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, shaping) == pytest.approx(150.0)
+
+    def test_drapeau_absent_ou_non_booleen_leve(self):
+        calc = _calculator()
+        combat = _combat_s11(expected=1.0, alive=1, hp_max=1, events=[])
+        with pytest.raises(Exception):
+            calc._squad_combat_shaping(combat, lambda p: p == 2, {k: v for k, v in _SHAPING.items() if k != "reward_on_expectation"})
+        with pytest.raises(ValueError, match="booleen"):
+            calc._squad_combat_shaping(combat, lambda p: p == 2, {**_SHAPING, "reward_on_expectation": 1})

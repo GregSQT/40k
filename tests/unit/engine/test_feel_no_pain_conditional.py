@@ -118,9 +118,9 @@ def _shoot_gs(target_unit_rules, weapon):
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {
             "1": {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": 0, "row": 0,
-                  "VALUE": 10.0, "player": 0, "HP_CUR": 1},
+                  "VALUE": 10.0, "player": 0, "HP_CUR": 1, "HP_MAX": 1},
             "2": {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": 9, "row": 9,
-                  "VALUE": 10.0, "player": 1, "HP_CUR": 1},
+                  "VALUE": 10.0, "player": 1, "HP_CUR": 1, "HP_MAX": 1},
         },
         "units": [attacker_unit, target_unit],
         "unit_by_id": {"1": attacker_unit, "2": target_unit},
@@ -282,7 +282,7 @@ def _ancient_gs(col, row):
     gs["board_cols"], gs["board_rows"] = 100, 100
     gs["objectives"] = [{"id": "o1", "hexes": [[10, 10]]}]
     gs["units_cache"] = {"U1": {"orientation": 0}}
-    gs["models_cache"] = {"T1": {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1,
+    gs["models_cache"] = {"T1": {"squad_id": "U1", "UNIT_RULES": [_OBJ_RULE_4], "HP_CUR": 1, "HP_MAX": 1,
                                  "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
                                  "col": col, "row": row}}
     return gs
@@ -292,7 +292,7 @@ def test_collect_fnp_near_objective_position_de_la_figurine_pas_de_l_escouade():
     """Le prédicat de position est celui de la FIGURINE blessée : l'Ancient loin de tout objectif
     n'a pas de FNP même si l'escouade en touche un (l'Intercessor `T2` est DANS l'aire)."""
     gs = _ancient_gs(90, 90)   # Ancient loin de tout
-    gs["models_cache"]["T2"] = {"squad_id": "U1", "UNIT_RULES": [], "HP_CUR": 1, "col": 10, "row": 10,
+    gs["models_cache"]["T2"] = {"squad_id": "U1", "UNIT_RULES": [], "HP_CUR": 1, "HP_MAX": 1, "col": 10, "row": 10,
                                 "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
     gs["squad_models"]["U1"].append("T2")
     unit = _unit([_OBJ_RULE_4])

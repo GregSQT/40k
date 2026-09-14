@@ -228,6 +228,8 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
     return {
         "target_sid": target_sid, "weapon_name": weapon["display_name"],
         "bs": 5, "ap": 0, "dmg_raw": 1, "dmg_bonus": 0,
+        # S11 : le vrai roller rend l'espérance de l'intent ; la construction la SOMME par cible.
+        "expected_damage": 0.0,
         # Seuils ENTIERS, comme les rends le vrai roller (`wound_threshold` /
         # `display_save_threshold_with_waaagh`) : l emission les relit pour rejouer l arbitrage
         # de [LETHAL HITS], un stub qui rendrait « 4+ » ne serait plus fidele au producteur.

@@ -15,6 +15,7 @@ sequence de des trop longue ou trop courte fait ROUGIR le test (`_seq` verifie l
 Mode `gym_training_mode` : le defenseur est programmatique, l allocation se resout sans
 prompt — c est le meme code que le PvP, sans l aller-retour frontend.
 """
+import pytest
 import random
 
 from engine.phase_handlers import shooting_handlers
@@ -44,11 +45,13 @@ def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=
     weapon = {"ATK": bs, "STR": strength, "AP": ap, "DMG": dmg, "NB": 1, "RNG": 24,
               "WEAPON_RULES": list(weapon_rules or []), "code": "test_plasma_gun", "display_name": "Plasma Gun"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
+                "col": 0, "row": 0, "RNG_WEAPONS": [weapon], "UNIT_RULES": []}
+    # `UNIT_RULES` : exigé sur toute figurine du models_cache depuis 2693007f2 (Unbreakable
+    # Resolve lu sur la figurine blessée) — le fichier était rouge sur main sans cette clé.
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": toughness,
               "HP_CUR": hp, "HP_MAX": hp, "ARMOR_SAVE": armor_save, "INVUL_SAVE": 7,
               "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
-              "col": 9, "row": 9}
+              "col": 9, "row": 9, "UNIT_RULES": []}
     return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",
@@ -56,7 +59,7 @@ def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=
         "models_cache": {"A1": attacker, "T1": target},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
-        "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(9, 9, player=1)},
+        "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(9, 9, player=1, hp=hp)},
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
         "unit_by_id": {
             "1": {"id": "1", "UNIT_RULES": []},
@@ -300,3 +303,47 @@ def test_anti_sans_le_keyword_sur_la_cible_ne_s_applique_pas_au_tir(monkeypatch)
     assert _records(gs)[0]["strengthResult"] == "FAILED"
     assert _hp(gs) == 3
     assert seq == [], "aucune sauvegarde tiree : la blessure a echoue"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S11 — espérance de dégâts de l'activation, portée par le résumé (sur le VRAI chemin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_s11_le_resume_porte_l_esperance_de_l_activation(monkeypatch):
+    """BS4 / S4 vs T4 / Sv4+ AP0, DMG 2 sur 3 PV, 1 attaque : E = ½ × ½ × ½ × 2 = 0,25 —
+    quel que soit le jet (ici tout réussit : 4, 4, 2 -> 2 dégâts réels)."""
+    _seq(monkeypatch, [4, 4, 2])
+    gs = _game_state(dmg=2, hp=3)
+
+    result = build_manual_shoot_allocation(gs, "1")
+
+    summary = result["shoot_result"]
+    assert summary["damage_total"] == 2, "les dés restent joués pour la partie"
+    assert summary["expected_damage_by_target"] == pytest.approx({"2": 0.25})
+    meta = summary["targets_meta"]["2"]
+    # Moyennes d'escouade à la construction : VALUE d'escouade 10 (units_cache) sur 1 figurine
+    # de 3 PV -> 10/3 points par PV, 10 points par figurine.
+    assert meta["alive_count"] == 1 and meta["hp_max"] == 3
+    assert meta["points_per_hp_mean"] == pytest.approx(10.0 / 3.0)
+    assert meta["model_value_mean"] == pytest.approx(10.0)
+
+
+def test_s11_l_esperance_ne_depend_pas_du_jet(monkeypatch):
+    """Même choix, jet raté (2 -> touche ratée) : 0 dégât réel, même espérance 0,25."""
+    _seq(monkeypatch, [2])
+    gs = _game_state(dmg=2, hp=3)
+
+    result = build_manual_shoot_allocation(gs, "1")
+
+    assert result["shoot_result"]["damage_total"] == 0
+    assert result["shoot_result"]["expected_damage_by_target"] == pytest.approx({"2": 0.25})
+
+
+def test_s11_l_esperance_plafonne_le_degat_par_les_pv_de_la_figurine(monkeypatch):
+    """DMG 6 sur une figurine à 2 PV : E[min(6, 2)] = 2 -> ½ × ½ × ½ × 2 = 0,25, pas 0,75."""
+    _seq(monkeypatch, [2])
+    gs = _game_state(dmg=6, hp=2)
+
+    result = build_manual_shoot_allocation(gs, "1")
+
+    assert result["shoot_result"]["expected_damage_by_target"] == pytest.approx({"2": 0.25})

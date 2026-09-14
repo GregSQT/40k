@@ -1133,18 +1133,50 @@ class RewardCalculator:
           - model_value * model_kill_bonus_factor  (par fig tuee — VALUE de CETTE
             figurine, portee par l event ; tuer le Nob rapporte plus qu un Boy)
           - value * squad_kill_bonus_factor  (par escouade wipe)
+
+        S11 (2026-09-14, `shaping["reward_on_expectation"]`, cle OBLIGATOIRE) : quand elle est
+        vraie, les deux premieres composantes se calculent sur l ESPERANCE de degats de l
+        activation et non sur le jet — `combat["expected_damage_by_target"]`, sommee par le
+        moteur a la declaration (`intent_expected_damage`), convertie avec les moyennes de la
+        cible a la declaration (`targets_meta[sid]["points_per_hp_mean"]`, `model_value_mean`,
+        `hp_max`, `alive_count`) : degats = points_par_PV_moyen x hp_w x E[dmg] ; figurines
+        tuees = min(E[dmg] / HP_MAX, vivantes) x valeur_moyenne x kill_f — proxy lineaire de
+        E[kills], assume (la loi exacte des pertes sous allocation sequentielle n a pas de forme
+        simple, et sans lui le bonus de kill resterait le terme dominant et bruite du tir). Le
+        bonus de wipe reste sur le resultat REEL : un evenement rare et decisif, pas un signal
+        dense. Mesure qui motive le levier : 95,5 % de la variance du signal d un tir est l ecart
+        entre le jet et son esperance (`scripts/grad_signal_probe.py`, 2026-09-13). Les des restent
+        joues pour la partie ; seule la recompense change. Le cote DEFENSIF (penalite des tirs
+        adverses) passe par la meme fonction, donc par la meme esperance.
         """
         hp_w = float(require_key(shaping, "hp_damage_weight"))
         kill_f = float(require_key(shaping, "model_kill_bonus_factor"))
         wipe_f = float(require_key(shaping, "squad_kill_bonus_factor"))
+        on_expectation = require_key(shaping, "reward_on_expectation")
+        if not isinstance(on_expectation, bool):
+            raise ValueError(
+                f"squad_shaping.reward_on_expectation doit etre un booleen, got {on_expectation!r}"
+            )
         targets_meta = require_key(combat, "targets_meta")
         total = 0.0
-        for ev in require_key(combat, "events"):
-            if not is_victim(int(ev["target_player"])):
-                continue
-            total += float(ev["points_per_hp"]) * hp_w * int(ev["damage"])
-            if ev["destroyed"]:
-                total += float(require_key(ev, "model_value")) * kill_f
+        if on_expectation:
+            for sid, exp_dmg in require_key(combat, "expected_damage_by_target").items():
+                meta = require_key(targets_meta, sid)
+                if not is_victim(int(require_key(meta, "player"))):
+                    continue
+                exp_dmg = float(exp_dmg)
+                hp_max = int(require_key(meta, "hp_max"))
+                alive = int(require_key(meta, "alive_count"))
+                total += float(require_key(meta, "points_per_hp_mean")) * hp_w * exp_dmg
+                expected_kills = min(exp_dmg / hp_max, float(alive))
+                total += float(require_key(meta, "model_value_mean")) * kill_f * expected_kills
+        else:
+            for ev in require_key(combat, "events"):
+                if not is_victim(int(ev["target_player"])):
+                    continue
+                total += float(ev["points_per_hp"]) * hp_w * int(ev["damage"])
+                if ev["destroyed"]:
+                    total += float(require_key(ev, "model_value")) * kill_f
         for sid in require_key(combat, "squads_wiped"):
             meta = require_key(targets_meta, sid)
             if is_victim(int(require_key(meta, "player"))):

@@ -11425,16 +11425,108 @@ def _target_within_half_range(
     return _ranged_squad_edge_distance(game_state, attacker_sid, target_sid) <= rng / 2.0
 
 
+def intent_expected_damage(
+    game_state: Dict[str, Any],
+    *,
+    weapon: Dict[str, Any],
+    target_sid: str,
+    n_attacks_expected: float,
+    hit_target: int,
+    wound_target: int,
+    save_threshold_value: int,
+    profile: Any,
+    rerolls: Any,
+    dmg_raw: Any,
+    dmg_bonus: int,
+    hit_fail_below: Optional[int],
+) -> float:
+    """Espérance de dégâts d'UN intent (une figurine, une arme, une escouade cible), telle que
+    le moteur la jouera — S11 (2026-09-14) : la récompense de tir et de mêlée se calcule sur
+    cette espérance, les dés restant joués pour la partie.
+
+    Facteurs, dans l'ordre du roller : `expected_attack_pool_damage` (touche, blessure,
+    sauvegarde, relances, plancher 10.07, règles d'arme) sur les MÊMES seuils que
+    `roll_attack_pool` reçoit ; dégât par blessure non sauvée = E[min(D + bonus, HP_MAX)] avec
+    le HP_MAX du profil de base de la cible (`units_cache[sid]["HP_MAX"]`, la caractéristique
+    Wounds de la datasheet ; 05.04 : l'excès est perdu, `expected_capped_dice_value`) ; Feel No
+    Pain 24.12 par le facteur P(aucun seuil ne sauve), seuils d'UNITÉ (`feel_no_pain`,
+    `feel_no_pain_vs_psychic`, union 19.04 lue sur `unit_by_id`).
+
+    APPROXIMATIONS ASSUMÉES, toutes du côté « escouade vue comme son profil de base » : l'allocation
+    choisit figurine par figurine (un leader attaché à plus de PV ou meilleure sauvegarde n'est pas
+    distingué) ; le FNP positionnel d'UNE figurine (`feel_no_pain_near_objective`, Unbreakable
+    Resolve) n'entre pas — la figurine qui encaissera n'est pas connue à la déclaration ; les
+    blessures [DEVASTATING] ignorent la sauvegarde mais reçoivent le même facteur FNP que les
+    blessures normales. Le nombre d'attaques est une espérance quand NB est un dé tiré dans le
+    roller de tir, et le nombre RÉSOLU sinon (pré-tiré : tir fractionné, mêlée). Aucune lecture
+    par figurine : l'espérance se calcule à la déclaration, sur les mêmes caches d'escouade que
+    `_build_target_meta`.
+    """
+    from engine.phase_handlers.attack_sequence import expected_attack_pool_damage
+
+    target_uc = require_key(game_state, "units_cache")[str(target_sid)]
+    hp_max = int(require_key(target_uc, "HP_MAX"))
+    if hp_max <= 0:
+        raise ValueError(f"intent_expected_damage: HP_MAX invalide ({hp_max}) sur l escouade {target_sid!r}")
+    bonus = int(dmg_bonus)
+    if hp_max <= bonus:
+        damage = float(hp_max)
+    else:
+        damage = bonus + expected_capped_dice_value(dmg_raw, hp_max - bonus, "intent_expected_dmg")
+    target_unit = require_unit_by_id(game_state, str(target_sid))
+    fnp_thresholds = [
+        th for th in (
+            _get_feel_no_pain_threshold(target_unit),
+            _get_feel_no_pain_vs_psychic_threshold(target_unit) if weapon_has_rule(weapon, "PSYCHIC") else None,
+        ) if th is not None
+    ]
+    p_not_saved = 1.0
+    for th in fnp_thresholds:
+        p_not_saved *= sum(1 for f in range(1, 7) if f < int(th)) / 6.0
+    kwargs: Dict[str, Any] = {}
+    if hit_fail_below is not None:
+        kwargs["hit_fail_below"] = int(hit_fail_below)
+    return expected_attack_pool_damage(
+        n_attacks=float(n_attacks_expected),
+        hit_target=int(hit_target),
+        wound_target=int(wound_target),
+        save_threshold_value=int(save_threshold_value),
+        profile=profile,
+        rerolls=rerolls,
+        damage=damage * p_not_saved,
+        **kwargs,
+    )
+
+
 def _build_target_meta(game_state: Dict[str, Any], target_sid: str) -> Dict[str, Any]:
     _tgt_uc = require_key(game_state, "units_cache")[target_sid]
     _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
+    # S11 : de quoi convertir une espérance de dégâts en récompense
+    # (`RewardCalculator._squad_combat_shaping`, `reward_on_expectation`), sur les MÊMES caches
+    # d'escouade que les clés ci-dessus — aucune lecture par figurine : HP_MAX du profil de base
+    # (Wounds de la datasheet, `units_cache`), points par PV et valeur par figurine MOYENS à la
+    # construction (VALUE d'escouade / effectif initial, la même convention que `points_per_hp`
+    # par figurine), effectif VIVANT à la déclaration (`squad_models` ∩ `models_cache`).
+    value = float(require_key(_tgt_uc, "VALUE"))
+    mcs = int(require_key(_tgt_sc, "model_count_at_start"))
+    hp_max = int(require_key(_tgt_uc, "HP_MAX"))
+    if mcs <= 0 or hp_max <= 0:
+        raise ValueError(
+            f"_build_target_meta: escouade {target_sid!r} avec model_count_at_start={mcs}, HP_MAX={hp_max}"
+        )
+    models_cache = require_key(game_state, "models_cache")
+    alive_count = sum(1 for m in require_key(game_state, "squad_models").get(target_sid, []) if m in models_cache)  # get allowed
     return {
-        "value": float(require_key(_tgt_uc, "VALUE")),
-        "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
+        "value": value,
+        "model_count_at_start": mcs,
         "player": int(require_key(_tgt_uc, "player")),
         "hp_before": int(require_key(_tgt_uc, "HP_CUR")),
         "col": int(require_key(_tgt_uc, "col")),
         "row": int(require_key(_tgt_uc, "row")),
+        "alive_count": alive_count,
+        "hp_max": hp_max,
+        "points_per_hp_mean": value / (mcs * hp_max),
+        "model_value_mean": value / mcs,
     }
 
 
@@ -11470,12 +11562,17 @@ def _manual_roll_intent(
         return None
     if "n_attacks_resolved" in intent:
         n_attacks = int(intent["n_attacks_resolved"])
+        # S11 : pre-tire (tir fractionne) — l esperance conditionne sur ce nombre.
+        _nb_expected_delta = 0.0
     else:
         # Aucun repli silencieux : NB absent ou non resoluble = donnee d arme invalide, elle
         # doit lever (l ancien defaut 1 + try/except la remplacait par 1 attaque en silence).
         n_attacks = resolve_dice_value(
             require_key(weapon, "NB"), f"squad_shoot_attacks_{attacker_mid}"
         )
+        # S11 : l esperance du nombre d attaques remplace le tirage de NB (les des additionnels
+        # ajoutes plus bas — BLAST, RAPID FIRE, bonus d abilites — sont deterministes).
+        _nb_expected_delta = expected_dice_value(require_key(weapon, "NB"), "squad_shoot_attacks_expected") - n_attacks
     # [BLAST] 24.05 : des additionnels selon la taille de la cible AU SELECT TARGETS STEP
     # (d ou la taille capturee a la declaration, et non la taille courante).
     _blast_x = _blast_extra_dice_per_five(weapon)
@@ -11852,6 +11949,20 @@ def _manual_roll_intent(
         reroll_1_towound=reroll_wound1,
         reroll_towound_on_objective=reroll_wound_obj,
     )
+    # S11 : esperance de CET intent, sur les memes seuils, profil et relances que le roller.
+    _expected_damage = intent_expected_damage(
+        game_state,
+        weapon=weapon, target_sid=target_sid,
+        n_attacks_expected=float(n_attacks) + _nb_expected_delta,
+        hit_target=bs, wound_target=wth, save_threshold_value=display_save_th,
+        profile=_attack_profile,
+        rerolls=RerollProfile(
+            hit_any_fail=_is_oath_target and _indirect_fail_below is None,
+            wound_1=reroll_wound1,
+            wound_any_fail=reroll_wound_obj,
+        ),
+        dmg_raw=dmg_raw, dmg_bonus=dmg_bonus, hit_fail_below=_indirect_fail_below,
+    )
     # +1 au jet de blessure d Oath. Meme helper que la melee (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
     # Primitive A (chantier 06) : au tir, seul le malus de suppression peut avoir joue — le
@@ -11898,6 +12009,9 @@ def _manual_roll_intent(
         # en tire ses tokens a l emission (`weapon_rule_log_tokens`), une fois pour le groupe.
         "weapon": weapon,
         "attack_profile": _attack_profile,
+        # S11 : esperance de degats de l intent (cf. `intent_expected_damage`), sommee par cible
+        # dans `_build_manual_allocation` -> `summary["expected_damage_by_target"]`.
+        "expected_damage": _expected_damage,
         # 10.06, volet MONSTER/VEHICLE : -1 au jet de touche. Ce drapeau etait calcule et
         # JAMAIS lu — il ne restait donc plus qu un seul modificateur du seuil affiche sans
         # cause visible, alors que [HEAVY] et [COVER] avaient la leur.
@@ -12700,6 +12814,9 @@ def _build_manual_allocation(
     summary: Dict[str, Any] = {
         "attacks_made": 0, "hits": 0, "wounds": 0, "failed_saves": 0,
         "damage_total": 0, "models_killed": 0, "events": [],
+        # S11 : esperance de degats par escouade cible (somme des intents), lue par
+        # `RewardCalculator._squad_combat_shaping` quand `reward_on_expectation` est actif.
+        "expected_damage_by_target": {},
     }
     # Position capturée avant la boucle : roll_intent_fn peut modifier units_cache (ex. MW Hold
     # Still retire la cible), garantit qu'aucun appel intermédiaire ne corrompt la lecture.
@@ -12721,6 +12838,8 @@ def _build_manual_allocation(
         summary["attacks_made"] += counts["attacks"]
         summary["hits"] += counts["hits"]
         summary["wounds"] += counts["wounds"]
+        _exp_by_target = summary["expected_damage_by_target"]
+        _exp_by_target[target_sid] = _exp_by_target.get(target_sid, 0.0) + float(require_key(r, "expected_damage"))
 
         weapon_name = r["weapon_name"]
         # Regle 04.03 : les armes de PROFIL identique sur une meme cible se resolvent

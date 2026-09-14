@@ -70,6 +70,8 @@ from .shared_utils import (
     # (tir et melee) au meme vocabulaire.
     RULE_LABEL_CLEAVE,
     _build_target_meta,
+    # S11 : esperance de l intent, JUMEAU du roller de tir (une seule definition).
+    intent_expected_damage,
     _build_enemy_adjacent_hexes_all_players,
     # Traducteurs de causes de relance et marqueurs de capacite, PARTAGES avec le roller de tir :
     # les inliner est la forme exacte sous laquelle ces deux chemins ont deja diverge.
@@ -4881,17 +4883,29 @@ def _manual_roll_fight_intent(
         is_melee=True,
         finest_hour_active=_finest_hour_active,
     )
+    _fight_rerolls = RerollProfile(
+        hit_1=reroll_hit1, hit_any_fail=reroll_hit_any, wound_1=reroll_wound1,
+        wound_any_fail=reroll_wound_obj, save_1=reroll_save1,
+    )
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=ws,
         wound_target=wth,
         save_threshold_value=display_save_th,
         profile=_attack_profile,
-        rerolls=RerollProfile(
-            hit_1=reroll_hit1, hit_any_fail=reroll_hit_any, wound_1=reroll_wound1,
-            wound_any_fail=reroll_wound_obj, save_1=reroll_save1,
-        ),
+        rerolls=_fight_rerolls,
         roll_d6=lambda: random.randint(1, 6),
+    )
+    # S11 : esperance de CET intent, sur les memes seuils, profil et relances que le roller.
+    # `n_attacks` est deja RESOLU en melee (NB pre-tire par la declaration) : l esperance
+    # conditionne sur ce nombre, cf. `intent_expected_damage`.
+    _expected_damage = intent_expected_damage(
+        game_state,
+        weapon=weapon, target_sid=target_sid,
+        n_attacks_expected=float(n_attacks),
+        hit_target=ws, wound_target=wth, save_threshold_value=display_save_th,
+        profile=_attack_profile, rerolls=_fight_rerolls,
+        dmg_raw=dmg_raw, dmg_bonus=0, hit_fail_below=None,
     )
     # Noms des ABILITES qui ont ouvert les relances — MEME helper que le tir, donc plus de
     # divergence possible. Sans lui, `step.log` dit que la relance etait POSSIBLE, jamais
@@ -4989,6 +5003,8 @@ def _manual_roll_fight_intent(
         # puisse pas etre nommee d un cote et muette de l autre.
         "weapon": weapon,
         "attack_profile": _attack_profile,
+        # S11 : cf. roller de tir.
+        "expected_damage": _expected_damage,
         # 10.06 est une regle de la phase de TIR : elle n a pas de jumeau en melee. La cle est
         # ECRITE et non omise — c est au producteur d affirmer que la regle ne s applique pas,
         # pas au lecteur de le deviner par un defaut.

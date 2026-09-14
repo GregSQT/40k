@@ -8,7 +8,9 @@
       "hp_damage_weight": 0.35,
       "model_kill_bonus_factor": 0.1,
       "squad_kill_bonus_factor": 0.15,
-      "incoherent_weight": 0.2
+      "incoherent_weight": 0.2,
+      "reward_on_expectation": false,
+      "reward_on_expectation_normal": "S11 (2026-09-14) : true = la recompense de tir et de melee (degats + figurines tuees) se calcule sur l ESPERANCE de degats du choix arme x cible, telle que le moteur la jouera (engine/phase_handlers/shared_utils.py::intent_expected_damage), et non sur le jet ; les des restent joues pour la partie, le bonus de wipe reste sur le resultat reel. Motivation mesuree : 95,5 % de la variance du signal d un tir est l ecart jet/esperance (scripts/grad_signal_probe.py, 2026-09-13, Documentation/Chantiers/backlog/plafonnement_p1.md §5.11). false = comportement historique (run de reference run_20260912-065925 rejouable). Cle OBLIGATOIRE, booleen."
     },
     "base_actions": {
       "ranged_attack": 0.3,

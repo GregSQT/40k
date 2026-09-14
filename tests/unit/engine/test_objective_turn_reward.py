@@ -604,7 +604,7 @@ def test_an_opponent_action_that_ends_the_game_still_pays_the_objective() -> Non
     payload.update({
         "action": "squad_shoot",
         "unitId": "2",  # unite de l'adversaire : c'est ce qui aiguille vers le chemin teste
-        "shoot_result": {"events": [], "squads_wiped": [], "targets_meta": {}},
+        "shoot_result": {"events": [], "squads_wiped": [], "targets_meta": {}, "expected_damage_by_target": {}},
     })
 
     total = calc.calculate_reward(True, payload, state)

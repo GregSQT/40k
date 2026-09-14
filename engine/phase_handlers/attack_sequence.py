@@ -614,6 +614,117 @@ def roll_attack_pool(
     }
 
 
+def _reroll_failures_once(
+    p_crit: float, p_normal: float, p_fail_rerolled: float
+) -> Tuple[float, float]:
+    """Loi (critique, réussite normale) d'UN dé après une relance UNIQUE de ses échecs éligibles.
+
+    `p_fail_rerolled` : probabilité que le dé initial soit un échec ET relançable. Le dé relancé
+    suit la loi initiale (01 Core, Re-rolls : un dé ne se relance qu'une fois).
+    """
+    return p_crit + p_fail_rerolled * p_crit, p_normal + p_fail_rerolled * p_normal
+
+
+def expected_attack_pool_damage(
+    *,
+    n_attacks: float,
+    hit_target: int,
+    wound_target: int,
+    save_threshold_value: int,
+    profile: WeaponAttackProfile,
+    rerolls: RerollProfile,
+    damage: float,
+    hit_fail_below: int = NATURAL_FAIL_ROLL + 1,
+) -> float:
+    """ESPÉRANCE EXACTE des dégâts que `roll_attack_pool` suivi de la sauvegarde produirait.
+
+    Mêmes paramètres que `roll_attack_pool` (l'appelant passe ce qu'il passe au roller), plus
+    `damage` = espérance de dégâts d'UNE blessure non sauvée (plafond par figurine et Feel No
+    Pain déjà appliqués par l'appelant) et `n_attacks` en flottant (espérance du nombre
+    d'attaques quand NB est un dé). Comptage par FACES avec `_evaluate_roll`, le même prédicat
+    que le roller : plancher d'échec 10.07, critique qui prime sur le plancher, 1 qui rate
+    toujours, sauvegarde de 1 qui échoue toujours.
+
+    RAISON D'ÊTRE (S11, 2026-09-14) : récompenser un tir ou une mêlée sur l'espérance de son
+    CHOIX (arme × cible, modificateurs compris) et non sur le jet. La mesure du 2026-09-13
+    (`scripts/grad_signal_probe.py`) attribue 95,5 % de la variance du signal d'un tir à l'écart
+    entre le jet et son espérance ; ce que l'agent doit apprendre est l'espérance, qu'il ne
+    reçoit jamais. `expected_damage_per_attack` (ci-dessus) ne suffit pas : elle ignore les
+    relances d'abilités (`RerollProfile`), le plancher d'échec et la relance de sauvegarde, que
+    le roller applique. Verrou : Monte-Carlo contre `roll_attack_pool` lui-même
+    (`tests/unit/engine/test_expected_attack_pool_damage.py`).
+
+    Relances modélisées comme le roller : touche — `hit_1` (le 1 seulement) ou `hit_any_fail`
+    (tout échec), une fois ; blessure — `wound_1`, `wound_any_fail` ou [TWIN-LINKED], une
+    fois ; sauvegarde — `save_1`. [LETHAL HITS] passe par `lethal_hits_auto_wound_is_better`,
+    exactement comme le roller ; [SUSTAINED HITS X] ajoute X touches NORMALES par touche
+    critique ; [DEVASTATING WOUNDS] rend la blessure critique non sauvegardable.
+    """
+    faces = range(1, 7)
+    sixth = 1.0 / 6.0
+
+    # Sauvegarde : échec si 1 naturel ou sous le seuil ; `save_1` relance le 1 une fois.
+    p_fail_save = sum(
+        1 for f in faces if f == NATURAL_FAIL_ROLL or f < int(save_threshold_value)
+    ) * sixth
+    if rerolls.save_1:
+        p_fail_save = p_fail_save - sixth + sixth * p_fail_save
+
+    # Blessure (un hit non automatique) : loi après relance éventuelle.
+    wound_crit = wound_normal = wound_fail_1 = 0.0
+    for f in faces:
+        crit, ok = _evaluate_roll(f, profile.crit_wound_on, int(wound_target))
+        if crit:
+            wound_crit += sixth
+        elif ok:
+            wound_normal += sixth
+        elif f == NATURAL_FAIL_ROLL:
+            wound_fail_1 += sixth
+    wound_fail = 1.0 - wound_crit - wound_normal
+    if rerolls.wound_any_fail or profile.twin_linked:
+        wound_rerolled = wound_fail
+    elif rerolls.wound_1:
+        wound_rerolled = wound_fail_1
+    else:
+        wound_rerolled = 0.0
+    wound_crit, wound_normal = _reroll_failures_once(wound_crit, wound_normal, wound_rerolled)
+    ev_per_hit = (
+        wound_crit * (1.0 if profile.devastating else p_fail_save)
+        + wound_normal * p_fail_save
+    )
+
+    if profile.torrent:
+        # 24.37 : touche automatique, aucun critique de touche.
+        return float(n_attacks) * ev_per_hit * float(damage)
+
+    hit_crit = hit_normal = hit_fail_1 = 0.0
+    for f in faces:
+        crit, ok = _evaluate_roll(f, profile.crit_hit_on, int(hit_target), int(hit_fail_below))
+        if crit:
+            hit_crit += sixth
+        elif ok:
+            hit_normal += sixth
+        elif f == NATURAL_FAIL_ROLL:
+            hit_fail_1 += sixth
+    hit_fail = 1.0 - hit_crit - hit_normal
+    if rerolls.hit_any_fail:
+        hit_rerolled = hit_fail
+    elif rerolls.hit_1:
+        hit_rerolled = hit_fail_1
+    else:
+        hit_rerolled = 0.0
+    hit_crit, hit_normal = _reroll_failures_once(hit_crit, hit_normal, hit_rerolled)
+
+    ev_on_crit_hit = ev_per_hit
+    if profile.lethal_hits and lethal_hits_auto_wound_is_better(
+        profile, int(wound_target), int(save_threshold_value)
+    ):
+        ev_on_crit_hit = p_fail_save  # blessure automatique : ni jet, ni critique de blessure
+    ev_on_crit_hit += profile.sustained_hits * ev_per_hit
+
+    return float(n_attacks) * (hit_crit * ev_on_crit_hit + hit_normal * ev_per_hit) * float(damage)
+
+
 def count_selected_hazardous_weapons(
     weapons_by_model: Sequence[Sequence[Dict[str, Any]]],
 ) -> int:

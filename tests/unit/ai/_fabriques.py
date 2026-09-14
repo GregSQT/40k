@@ -392,6 +392,9 @@ def units_cache_entry(
     entry: Dict[str, Any] = {
         "BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
         "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player, "HP_CUR": hp_cur,
+        # HP_MAX : Wounds du profil de base, toujours posé en production (game_state.py) ; lu
+        # par `_build_target_meta` depuis S11 (plafond de l'espérance de dégâts).
+        "HP_MAX": hp_cur,
     }
     if models:
         entry["occupied_hexes_by_model"] = dict(models)

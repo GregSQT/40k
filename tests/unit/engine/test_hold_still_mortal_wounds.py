@@ -166,6 +166,8 @@ def _patch_fight_harness(monkeypatch, fake_rolled):
     monkeypatch.setattr(fh, "resolve_melee_wound_bonus", lambda *a, **kw: (4, None))
     monkeypatch.setattr(aseq, "build_weapon_attack_profile", lambda *a, **kw: None)
     monkeypatch.setattr(aseq, "roll_attack_pool", lambda **kw: fake_rolled)
+    # S11 : l'espérance de l'intent lit le même profil (ici neutralisé) — neutralisée avec lui.
+    monkeypatch.setattr(aseq, "expected_attack_pool_damage", lambda **kw: 0.0)
     monkeypatch.setattr(fh, "display_save_threshold_with_waaagh", lambda *a, **kw: (4, False))
 
 

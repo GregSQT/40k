@@ -6886,7 +6886,7 @@ class W40KEngine(gym.Env):
                 "unitId": squad_id,
                 "squad_id": squad_id,
                 "target_squad_id": None,
-                "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
+                "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": [], "expected_damage_by_target": {}},
             }
         return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
 

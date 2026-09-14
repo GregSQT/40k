@@ -50,6 +50,7 @@ def _seq(monkeypatch, rolls):
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
     monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean")
+    return seq
 
 
 
@@ -91,16 +92,23 @@ def _weapon(**overrides):
 
 
 def test_dmg_non_resoluble_leve_au_lieu_de_faire_1_degat(monkeypatch):
-    """« D5 » n est pas une expression de des supportee : erreur explicite, pas 1 degat."""
-    _seq(monkeypatch, [4, 5, 1])  # touche, blesse, sauvegarde ratee -> resolution des degats
+    """« D5 » n est pas une expression de des supportee : erreur explicite, pas 1 degat.
+
+    Depuis S11 (2026-09-14) l'espérance de dégâts de l'intent est calculée A LA DECLARATION,
+    donc la valeur invalide lève dès le roller (contexte `intent_expected_dmg`), après les jets
+    de touche/blessure/sauvegarde et AVANT le dé de dégâts ; sans S11 elle levait à la résolution
+    des dégâts (`squad_shoot_dmg_A1`). Dans les deux cas : aucun dé de dégâts joué, aucun PV
+    retiré en douce."""
+    seq = _seq(monkeypatch, [4, 5, 1])  # touche, blesse, sauvegarde ratee -> resolution des degats
     gs = _game_state(_weapon(DMG="D5"))
 
     with pytest.raises(ValueError) as exc:
         build_manual_shoot_allocation(gs, "1")
 
-    # L erreur NOMME la valeur rencontree et la figurine attaquante.
+    # L erreur NOMME la valeur rencontree et son contexte.
     assert "D5" in str(exc.value)
-    assert "squad_shoot_dmg_A1" in str(exc.value)
+    assert "intent_expected_dmg" in str(exc.value)
+    assert seq == [], "touche, blessure et sauvegarde tirées ; le dé de dégâts, jamais"
     # Et surtout : aucun degat n a ete applique en douce.
     assert gs["models_cache"]["T1"]["HP_CUR"] == 20
 

@@ -530,6 +530,7 @@ def _rc_with_lowest_hp_bonus(bonus: float) -> RewardCalculator:
                     "model_kill_bonus_factor": 0.1,
                     "squad_kill_bonus_factor": 0.1,
                     "incoherent_weight": 0.0,
+                    "reward_on_expectation": False,
                 },
                 "base_actions": {"ranged_attack": 0.0, "melee_attack": 0.0, "charge_success": 0.0, "charge_fail": 0.0, "wait": 0.0},
                 "result_bonuses": {"kill_target": 1.0, "target_lowest_hp": bonus},
