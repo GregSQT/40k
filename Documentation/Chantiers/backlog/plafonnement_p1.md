@@ -586,9 +586,47 @@ choix (arme × cible : touche × blessure × sauvegarde × D, `engine/weapon_dam
 source unique déjà utilisée par les bots). Même choix → même récompense. Objectifs, pénalités et
 issue ±150 restent sur le vrai résultat. Bonus de kill (2,0) : en espérance aussi (proportionnel
 aux dégâts espérés rapportés aux PV d'une figurine), sinon il reste le terme dominant et bruité du
-tir. Clé de config pour l'activer (le run de référence reste rejouable) ; tracker publiant
-espérance et jet côte à côte (la mesure de S11 : variance du signal de tir avant/après). Périmètre,
-tests et résultat à consigner ici.
+tir. Clé de config pour l'activer (le run de référence reste rejouable).
+
+**Livré le 2026-09-14 à 03:45 (worktree `worktree-s11-reward-esperance`, commit `f626a786e`, à
+merger après le jugement de vf_coef — les workers d'évaluation rechargent le code de main).**
+- `engine/phase_handlers/attack_sequence.py::expected_attack_pool_damage` : espérance EXACTE de
+  `roll_attack_pool` + comparaison de sauvegarde, par faces, relances d'abilités (`RerollProfile`),
+  plancher 10.07, [SUSTAINED]/[LETHAL]/[DEVASTATING]/[TWIN-LINKED]/[TORRENT]. Verrou :
+  `tests/unit/engine/test_expected_attack_pool_damage.py` — égalité avec `expected_damage_per_attack`
+  sans relance (28 cas), **Monte-Carlo contre le roller lui-même** (10 cas × 40 000 attaques,
+  tolérance 0,015), rouge par mutation (relance de touche, de sauvegarde, plancher ignorés).
+- `shared_utils.py::intent_expected_damage` : appelée par les DEUX rollers (tir et mêlée) sur les
+  mêmes seuils, profil et relances que `roll_attack_pool` ; dégât = E[min(D + bonus, HP_MAX)] avec
+  le HP_MAX du profil de base (`units_cache`), FNP d'unité (facteur P(aucun seuil ne sauve)) ;
+  NB en espérance quand le roller de tir le tire, nombre résolu sinon. Sommée par cible dans
+  `summary["expected_damage_by_target"]` ; `targets_meta[sid]` porte `alive_count`, `hp_max`,
+  `points_per_hp_mean` (= VALUE / (effectif initial × HP_MAX)), `model_value_mean`. Aucune
+  lecture par figurine (une première version lisait la première figurine vivante : 56 fixtures
+  sans `UNIT_RULES`/`points_per_hp` la refusaient ; les caches d'escouade sont la source).
+- `reward_calculator.py::_squad_combat_shaping` : clé OBLIGATOIRE `squad_shaping.reward_on_expectation`
+  (booléen, ajoutée à `false` dans les deux rewards_config) ; à `true`, dégâts = points_par_PV_moyen
+  × hp_w × E[dmg] et kills = min(E[dmg] / HP_MAX, vivantes) × valeur_moyenne × kill_f (proxy
+  linéaire assumé) ; wipe sur le résultat réel ; côté défensif (pénalité des tirs adverses) par la
+  même fonction. Verrou : `TestS11RewardOnExpectation` (7 tests), rouge par mutation (plafond des
+  kills, drapeau ignoré). Vrai chemin : `test_shoot_attack_sequence.py` (3 tests S11 : même choix →
+  même espérance 0,25 que le jet réussisse ou rate ; plafond par les PV).
+- Approximations assumées (docstring) : escouade vue comme son profil de base (leader attaché non
+  distingué), FNP positionnel d'une figurine (Unbreakable Resolve) hors espérance, [DEVASTATING]
+  avec le même facteur FNP, NB pré-tiré conditionné (tir fractionné, mêlée).
+- Mesure de S11 : PAS de nouveau composant de breakdown (aurait touché `REWARD_BREAKDOWN_COMPONENTS`,
+  le tracker et ses verrous) ; l'instrument existant suffit — `scripts/grad_signal_probe.py` sur le
+  checkpoint S11 contre celui de P1 : Var(δ) par famille (tir 0,115 aujourd'hui) et f.
+- Constat hors sujet, prouvé sur HEAD avec les modules d'origine : **57 tests rouges préexistants**
+  (`test_precision.py`, `test_weapon_rule_log_tokens.py` 29, `test_weapon_value_no_silent_fallback.py` 7,
+  `test_fight_special_rules.py` 6, `test_special_rules_e2e.py` 5, `test_melta_shoot.py` 3,
+  `test_squad_shoot_log_dead_target_position.py` 3) : `_resolve_one_manual_wound` → `_collect_fnp_thresholds`
+  → `_model_rules_view` exige `UNIT_RULES` sur la figurine blessée depuis `2693007f2`, et ces fixtures
+  n'en portent pas. Identiques avec et sans S11 (listes comparées) ; non corrigés ici.
+
+**Run S11 à lancer après le jugement de vf_coef** : merge, `reward_on_expectation: true` dans
+`ArmageddonAgent_x1_rewards_config.json`, commande habituelle `--etape P1`, profil de référence
+(vf_coef selon le verdict), jugé par la règle §7. Résultat à consigner ici.
 
 ## 6. Ce qui n'a pas été fait
 
