@@ -169,9 +169,12 @@ pendant que `explained_variance` monte à 0,98 et `value_loss` baisse. Lecture :
 du critic** (retours = avantages + valeurs) ; la prédiction f ≈ 0,18 supposait le critic fixe. Arrêté
 par l'utilisateur à 02:22 (fenêtre < 20 000 : verdict sur la monotonie, pas par la règle). Profil
 ramené au régime de référence (`467eff961`). Détail, tableau par tranche et série mémoire :
-dossier §5.9. Depuis 02:36 : essai `vf_coef` 0,3 (`training_x1_04-p01-vf030.log`, seule différence
-avec `run_20260912-065925`), jugé par la règle §7 ; S11 (récompense en espérance) en cours de code,
-à lancer ensuite (dossier §5.10, §5.11).
+dossier §5.9. **Essai `vf_coef` 0,3 (02:36 → 10:26, `run_20260914-023713`) RÉFUTÉ** : par fenêtre
+d'étape 0,509 / 0,519 / 0,572 / 0,577 / 0,585 contre 0,508 / 0,571 / 0,601 / 0,592 / 0,585 en
+référence — même plateau, atteint plus lentement ; 0,17 rétabli (dossier §5.10). **Run S11 depuis
+10:30** (`training_x1_05-p01-s11.log`) : récompense de tir et de mêlée sur l'espérance du choix
+(`squad_shaping.reward_on_expectation`, `expected_attack_pool_damage` = espérance exacte du roller,
+Monte-Carlo verrouillé), profil de référence, jugé par la règle §7 (dossier §5.11).
 
 ---
 

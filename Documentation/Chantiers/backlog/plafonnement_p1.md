@@ -66,8 +66,9 @@ gradient du rollout complet (32 640), pas sur la taille du mini-lot.
 
 **Décision prise le 2026-09-13 : run lancé dans la nuit du 13 au 14 — RÉFUTÉ (§5.9) : `03_selfplay/P0`
 chute 0,50 → 0,41 en 8 000 épisodes, arrêté à 02:22. Lecture : λ change aussi la cible du critic.**
-**Depuis le 2026-09-14 02:36 : essai `vf_coef` 0,3 (décision utilisateur, §5.10) ; S11 en cours de
-code (§5.11), à lancer après le jugement de vf_coef.**
+**2026-09-14 : essai `vf_coef` 0,3 (§5.10) RÉFUTÉ — même plateau 0,585 que la référence, atteint
+plus lentement. Depuis 10:30 : run S11 (§5.11, récompense de tir et de mêlée en espérance),
+seul changement de mécanisme joué à ce jour.**
 
 **Si ça ne bouge pas.** Le levier « réglages » est épuisé. Il faut alors changer la façon dont
 l'agent reçoit son conseil : soit une tête « Q » qui moyenne les dés (quelques jours de code),
@@ -343,13 +344,13 @@ log-prob 1,7 × 10⁻⁴).
 | S2 | `batch_size` 4 080 | A1 | ☑ testée → ✗ | config | crash VRAM (8,89 Go) ; VRAM libérée depuis (obs non résidentes), mais levier réfuté par f |
 | S3 | `target_kl` relevé / `n_epochs` | A2 | ✗ écarté | config | 0,03 prendrait des pas de 0,045 nat hors région de confiance ; direction = bruit |
 | S4 | `learning_rate` | A3 | ✗ écarté | config | idem ; antécédent de destruction |
-| S5 | `vf_coef` 0,5 → 0,17 | A6 | ☑ livrée (2026-09-07) ; **0,3 en essai depuis le 2026-09-14 (§5.10)** | config | part policy 0,62, EV intacte ; aucun effet sur le plateau ; question rouverte par l'utilisateur : à 0,17 le tronc partagé est façonné à 62 % par un gradient qui est du bruit à 98 % |
+| S5 | `vf_coef` 0,5 → 0,17 | A6 | ☑ livrée (2026-09-07) ; **0,3 testé le 2026-09-14 → ✗ même plateau (§5.10)** | config | part policy 0,62, EV intacte ; aucun effet sur le plateau ; question rouverte par l'utilisateur : à 0,17 le tronc partagé est façonné à 62 % par un gradient qui est du bruit à 98 % |
 | S6 | `max_grad_norm` 2,0 | A5 | ☑ testée (2026-09-06) → instrument seulement | config | redescendu à 0,5 ; norme brute publiée depuis |
 | S7 | Régime scalaire de lignée (lr 0,001, ent_coef 0,01) | rampes reparcourues | ☑ livrée (2026-09-07/08) | config + code | a stoppé les destructions ; n'a pas produit de progression au-delà de 0,60 |
 | S8 | Entropie normalisée par l'état + `ent_coef` × 5 | B1, B2 | ☑ testée (2026-09-12/13) → **sans effet** | code + agent dédié, 2 runs (11 h 44) | exploration ×2–5 sur têtes courtes ; holdout +0,4 pt, vs P0 −6 pts, dans le bruit ; clé conservée, désactivée par défaut |
 | S9 | Température des logits (T ≈ 2) à la collecte **et** dans le ratio PPO, T = 1 en évaluation | B1, B3 | ☐ envisagée (rapport du 2026-09-13, option C) | code (`_action_logits`, côté workers comme `evaluate_actions`) | nécessaire pour charge/pose, insuffisante seule ; ajoute de la variance : à mesurer **après** la question C1 |
 | S10 | `gae_lambda` 0,95 → 0,8 / 0,5 / 0,2 / 0 ; `gamma` 0,97 | C1, C4 | ☑ **λ mesuré a posteriori (2026-09-13) → ✗ comme levier seul** | config | f(λ=0) = 0,053 [0,036, 0,070] < 0,1 : le critère écrit pour relancer P1 à ce λ n'est pas atteint ; γ non balayé (critic à 0,99) |
-| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ⏳ **décidée le 2026-09-14 (utilisateur), en cours de code (§5.11)** | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
+| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☑ **livrée le 2026-09-14, run en cours (§5.11)** | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
 | S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
 | S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
 | S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ⏳ **désignée par S13, décision en attente (§7)** | code IA | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
@@ -566,7 +567,7 @@ D'où S11 (§5.11) : récompenser le choix sur son espérance, pas sur le jet. E
 « aléatoire » : 2,23 nats sur ln 194 = 5,07, soit ~9 cases sérieuses sur 194 ; c'est la seule tête
 qui hésite encore, et la seule dont le crédit propre n'est pas du dé.
 
-### 5.10 Essai `vf_coef` 0,3 (2026-09-14, décision utilisateur) — EN COURS
+### 5.10 Essai `vf_coef` 0,3 (2026-09-14, décision utilisateur) — RÉFUTÉ
 
 Profil ramené au régime de référence (`n_steps` 8 160, `batch_size` 1 020, λ 0,95, 24 envs, commit
 `467eff961`), seule différence `vf_coef` 0,17 → 0,3. Commande habituelle, `training_x1_04-p01-vf030.log`,
@@ -576,7 +577,27 @@ politique dont le gradient est du bruit à 98 %, alors que le critic a un signal
 0,3 n'est pas calibré : c'est un essai entre les deux valeurs mesurées. P0 a été entraîné à froid à
 0,17 (90 % contre les bots) : 0,17 n'empêche pas d'apprendre ; la question porte sur la reprise à
 chaud contre un adversaire de même niveau. Jugement par la règle §7 (moyenne de `03_selfplay/P0`
-sur 20 000–30 000 contre 0,585–0,595 ; garde de destruction à 20 000). Résultat à consigner ici.
+sur 20 000–30 000 contre 0,585–0,595 ; garde de destruction à 20 000).
+
+**Résultat (`run_20260914-023713`, 02:36 → 10:26, ~48 000 épisodes d'étape, arrêté par
+l'utilisateur).** Parité d'ouverture 0,520.
+
+| fenêtre d'étape | [0, 10k) | [10k, 20k) | [20k, 30k) | [30k, 40k) | [40k, 50k) |
+|---|---|---|---|---|---|
+| référence 0,17 (`run_20260912-065925`) | 0,508 | 0,571 | 0,601 | 0,592 | 0,585 |
+| `vf_coef` 0,3 | 0,509 | 0,519 | 0,572 | 0,577 | 0,585 (5 630 pts) |
+
+Sondes `pool_eval/vs_P0` : 0,493 (10 000) / 0,580 (20 000) / 0,587 (30 000, moyenne 0,553) /
+0,570 (40 000, moyenne 0,579) — promotion jamais approchée. `diag/grad_share_policy_mb0` 0,47
+(0,62 à 0,17), `explained_variance` 0,88, `n_minibatches_done` 11–16 sur 32, RAM min 5 Go aux
+sondes (24 envs + 2 workers d'évaluation).
+
+**Verdict.** À 30 000 : < 0,62 et montante → branche (d), laissé courir ; à 48 000 il a
+**rejoint exactement le plateau de la référence (0,585)**, en y arrivant 3 points plus lentement
+sur chaque fenêtre. Un critic mieux servi ne déplace pas le plafond : `vf_coef` n'en est pas la
+cause, et le tronc partagé « façonné par le bruit » non plus, puisque lui donner plus de signal
+critic (part policy 0,62 → 0,47) ne change rien au jeu. 0,17 rétabli. S5 reste « livrée, aucun
+effet sur le plateau », désormais dans les deux sens.
 
 ### 5.11 S11 — récompense en espérance pour tir et mêlée (2026-09-14, décision utilisateur) — CODE EN COURS
 
@@ -624,9 +645,12 @@ merger après le jugement de vf_coef — les workers d'évaluation rechargent le
   → `_model_rules_view` exige `UNIT_RULES` sur la figurine blessée depuis `2693007f2`, et ces fixtures
   n'en portent pas. Identiques avec et sans S11 (listes comparées) ; non corrigés ici.
 
-**Run S11 à lancer après le jugement de vf_coef** : merge, `reward_on_expectation: true` dans
-`ArmageddonAgent_x1_rewards_config.json`, commande habituelle `--etape P1`, profil de référence
-(vf_coef selon le verdict), jugé par la règle §7. Résultat à consigner ici.
+**Run S11 lancé le 2026-09-14 à 10:30** : S11 mergé dans main (`296c1bc3d`),
+`reward_on_expectation: true` dans `ArmageddonAgent_x1_rewards_config.json`, profil de référence
+(`vf_coef` 0,17 rétabli), commande habituelle `--etape P1`, `training_x1_05-p01-s11.log`. Seule
+différence avec `run_20260912-065925` : la récompense de tir et de mêlée est l'espérance du choix,
+plus le jet. Jugé par la règle §7 (moyenne de `03_selfplay/P0` sur 20 000–30 000 contre 0,601 /
+plat 0,585 ; sondes ; garde à 20 000). Résultat à consigner ici.
 
 ## 6. Ce qui n'a pas été fait
 
@@ -638,8 +662,8 @@ merger après le jugement de vf_coef — les workers d'évaluation rechargent le
 - [x] **Balayage λ appairé** — fait le 2026-09-13 : f(λ=0) = 0,053 [0,036, 0,070] (C4, S10).
 - [x] Sonde avec **P0 déterministe** — faite le 2026-09-13 : mêmes nombres (B4, S12).
 - [x] **Levier S23** (λ 0,2 + 32 640 / 2 040) — testé dans la nuit du 2026-09-13 au 14, réfuté (§5.9).
-- [ ] **`vf_coef` 0,3** — run en cours depuis le 2026-09-14 02:36 (§5.10).
-- [ ] **S11** — code en cours (§5.11), run après le jugement de vf_coef.
+- [x] **`vf_coef` 0,3** — run du 2026-09-14 02:36 → 10:26, réfuté (§5.10).
+- [ ] **S11** — code livré et mergé (§5.11) ; run en cours depuis le 2026-09-14 10:30.
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
 - [ ] Ventilation des pénalités −97 (C5) ; déploiement auto à 0,50 (D4).

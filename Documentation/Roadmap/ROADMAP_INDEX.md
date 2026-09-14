@@ -188,9 +188,10 @@ du dossier, recommandation A : run P1 direct avec S23 (~6 h) avant d'engager S14
 dossier §5.9)** : `03_selfplay/P0` 0,50 → 0,41 en 8 000 épisodes, monotone — λ change la cible du
 critic, la prédiction f supposait le critic fixe. Au passage : correctif de collecte (`a59ff5a61`,
 le learner tenait trois exemplaires des observations). Profil ramené au régime de référence.
-**Décisions utilisateur du 2026-09-14** : (1) essai `vf_coef` 0,3 en cours depuis 02:36, jugé par la
-règle §7 (dossier §5.10) ; (2) **S11**, récompense en espérance pour tir et mêlée, en cours de code,
-run après le jugement de vf_coef (dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps —
+**Décisions utilisateur du 2026-09-14** : (1) essai `vf_coef` 0,3 (02:36 → 10:26) **réfuté** — même
+plateau 0,585 que la référence, atteint plus lentement (dossier §5.10) ; (2) **S11**, récompense en
+espérance pour tir et mêlée, livrée et mergée (`296c1bc3d`), **run en cours depuis 10:30**
+(`training_x1_05-p01-s11.log`, dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps —
 un plateau est un symptôme. En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
 plafond 0,65 par un exploiteur contre P0 (jamais fait).
 

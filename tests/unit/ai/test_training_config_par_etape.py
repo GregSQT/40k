@@ -134,8 +134,9 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     S23 (2026-09-13 → 09-14, `n_steps` 32640 / `batch_size` 2040 / `gae_lambda` 0.2) est RÉFUTÉ :
     le critic dérive vers une cible TD(0.2) et `03_selfplay/P0` chute 0,50 → 0,41 en 8 000
     épisodes ; le profil est revenu au régime de référence le 2026-09-14 (`_doc`), seul
-    `vf_coef` passe à 0.3 en essai (0.17 : tronc partagé façonné à 62 % par un gradient de
-    politique qui est du bruit à 98 % ; 0.5 : le critic étouffait la politique).
+    `vf_coef` a été essayé à 0.3 (02:36 → 10:26) : même plateau que la référence, 3 points plus
+    lentement — réfuté, 0.17 rétabli (`_doc`). Le run suivant teste S11 (récompense en espérance,
+    `rewards_config.squad_shaping.reward_on_expectation`), profil inchangé.
     """
     mp = profil_lignee["model_params"]
     assert mp["learning_rate"] == pytest.approx(0.001)
@@ -146,7 +147,7 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     assert mp["batch_size"] == 1020
     assert mp["gae_lambda"] == pytest.approx(0.95)
     assert profil_lignee["n_envs"] == 24, "les 24 envs hérités ont tenu 15 h sur le run de référence"
-    assert mp["vf_coef"] == pytest.approx(0.3)
+    assert mp["vf_coef"] == pytest.approx(0.17)
     # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
 
