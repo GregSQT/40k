@@ -131,27 +131,22 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     l'early-stop `target_kl`, soit une epoch sur quatre : le rollout quadruplé divisait par quatre
     l'apprentissage par épisode), `ent_coef` 0.03 → 0.01 et `vf_coef` 0.15 → 0.17.
 
-    Trois valeurs redécidées le 2026-09-13 (run S23, dossier `plafonnement_p1.md` §7, mesure
-    `scripts/grad_signal_probe.py`) : `n_steps` 8160 → 32640, `batch_size` 1020 → 2040 (surchargé
-    à nouveau) et `gae_lambda` 0.95 → 0.2 (surchargé pour la première fois). Le gradient d'une
-    update était du bruit à 98 % ; λ court ET lot ×4 ensemble prédisent f ≈ 0,18. Pas 4080 : la VRAM
-    mesurée à 4080 (7,47 Go réservés sur 8,19 partagés avec l'hôte) replanterait comme le 2026-09-07,
-    où le pic atteignait 8,89 Go — `CUDA driver error: device not ready` que rien ne rattachait à
-    `batch_size`. Aucun garde-fou ne rattrape ce cas : `apply_rollout_n_steps` dimensionne sur la
-    RAM SYSTÈME. 2040 = 16 mini-lots, la coupure KL à ~15 pas couvre une epoch entière.
+    S23 (2026-09-13 → 09-14, `n_steps` 32640 / `batch_size` 2040 / `gae_lambda` 0.2) est RÉFUTÉ :
+    le critic dérive vers une cible TD(0.2) et `03_selfplay/P0` chute 0,50 → 0,41 en 8 000
+    épisodes ; le profil est revenu au régime de référence le 2026-09-14 (`_doc`), seul
+    `vf_coef` passe à 0.3 en essai (0.17 : tronc partagé façonné à 62 % par un gradient de
+    politique qui est du bruit à 98 % ; 0.5 : le critic étouffait la politique).
     """
     mp = profil_lignee["model_params"]
     assert mp["learning_rate"] == pytest.approx(0.001)
     assert mp["ent_coef"] == pytest.approx(0.01)
-    assert mp["n_steps"] == 32640
-    assert mp["batch_size"] == 2040
-    assert mp["gae_lambda"] == pytest.approx(0.2)
-    assert mp["vf_coef"] == pytest.approx(0.17)
-    # 8 envs (2026-09-14 00:50) : la RAM d'un rollout est proportionnelle au rollout TOTAL (chaque
-    # worker garde sa trajectoire) ; 24, 16 puis 12 envs ont laissé 1, 2 puis 4 Go disponibles au
-    # pic de réception. 32 640 / 8 = 4 080 pas par env, rollout divisible par le lot.
-    assert profil_lignee["n_envs"] == 8
-    assert (mp["n_steps"] // profil_lignee["n_envs"] * profil_lignee["n_envs"]) % mp["batch_size"] == 0
+    assert mp["n_steps"] == 8160
+    # Valeurs RÉSOLUES (profil hérité) : S23 réfuté, retour aux valeurs de x1_long ; l'héritage
+    # lui-même est vérifié par test_the_lineage_profile_inherits_everything_it_does_not_redeclare.
+    assert mp["batch_size"] == 1020
+    assert mp["gae_lambda"] == pytest.approx(0.95)
+    assert profil_lignee["n_envs"] == 24, "les 24 envs hérités ont tenu 15 h sur le run de référence"
+    assert mp["vf_coef"] == pytest.approx(0.3)
     # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
 
@@ -177,9 +172,7 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
     Avant `extends`, deux profils voisins dupliquaient quinze clés — 15,1 Ko — que seul un test
     empêchait de diverger. Un septième profil écrit à plat aurait ajouté une septième copie.
     """
-    # `n_envs` surchargé depuis le 2026-09-13 (12) : le coût RAM du rollout de 32 640 est porté par
-    # les workers (trajectoire locale) et le learner (3 copies) ; 24 envs ont mis la VM à 1 Go (`_doc`).
-    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes", "n_envs"}
+    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes"}
     partagees = [
         cle for cle in profil_froid
         if cle not in surcharge and not cle.endswith(("_normal", "_detail"))
@@ -193,8 +186,7 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
     assert not divergentes, f"clés non héritées : {sorted(divergentes)}"
 
     # Et dans `model_params`, tout ce que la lignée ne redéclare pas vient aussi du parent.
-    # `gae_lambda` et `batch_size` ne sont plus dans cette liste : surchargés depuis le 2026-09-13 (S23).
-    for cle in ("n_epochs", "gamma", "clip_range", "target_kl", "max_grad_norm"):
+    for cle in ("n_epochs", "gamma", "gae_lambda", "batch_size", "clip_range", "target_kl", "max_grad_norm"):
         assert profil_lignee["model_params"][cle] == profil_froid["model_params"][cle], cle
 
 
