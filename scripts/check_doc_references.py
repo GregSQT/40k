@@ -598,9 +598,12 @@ def fragments(line: str) -> tuple[list[str], bool]:
 def names_in(cell: str) -> list[str]:
     # `{move,charge,fight}_handler.py` désigne un ENSEMBLE, comme le joker : le fragment capturé
     # (`_handler.py`) n'est le nom d'aucun fichier. Même famille que la garde sur `*`.
+    # `<stem>_training_contract.json` désigne un MOTIF : la classe de caractères s'arrête au `>`
+    # et le fragment capturé (`_training_contract.json`) n'est le nom d'aucun fichier non plus —
+    # 7 fausses alertes sur `training.md` et `ROADMAP_INDEX.md` le 2026-09-14.
     found = [
         m.group(1) for m in FILE_REF.finditer(cell)
-        if not (m.start() and cell[m.start() - 1] in "*,{}")
+        if not (m.start() and cell[m.start() - 1] in "*,{}>")
     ]
     return [n for n in dict.fromkeys(found) if not WILDCARD.search(n)]
 

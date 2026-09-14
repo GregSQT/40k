@@ -966,6 +966,40 @@ class TestCollectRolloutsDispatch:
             "alors qu'un MaskableSubprocVecEnv est présent dans la chaîne"
         )
 
+    def test_distributed_refuses_a_flat_rollout_buffer(self):
+        """Le chemin distribué copie les observations clé par clé : un buffer plat (espace Box)
+        ne peut pas les recevoir. Erreur explicite au dispatch, pas un AttributeError sur
+        `observations.keys()` au premier rollout."""
+        from ai.patched_ppo import PatchedMaskablePPO
+        from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
+        from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
+        from gymnasium import spaces
+
+        obs_space = spaces.Box(-1.0, 1.0, (13,), dtype=np.float32)
+        act_space = spaces.Discrete(8)
+
+        inner = MagicMock(spec=MaskableSubprocVecEnv)
+        del inner.venv
+        env_mock = MagicMock()
+        env_mock.venv = inner
+        env_mock.num_envs = 2
+        env_mock.observation_space = obs_space
+        env_mock.action_space = act_space
+        env_mock.has_attr.return_value = True
+
+        buf = MaskableRolloutBuffer(
+            buffer_size=2, observation_space=obs_space, action_space=act_space,
+            device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=2,
+        )
+
+        with patch.object(PatchedMaskablePPO, "_setup_model"):
+            model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
+        model.policy = MagicMock()
+        model._last_obs = np.zeros((2, 13), dtype=np.float32)
+
+        with pytest.raises(TypeError, match="MaskableDictRolloutBuffer"):
+            model.collect_rollouts(env_mock, MagicMock(), buf, n_rollout_steps=2)
+
     def test_falls_back_to_stepwise_without_subproc(self):
         """collect_rollouts utilise le chemin stepwise si pas de MaskableSubprocVecEnv."""
         from ai.patched_ppo import PatchedMaskablePPO

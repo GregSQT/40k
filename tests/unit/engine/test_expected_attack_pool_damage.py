@@ -115,7 +115,12 @@ def test_monte_carlo_contre_roll_attack_pool(
 
 
 def test_le_degat_et_le_nombre_d_attaques_sont_des_facteurs() -> None:
-    kw = dict(hit_target=3, wound_target=4, save_threshold_value=5,
-              profile=_PROFILES["sustained_2"], rerolls=RerollProfile(hit_any_fail=True))
-    base = expected_attack_pool_damage(n_attacks=1.0, damage=1.0, **kw)
-    assert expected_attack_pool_damage(n_attacks=3.5, damage=2.25, **kw) == pytest.approx(3.5 * 2.25 * base)
+    def _expected(n_attacks: float, damage: float) -> float:
+        return expected_attack_pool_damage(
+            n_attacks=n_attacks, hit_target=3, wound_target=4, save_threshold_value=5,
+            profile=_PROFILES["sustained_2"], rerolls=RerollProfile(hit_any_fail=True),
+            damage=damage,
+        )
+
+    base = _expected(n_attacks=1.0, damage=1.0)
+    assert _expected(n_attacks=3.5, damage=2.25) == pytest.approx(3.5 * 2.25 * base)

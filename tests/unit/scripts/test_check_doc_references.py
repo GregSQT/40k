@@ -557,6 +557,21 @@ def test_brace_enumeration_is_not_a_file(tmp_path: pathlib.Path) -> None:
     assert not broken
 
 
+def test_placeholder_prefix_is_not_a_file(tmp_path: pathlib.Path) -> None:
+    """`<stem>_training_contract.json` désigne un motif ; `_training_contract.json` n'existe pas.
+
+    Le placeholder peut être en tête ou au milieu du nom (`model_<agent>_…`) : dans les deux cas
+    la capture commence après le `>`, et c'est elle que la garde doit écarter.
+    """
+    doc = write(
+        tmp_path, "note.md",
+        "un compagnon `<stem>_training_contract.json`, renommé `model_<agent>_training_contract.json`\n",
+    )
+    _resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert not broken
+    assert cdr.names_in("`<stem>_training_contract.json`") == []
+
+
 def test_missing_file_in_table_is_broken(tmp_path: pathlib.Path) -> None:
     doc = write(tmp_path, "note.md", "| x | `engine/ce_module_n_existe_pas.py` | `truc` |\n")
     _resolved, _unverifiable, broken = cdr.check_references(doc)
@@ -1276,6 +1291,7 @@ def test_a_file_cited_twice_is_one_reference(tmp_path: pathlib.Path) -> None:
     "`Documentation/x.md` (`_un_symbole`)",
     "`*_handler.py` (`_un_symbole`)",
     "`{move,charge,fight}_handler.py` (`_un_symbole`)",
+    "`<stem>_training_contract.json` (`_un_symbole`)",
     "`analyzer_phases/*` (`_un_symbole`)",
     "on dépose un `hashlib.md5` (`_un_symbole`) quelque part",
 ])

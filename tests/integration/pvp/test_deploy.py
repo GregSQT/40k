@@ -550,6 +550,7 @@ class TestDeclareBattleFormations:
     def test_cancelling_returns_the_unit_to_the_pool(self, declaration_game):
         """`cancel_strategic_reserves` défait une mise en réserves avant validation."""
         player = _declaring_player(declaration_game)
+        assert player is not None, "aucun camp déclarant : le test n'a rien à annuler"
         unit_id = str(_reserves_declaration(declaration_game)["declarable"][0])
         declaration_game.act("deploy_strategic_reserves", unitId=unit_id)
         assert unit_id in _reserves_declaration(declaration_game)["cancellable"]
