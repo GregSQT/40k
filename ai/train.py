@@ -89,7 +89,7 @@ sys.path.insert(0, project_root)
 from ai.unit_registry import UnitRegistry
 # Garde-fou d'ouverture de run : verifie que le modele repris a appris sur le MEME sens des
 # grandeurs (observation, familles d'actions, cles de recompense). Cf. ai/training_contract.py.
-from ai.training_contract import contract_path, enforce_training_contract
+from ai.training_contract import contract_path, enforce_training_contract, reward_table_fingerprint
 from shared.json_atomic import write_json_atomic
 sys.path.insert(0, project_root)
 
@@ -328,6 +328,53 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
     log(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
 
 
+def arm_value_warmup(
+    model: "PatchedMaskablePPO",
+    model_params: Mapping[str, Any],
+    rewards_config: Mapping[str, Any],
+    agent_key: str,
+    log=print,
+) -> None:
+    """ECHAUFFEMENT CRITIC (B6) : pose l'identite de la table du run, refuse un rejeu.
+
+    Appele apres la creation (`--new`) ou le chargement + curriculum (`--append`) du modele, par
+    les deux chemins d'entrainement. `value_warmup_contract_id` est TOUJOURS pose — c'est ce que
+    `train` inscrit dans `value_warmup_done_under` a la fin du regime — et le refus ne vaut que
+    si le profil demande un echauffement :
+
+    - profil sans `value_warmup_updates` (ou 0) : rien a verifier, quel que soit le marqueur ;
+    - profil avec la cle et zip sans marqueur, ou marqueur d'une AUTRE table : l'echauffement
+      se joue, et le log dit sous quelle empreinte ;
+    - profil avec la cle et marqueur de CETTE table : REFUS. La cle vit dans le profil de lignee
+      (`x1_lineage`), donc elle serait encore la a chaque etape suivante, et chacune rejouait
+      20 updates critic-only (~1 440 episodes, politique figee) sans qu'aucun garde-fou ne le
+      voie. Retirer la cle du profil, ou changer la table, sont les deux seules issues — pas de
+      drapeau de contournement.
+    """
+    empreinte = reward_table_fingerprint(rewards_config, agent_key)
+    model.value_warmup_contract_id = empreinte
+    demande = int(model_params.get("value_warmup_updates", 0))  # get allowed: cle optionnelle
+    if demande <= 0:
+        return
+    deja = model.value_warmup_done_under
+    if deja == empreinte:
+        raise ValueError(
+            f"Echauffement critic refuse : le modele charge porte deja le marqueur "
+            f"value_warmup_done_under={deja} — un echauffement s'est acheve sous CETTE table de "
+            f"recompense, et le profil demande value_warmup_updates={demande}. Le rejouer figerait "
+            f"la politique {demande} updates pour rien. Retire `value_warmup_updates` du profil "
+            f"(config/agents/<agent>/*_training_config.json), ou change la table de recompense si "
+            f"la cible du critic a reellement change."
+        )
+    if deja is None:
+        log(f"🔥 Echauffement critic : {demande} updates (table de recompense {empreinte}, jamais echauffee)")
+    else:
+        log(
+            f"🔥 Echauffement critic : {demande} updates (table de recompense {empreinte}, "
+            f"dernier echauffement sous {deja})"
+        )
+
+
 #: Fin commune des deux diagnostics de `_load_checkpoint` : ce qu'on fait APRES l'arret ne depend
 #: pas de la raison de l'arret. Une constante, pas deux tails recopies — c'est la divergence des
 #: copies qui a laissé le repli survivre a la suppression de ses jumeaux.
@@ -338,7 +385,7 @@ _CONSEIL_DE_REPRISE = (
 )
 
 
-def _load_checkpoint(model_path: str, env, device: str) -> MaskablePPO:
+def _load_checkpoint(model_path: str, env, device: str) -> PatchedMaskablePPO:
     """Charge un checkpoint MaskablePPO. LEVE si le fichier est illisible — jamais de repli.
 
     Les trois sites de chargement de ce module entouraient `MaskablePPO.load` d'un
@@ -3153,6 +3200,9 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
         # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
         attach_run_logger(model, events_log_dir)
         print(f"✅ Logger reinitialized for continuous TensorBoard: {events_log_dir}")
+    arm_value_warmup(
+        model, model_params, config.load_agent_rewards_config(effective_agent_key), effective_agent_key
+    )
     _apply_torch_compile(model)
     return model, env, training_config, model_path, _episode_offset
 
@@ -3877,6 +3927,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
         attach_run_logger(model, events_log_dir)
         chunk_log(f"✅ Logger reinitialized for TensorBoard run: {events_log_dir}")
+    arm_value_warmup(
+        model, model_params, config.load_agent_rewards_config(_rewards_key), _rewards_key, log=chunk_log
+    )
     _apply_torch_compile(model)
     # Import metrics tracker
     from ai.metrics_tracker import W40KMetricsTracker, resolve_perf_windows

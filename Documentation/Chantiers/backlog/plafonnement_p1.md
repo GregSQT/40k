@@ -811,6 +811,22 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   ultérieur. Motif : le critic a appris une cible qui payait +6 par VP propre et 0 par VP
   cédé ; à la reprise, sa cible change, et le premier gradient de politique serait calculé sur
   des avantages faux.
+  **Marqueur « échauffé sous cette table » (décision B, 2026-09-14).** La clé vit dans
+  `x1_lineage`, donc chaque `--append` d'étape suivante l'aurait portée encore et rejoué 20
+  updates critic-only (~1 440 épisodes, politique figée) sans garde-fou. Le zip retient
+  désormais `value_warmup_done_under` = empreinte de la table de récompense sous laquelle le
+  dernier échauffement s'est ACHEVÉ (`training_contract.reward_table_fingerprint` : clés ET
+  valeurs, hors clés `_doc` — le critic apprend la somme, un facteur doublé est une autre
+  cible ; le contrat `build_contract`, lui, ne compare que les noms). Écrit par `train` à la
+  dernière update du régime, pas à l'ouverture : un checkpoint pris au milieu ne se dit pas
+  échauffé, `--resume-from` rejoue le régime entier. `ai/train.py::arm_value_warmup` (les
+  deux chemins d'entraînement, après création ou chargement + curriculum) pose
+  `value_warmup_contract_id` (empreinte du run, exclue du zip, obligatoire sinon `train`
+  lève) et REFUSE (`ValueError`) un profil qui demande la clé quand le zip porte déjà cette
+  empreinte — issues : retirer la clé du profil, ou changer la table. Marqueur d'une autre
+  table ou absent : l'échauffement se joue, le log dit les deux empreintes. Tests :
+  `tests/unit/ai/test_value_warmup_marker.py` (13) — rouge constaté sans le `raise`, et rouge
+  si le marqueur est écrit dès la première update.
   **Gel hors critic (review du 2026-09-14).** Annuler les termes ne suffit pas : l'extracteur
   de features est PARTAGÉ (`PointerMaskablePolicy` exige `share_features_extractor=True`, et
   ses logits `q · e_i` lisent les embeddings de l'extracteur), donc la value loss seule

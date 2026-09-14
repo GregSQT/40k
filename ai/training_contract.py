@@ -53,6 +53,7 @@ ensembles.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -178,6 +179,42 @@ def build_contract(rewards_config: Mapping[str, Any], agent_key: str) -> Dict[st
         "action_families": list(macro_intents.ACTION_FAMILIES),
         "reward_keys": _chemins_de_cles(agent_reward_table(rewards_config, agent_key)),
     }
+
+
+def _sans_cles_de_doc(valeur: Any) -> Any:
+    """La meme structure, sans les cles de documentation (`_comment`, `_normal`, `_doc`…).
+
+    Convention du depot : une cle qui commence par `_` porte du texte pour le lecteur, jamais
+    une grandeur lue par le moteur. Les garder ferait dependre l'empreinte d'une reformulation.
+    """
+    if isinstance(valeur, Mapping):
+        return {
+            str(cle): _sans_cles_de_doc(valeur[cle])
+            for cle in sorted(valeur, key=str)
+            if not str(cle).startswith("_")
+        }
+    if isinstance(valeur, list):
+        return [_sans_cles_de_doc(v) for v in valeur]
+    return valeur
+
+
+def reward_table_fingerprint(rewards_config: Mapping[str, Any], agent_key: str) -> str:
+    """Empreinte de la CIBLE DU CRITIC : la table de recompense de cet agent, cles ET valeurs.
+
+    Ce n'est pas le contrat (`build_contract`), qui ne compare que les NOMS : changer un poids
+    est le mode d'emploi normal d'un run et ne doit pas l'arreter. Mais le critic, lui, apprend
+    la SOMME des recompenses — un facteur double est une autre cible, au meme titre qu'une cle
+    remplacee. C'est cette empreinte que l'echauffement critic (`value_warmup_updates`,
+    ai/patched_ppo.py) inscrit dans le zip quand il s'acheve (`value_warmup_done_under`), et
+    que `ai/train.py::arm_value_warmup` compare a l'ouverture du run : un profil qui porte la
+    cle ne rejoue jamais un echauffement deja fait sous la meme table.
+
+    Les cles de documentation sont ecartees (`_sans_cles_de_doc`) ; le JSON est canonique
+    (cles triees, separateurs fixes) ; 16 hexadecimaux suffisent a distinguer deux tables.
+    """
+    table = _sans_cles_de_doc(agent_reward_table(rewards_config, agent_key))
+    canon = json.dumps(table, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
 
 
 def contract_path(model_path: str) -> str:
