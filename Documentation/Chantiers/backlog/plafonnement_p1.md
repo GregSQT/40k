@@ -64,7 +64,10 @@ buffer au-delà de la moitié de la mémoire libre (le « 44 Go qui tuaient la V
 KL à ~15 pas couvre alors une epoch entière du rollout, et la prédiction f ≈ 0,18 porte sur le
 gradient du rollout complet (32 640), pas sur la taille du mini-lot.
 
-**Décision prise le 2026-09-13 : ce run est lancé (prompt dans ROADMAP_INDEX, bloc plafonnement).**
+**Décision prise le 2026-09-13 : run lancé dans la nuit du 13 au 14 — RÉFUTÉ (§5.9) : `03_selfplay/P0`
+chute 0,50 → 0,41 en 8 000 épisodes, arrêté à 02:22. Lecture : λ change aussi la cible du critic.**
+**Depuis le 2026-09-14 02:36 : essai `vf_coef` 0,3 (décision utilisateur, §5.10) ; S11 en cours de
+code (§5.11), à lancer après le jugement de vf_coef.**
 
 **Si ça ne bouge pas.** Le levier « réglages » est épuisé. Il faut alors changer la façon dont
 l'agent reçoit son conseil : soit une tête « Q » qui moyenne les dés (quelques jours de code),
@@ -340,13 +343,13 @@ log-prob 1,7 × 10⁻⁴).
 | S2 | `batch_size` 4 080 | A1 | ☑ testée → ✗ | config | crash VRAM (8,89 Go) ; VRAM libérée depuis (obs non résidentes), mais levier réfuté par f |
 | S3 | `target_kl` relevé / `n_epochs` | A2 | ✗ écarté | config | 0,03 prendrait des pas de 0,045 nat hors région de confiance ; direction = bruit |
 | S4 | `learning_rate` | A3 | ✗ écarté | config | idem ; antécédent de destruction |
-| S5 | `vf_coef` 0,5 → 0,17 | A6 | ☑ livrée (2026-09-07) | config | part policy 0,62, EV intacte ; aucun effet sur le plateau |
+| S5 | `vf_coef` 0,5 → 0,17 | A6 | ☑ livrée (2026-09-07) ; **0,3 en essai depuis le 2026-09-14 (§5.10)** | config | part policy 0,62, EV intacte ; aucun effet sur le plateau ; question rouverte par l'utilisateur : à 0,17 le tronc partagé est façonné à 62 % par un gradient qui est du bruit à 98 % |
 | S6 | `max_grad_norm` 2,0 | A5 | ☑ testée (2026-09-06) → instrument seulement | config | redescendu à 0,5 ; norme brute publiée depuis |
 | S7 | Régime scalaire de lignée (lr 0,001, ent_coef 0,01) | rampes reparcourues | ☑ livrée (2026-09-07/08) | config + code | a stoppé les destructions ; n'a pas produit de progression au-delà de 0,60 |
 | S8 | Entropie normalisée par l'état + `ent_coef` × 5 | B1, B2 | ☑ testée (2026-09-12/13) → **sans effet** | code + agent dédié, 2 runs (11 h 44) | exploration ×2–5 sur têtes courtes ; holdout +0,4 pt, vs P0 −6 pts, dans le bruit ; clé conservée, désactivée par défaut |
 | S9 | Température des logits (T ≈ 2) à la collecte **et** dans le ratio PPO, T = 1 en évaluation | B1, B3 | ☐ envisagée (rapport du 2026-09-13, option C) | code (`_action_logits`, côté workers comme `evaluate_actions`) | nécessaire pour charge/pose, insuffisante seule ; ajoute de la variance : à mesurer **après** la question C1 |
 | S10 | `gae_lambda` 0,95 → 0,8 / 0,5 / 0,2 / 0 ; `gamma` 0,97 | C1, C4 | ☑ **λ mesuré a posteriori (2026-09-13) → ✗ comme levier seul** | config | f(λ=0) = 0,053 [0,036, 0,070] < 0,1 : le critère écrit pour relancer P1 à ce λ n'est pas atteint ; γ non balayé (critic à 0,99) |
-| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☐ envisagée, **dimensionnée** | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
+| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ⏳ **décidée le 2026-09-14 (utilisateur), en cours de code (§5.11)** | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
 | S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
 | S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
 | S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ⏳ **désignée par S13, décision en attente (§7)** | code IA | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
@@ -358,7 +361,7 @@ log-prob 1,7 × 10⁻⁴).
 | S20 | Ventiler les pénalités −97 | C5 | ☐ non investigué | tracker | |
 | S21 | K ≈ 316 rollouts pour distinguer ‖G‖² = 0 de 8 × 10⁻⁵ | C3 | ✗ jugé inutile pour la décision | ~4 h | même à la borne haute, l'update est du bruit à > 97,8 % |
 | S22 | Second run traité entnorm (variance entre entraînements) | B1 | ☐ non fait | ~6 h | écart holdout < 10 points → « pas de verdict » selon le critère écrit ; remplacé par la mesure S13 plus directe |
-| S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (16 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ⏳ **proposé (§7, complément 40k-a2)**, prédiction chiffrée | config `x1_lineage`, run ~6 h | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; VRAM mesurée : 3,80 Go réservés à 2 040, 7,47 à 4 080 (replanterait) ; RAM buffer 3,72 Go |
+| S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (16 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ☑ **testée (2026-09-14, §5.9) → ✗ détruit** : 0,50 → 0,41 en 8 000 épisodes ; λ change la cible du critic, la prédiction f supposait le critic fixe | config `x1_lineage`, 5 lancements (3 tués par la RAM, 1 correctif de collecte, 1 jugé) | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; VRAM mesurée : 3,80 Go réservés à 2 040, 7,47 à 4 080 (replanterait) ; RAM buffer 3,72 Go |
 
 ---
 
@@ -494,6 +497,99 @@ log-prob 1,7 × 10⁻⁴).
 
 ---
 
+### 5.9 Run S23 — λ 0,2 + rollout 32 640 / lot 2 040 (nuit du 2026-09-13 au 14) — RÉFUTÉ
+
+**Config** : `x1_lineage` `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (commit `5744e9d66`),
+tout le reste inchangé ; commande habituelle `--etape P1`, reprise de P0 (`robust_0.8683`).
+Règle §7 complétée avant le lancement (branches d/e, validées).
+
+**Cinq lancements.** Le rollout ×4 a d'abord été un problème de RAM, pas de GPU :
+
+| tentative | envs | issue | RAM disponible min (VM 39 Go) |
+|---|---|---|---|
+| 1 (23:14) | 24 | tuée par le watchdog à 23:39, 6 updates faites | 1 Go, swap 9 Go |
+| 2 (23:42) | 16 | tuée à 23:51, pendant le 1ᵉʳ rollout | 2 Go |
+| 3 (23:55) | 12 | tuée à 00:08, pendant le 1ᵉʳ rollout | 2 Go (workers 20,8 Go) |
+| 4 (00:14) | 12, **correctif de collecte** (`a59ff5a61`) | arrêtée à 00:47 pour passer à 8 envs | 4 Go (learner 3,5 Go en régime, 7,3 au pic) |
+| 5 (00:47) | 8 | **jugée**, arrêtée par l'utilisateur à 02:22 | 7 Go (learner max 7,6 Go, workers 17,4 Go) |
+
+Cause mesurée (séries à 10 s, `mem_s23_*.tsv`) : chaque worker garde sa trajectoire en listes de
+blocs de 104 Ko puis `np.stack` (deux exemplaires au pic, blocs jamais rendus au tas : 0,9 → 1,7 Go
+de RSS par worker à 32 640 pas) ; le learner recevait la **liste complète** des trajectoires, les
+empilait (`obs_all`), puis remplissait le buffer pas à pas — **trois exemplaires** des
+observations (3 × 3,4 Go). Le coût RAM d'un rollout est proportionnel au rollout **total**, pas au
+nombre d'envs : baisser `n_envs` ne rend que la base par worker. Correctif : tableaux préalloués
+côté worker, `iter_trajectories` côté learner (chaque trajectoire copiée dans le buffer à la
+réception puis libérée) ; verrou `TestDistributedRolloutObservationsLandInBuffer`, rouge/vert par
+mutation (steps inversés, obs non libérées). Le 4 080 de VRAM n'a jamais été atteint : 7,3–7,7 Go
+réservés à 2 040 sur 8,19, sans erreur CUDA.
+
+**Résultat (tentative 5, `run_20260914-004747`, 8 340 épisodes d'étape, 26 updates).** Parité
+d'ouverture 0,490. Plomberie conforme : `n_steps` 4 080 par env, buffer reconstruit,
+`train/n_minibatches_done` 21–44 sur 64 (rollout vu en entier, 1,3 à 2,8 epochs),
+`train/time_update` 11–13 s.
+
+| tranche d'épisodes d'étape | 0–1k | 1–2k | 2–3k | 3–4k | 4–5k | 5–6k | 6–7k |
+|---|---|---|---|---|---|---|---|
+| `03_selfplay/P0` (≈ 700 parties/tranche) | 0,498 | 0,506 | 0,500 | 0,461 | 0,459 | 0,410 | 0,422 |
+| `game_critical/win_rate_overall` | 0,612 | 0,603 | 0,601 | 0,591 | 0,586 | 0,576 | 0,568 |
+| `01_VP/a_vp_diff` | 5,36 | 5,17 | 5,64 | 4,06 | 4,53 | 1,73 | 2,25 |
+| `s_win_rate_deploy_active` | 0,618 | 0,607 | 0,610 | 0,562 | 0,582 | 0,527 | 0,535 |
+
+Référence (`run_20260912-065925`) sur [0, 10 000) : 0,508. Ici 0,457 sur [0, 8 340), **monotone
+décroissant** (erreur-type par tranche ≈ 0,02 : la chute vaut 5 écarts-types). Pendant la chute :
+`train/explained_variance` 0,973 → 0,980, `train/value_loss` 0,055 → 0,032, `approx_kl` 0,006–0,014,
+`clip_fraction` 0,06–0,10, `entropy_loss` −0,79 → −0,73 (stable), `grad_share_policy_mb0` 0,67–0,79.
+
+**Lecture.** La prédiction f ≈ 0,18 (§7, complément 40k-a2) était mesurée **a posteriori** sur des
+rollouts collectés avec le critic entraîné à λ = 0,95 : elle décrit l'avantage de l'acteur à critic
+fixe. Dans un run, λ change aussi la **cible du critic** (SB3 : `returns = advantages + values`) ; à
+0,2 le critic apprend quasi TD(0) en bootstrap sur lui-même, son EV de 0,98 est auto-référentielle
+(la cible est presque sa propre prédiction), et la politique suit un critic qui dérive. La branche
+(e) de la règle (« λ court biaise vers le proxy du critic ») est le bon verdict, mais son mécanisme
+est la dérive de la cible, pas un biais de direction mesurable sur ce checkpoint : une sonde de
+cosinus sur un critic dérivé ne mesurerait rien, elle n'a pas été faite. Fenêtre < 20 000, donc
+verdict rendu **par l'utilisateur** sur la monotonie, pas par la règle ; le run se serait détruit
+seul à 20 000 (garde < 0,50).
+
+**Ce que S23 ferme.** Le levier config « nettoyer le gradient par λ et le lot » : λ long = bruit
+(f 0,018), λ court partout = critic cassé. Reste ouvert, non testé : **λ court pour l'avantage de
+l'acteur seul, λ long pour la cible du critic** (deux jeux d'avantages dans le buffer) — le crédit
+propre d'un mouvement est V(s′) − V(s) (12 % de dés) et il est noyé à λ 0,95 sous les dés des tirs
+suivants (95,5 %). À dimensionner, décision utilisateur requise avant code.
+
+**Correction de lecture, même nuit.** « Le tir est du dé » (§0-4, §5.8) est faux comme résumé : le
+tir est une optimisation d'espérance (arme × cible, portée, figurines) que l'agent a **acquise**
+(têtes de tir à p ≈ 0,99, 90 % contre les bots). Ce qui est du dé, c'est l'écart entre l'espérance
+qu'il a apprise et le jet qu'il reçoit comme récompense — 95,5 % de la variance du signal d'un tir.
+D'où S11 (§5.11) : récompenser le choix sur son espérance, pas sur le jet. Et `move_cell` n'est pas
+« aléatoire » : 2,23 nats sur ln 194 = 5,07, soit ~9 cases sérieuses sur 194 ; c'est la seule tête
+qui hésite encore, et la seule dont le crédit propre n'est pas du dé.
+
+### 5.10 Essai `vf_coef` 0,3 (2026-09-14, décision utilisateur) — EN COURS
+
+Profil ramené au régime de référence (`n_steps` 8 160, `batch_size` 1 020, λ 0,95, 24 envs, commit
+`467eff961`), seule différence `vf_coef` 0,17 → 0,3. Commande habituelle, `training_x1_04-p01-vf030.log`,
+lancé 02:36, parité d'ouverture à lire. Question posée : S5 a réglé « le critic étouffe la
+politique » (0,5 : 75 % du tronc) ; à 0,17 le tronc partagé reçoit 62 % de son gradient d'une
+politique dont le gradient est du bruit à 98 %, alors que le critic a un signal réel (f = 0,27).
+0,3 n'est pas calibré : c'est un essai entre les deux valeurs mesurées. P0 a été entraîné à froid à
+0,17 (90 % contre les bots) : 0,17 n'empêche pas d'apprendre ; la question porte sur la reprise à
+chaud contre un adversaire de même niveau. Jugement par la règle §7 (moyenne de `03_selfplay/P0`
+sur 20 000–30 000 contre 0,585–0,595 ; garde de destruction à 20 000). Résultat à consigner ici.
+
+### 5.11 S11 — récompense en espérance pour tir et mêlée (2026-09-14, décision utilisateur) — CODE EN COURS
+
+Principe : le moteur jette les dés pour la partie (la cible perd ses PV selon le vrai jet), mais la
+récompense versée à l'agent pour un tir ou une mêlée est calculée à partir de l'espérance de son
+choix (arme × cible : touche × blessure × sauvegarde × D, `engine/weapon_damage_cache.py::squad_expected_damage`,
+source unique déjà utilisée par les bots). Même choix → même récompense. Objectifs, pénalités et
+issue ±150 restent sur le vrai résultat. Bonus de kill (2,0) : en espérance aussi (proportionnel
+aux dégâts espérés rapportés aux PV d'une figurine), sinon il reste le terme dominant et bruité du
+tir. Clé de config pour l'activer (le run de référence reste rejouable) ; tracker publiant
+espérance et jet côte à côte (la mesure de S11 : variance du signal de tir avant/après). Périmètre,
+tests et résultat à consigner ici.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -503,14 +599,15 @@ log-prob 1,7 × 10⁻⁴).
       ρ(r, ΔV) = −0,55 ; S11 bornée par là.
 - [x] **Balayage λ appairé** — fait le 2026-09-13 : f(λ=0) = 0,053 [0,036, 0,070] (C4, S10).
 - [x] Sonde avec **P0 déterministe** — faite le 2026-09-13 : mêmes nombres (B4, S12).
-- [ ] **Levier S23** (λ 0,2 + 32 640 / 2 040) : décidé le 2026-09-13, run à lancer ; résultat attendu en §5.9.
+- [x] **Levier S23** (λ 0,2 + 32 640 / 2 040) — testé dans la nuit du 2026-09-13 au 14, réfuté (§5.9).
+- [ ] **`vf_coef` 0,3** — run en cours depuis le 2026-09-14 02:36 (§5.10).
+- [ ] **S11** — code en cours (§5.11), run après le jugement de vf_coef.
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
-- [ ] Récompense en espérance (S11).
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
 - [ ] Ventilation des pénalités −97 (C5) ; déploiement auto à 0,50 (D4).
 - [ ] Pool élargi dès P1 (S16) ; second scénario (S17).
-- [ ] Aucun **run d'entraînement** n'a été relancé depuis l'arrêt du 2026-09-12 hors les deux bras
-      entnorm ; aucun réglage n'a été retenu pour un tel run.
+- [x] Runs relancés depuis l'arrêt du 2026-09-12 : deux bras entnorm (09-12/13), S23 (09-13/14, réfuté),
+      vf_coef 0,3 (09-14, en cours).
 
 ---
 
@@ -623,7 +720,11 @@ attendu ~15–20 sur 64 ; ≤ 8 → rollout non vu en entier, prédiction f ≈ 
 Plomberie vérifiée avant : `_apply_curriculum_model_params` (ai/train.py) pose `gae_lambda`,
 `batch_size` et `n_steps` sur le modèle repris et reconstruit le buffer avec le nouveau λ
 (`recreate_rollout_buffer`, inconditionnel) ; `n_steps` est converti par env avant le
-chargement (32 640 → 1 360 × 24). Résultat à consigner en §5.9.
+chargement (32 640 → 1 360 × 24). **Résultat en §5.9 : réfuté (critic qui dérive sous une cible
+TD(0,2)). Suite décidée le 2026-09-14 par l'utilisateur : essai `vf_coef` 0,3 (§5.10) puis S11
+(§5.11) ; S14 / S15 restent en réserve ; « menace par case » en observation écartée (l'ennemi bouge
+avant de tirer) ; deux λ acteur/critic à dimensionner ; plafond 0,65 jamais mesuré (aucun exploiteur
+n'a tourné contre ce P0).**
 
 ---
 

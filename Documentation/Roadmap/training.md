@@ -152,8 +152,26 @@ rassemble le symptôme mesuré (sondes, courbes par quart, holdouts), la chronol
 2026-09-11 au 2026-09-13 et ses antécédents P2, l'inventaire des causes possibles et des
 solutions avec leur statut, et l'arbitrage en attente (§7 du dossier). Les mesures de détail
 restent dans les sections ci-dessous ([#entropie-normalisee](#entropie-normalisee),
-[#signal-p1-2026-09-13](#signal-p1-2026-09-13), [#holdout-2026-09-13](#holdout-2026-09-13)) ;
-toute nouvelle mesure s'ajoute aux deux endroits.
+[#signal-p1-2026-09-13](#signal-p1-2026-09-13), [#holdout-2026-09-13](#holdout-2026-09-13),
+[#run-s23-2026-09](#run-s23-2026-09)) ; toute nouvelle mesure s'ajoute aux deux endroits.
+
+### Run S23 — λ 0,2 + rollout 32 640 / lot 2 040 — RÉFUTÉ (nuit du 2026-09-13 au 14) {#run-s23-2026-09}
+
+Commande habituelle `--etape P1` sous `x1_lineage` (`gae_lambda` 0,2, `n_steps` 32 640,
+`batch_size` 2 040, commit `5744e9d66`). Cinq lancements : trois tués par le watchdog RAM à 24, 16
+et 12 envs (1, 2, 2 Go disponibles sur 39 — le coût RAM d'un rollout est proportionnel au rollout
+**total** : chaque worker garde sa trajectoire, le learner en tenait trois exemplaires), un
+correctif de collecte (`a59ff5a61` : tableaux préalloués côté worker, `iter_trajectories` côté
+learner, verrou par mutation), puis le run jugé à 8 envs (`run_20260914-004747`, min 7 Go). Résultat
+sur 8 340 épisodes d'étape / 26 updates : `03_selfplay/P0` **0,50 → 0,41** par tranche de 1 000,
+monotone (référence 0,51 sur la même fenêtre), `win_rate_overall` 0,61 → 0,57, VP diff 5,4 → 2,
+pendant que `explained_variance` monte à 0,98 et `value_loss` baisse. Lecture : λ change la **cible
+du critic** (retours = avantages + valeurs) ; la prédiction f ≈ 0,18 supposait le critic fixe. Arrêté
+par l'utilisateur à 02:22 (fenêtre < 20 000 : verdict sur la monotonie, pas par la règle). Profil
+ramené au régime de référence (`467eff961`). Détail, tableau par tranche et série mémoire :
+dossier §5.9. Depuis 02:36 : essai `vf_coef` 0,3 (`training_x1_04-p01-vf030.log`, seule différence
+avec `run_20260912-065925`), jugé par la règle §7 ; S11 (récompense en espérance) en cours de code,
+à lancer ensuite (dossier §5.10, §5.11).
 
 ---
 
@@ -544,8 +562,7 @@ f = 0,667 [0,637, 0,696] (estimateur du gradient d'entropie, dépendant de la po
 plafond d'instrument, cf. note de la section précédente).
 Trois points qui complètent le verdict, détaillés au §7 du dossier `plafonnement_p1.md` :
 (1) λ à lot fixe et lot à λ = 0,95 ont été éliminés séparément, pas **ensemble** — à λ = 0,2 et
-B = 32 640 la définition de B_noise prédit f ≈ 0,18 [0,13, 0,32] (S23 : `batch_size` 2 040, le lot de 4 080 mesuré à 7,47 Go de VRAM réservés replanterait ; run ~6 h à jouer avant
-S14 / S15) ; (2) Var(r) / Var(δ) = 0,86 n'est pas une borne de ce qu'une récompense en espérance
+B = 32 640 la définition de B_noise prédit f ≈ 0,18 [0,13, 0,32] (S23 : `batch_size` 2 040, le lot de 4 080 mesuré à 7,47 Go de VRAM réservés replanterait ; **joué la nuit suivante et réfuté, [#run-s23-2026-09](#run-s23-2026-09) : la prédiction supposait le critic fixe, λ change sa cible**) ; (2) Var(r) / Var(δ) = 0,86 n'est pas une borne de ce qu'une récompense en espérance
 retirerait (covariance négative, Var(E[r∣s,a]) conservée) ; (3) le contrôle aléatoire valide le
 code, pas le régime (son f vient du facteur p(1−p) d'une politique d'entropie maximale) — le fait
 informatif est le témoin entraîné à 28 % aussi indétectable que P1, qui penche vers « noyé »
