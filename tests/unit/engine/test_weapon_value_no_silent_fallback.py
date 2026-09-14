@@ -57,10 +57,12 @@ def _seq(monkeypatch, rolls):
 def _game_state(weapon):
     """Tireur '1' en (0,0) avec `weapon`. Cible '2' HP 20, aucune sauvegarde."""
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
+                "col": 0, "row": 0, "RNG_WEAPONS": [weapon], "UNIT_RULES": []}
+    # `UNIT_RULES` : exigé sur toute figurine du models_cache depuis 2693007f2 (FNP positionnel
+    # lu sur la figurine blessée) — le fichier était rouge sur main sans cette clé.
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 20, "HP_MAX": 20,
               "ARMOR_SAVE": 7, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
-              "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": 1}
+              "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": 1, "UNIT_RULES": []}
     return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",

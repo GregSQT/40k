@@ -1139,10 +1139,14 @@ class RewardCalculator:
         activation et non sur le jet — `combat["expected_damage_by_target"]`, sommee par le
         moteur a la declaration (`intent_expected_damage`), convertie avec les moyennes de la
         cible a la declaration (`targets_meta[sid]["points_per_hp_mean"]`, `model_value_mean`,
-        `hp_max`, `alive_count`) : degats = points_par_PV_moyen x hp_w x E[dmg] ; figurines
-        tuees = min(E[dmg] / HP_MAX, vivantes) x valeur_moyenne x kill_f — proxy lineaire de
-        E[kills], assume (la loi exacte des pertes sous allocation sequentielle n a pas de forme
-        simple, et sans lui le bonus de kill resterait le terme dominant et bruite du tir). Le
+        `hp_max`, `alive_count`, `hp_before`) : degats = points_par_PV_moyen x hp_w x
+        min(E[dmg], PV restants de la cible) — le jet, lui, ne retire jamais plus que
+        `hp_before` (`_resolve_one_manual_wound` : `min(dmg, hp_before)` puis figurines mortes),
+        et sans ce plafond 20 attaques sur un Grot a 1 PV paieraient 2,5 PV, cote offensif comme
+        defensif ; figurines tuees = min(E[dmg] / HP_MAX, vivantes) x valeur_moyenne x kill_f —
+        proxy lineaire de E[kills], assume (la loi exacte des pertes sous allocation sequentielle
+        n a pas de forme simple, et sans lui le bonus de kill resterait le terme dominant et
+        bruite du tir). Le
         bonus de wipe reste sur le resultat REEL : un evenement rare et decisif, pas un signal
         dense. Mesure qui motive le levier : 95,5 % de la variance du signal d un tir est l ecart
         entre le jet et son esperance (`scripts/grad_signal_probe.py`, 2026-09-13). Les des restent
@@ -1167,7 +1171,8 @@ class RewardCalculator:
                 exp_dmg = float(exp_dmg)
                 hp_max = int(require_key(meta, "hp_max"))
                 alive = int(require_key(meta, "alive_count"))
-                total += float(require_key(meta, "points_per_hp_mean")) * hp_w * exp_dmg
+                hp_before = int(require_key(meta, "hp_before"))
+                total += float(require_key(meta, "points_per_hp_mean")) * hp_w * min(exp_dmg, float(hp_before))
                 expected_kills = min(exp_dmg / hp_max, float(alive))
                 total += float(require_key(meta, "model_value_mean")) * kill_f * expected_kills
         else:

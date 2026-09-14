@@ -334,7 +334,7 @@ class TestObservationEnemySquadValue:
 
 
 def _combat_s11(*, expected: float, alive: int, hp_max: int, events: List[Dict[str, Any]],
-                player: int = 2) -> Dict[str, Any]:
+                player: int = 2, hp_before: int | None = None) -> Dict[str, Any]:
     return {
         "events": events,
         "squads_wiped": [],
@@ -342,6 +342,7 @@ def _combat_s11(*, expected: float, alive: int, hp_max: int, events: List[Dict[s
         "targets_meta": {"9": {
             "value": 75, "model_count_at_start": 10, "player": player,
             "alive_count": alive, "hp_max": hp_max,
+            "hp_before": alive * hp_max if hp_before is None else hp_before,
             "points_per_hp_mean": 5.0, "model_value_mean": 10.0,
         }},
     }
@@ -368,10 +369,19 @@ class TestS11RewardOnExpectation:
         assert calc._squad_combat_shaping(combat, lambda p: p == 2, _SHAPING) == pytest.approx(5.0 * 2 + 10.0)
 
     def test_les_figurines_tuees_esperees_sont_plafonnees_par_les_vivantes(self):
-        """E[dmg] 10 sur 3 figurines à 1 PV : kills = min(10, 3) = 3 -> 5 × 10 + 10 × 3 = 80."""
+        """E[dmg] 10 sur 3 figurines à 1 PV (3 PV restants) : dégâts = min(10, 3) = 3, kills =
+        min(10, 3) = 3 -> 5 × 3 + 10 × 3 = 45. Le jet ne retire jamais plus que les PV restants ;
+        20 attaques sur un Grot ne paient pas 2,5 PV."""
         calc = _calculator()
         combat = _combat_s11(expected=10.0, alive=3, hp_max=1, events=[])
-        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == pytest.approx(80.0)
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == pytest.approx(45.0)
+
+    def test_les_degats_esperes_sont_plafonnes_par_les_pv_restants(self):
+        """Escouade déjà blessée : 5 vivantes à 2 PV mais 6 PV restants ; E[dmg] 8 -> dégâts 6."""
+        calc = _calculator()
+        combat = _combat_s11(expected=8.0, alive=5, hp_max=2, events=[], hp_before=6)
+        # dégâts 5 × 6 = 30 ; kills min(8/2, 5) = 4 -> 10 × 4 = 40.
+        assert calc._squad_combat_shaping(combat, lambda p: p == 2, self._ON) == pytest.approx(70.0)
 
     def test_hp_max_divise_les_kills_esperes(self):
         """E[dmg] 3 sur des figurines à 2 PV : kills = 1,5 -> 5 × 3 + 10 × 1,5 = 30."""
