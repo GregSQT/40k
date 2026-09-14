@@ -201,13 +201,13 @@ _engine_id_lock = threading.Lock()
 
 #: Les cinq categories de `reward_breakdown` posees par RewardCalculator (`total` est leur
 #: resultat, pas une categorie).
-REWARD_BREAKDOWN_COMPONENTS = ('base_actions', 'result_bonuses', 'objective', 'situational', 'penalties')
+REWARD_BREAKDOWN_COMPONENTS = ('base_actions', 'result_bonuses', 'objective', 'vp_margin', 'situational', 'penalties')
 
 #: Categories DENSES : celles qui paient un COMPORTEMENT. `situational` (le +-50 terminal) paie
 #: le RESULTAT et sa masse ecraserait toute comparaison ; `penalties` est negatif et n'est PAS
 #: disjoint de `base_actions` (`wait` et `charge_fail` sont ecrits dans les deux), l'additionner
 #: compterait chaque attente deux fois. Seules ces trois-la portent un flux positif cumule.
-DENSE_REWARD_BREAKDOWN_COMPONENTS = ('base_actions', 'result_bonuses', 'objective')
+DENSE_REWARD_BREAKDOWN_COMPONENTS = ('base_actions', 'result_bonuses', 'objective', 'vp_margin')
 
 
 def empty_reward_breakdown_totals() -> Dict[str, float]:
@@ -973,6 +973,9 @@ class W40KEngine(gym.Env):
             "game_over": False,
             "winner": None,
             "victory_points": {1: 0, 2: 0},
+            # Marge de VP deja versee au ledger B6. Remise a 0 ici ET au reset (meme cycle que
+            # `victory_points`). KeyError si absente dans _calculate_vp_margin_reward (T1).
+            "vp_margin_paid": 0,
             # Points de commandement des deux joueurs (08.02). Meme cycle de vie que
             # `victory_points` : pose a l'init ET remis a la dotation de depart au reset.
             "command_points": initial_command_points(get_config_loader().get_game_config()),
@@ -1816,6 +1819,8 @@ class W40KEngine(gym.Env):
             "turn_limit_reached": False,
             "winner": None,
             "victory_points": {1: 0, 2: 0},
+            # Ledger B6 : remis a 0 au reset, comme `victory_points`.
+            "vp_margin_paid": 0,
             # Remise a la dotation de depart : un episode ne peut pas heriter des CP du
             # precedent (`reset` fait un `update()` de game_state, pas une recreation).
             "command_points": initial_command_points(get_config_loader().get_game_config()),
@@ -3246,8 +3251,8 @@ class W40KEngine(gym.Env):
         VALIDITE DU MASQUE DE SORTIE jusqu'au `return` : auditee. Entre la derniere construction et
         la sortie ne tournent que ``calculate_reward``, des compteurs et la fabrication d'``info``,
         et RIEN de ce que ``calculate_reward`` ecrit dans ``game_state``
-        (``last_reward_breakdown``, ``_pile_in_toCol/Row``, et les familles
-        ``objective_rewarded_turns`` / ``coherency_penalized_turns`` du registre ``_once_claims``)
+        (``last_reward_breakdown``, ``vp_margin_paid``, ``_pile_in_toCol/Row``, et la famille
+        ``coherency_penalized_turns`` du registre ``_once_claims``)
         n'est lu par la construction du masque — verifie par grep sur ``action_decoder``,
         ``phase_handlers`` et ``spatial_grid``. ``_pending_reserves_wasted`` est vide ici, pas par
         le calcul de recompense.

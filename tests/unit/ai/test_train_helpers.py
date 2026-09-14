@@ -316,6 +316,25 @@ def test_curriculum_covers_every_model_param(rollout_rebuilds) -> None:
         assert isinstance(model.ent_coef, float), f"profil {name} : ent_coef doit etre un scalaire"
 
 
+def test_value_warmup_updates_applied_by_curriculum(rollout_rebuilds) -> None:
+    """value_warmup_updates est dans _PLAIN_CURRICULUM_KEYS et sera applique en --append.
+
+    Couverture synthetique : le parametre n'est pas encore dans les profils config (tache
+    post-S11), mais la cle est en production dans _PLAIN_CURRICULUM_KEYS depuis B6.
+    Sans ce test, l'oubli de la cle dans _PLAIN_CURRICULUM_KEYS passerait inapercru jusqu'au
+    premier run --append qui en aurait besoin.
+    """
+    model = SimpleNamespace()
+    params = {
+        "learning_rate": {"initial": 0.002, "final": 0.0005, "decay_fraction": 0.9},
+        "ent_coef": 0.02,
+        "clip_range": 0.2,
+        "value_warmup_updates": 50,
+    }
+    train._apply_curriculum_model_params(model, params, log=lambda _: None)
+    assert model.value_warmup_updates == 50
+
+
 def test_load_configured_unit_rule_ids(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)

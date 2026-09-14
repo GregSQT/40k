@@ -176,6 +176,24 @@ référence — même plateau, atteint plus lentement ; 0,17 rétabli (dossier �
 (`squad_shaping.reward_on_expectation`, `expected_attack_pool_damage` = espérance exacte du roller,
 Monte-Carlo verrouillé), profil de référence, jugé par la règle §7 (dossier §5.11).
 
+### Marge de VP en ledger + échauffement du critic — B6, code livré, run après S11 {#marge-vp-2026-09}
+
+**Décision utilisateur du 2026-09-14.** `objective_reward_factor × VP_propres` (versé au tour
+du joueur contrôlé) devient `vp_margin_factor × Δ(VP_moi − VP_lui)`, versé à chaque changement
+de score, quel que soit le joueur dont c'est le tour (`BotControlledEnv` accumule). Somme
+téléscopique = 6 × marge finale, élimination comprise ; un VP concédé coûte désormais −6 (0
+avant). Remplacement et non ajout : Corr(ΔVP_moi, Δmarge) = 0,82 sur 40 parties, les deux
+termes ensemble auraient valu +11 / −5. Nouveau composant de ventilation `vp_margin`
+(`reward/vp_margin_total`, `objective_share` = part de score, `01_VP/f_obj_rewards` = 6 × marge).
+Le critic ayant appris une cible qui ignorait les VP cédés, la reprise s'ouvre par
+`model_params.value_warmup_updates` updates où seule la value loss est optimisée (politique et
+entropie annulées, KL désactivé, `train/value_warmup_active`) — régime de run, jamais hérité
+d'un checkpoint. **Livré en worktree `worktree-marge-vp-b6`, non mergé** : le run S11 lit main
+et `config/` à chaud. Après le verdict S11 : merge, `ai.training_contract --init` +
+`write_contract` sur le zip P0 (les clés de récompense changent), `value_warmup_updates` dans
+`x1_lineage`, run « S11 + marge » par la commande habituelle `--etape P1`. Détail, tests et
+mutations constatées : dossier §5.12.
+
 ---
 
 ## 🟡 Entropie normalisée par l'état — contrôle vs traité mesurés, arbitrage ouvert {#entropie-normalisee}

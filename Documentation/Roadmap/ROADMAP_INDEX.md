@@ -192,7 +192,11 @@ le learner tenait trois exemplaires des observations). Profil ramené au régime
 plateau 0,585 que la référence, atteint plus lentement (dossier §5.10) ; (2) **S11**, récompense en
 espérance pour tir et mêlée, livrée et mergée (`296c1bc3d`), **run en cours depuis 10:30**
 (`training_x1_05-p01-s11.log`, dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps —
-un plateau est un symptôme. En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
+un plateau est un symptôme ; (4) **B6, marge de VP en ledger** (`vp_margin_factor × Δ(VP_moi −
+VP_lui)` à la place de `objective_reward_factor × VP_propres`, un VP cédé coûte −6) **+ échauffement
+du critic** (`value_warmup_updates`) — **code livré en worktree `worktree-marge-vp-b6`, non mergé
+tant que S11 tourne** ; merge, contrat, profil et run « S11 + marge » après le verdict S11
+([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12). En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
 plafond 0,65 par un exploiteur contre P0 (jamais fait).
 
 ---

@@ -285,27 +285,26 @@ def test_objective_curves_are_emitted_from_the_engine_samples(tmp_path: Any) -> 
 
 
 def test_obj_rewards_equals_what_the_reward_calculator_actually_pays(tmp_path: Any) -> None:
-    """01_VP/f_obj_rewards = le montant REELLEMENT verse par tour.
+    """01_VP/f_obj_rewards = approximation du versement ledger B6 sur l'episode.
 
-    Le versement vaut `objective_reward_factor x VP marques` par construction
-    (RewardCalculator._calculate_objective_reward_per_turn) : la courbe se LIT donc sur les VP
-    de l'episode. Elle rejouait auparavant la formule du versement sur les echantillons — un
-    miroir de la formule du moteur, qui est devenu faux des que celle-ci est passee du lineaire
-    a l'escalier plafonne de la mission.
+    Le versement vaut `vp_margin_factor × marge_finale` par construction telesopique
+    (RewardCalculator._calculate_vp_margin_reward) : la courbe se LIT donc sur la marge VP
+    finale. Elle lit `victory_points_diff_controlled_minus_opponent`, jamais les echantillons.
 
     CONTROLE DISCRIMINANT : les echantillons d'objectifs sont volontairement INCOHERENTS avec
-    les VP fournis (4 tours a 1-3 objectifs ne peuvent pas produire 32 VP). Toute formule qui
-    les relirait donnerait autre chose que 96 — seule la lecture des VP passe.
+    la marge VP fournie (4 tours a 1-3 objectifs ne peuvent pas produire une marge de 32).
+    Toute formule qui les relirait donnerait autre chose que 192 — seule la lecture de la marge
+    finale passe.
     """
     from config_loader import get_config_loader
 
     cfg = get_config_loader().load_agent_rewards_config("ArmageddonAgent_x1")["ArmageddonAgent_x1"]
-    factor = float(cfg["objective_rewards"]["objective_reward_factor"])
+    factor = float(cfg["objective_rewards"]["vp_margin_factor"])
     assert factor > 0.0, "facteur nul : le controle ne mesurerait rien"
 
     tracker, recording = _tracker(tmp_path)
     _episode(tracker, _tactical(
-        victory_points_controlled_episode=32.0,
+        victory_points_diff_controlled_minus_opponent=32.0,
         controlled_objective_samples=[3.0, 1.0, 1.0, 1.0],
         opponent_objective_samples=[1.0, 1.0, 1.0, 1.0],
     ))

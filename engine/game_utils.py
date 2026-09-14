@@ -95,7 +95,6 @@ ONCE_CLAIMS_KEY = "_once_claims"
 # (2-uplet, 3-uplet avec l'id d'objectif, chaine pour les evenements de choix).
 OnceClaimFamily = Literal[
     "primary_objective_scored_turns",
-    "objective_rewarded_turns",
     "coherency_penalized_turns",
     "cp_gain_on_objective_resolved",
     "_choice_timing_fired_events",

@@ -11,7 +11,6 @@ from engine.phase_handlers.shared_utils import is_unit_alive
 from engine.game_utils import get_unit_by_id, require_unit_by_id, once_claim, once_claimed
 from engine.game_state import (
     objective_hex_sets,
-    primary_objective_points,
     unit_is_within_objective,
 )
 from shared.data_validation import require_key
@@ -45,12 +44,13 @@ class RewardCalculator:
         # (game_state.determine_winner_with_method) ? ». Elle ne le pouvait pas : la part
         # objectif entrait dans le total sur 12 chemins mais n'etait categorisee que sur UN
         # (la reponse systeme), noyee dans `base_actions` ou explicitement retranchee ailleurs
-        # (`fight_reward - objective_turn_reward`). Cette cle agrege desormais les DEUX sources
-        # d'objectif — le versement de fin de tour et le bonus « sur un objectif » par action.
+        # (`fight_reward - vp_margin_reward`). `objective` ne porte plus que `on_objective_bonus` ;
+        # `vp_margin` porte le ledger B6 (6 × Δmarge depuis le dernier versement).
         reward_breakdown = {
             'base_actions': 0.0,
             'result_bonuses': 0.0,
             'objective': 0.0,
+            'vp_margin': 0.0,
             'situational': 0.0,
             'penalties': 0.0,
             'total': 0.0
@@ -170,26 +170,26 @@ class RewardCalculator:
         # Le calcul reste ici, et non a la frontiere moteur : c'est le RewardCalculator qui doit
         # decider d'un reward, et il n'y a pas besoin d'un report (`_pending_zone_shaping`) —
         # le step qui porte la transition est deja un step credite a l'agent.
-        objective_turn_reward = self._calculate_objective_reward_per_turn(game_state, result)
-        if objective_turn_reward:
-            reward_breakdown['objective'] += objective_turn_reward
+        vp_margin_reward = self._calculate_vp_margin_reward(game_state)
+        if vp_margin_reward:
+            reward_breakdown['vp_margin'] += vp_margin_reward
         # Penalite coherency fin de tour (squad_shaping) : MEME garde, meme site, donc morte
         # pour la meme raison. La reparer avec sa jumelle est deliberé — laisser une penalite
         # inerte a cote d'un bonus repare fausserait l'arbitrage entre les deux.
         coherency_penalty = self._calculate_coherency_penalty_per_turn(game_state, result)
         if coherency_penalty:
             reward_breakdown['penalties'] += coherency_penalty
-            # ⚠️ A partir d'ici `objective_turn_reward` n'est PLUS de l'objectif pur : il
+            # ⚠️ A partir d'ici `vp_margin_reward` n'est PLUS de la marge pure : il
             # TRANSPORTE aussi la penalite de coherency vers le total de chaque chemin. C'est
-            # pourquoi `reward_breakdown['objective']` est renseigne AVANT cette ligne, a partir
+            # pourquoi `reward_breakdown['vp_margin']` est renseigne AVANT cette ligne, a partir
             # de la valeur pure. Categoriser la variable apres cette absorption imputerait la
-            # penalite a l'objectif et fausserait la mesure des le premier tour.
-            objective_turn_reward += coherency_penalty
+            # penalite a la marge et fausserait la mesure des le premier tour.
+            vp_margin_reward += coherency_penalty
 
         if is_system_response:
             # Pure system response - no action attached
             system_response_reward = system_penalties['system_response']
-            reward_breakdown['total'] = system_response_reward + objective_turn_reward
+            reward_breakdown['total'] = system_response_reward + vp_margin_reward
 
             # CRITICAL FIX: Check if game ended and add situational reward
             if game_state.get("game_over", False):
@@ -214,7 +214,7 @@ class RewardCalculator:
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
 
-        # objective_turn_reward et coherency_penalty sont calcules plus haut (avant le tri
+        # vp_margin_reward et coherency_penalty sont calcules plus haut (avant le tri
         # action / reponse systeme, voir la trace la-bas) et restent propages par tous les
         # chemins de retour ci-dessous.
 
@@ -242,19 +242,18 @@ class RewardCalculator:
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
-                # `objective_turn_reward` COMPRIS, comme sur la sortie jumelle deux lignes plus
-                # bas. L'omettre perdait les points pour de bon : le tour a deja ete consomme
-                # (`objective_rewarded_turns`) et `breakdown['objective']` deja credite — la
-                # ventilation annoncait donc une part que le total ne versait pas. Meme defaut
-                # que sur les trois sorties anticipees du tir, corrigees en 9b7d0aa0.
+                # `vp_margin_reward` COMPRIS, comme sur la sortie jumelle deux lignes plus
+                # bas. L'omettre perdait les points pour de bon : la ventilation annoncait
+                # une part que le total ne versait pas. Meme defaut que sur les trois sorties
+                # anticipees du tir, corrigees en 9b7d0aa0.
                 reward_breakdown['total'] = (
-                    situational_reward + defensive_penalty + objective_turn_reward
+                    situational_reward + defensive_penalty + vp_margin_reward
                 )
                 game_state['last_reward_breakdown'] = reward_breakdown
                 return reward_breakdown['total']
 
-            # Game not over : seul le signal defensif (+ objectif) revient a l agent.
-            reward_breakdown['total'] = objective_turn_reward + defensive_penalty
+            # Game not over : seul le signal defensif (+ marge VP) revient a l agent.
+            reward_breakdown['total'] = vp_margin_reward + defensive_penalty
             game_state['last_reward_breakdown'] = reward_breakdown
             return reward_breakdown['total']
 
@@ -281,30 +280,27 @@ class RewardCalculator:
             # In these cases, no logs are added, so return 0.0 reward
             waiting_for_player = result.get("waiting_for_player", False)
             all_attack_results = result.get("all_attack_results")
-            # ⚠️ CES SORTIES RENVOYAIENT 0.0 SEC, ecrasant `objective_turn_reward`.
+            # ⚠️ CES SORTIES RENVOYAIENT 0.0 SEC, ecrasant `vp_margin_reward`.
             # Un tir n'est pas toujours un payload de tir « pur » : quand il vide le pool, la
             # cascade (w40k_core, boucle `phase_complete`/`next_phase`) le fait traverser les
             # phases suivantes jusqu'a `command_phase_start`, qui hors tour agent rend
-            # `command_phase_end` — soit `phase_transition: True` + `next_phase: "move"`, le
-            # declencheur EXACT du versement d'objectif. La cascade REINJECTE alors `action`,
-            # `unitId` et `all_attack_results` dans ce resultat, si bien que le payload arrive
-            # ici en portant la transition. `is_action_result` etant vrai, il echappe au chemin
-            # « reponse systeme » qui, lui, versait bien les points.
-            # Mesure : meme transition, memes objectifs — 30.0 verses sans les cles d'action,
-            # 0.0 avec. Les points etaient perdus, et la ventilation les comptait quand meme.
-            # `objective_turn_reward` (et non 0.0) est ce que rendent DEJA les douze autres
-            # branches d'action : c'est l'alignement, pas une exception de plus.
+            # `command_phase_end` — soit `phase_transition: True` + `next_phase: "move"`. La
+            # cascade REINJECTE alors `action`, `unitId` et `all_attack_results` dans ce resultat,
+            # si bien que le payload arrive ici en portant la transition. `is_action_result` etant
+            # vrai, il echappe au chemin « reponse systeme » qui, lui, versait bien les points.
+            # `vp_margin_reward` (et non 0.0) est ce que rendent DEJA les douze autres branches
+            # d'action : c'est l'alignement, pas une exception de plus.
             if waiting_for_player and not all_attack_results:
                 # No attacks executed yet (waiting for target selection): no shooting reward,
-                # mais la recompense d'objectif reste due si le payload porte la transition.
-                reward_breakdown['total'] = objective_turn_reward
+                # mais la marge VP reste due si le payload porte la transition.
+                reward_breakdown['total'] = vp_margin_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return objective_turn_reward
+                return vp_margin_reward
             if not all_attack_results:
                 # End activation without firing (e.g. no valid targets, no weapons) - no logs
-                reward_breakdown['total'] = objective_turn_reward
+                reward_breakdown['total'] = vp_margin_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return objective_turn_reward
+                return vp_margin_reward
             
             # Sum all shoot rewards from current activation (handles RNG_NB > 1)
             action_logs = require_key(game_state, "action_logs")
@@ -385,12 +381,12 @@ class RewardCalculator:
                 # d'objectif reste due (meme raison que les deux sorties ci-dessus).
                 reward_breakdown['base_actions'] = 0.0
                 reward_breakdown['result_bonuses'] = 0.0
-                reward_breakdown['total'] = objective_turn_reward
+                reward_breakdown['total'] = vp_margin_reward
                 game_state['last_reward_breakdown'] = reward_breakdown
-                return objective_turn_reward
-            
+                return vp_margin_reward
+
             # Calculate total reward
-            calculated_reward = base_action_reward + result_bonus_reward + objective_turn_reward
+            calculated_reward = base_action_reward + result_bonus_reward + vp_margin_reward
 
             # Properly populate reward_breakdown
             reward_breakdown['base_actions'] = base_action_reward
@@ -412,7 +408,7 @@ class RewardCalculator:
         # propre, le gain (ou la perte) se matérialise dans les phases suivantes, et la pression
         # de tempo de 20.04 est portée par la DESTRUCTION de fin de 3e round, pas par un bonus.
         elif action_type in ("deploy_unit", "deploy_strategic_reserves", "ingress_move"):
-            deploy_reward = 0.0 + objective_turn_reward
+            deploy_reward = 0.0 + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = deploy_reward
 
@@ -427,7 +423,7 @@ class RewardCalculator:
 
         elif action_type == "move" or action_type == "flee":
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
-            movement_reward = on_obj_reward + objective_turn_reward
+            movement_reward = on_obj_reward + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = movement_reward
@@ -443,7 +439,7 @@ class RewardCalculator:
 
         elif action_type == "skip":
             # FIXED: Skip means no targets available - no penalty
-            skip_reward = 0.0 + objective_turn_reward
+            skip_reward = 0.0 + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = skip_reward
             
@@ -464,20 +460,20 @@ class RewardCalculator:
             # No target can die in charge phase
             enriched_target = self._enrich_unit_for_reward_mapper(target)
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
-            reward_breakdown['base_actions'] = charge_reward - objective_turn_reward
+            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + vp_margin_reward
+            reward_breakdown['base_actions'] = charge_reward - vp_margin_reward
             reward_breakdown['total'] = charge_reward
-            
+
             # CRITICAL FIX: Add situational reward if game ended
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
                 reward_breakdown['situational'] = situational_reward
                 charge_reward += situational_reward
                 reward_breakdown['total'] = charge_reward
-            
+
             game_state['last_reward_breakdown'] = reward_breakdown
             return charge_reward
-            
+
         elif action_type in ("fight", "combat") and "targetId" in result:
             # "combat" is the step_logger action type, "fight" is the legacy name
             target = get_unit_by_id(game_state, str(result["targetId"]))
@@ -494,10 +490,10 @@ class RewardCalculator:
                 on_obj_reward = self._calculate_on_objective_reward(game_state, result)
             elif pile_in_col is not None:
                 on_obj_reward = self._calculate_on_objective_reward(game_state, {"unitId": result.get("unitId"), "toCol": pile_in_col, "toRow": pile_in_row})
-            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward + on_obj_reward
-            # `- on_obj_reward` en plus de `- objective_turn_reward` : sans lui, le bonus
+            fight_reward = reward_mapper.get_combat_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + vp_margin_reward + on_obj_reward
+            # `- on_obj_reward` en plus de `- vp_margin_reward` : sans lui, le bonus
             # « sur un objectif » resterait compte dans `base_actions` EN PLUS d'`objective`.
-            reward_breakdown['base_actions'] = fight_reward - objective_turn_reward - on_obj_reward
+            reward_breakdown['base_actions'] = fight_reward - vp_margin_reward - on_obj_reward
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = fight_reward
 
@@ -541,7 +537,7 @@ class RewardCalculator:
                     combat, acting_unit, acting_player, game_state
                 )
 
-            squad_total = squad_reward + objective_turn_reward
+            squad_total = squad_reward + vp_margin_reward
             reward_breakdown['result_bonuses'] = squad_reward
             reward_breakdown['total'] = squad_total
 
@@ -565,7 +561,7 @@ class RewardCalculator:
             on_obj_reward = 0.0
             if pile_in_col is not None:
                 on_obj_reward = self._calculate_on_objective_reward(game_state, {"unitId": result.get("unitId"), "toCol": pile_in_col, "toRow": pile_in_row})
-            wait_reward += objective_turn_reward + on_obj_reward
+            wait_reward += vp_margin_reward + on_obj_reward
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = wait_reward
 
@@ -582,7 +578,7 @@ class RewardCalculator:
         elif action_type == "pass":
             # Pass action in fight phase - unit had no valid targets to attack
             # Treat same as wait (no reward, no penalty)
-            pass_reward = 0.0 + objective_turn_reward
+            pass_reward = 0.0 + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = pass_reward
 
@@ -602,7 +598,7 @@ class RewardCalculator:
             charge_fail_reward = require_key(require_key(unit_rewards, "base_actions"), "charge_fail")
             reward_breakdown['base_actions'] = charge_fail_reward
             reward_breakdown['penalties'] = charge_fail_reward
-            charge_fail_reward += objective_turn_reward
+            charge_fail_reward += vp_margin_reward
             reward_breakdown['total'] = charge_fail_reward
 
             # CRITICAL FIX: Add situational reward if game ended
@@ -617,7 +613,7 @@ class RewardCalculator:
 
         elif action_type == "advance":
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
-            advance_reward = on_obj_reward + objective_turn_reward
+            advance_reward = on_obj_reward + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = advance_reward
@@ -634,7 +630,7 @@ class RewardCalculator:
         elif action_type == "no_effect":
             # No-effect action (e.g., skip attempted on non-active unit in charge phase)
             # Treat same as pass - no reward, no penalty
-            no_effect_reward = 0.0 + objective_turn_reward
+            no_effect_reward = 0.0 + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['total'] = no_effect_reward
 
@@ -652,7 +648,7 @@ class RewardCalculator:
 
         elif action_type in ("squad_normal_move", "squad_fall_back"):
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
-            movement_reward = on_obj_reward + objective_turn_reward
+            movement_reward = on_obj_reward + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = movement_reward
@@ -666,7 +662,7 @@ class RewardCalculator:
 
         elif action_type == "squad_advance":
             on_obj_reward = self._calculate_on_objective_reward(game_state, result)
-            advance_reward = on_obj_reward + objective_turn_reward
+            advance_reward = on_obj_reward + vp_margin_reward
             reward_breakdown['base_actions'] = 0.0
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = advance_reward
@@ -682,7 +678,7 @@ class RewardCalculator:
             wait_reward = self._wait_reward(acting_unit, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
-            wait_reward += objective_turn_reward
+            wait_reward += vp_margin_reward
             reward_breakdown['total'] = wait_reward
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
@@ -697,9 +693,9 @@ class RewardCalculator:
             if not charge_succeeded:
                 unit_rewards = self._get_unit_reward_config(acting_unit)
                 charge_fail_val = float(require_key(require_key(unit_rewards, "base_actions"), "charge_fail"))
-                charge_fail_val += objective_turn_reward
-                reward_breakdown['base_actions'] = charge_fail_val - objective_turn_reward
-                reward_breakdown['penalties'] = charge_fail_val - objective_turn_reward
+                charge_fail_val += vp_margin_reward
+                reward_breakdown['base_actions'] = charge_fail_val - vp_margin_reward
+                reward_breakdown['penalties'] = charge_fail_val - vp_margin_reward
                 reward_breakdown['total'] = charge_fail_val
                 if game_state.get("game_over", False):
                     situational_reward = self._get_situational_reward(game_state)
@@ -716,8 +712,8 @@ class RewardCalculator:
                 raise ValueError(f"Charge target not found: {target_squad_id}")
             enriched_target = self._enrich_unit_for_reward_mapper(target)
             all_targets = [self._enrich_unit_for_reward_mapper(t) for t in self._get_all_valid_targets(acting_unit, game_state)]
-            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + objective_turn_reward
-            reward_breakdown['base_actions'] = charge_reward - objective_turn_reward
+            charge_reward = reward_mapper.get_charge_priority_reward(enriched_unit, enriched_target, all_targets, game_state) + vp_margin_reward
+            reward_breakdown['base_actions'] = charge_reward - vp_margin_reward
             reward_breakdown['total'] = charge_reward
             if game_state.get("game_over", False):
                 situational_reward = self._get_situational_reward(game_state)
@@ -872,40 +868,8 @@ class RewardCalculator:
                     f"(controlled_player={controlled_player}, opponent_player={opponent_player})"
                 )
 
-        # Add objective control reward at end of turn 5
-        # CRITICAL: Calculate objective reward even if situational_modifiers is missing
-        objective_reward = self._calculate_objective_reward_turn5(game_state, unit_rewards)
-
-        # Diagnostic logging (only if not quiet)
-        if not self.quiet and objective_reward > 0:
-            current_turn = require_key(game_state, "turn")
-            # Meme lecture pure que dans `_calculate_objective_reward_turn5` : un LOG de
-            # diagnostic ne doit surtout pas reecrire l'etat de controle qu'il decrit.
-            _controllers = require_key(game_state, "objective_controllers")
-            controlled_count = sum(
-                1 for controller in _controllers.values() if controller == controlled_player
-            )
-            print(
-                f"🎯 OBJECTIVE REWARD: Turn={current_turn}, "
-                f"controlled_player={controlled_player}, "
-                f"controlled_objectives={controlled_count}, Reward={objective_reward:.1f}"
-            )
-
-        return base_reward + objective_reward
+        return base_reward
     
-    def _get_primary_objective_config(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Return primary objective config if present, else None."""
-        primary_objective = game_state.get("primary_objective")
-        if primary_objective is None:
-            return None
-        if isinstance(primary_objective, list):
-            if len(primary_objective) != 1:
-                raise ValueError("primary_objective must contain exactly one config for rewards")
-            primary_objective = primary_objective[0]
-        if not isinstance(primary_objective, dict):
-            raise TypeError(f"primary_objective is {type(primary_objective).__name__}, expected dict")
-        return primary_objective
-
     def _get_controlled_player_unit(self, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Return one unit for the controlled player (if any)."""
         controlled_player = require_key(self.config, "controlled_player")
@@ -927,8 +891,8 @@ class RewardCalculator:
         if not result.get("phase_transition") or result.get("next_phase") != "move":
             return 0.0
         controlled_player = int(require_key(self.config, "controlled_player"))
-        # MA phase command : meme raison que dans _calculate_objective_reward_per_turn (la
-        # transition command -> move existe pour les deux joueurs a chaque round).
+        # MA phase command uniquement : la transition command -> move existe pour les deux
+        # joueurs a chaque round, la penalite ne s applique qu au joueur controle.
         if int(require_key(game_state, "current_player")) != controlled_player:
             return 0.0
         current_turn = require_key(game_state, "turn")
@@ -954,175 +918,43 @@ class RewardCalculator:
                 incoherent_count += 1
         return -incoherent_w * incoherent_count
 
-    def _calculate_objective_reward_per_turn(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
-        """
-        Reward controlled player based on objectives controlled at turn start.
-        Applied once per turn when transitioning into move phase.
-        """
-        if not result.get("phase_transition") or result.get("next_phase") != "move":
-            return 0.0
+    def _calculate_vp_margin_reward(self, game_state: Dict[str, Any]) -> float:
+        """Ledger VP-margin : verse `vp_margin_factor × Δ(VP_moi − VP_lui)` depuis le dernier appel.
 
-        primary_objective = self._get_primary_objective_config(game_state)
-        if primary_objective is None:
-            return 0.0
+        Tiré à chaque step depuis `calculate_reward`, AVANT le tri action/réponse système.
+        Delta nul sur la majorité des steps (pas de changement de VP) — le versement se
+        déclenche dès que des VP sont enregistrés dans `game_state["victory_points"]`, quel
+        que soit `current_player` (B6 : les VP adverses tombent pendant son tour et sont
+        accumulés par BotControlledEnv dans le step gym de l'agent).
 
-        # MA phase command, pas celle de l'adversaire.
-        #
-        # 07.02 : un battle round comprend UN tour par joueur, chacun avec sa propre phase
-        # command — la transition command -> move survient donc DEUX fois par round. Sans ce
-        # filtre, le premier des deux passages arme `objective_rewarded_turns` et l'agent est
-        # paye pour les objectifs qu'il tient au debut du tour ADVERSE.
-        #
-        # Le critere est l'alignement avec le SCORING DU MOTEUR, et rien d'autre :
-        # GameStateManager._apply_primary_objective_scoring_single attribue les VP au joueur
-        # ACTIF, une fois par tour, a partir de start_turn. Ce sont ces VP qui decident du
-        # vainqueur (determine_winner_with_method) ; payer a la frontiere adverse recompenserait
-        # un etat de controle qui ne se convertit en rien.
-        #
-        # ⚠️ Aucun PDF de Documentation/40k_rules ne fonde ce decoupage — le corpus est celui des
-        # regles de BASE, sans mission pack : les termes « victory point » et « primary » n'y
-        # apparaissent nulle part. 14.02 traite du CONTROLE (determine a la fin de chaque phase
-        # et de chaque tour, symetriquement pour les deux joueurs), pas du marquage ; 08.05 dit
-        # seulement qu'une mission PEUT se resoudre a la fin de la phase command. L'instant de
-        # marquage vient de config/primary_objective/*/Objectives_Control.json, propre au projet.
-        # Donc : si ce fichier change de timing, ce filtre doit le suivre — il n'a pas d'autre
-        # source de verite que lui.
-        # ⚠️ Limite connue : cette mission fait marquer le SECOND joueur a la fin de la phase
-        # fight au round 5 (`round5_second_player_phase`). Ce versement-la reste calcule a la
-        # frontiere command -> move, donc a un instant different de l'attribution des VP dans ce
-        # seul cas (1 marquage sur 4, et seulement quand l'agent joue en second).
+        Somme téléscopique : ∑ versements = vp_margin_factor × (VP_moi − VP_lui) finaux,
+        y compris en fin par élimination.
+
+        KeyError si `vp_margin_paid` absent : doit être initialisé à 0 aux deux sites de
+        création de game_state dans w40k_core.py (T1 — pas de défaut).
+        """
         controlled_player = int(require_key(self.config, "controlled_player"))
-        if int(require_key(game_state, "current_player")) != controlled_player:
-            return 0.0
-
-        scoring_cfg = require_key(primary_objective, "scoring")
-        start_turn = require_key(scoring_cfg, "start_turn")
-        current_turn = require_key(game_state, "turn")
-        if current_turn < start_turn:
-            return 0.0
-
-        reward_key = (current_turn, controlled_player)
-        if once_claimed(game_state, "objective_rewarded_turns", reward_key):
-            return 0.0
-
-        # Même invariant : _get_controlled_player_unit avant once_claim.
-        acting_unit = self._get_controlled_player_unit(game_state)
-        once_claim(game_state, "objective_rewarded_turns", reward_key)
-        if not acting_unit:
-            return 0.0
-
-        unit_rewards = self._get_unit_reward_config(acting_unit)
-        objective_rewards = require_key(unit_rewards, "objective_rewards")
-        objective_reward_factor = float(require_key(objective_rewards, "objective_reward_factor"))
-
-        # LECTURE PURE de l'etat 14.02, et non un recomptage : recalculer le controle le
-        # REECRIRAIT (`calculate_objective_control`). Tant que cette
-        # fonction ne versait rien, la mutation n'arrivait jamais ; la rendre effective aurait
-        # fait recalculer le controle depuis un chemin de RECOMPENSE, hors des frontieres ou la
-        # regle 14.02 l'autorise (run_objective_control_checkpoint) — donc un reward capable de
-        # deplacer les VP et l'observation.
-        # Ici on compte les controleurs deja figes, ceux-la memes que le scoring vient d'ecrire a
-        # la phase command : le reward et les VP partent du MEME comptage, par construction,
-        # sans second calcul qui pourrait diverger (methode de controle, egalites).
-        objective_controllers = require_key(game_state, "objective_controllers")
         opponent_player = 2 if controlled_player == 1 else 1
-        controlled_objectives = sum(
-            1 for controller in objective_controllers.values() if controller == controlled_player
-        )
-        opponent_objectives = sum(
-            1 for controller in objective_controllers.values() if controller == opponent_player
-        )
-        # L'echantillonnage des objectifs tenus (controlled/opponent_objective_samples_*)
-        # occupait cette place : une MESURE branchee sur ce calcul de RECOMPENSE, donc soumise a
-        # ses gardes de sortie. Il vit desormais dans
-        # GameStateManager._apply_primary_objective_scoring_single, au moment exact ou les VP
-        # sont attribues (meme instant que la lecture ci-dessus).
 
-        # MULTIPLE EXACT DES VP DU TOUR, et non une formule propre a la recompense.
-        # `reward_per_objective * mes_objectifs` (+ un forfait d'avance) etait LINEAIRE alors que
-        # la mission est un ESCALIER plafonne : tenir 3, 4 ou 5 objectifs rapporte exactement
-        # autant que 2 (5 VP si >=1, 5 si >=2, 5 si j'en tiens plus, plafond 15). Le reward
-        # payait 10 de plus par zone supplementaire — un signal que le jeu ne rend jamais, qui
-        # pousse a s'etaler au lieu de consolider et de PRIVER l'adversaire. Un seul facteur
-        # d'echelle demeure : la forme appartient a la mission.
-        total_reward = objective_reward_factor * primary_objective_points(
-            scoring_cfg, controlled_objectives, opponent_objectives
-        )
+        victory_points = require_key(game_state, "victory_points")
+        my_vp = float(require_key(victory_points, controlled_player))
+        opp_vp = float(require_key(victory_points, opponent_player))
+        current_margin = my_vp - opp_vp
 
-        return total_reward
+        paid_so_far = require_key(game_state, "vp_margin_paid")
+        delta = current_margin - paid_so_far
+        if delta == 0.0:
+            return 0.0
 
-    def _calculate_objective_reward_turn5(self, game_state: Dict[str, Any], unit_rewards: Dict[str, Any]) -> float:
-        """
-        Calculate reward for objective control at end of turn 5.
-        
-        Simple approach: Reward per objective controlled by the controlled player.
-        Only applies when game ends at turn 5 (not elimination).
-        Reward value is read from config: objective_rewards.reward_per_objective_turn5
-        
-        Returns:
-            Reward value (reward_per_objective * number of objectives controlled by the controlled player)
-        """
-        # Only apply at end of turn 5 (not elimination)
-        current_turn = require_key(game_state, "turn")
-        turn_limit_reached = game_state.get("turn_limit_reached", False)
-        
-        # Check if game ended at turn 5
-        # Either: turn_limit_reached is True (turn limit reached)
-        # Or: turn > 5 (standard end of turn 5)
-        is_turn5_end = turn_limit_reached or (current_turn > 5)
-        
-        if not is_turn5_end:
-            return 0.0
-        
-        # Check if game ended by elimination (not turn limit)
-        # If winner is determined by elimination, don't give objective rewards
-        # (objectives only matter when game ends at turn 5)
-        living_units_by_player = {}
-        units_cache = require_key(game_state, "units_cache")
-        for _unit_id, cache_entry in units_cache.items():
-            player = cache_entry["player"]
-            if player not in living_units_by_player:
-                living_units_by_player[player] = 0
-            living_units_by_player[player] += 1
-        
-        # If one player has no living units, game ended by elimination (not turn 5)
-        if len(living_units_by_player) < 2:
-            return 0.0
-        
-        # Both players still alive - game ended at turn 5.
-        # Calculate objectives controlled by the controlled player.
-        if not self.state_manager:
-            return 0.0
-        
-        # LECTURE PURE de l'etat 14.02, jumeau exact de `_compute_objective_hold_reward` (~l.963,
-        # meme raisonnement, meme piege) : recalculer le controle le REECRIRAIT
-        # (`calculate_objective_control`), hors des frontieres de phase et de tour ou 14.02
-        # l'autorise. Le compteur ci-dessous lit les controleurs DEJA figes, ceux du dernier
-        # checkpoint — un seul comptage, celui de la regle.
-        #
-        # Le second lecteur qui rendait ce piege couteux — le solde des intentions de zone, qui
-        # relisait ces memes controleurs juste apres au step terminal — a disparu le 2026-09-09
-        # avec les intentions. Le raisonnement, lui, tient sans lui.
-        controlled_player = int(require_key(self.config, "controlled_player"))
-        objective_controllers = require_key(game_state, "objective_controllers")
-        controlled_objectives = sum(
-            1 for controller in objective_controllers.values() if controller == controlled_player
-        )
-        
-        # Get reward per objective from config (REQUIRED - raise error if missing)
-        if "objective_rewards" not in unit_rewards:
-            raise KeyError(f"Unit rewards missing required 'objective_rewards' section")
-        
-        objective_rewards = unit_rewards["objective_rewards"]
-        if "reward_per_objective_turn5" not in objective_rewards:
-            raise KeyError(f"Objective rewards missing required 'reward_per_objective_turn5' value")
-        
-        reward_per_objective = objective_rewards["reward_per_objective_turn5"]
-        
-        total_reward = reward_per_objective * controlled_objectives
-        
-        return total_reward
-    
+        agent_key = require_key(self.config, "controlled_agent")
+        unit_rewards = self.rewards_config[agent_key]
+        objective_rewards = require_key(unit_rewards, "objective_rewards")
+        vp_margin_factor = float(require_key(objective_rewards, "vp_margin_factor"))
+
+        game_state["vp_margin_paid"] = current_margin
+        return vp_margin_factor * delta
+
+
     def _squad_combat_shaping(self, combat: Dict[str, Any], is_victim, shaping: Dict[str, Any]) -> float:
         """Valeur proportionnelle-points des degats subis par les figurines dont
         `is_victim(target_player)` est vrai, dans un summary de resolve_squad_*.

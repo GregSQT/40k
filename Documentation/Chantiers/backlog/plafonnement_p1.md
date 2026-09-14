@@ -362,6 +362,7 @@ log-prob 1,7 × 10⁻⁴).
 | S20 | Ventiler les pénalités −97 | C5 | ☐ non investigué | tracker | |
 | S21 | K ≈ 316 rollouts pour distinguer ‖G‖² = 0 de 8 × 10⁻⁵ | C3 | ✗ jugé inutile pour la décision | ~4 h | même à la borne haute, l'update est du bruit à > 97,8 % |
 | S22 | Second run traité entnorm (variance entre entraînements) | B1 | ☐ non fait | ~6 h | écart holdout < 10 points → « pas de verdict » selon le critère écrit ; remplacé par la mesure S13 plus directe |
+| S24 | **Marge de VP** (B6) : `vp_margin_factor × Δ(VP_moi − VP_lui)` en ledger, à la place de `objective_reward_factor × VP_propres` ; échauffement du critic `value_warmup_updates` | C1, C5 | ☑ **code livré le 2026-09-14 en worktree (§5.12), merge et run après le verdict S11** | moteur + tracker + PPO + contrat | somme téléscopique = 6 × marge finale ; les VP concédés coûtent −6 chacun (0 avant) ; Corr(ΔVP_moi, Δmarge) = 0,82 sur 40 parties → additionner les deux termes aurait fait +11 / −5, rejeté |
 | S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (16 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ☑ **testée (2026-09-14, §5.9) → ✗ détruit** : 0,50 → 0,41 en 8 000 épisodes ; λ change la cible du critic, la prédiction f supposait le critic fixe | config `x1_lineage`, 5 lancements (3 tués par la RAM, 1 correctif de collecte, 1 jugé) | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; VRAM mesurée : 3,80 Go réservés à 2 040, 7,47 à 4 080 (replanterait) ; RAM buffer 3,72 Go |
 
 ---
@@ -664,6 +665,58 @@ différence avec `run_20260912-065925` : la récompense de tir et de mêlée est
 plus le jet. Jugé par la règle §7 (moyenne de `03_selfplay/P0` sur 20 000–30 000 contre 0,601 /
 plat 0,585 ; sondes ; garde à 20 000). Résultat à consigner ici.
 
+### 5.12 B6 — marge de VP en ledger + échauffement du critic (2026-09-14, décision utilisateur) — CODE LIVRÉ EN WORKTREE, RUN APRÈS S11
+
+**Décision.** Le terme d'objectif `objective_reward_factor × VP_propres` (versé une fois par tour à
+la frontière command → move, joueur contrôlé seulement) est remplacé par un **ledger de marge** :
+à chaque appel de `calculate_reward`, `vp_margin_factor × Δ(VP_moi − VP_lui)` depuis le dernier
+versement, `game_state["vp_margin_paid"]` servant de filigrane. Facteur 6 inchangé. Pourquoi
+remplacer et non ajouter : Corr(ΔVP_moi, Δmarge) = 0,82 sur 40 parties, les deux termes
+ensemble auraient valu +11 par VP propre et −5 par VP cédé ; le ledger seul vaut +6 / −6.
+Pourquoi un ledger et non un versement par tour : la somme télescope en **6 × marge finale**, y
+compris quand la partie se termine par élimination ; et les VP de l'adversaire tombent pendant
+SON tour — aucun filtre `current_player`, `BotControlledEnv` (`accumulate_reward=True`) crédite
+le step gym de l'agent. Le bonus « se poser sur un objectif » (`on_objective_bonus`) est conservé
+et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
+
+**Livré (worktree `worktree-marge-vp-b6`, non mergé : le run S11 lit main et `config/` à chaud).**
+- `engine/reward_calculator.py::_calculate_vp_margin_reward`, appelée au site des récompenses de
+  frontière (avant le tri action / réponse système), propagée par tous les chemins de retour ;
+  `_calculate_objective_reward_per_turn`, `_calculate_objective_reward_turn5` (mort :
+  `reward_per_objective_turn5 = 0`) et `_get_primary_objective_config` supprimées.
+  `vp_margin_paid` absent → `ConfigurationError` (T1), initialisé à 0 aux deux sites de création
+  de `game_state` dans `w40k_core.py`.
+- `REWARD_BREAKDOWN_COMPONENTS` / `DENSE_REWARD_BREAKDOWN_COMPONENTS` : composant `vp_margin`.
+  Tracker : `reward/vp_margin_total` ; `reward/objective_share` = (objective⁺ + vp_margin⁺) /
+  positifs (« part de score ») ; `01_VP/f_obj_rewards` = `vp_margin_factor × marge finale`.
+- Config (worktree seulement) : `objective_rewards.vp_margin_factor: 6.0` remplace
+  `objective_reward_factor` et `reward_per_objective_turn5` dans les deux `rewards_config`.
+- **Échauffement du critic** (`ai/patched_ppo.py`) : clé `model_params.value_warmup_updates`
+  (kwarg du constructeur, comme `entropy_normalize_by_legal` ; dans `_PLAIN_CURRICULUM_KEYS`
+  pour `--append`). Pendant les N premières updates du run, `loss = vf_coef × value_loss` —
+  politique et entropie annulées, early-stop KL désactivé ; `train/value_warmup_active` publié.
+  Le compteur `_vwu_done` est exclu du zip : l'échauffement est un régime de run, jamais hérité
+  d'un checkpoint. Motif : le critic a appris une cible qui payait +6 par VP propre et 0 par VP
+  cédé ; à la reprise, sa cible change, et le premier gradient de politique serait calculé sur
+  des avantages faux.
+- Tests (rouge par mutation, constatés) : `test_objective_turn_reward.py` réécrit (versement =
+  6 × Δmarge, delta adverse hors tour, deux appels → 0, filigrane, erreur si clé absente,
+  ventilation) — rouge sur « filtre `current_player` réintroduit » et « filigrane non écrit » ;
+  `test_s11_reward_on_expectation_e2e.py` : somme des `vp_margin` sur une partie moteur réelle =
+  6 × marge finale (rouge sur le filtre, marge 25 → 150 attendus manqués) ;
+  `tests/unit/ai/test_critic_warmup.py` (8) : politique immobile / critic mobile pendant le
+  warmup (rouge si la loss complète revient), compteur saturant, kwarg accepté en `--new`,
+  `_vwu_done` non hérité (rouge sans `_excluded_save_params`), zip antérieur à B6 chargé à 0.
+  Fixtures adaptées : `test_reward_calculator.py`, `test_agent_decision_mechanism.py`,
+  `test_terminal_info_all_paths.py`, `test_metrics_single_writer.py`, `test_metrics_tracker_utils.py`,
+  `test_train_helpers.py` (couverture synthétique de la clé). 241 verts sur les onze fichiers touchés.
+
+**Reste à faire après le verdict S11** : merge dans main ; `python3 -m ai.training_contract --init`
+et `write_contract(P0_zip, build_contract(rewards, agent))` (la table de récompense change de
+clés, le contrat refuserait la reprise) ; `value_warmup_updates` dans le profil `x1_lineage`
+(valeur à choisir, ~10 updates = 81 600 pas) ; run « S11 + marge » par la commande habituelle
+`--etape P1`, jugé par la règle §7.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -676,6 +729,7 @@ plat 0,585 ; sondes ; garde à 20 000). Résultat à consigner ici.
 - [x] **Levier S23** (λ 0,2 + 32 640 / 2 040) — testé dans la nuit du 2026-09-13 au 14, réfuté (§5.9).
 - [x] **`vf_coef` 0,3** — run du 2026-09-14 02:36 → 10:26, réfuté (§5.10).
 - [ ] **S11** — code livré et mergé (§5.11) ; run en cours depuis le 2026-09-14 10:30.
+- [ ] **B6 / S24** — code livré en worktree (§5.12) ; merge, contrat, profil et run après le verdict S11.
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
 - [ ] Ventilation des pénalités −97 (C5) ; déploiement auto à 0,50 (D4).

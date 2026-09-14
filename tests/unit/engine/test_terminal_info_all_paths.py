@@ -84,8 +84,7 @@ def _rewards() -> Dict[str, Any]:
         AGENT_KEY: {
             "base_actions": {"wait": -0.1, "ranged_attack": 1.0},
             "objective_rewards": {
-                "objective_reward_factor": 6.0,
-                "reward_per_objective_turn5": 0.0,
+                "vp_margin_factor": 6.0,
                 "on_objective_bonus": 5.0,
             },
         }

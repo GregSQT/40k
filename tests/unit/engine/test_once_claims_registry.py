@@ -39,7 +39,6 @@ from tests.unit.engine.test_objective_scoring import (
 # pour les événements de choix — et le registre doit les porter sans les confondre.
 _PRODUCTION_CLAIMS = [
     ("primary_objective_scored_turns", ("obj1", 1, 1)),
-    ("objective_rewarded_turns", (1, 1)),
     ("coherency_penalized_turns", (1, 1)),
     ("cp_gain_on_objective_resolved", (1, 1)),
     ("_choice_timing_fired_events", "phase_start|1|fight|1|3|rule_x"),
@@ -61,15 +60,15 @@ class TestOnceClaimsSemantics:
     def test_claim_then_claimed(self):
         """once_claim : après réclamation, la même clé est vue comme réclamée."""
         gs: Dict[str, Any] = {}
-        once_claim(gs, "objective_rewarded_turns", (1, 1))
-        assert once_claimed(gs, "objective_rewarded_turns", (1, 1)) is True
+        once_claim(gs, "coherency_penalized_turns", (1, 1))
+        assert once_claimed(gs, "coherency_penalized_turns", (1, 1)) is True
 
     def test_other_key_same_family_not_claimed(self):
         """once_key : un autre (tour, joueur) de la MÊME famille reste libre."""
         gs: Dict[str, Any] = {}
-        once_claim(gs, "objective_rewarded_turns", (1, 1))
-        assert once_claimed(gs, "objective_rewarded_turns", (1, 2)) is False
-        assert once_claimed(gs, "objective_rewarded_turns", (2, 1)) is False
+        once_claim(gs, "coherency_penalized_turns", (1, 1))
+        assert once_claimed(gs, "coherency_penalized_turns", (1, 2)) is False
+        assert once_claimed(gs, "coherency_penalized_turns", (2, 1)) is False
 
     def test_families_are_isolated(self):
         """once_famille : réclamer dans une famille n'en réclame aucune autre.
@@ -79,7 +78,7 @@ class TestOnceClaimsSemantics:
         """
         gs: Dict[str, Any] = {}
         once_claim(gs, "coherency_penalized_turns", (1, 1))
-        assert once_claimed(gs, "objective_rewarded_turns", (1, 1)) is False
+        assert once_claimed(gs, "primary_objective_scored_turns", (1, 1)) is False
         assert once_claimed(gs, "cp_gain_on_objective_resolved", (1, 1)) is False
 
     def test_claim_is_idempotent(self):

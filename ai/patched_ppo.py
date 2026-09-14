@@ -164,7 +164,13 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
 
-    def __init__(self, *args: Any, entropy_normalize_by_legal: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        entropy_normalize_by_legal: bool = False,
+        value_warmup_updates: int = 0,
+        **kwargs: Any,
+    ) -> None:
         """`entropy_normalize_by_legal` : cle `model_params`, voir `entropy_loss_normalized_by_legal`.
 
         Absente (False) : le terme d'entropie de la loss reste `-mean(H)`, strictement le
@@ -172,11 +178,21 @@ class PatchedMaskablePPO(MaskablePPO):
         calculee sans gradient. Attribut d'instance ordinaire : SB3 le serialise dans le `data` du
         zip et le restaure au chargement ; `_apply_curriculum_model_params` (ai/train.py) le
         reapplique depuis le profil en `--append`.
+
+        `value_warmup_updates` (B6) : nombre d'updates du run pendant lesquelles seule la value
+        loss est optimisee (voir `train`). Meme cycle de vie que la cle ci-dessus. Le compteur
+        `_vwu_done` n'est PAS serialise (`_excluded_save_params`) : l'echauffement est un regime
+        de RUN, rejoue par tout run dont le profil porte la cle, jamais herite d'un checkpoint.
         """
         self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
             entropy_normalize_by_legal
         )
+        self.value_warmup_updates: int = int(value_warmup_updates)
+        self._vwu_done: int = 0
         super().__init__(*args, **kwargs)
+
+    def _excluded_save_params(self) -> list[str]:
+        return super()._excluded_save_params() + ["_vwu_done"]
 
     # ── 2.1 — GPU-resident buffer ─────────────────────────────────────────────────────────────
 
@@ -326,7 +342,16 @@ class PatchedMaskablePPO(MaskablePPO):
                     entropy_loss_normalized if self.entropy_normalize_by_legal else entropy_loss
                 )
 
-                loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef * value_loss
+                # ECHAUFFEMENT CRITIC (décision B) : pendant les `value_warmup_updates`
+                # premières updates du run, seul le critic s'ajuste. La politique et l'entropie
+                # sont annulées (pas seulement réduites) pour éviter tout déplacement de la
+                # politique pendant que le critic recalibre sa cible. L'early-stop KL n'est pas
+                # applicable : sans gradient de politique, approx_kl n'a pas de sens.
+                _in_warmup: bool = self._vwu_done < self.value_warmup_updates
+                if _in_warmup:
+                    loss = self.vf_coef * value_loss
+                else:
+                    loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef * value_loss
 
                 # Norme du gradient de CHAQUE terme, pondere comme dans la loss.
                 # `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
@@ -352,8 +377,10 @@ class PatchedMaskablePPO(MaskablePPO):
                 with th.no_grad():
                     approx_kl_div_t = th.mean((th.exp(log_ratio) - 1) - log_ratio)
 
-                if self.target_kl is not None:
+                if self.target_kl is not None and not _in_warmup:
                     # Early-stopping exige la valeur scalaire maintenant.
+                    # Désactivé pendant le warmup critic : pas de gradient de politique,
+                    # approx_kl ne mesure pas une divergence de politique réelle.
                     approx_kl_val = float(approx_kl_div_t.cpu().numpy())
                     approx_kl_divs.append(approx_kl_val)
                     if approx_kl_val > 1.5 * self.target_kl:
@@ -471,6 +498,11 @@ class PatchedMaskablePPO(MaskablePPO):
         # Bootstrap : last_values GPU vs last_value CPU (posés par _collect_rollouts_distributed).
         self.logger.record("diag/last_values_gpu_mean", getattr(self, "_diag_last_values_gpu_mean", _nan))
         self.logger.record("diag/last_values_cpu_mean", getattr(self, "_diag_last_values_cpu_mean", _nan))
+        # Echauffement critic B6 : 1 pendant les N premières updates, 0 ensuite.
+        _was_warmup: bool = self._vwu_done < self.value_warmup_updates
+        self.logger.record("train/value_warmup_active", int(_was_warmup))
+        if _was_warmup:
+            self._vwu_done += 1
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 
