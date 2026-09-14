@@ -311,7 +311,7 @@ log-prob 1,7 × 10⁻⁴).
 | D3 | Siège P2 sur-représenté (0,70) | P2 plus dur (0,627 vs 0,656 en jeu, 85,7 vs 97,7 en holdout) | ◐ décision du 2026-09-11, effet non isolé | l'écart de siège n'a pas bougé depuis le 2026-08-12 (12 points) |
 | D4 | 10 % d'épisodes déployés par le moteur joués à 0,50 | position non choisie par l'agent | ☐ non traité | `s_win_rate_deploy_auto` 0,50 vs 0,69 en actif ; `r_obj_held_diff_deploy_auto` −0,24 |
 | D5 | Deux fichiers de scénario | diversité de terrain faible | ☐ non testé | É9 (second scénario) ouvert par ailleurs |
-| D6 | Moteur modifié pendant la lignée (35 commits entre les holdouts) | références invalidées | ☑ acté, pas une cause du plateau ; **complété §9.1 : le seuil 0,65 a été posé le 09-11 sur un jeu où P1 faisait 0,713** | P0 et P1 jouent le même moteur ; seules les comparaisons avant/après sont interdites — et la référence 0,713 (curriculum.log ligne 10, autre P0, autre observation) n'est PAS comparable au 0,60 actuel ; le seul point de référence valide est ce qu'un exploiteur atteint MAINTENANT (S25) |
+| D6 | Moteur modifié pendant la lignée (35 commits entre les holdouts) | références invalidées | ☑ acté, pas une cause du plateau ; **complété §9.1 : le seuil 0,65 a été posé le 09-11 sur un jeu où P1 faisait 0,713** | P0 et P1 jouent le même moteur ; seules les comparaisons avant/après sont interdites — et la référence 0,713 (curriculum.log ligne 11, autre P0, autre observation) n'est PAS comparable au 0,60 actuel ; le seul point de référence valide est ce qu'un exploiteur atteint MAINTENANT (S25) |
 
 ### E. Mesure et critère
 
@@ -1073,7 +1073,7 @@ du dossier. Ce qui suit est **vérifié dans le dépôt** sauf mention contraire
 |---|---|---|---|---|---|
 | 7 | P1 | x1_long, new | 100 000 | 0,737 | avant option A |
 | 9 | P1 | from:P00 | 80 000 | 0,697 | avant option A |
-| 10 | P1 | **x1_lineage, from:P0** | 30 008 | **0,713** | entre la ligne P0 à 75 001 et le P0 actuel (09-10 22:31) |
+| 11 | P1 | **x1_lineage, from:P0** | 30 008 | **0,713** | run du 09-08 12:03 → 15:49 (autre session : `tb_run.json`, zip `OLD/ArmageddonAgent_x1_P1.zip`) |
 | 14 | P1 | x1_lineage, from:P0 | 30 000 | 0,563 | 09-11 05:06 |
 | 15 | P2 | x1_lineage, from:P1 | 30 000 | 0,650 vs P0, 0,579 vs P1 | 09-11 13:09 |
 
@@ -1085,12 +1085,30 @@ par `ai/bot_doctrines.py`, `ai/benchmark_bots.py` et le cache de meilleure arme 
 `engine/w40k_core.py` ; 0 hit `expected_damage|weapon_damage` dans `engine/observation_*.py`),
 plus deux changements d'observation du 09-09 qui ont imposé un P0 neuf. Le seuil est passé de
 0,55 à 0,65 le 09-11 (§1.4), le jour du 0,563. **Le seuil 0,65 a donc été fixé sur un jeu où P1
-faisait 0,71, et n'a jamais été confronté au jeu actuel.** Réserve : le P0 de la ligne 10 n'est
+faisait 0,71, et n'a jamais été confronté au jeu actuel.** Réserve : le P0 de la ligne 11 n'est
 pas le P0 actuel (75 001 épisodes contre 50 000, autre observation), donc « même adversaire »
 n'est pas acquis et le 0,713 n'est **pas** une référence comparable. **Conclusion sur les
 commits du 09-10 : aucune action code ; la seule référence valide est ce qu'un exploiteur
 atteint maintenant (S25).** Ce que ces commits ont changé pour le joueur (qui tient un
 objectif, adversité des bots) ne se lit pas dans le code, il se lit dans les parties : S27.
+
+
+**Complément d'une troisième session (2026-09-14 soir, vérifié par elle dans les zips et `git log -p`) :**
+le run à 0,713 tournait déjà avec **exactement le profil actuel** (lr 0,001 constant, ent_coef
+0,01, n_steps 8 160, batch 1 020, n_epochs 4, vf_coef 0,17, λ 0,95, target_kl 0,015, pool P0 à
+0,7, bots 0,3, mêmes récompenses hors B6). Ce qui diffère du run à 0,563 : l'**observation**
+(grille 9 → 12 canaux : obscuring, los_exposure, occupant_level ; +20 scalaires OC live/secured,
+mots-clés, split-fire, Ld, siège — commits du 09-08 17:18 au 09-09 19:07, d'où le P0 neuf),
+l'**adversaire** (P0 de 75 001 épisodes sur l'ancienne observation contre 50 000 sur la nouvelle)
+et le **moteur** (les quatre commits du 09-10, move réactif bloqué au contact, verticalité).
+Conséquences : (1) A3 (lr de reprise) perd l'essentiel de son poids — le même lr a extrait 0,71 en
+30 000 épisodes sur l'ancien jeu ; hygiène, pas cause. (2) Le suspect qui touche directement
+l'extraction de signal est l'observation : plus grande à réseau et lr égaux, et les bits de tir
+fractionné y pèsent 85 à 640 fois moins que leur étalon (ROADMAP_INDEX, mesure du 09-11) —
+régression par l'observation en tête de l'étape 3 si S25 plafonne. (3) Réserve honnête : une part
+du 0,713 a pu être l'exploit d'un défaut du moteur corrigé depuis (OC non sommée par figurine,
+57 armes à dégât nul) — le 0,713 ne prouve pas que 0,90 soit atteignable sur le jeu actuel ; c'est
+S25 qui le mesure. Le zip 0,713 ne se charge plus (obs_size 17 091 → 18 204).
 
 ### 9.2 Le régime de reprise double le learning rate
 
@@ -1138,8 +1156,8 @@ E2 / S18 restent clos ; G1 « limite normale » écarté.
    modèles) : table siège × mode. Lecture : si P0 vs P0 argmax s'écarte de 0,50 par siège de
    plus de 5 points, le siège est une variable à équilibrer dans tout ce qui suit.
 2. **S25 — exploiteur de P0, meilleur cas, UN bras** (~6 h) : lr 0,0005, P0 déterministe,
-   siège 0,5, 100 % P0, 60 000 épisodes, sondes à 10 000. Règle : moyenne des 3 dernières
-   sondes ; **≥ 0,68** → le défaut de P1 est dans l'écart de config, bissection en un run par
+   siège 0,5, 100 % P0, 60 000 épisodes, sondes exploiteur de 100 parties tous les 2 000 épisodes
+   (log seulement, cf. §9.6 A3). Règle : moyenne des 3 dernières sondes ; **≥ 0,68** → le défaut de P1 est dans l'écart de config, bissection en un run par
    variable (lr → déterminisme → siège → part de bots) ; **≥ 0,80** → la config P1 est le seul
    problème ; **< 0,62 plat** → goulot = mécanisme, passer au 3.
 3. **Si goulot = mécanisme, dans le dispositif S25, un levier par run, deux graines quand
@@ -1168,6 +1186,31 @@ seul à `win_rate_target` 0,70 par sa sonde de confirmation : à relever à 0,95
 curriculum pour lire jusqu'où il monte.
 
 ---
+
+### 9.6 Exécution autonome (2026-09-14 soir →) — arbitrages pris, contre-relus par un sous-agent {#arbitrages-2026-09-14}
+
+Décision utilisateur : dérouler S27 → S25 → leviers sans attendre ; chaque arbitrage est analysé,
+contre-relu par un sous-agent indépendant (lecture seule du dépôt, preuves fichier:ligne), la
+solution de consensus appliquée et notée ici.
+
+**Livré (merge `9bd6de90b`)** : agent dédié `ArmageddonAgent_x1_expl` (`config/agents/ArmageddonAgent_x1_expl/`,
+copie de la config x1 ; curriculum `order [P0, E0]`, E0 exploiteur `from:P0` ciblant P0 à 100 %,
+`opponent.deterministic true`, `win_rate_target 0,95`, `budget_cap 60000` ; `x1_lineage` à lr 0,0005
+et siège 0,5 ; profils de mesure `x1_seat_p1` / `x1_seat_p2`) ; copies identiques (`cmp`) de P0 zip /
+pkl / run_state / contrat sous `ai/models/ArmageddonAgent_x1_expl/` ; contrat courant de l'agent =
+contrat P0 (0 écart, même empreinte de table `7470725e7d0095b8`) ; `scripts/seat_matrix_probe.py`
+(+ 5 tests) : `evaluate_against_checkpoints` tel quel, plateau déduit du suffixe `_x<N>`.
+
+| # | arbitrage | analyse | contre-relecture | appliqué |
+|---|---|---|---|---|
+| A1 | S25 tourne sous la table **B6** (marge de VP), pas sous la récompense de référence de P1 | l'ancienne récompense d'objectif a été supprimée du code le 09-14 (0 hit `objective_reward_factor` hors doc) ; le run de référence n'est plus rejouable sur main ; `value_warmup_updates 20` reste actif (zip P0 sans marqueur → régime joué) | CONFIRMÉ (`engine/reward_calculator.py:921-952`, `ai/train.py:3928-3935`, `:363-368`) | S25 = meilleur cas **sous B6** ; la bissection contre la config P1 se fera sous B6 (le « run marge » P1 devient le bras de comparaison) |
+| A2 | cellules « P0 échantillonné vs P0 argmax » et « P0 argmax vs P0 argmax » de S27 | le script impose `deterministic=True` (`ai/bot_evaluation.py:2568`) ; la première se lit sur `03_selfplay/P0` de S25 **pendant le warmup** (politique figée au bit près, ~500–1 440 épisodes d'étape) ; la seconde devait venir de la parité d'ouverture | CONTESTÉ sur la seconde : **un exploiteur n'a pas de sonde de parité** (`ai/train.py:6946` monte `ExploiterProbeCallback` seul, `:6996` réserve `PoolEarlyStoppingCallback` aux non-exploiteurs) — donc aucun garde-fou d'appariement zip/pkl sur S25 | P0 vs P0 mesuré par le script sur les deux sièges forcés AVANT S25, lu comme verrou de parité [0,40, 0,60] |
+| A3 | lecture de S25 : sondes exploiteur 100 parties / 2 000 épisodes (pas 10 000 comme écrit en §9.5), confirmation 500 à ≥ 0,95, pas de bloc early_stop, budget en épisodes d'étape | | CONFIRMÉ (`ai/training_callbacks.py:3050-3088`, `:2760`, `ai/curriculum.py:1088`) ; **les sondes exploiteur ne sont PAS publiées dans TensorBoard**, seulement dans le log (`🔬 Sonde exploiteur`) et `curriculum.log` à la clôture | verdict sur la moyenne glissante de 3 sondes calculée depuis le log (300 parties, ±2,9 pts) + `03_selfplay/P0`, `win_rate_overall`, `seat_aware/*` (100 % des épisodes contre P0) |
+| A4 | lr 0,0005, un seul bras | bras 0,001 seulement si S25 ≥ 0,68 | CONFIRMÉ (`ai/train.py:296-304`, `ai/patched_ppo.py:260`, rampe non montée sur scalaire `:4602`) | |
+| A5 | `opponent.deterministic` global atteint l'exploiteur | | CONFIRMÉ (`ai/train.py:5266` → `ai/training_utils.py:154-329` → `ai/env_wrappers.py:445`, `:1199`) | |
+| R1 | **bug attrapé** : `seat_matrix_probe.py` ne posait pas `W40K_BOARD_PATH` → plateau x5 en silence (grille à taille fixe, aucun refus) | | signalé par la contre-relecture (`config/config.json:8`, `engine/spatial_grid.py:547-563`) | corrigé avant toute mesure : `board_path_for_agent`, test ; la sonde de fumée à 8 parties faite avant ce correctif est **jetée** |
+| R2 | le canonique de fin de S25 (`model_ArmageddonAgent_x1_expl.zip`) sera le meilleur instantané **holdout bots** (`save_best_robust`), pas les poids finaux de l'exploiteur ; `_close_exploiter_stage` ne promeut aucun `_E0.zip` | | signalé (`ai/train.py:1538-1559`) | toute mesure a posteriori sur l'exploiteur vise le dernier `ppo_checkpoint` (rotation 3) ; noté, pas modifié |
+| R3 | S27 : seuls les profils forcés mesurent un siège, ils n'existent que dans l'agent expl | | signalé (`ai/bot_evaluation.py:2650-2660`) | toutes les cellules S27 passent `--agent ArmageddonAgent_x1_expl` (tables identiques), y compris P1 `robust_0.9078` |
 
 ## 8. Références
 
