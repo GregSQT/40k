@@ -200,7 +200,7 @@ zip, marqueur anti-rejeu `value_warmup_done_under` : un `--append` ou un `--resu
 redemande l'échauffement sous la même table de récompense le saute, journalisé) — **code livré et mergé le 2026-09-14, contrat P0
 réécrit, `value_warmup_updates: 20` posé ; run « marge » à lancer** ([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12).
 **Point de reprise sans contexte : dossier
-[#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** **Relecture du 2026-09-14 soir ([dossier §9](../Chantiers/backlog/plafonnement_p1.md#relecture-2026-09-14)) : ordre remplacé — mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur agent dédié (S25) → leviers de mécanisme dans ce dispositif, deux graines ; B6 après.** En réserve : S14 / S15, deux λ acteur/critic (à dimensionner).
+[#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** **Relecture du 2026-09-14 soir ([dossier §9](../Chantiers/backlog/plafonnement_p1.md#relecture-2026-09-14)) : ordre remplacé — mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur agent dédié (S25) → leviers de mécanisme dans ce dispositif, deux graines ; B6 après.** Livré le 2026-09-14 soir (merges `9bd6de90b`, `88ac1e367`) : agent dédié `ArmageddonAgent_x1_expl` (config copiée, curriculum P0 + E0, lr 0,0005, siège 0,5, P0 déterministe), `scripts/seat_matrix_probe.py` (plateau déduit de l'agent, threads BLAS limités — mesuré : 456 threads sur 16 cœurs sans le bloc `training_env`), arbitrages contre-relus en [dossier §9.6](../Chantiers/backlog/plafonnement_p1.md#arbitrages-2026-09-14). En réserve : S14 / S15, deux λ acteur/critic (à dimensionner).
 
 ---
 
