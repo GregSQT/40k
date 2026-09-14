@@ -1247,6 +1247,30 @@ P0 1,00 (part de bots 0), VecNormalize chargée, **échauffement critic 20 updat
 `7470725e7d0095b8`, jamais échauffée). Fin attendue vers 04:00 (60 000 épisodes d'étape). Lecture
 par la règle §9.5 sur les sondes exploiteur du log (100 parties / 2 000 épisodes) et `03_selfplay/P0`.
 
+**Lecture à 20 000 épisodes d'étape (2026-09-15, 01:35).** Sondes exploiteur (100 parties, argmax
+contre argmax, holdout, sièges 50/50) à 2 000 / 4 000 / … / 20 000 : 0,43 · 0,55 · 0,58 · 0,49 ·
+0,63 · 0,66 · 0,67 · **0,73** · 0,66 · **0,68** — moyenne des trois dernières **0,69**. Référence P1
+(`run_20260912-065925`) au même point : sonde 0,533, moyenne 0,540. `03_selfplay/P0` (agent
+échantillonné, 10 % d'épisodes déployés par le moteur, fenêtre 500) par tranche de 2 000 : 0,477 →
+0,498 → 0,526 → 0,573 → 0,580 → 0,593 → 0,598 → 0,605 → 0,641, sans plateau (référence sur
+[10 000, 20 000) : 0,571). Déploiement actif 0,665 contre **0,41 en déploiement moteur, en baisse** :
+l'avantage construit passe par le déploiement de l'agent. **Holdout bots à 10 000 : combined 0,887,
+pire bot 0,83, siège 1 0,947 / siège 2 0,839** — 0 % de bots à l'entraînement et la généralité
+tient (P0 : 0,863–0,910 ; P1 : 0,907). Santé : EV 0,87, KL 0,010, coupure après 15–25 mini-lots
+sur 32 (11–16 sur P1), entropie −0,82 → −0,65 (monte, mais l'argmax gagne : l'inverse de S11),
+lr 0,0005 (les trois premières updates du warmup affichent 0,001 dans `train/learning_rate`,
+politique figée alors — à vérifier, sans effet mesurable). Le run continue jusqu'à 60 000 ; la
+branche « ≥ 0,68 → bissection » est déjà la plus probable.
+
+**Bissection préparée (config seule, agent dédié), à lancer après S25 — un GPU, donc en série.**
+S25 diffère du régime P1 par quatre variables : lr 0,0005 / 0,001 ; P0 déterministe / stochastique ;
+siège 0,5 / 0,7 ; 100 % P0 / 70 % P0 + 30 % bots. La récompense B6 est commune à tout ce qui
+suit (§9.6 A1). Ordre : (1) **P1 sous B6** = le « run marge » de l'autre session (référence
+comparable, à lancer par elle ou ici) ; (2) **H1** = S25 + {P0 stochastique, 30 % bots}
+(adversité de P1, régime de S25) ; (3) **H2** = S25 + {lr 0,001, siège 0,7} (régime de P1,
+adversité de S25) ; puis une variable dans la paire désignée. Jugement à 30 000 sur la moyenne
+des trois dernières sondes, comparée à S25 au même point ; écart < 10 points → deuxième graine.
+
 ## 8. Références
 
 - Runs : `tensorboard/x1_lineage_ArmageddonAgent_x1/run_20260912-065925` (P1) ;
