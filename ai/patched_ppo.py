@@ -187,16 +187,34 @@ class PatchedMaskablePPO(MaskablePPO):
         le rejoue pas de lui-meme. Exclure le compteur seul ne suffisait pas : la cle restauree
         au `load` et laissee en place par un profil qui ne la porte pas rejouait N updates
         critic-only en silence.
+
+        MARQUEUR « ECHAUFFE SOUS CETTE TABLE » (decision B du 2026-09-14). La cle vit dans le
+        profil de lignee, donc chaque `--append` suivant la porte encore : sans marqueur, chaque
+        etape rejouait 20 updates critic-only. Deux attributs :
+        - `value_warmup_contract_id` : empreinte de la table de recompense du RUN COURANT
+          (`training_contract.reward_table_fingerprint`), posee par `ai/train.py::arm_value_warmup`
+          a l'ouverture, EXCLUE du zip. Obligatoire des que `value_warmup_updates > 0` :
+          `train` leve si elle manque (T1), un echauffement sans identite ne peut pas s'inscrire ;
+        - `value_warmup_done_under` : empreinte sous laquelle le DERNIER echauffement s'est
+          ACHEVE, ecrite par `train` a la derniere update du regime, SERIALISEE dans le zip.
+          `arm_value_warmup` refuse un run dont le profil porte la cle si le zip charge porte
+          deja cette empreinte. Ecrite a l'ACHEVEMENT et non a l'ouverture : un checkpoint pris
+          au milieu de l'echauffement ne porte pas le marqueur, et `--resume-from` le rejoue en
+          entier — le compteur n'etant pas serialise, un echauffement partiel n'existe pas.
         """
         self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
             entropy_normalize_by_legal
         )
         self.value_warmup_updates: int = int(value_warmup_updates)
         self._vwu_done: int = 0
+        self.value_warmup_contract_id: str | None = None
+        self.value_warmup_done_under: str | None = None
         super().__init__(*args, **kwargs)
 
     def _excluded_save_params(self) -> list[str]:
-        return super()._excluded_save_params() + ["value_warmup_updates", "_vwu_done"]
+        return super()._excluded_save_params() + [
+            "value_warmup_updates", "_vwu_done", "value_warmup_contract_id",
+        ]
 
     def _critic_modules(self) -> tuple[th.nn.Module, th.nn.Module]:
         """Les modules que l'échauffement critic (B6) laisse apprendre — la SEULE partition.
@@ -288,6 +306,13 @@ class PatchedMaskablePPO(MaskablePPO):
         # Échauffement critic (B6) : les paramètres que le warmup laisse apprendre, calculés une
         # fois par update et SEULEMENT pendant le régime (voir `_critic_only_param_ids`).
         _in_warmup: bool = self._vwu_done < self.value_warmup_updates
+        if _in_warmup and self.value_warmup_contract_id is None:
+            raise RuntimeError(
+                "value_warmup_updates > 0 exige value_warmup_contract_id (empreinte de la table "
+                "de recompense du run, posee par ai/train.py::arm_value_warmup) : sans elle, "
+                "l'echauffement ne peut pas inscrire sous quelle table il s'est fait, et le run "
+                "suivant le rejouerait."
+            )
         critic_only_param_ids: frozenset[int] = (
             self._critic_only_param_ids() if _in_warmup else frozenset()
         )
@@ -560,6 +585,10 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("train/value_warmup_active", int(_in_warmup))
         if _in_warmup:
             self._vwu_done += 1
+            if self._vwu_done == self.value_warmup_updates:
+                # Derniere update du regime : le zip retiendra sous quelle table de recompense
+                # cet echauffement s'est acheve (voir `__init__`).
+                self.value_warmup_done_under = self.value_warmup_contract_id
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 

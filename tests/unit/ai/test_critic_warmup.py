@@ -30,9 +30,14 @@ from tests.unit.ai.test_gradient_norm_is_pre_clip import _TinyMaskedEnv
 from tests.unit.ai.test_pointer_head import _ToyEnv
 
 
+#: Empreinte de table de récompense que `ai/train.py::arm_value_warmup` poserait à l'ouverture
+#: du run. Obligatoire dès que `value_warmup_updates > 0` (`train` lève sans elle).
+_TABLE_ID = "table-de-test-0001"
+
+
 def _model(n_warmup: int, **policy_kwargs: Any) -> PatchedMaskablePPO:
     """`MlpPolicy` sur `_TinyMaskedEnv` ; la clé passe par le constructeur, comme en `--new`."""
-    return PatchedMaskablePPO(
+    model = PatchedMaskablePPO(
         "MlpPolicy",
         _TinyMaskedEnv(),
         n_steps=8,
@@ -43,11 +48,13 @@ def _model(n_warmup: int, **policy_kwargs: Any) -> PatchedMaskablePPO:
         policy_kwargs={"net_arch": [8], **policy_kwargs},
         value_warmup_updates=n_warmup,
     )
+    model.value_warmup_contract_id = _TABLE_ID
+    return model
 
 
 def _production_model(n_warmup: int) -> PatchedMaskablePPO:
     """Le VRAI chemin : `PointerMaskablePolicy` + `SpatialCombinedExtractor` (extracteur partagé imposé)."""
-    return PatchedMaskablePPO(
+    model = PatchedMaskablePPO(
         PointerMaskablePolicy, _ToyEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
         device="cpu", verbose=0,
         policy_kwargs={
@@ -57,6 +64,8 @@ def _production_model(n_warmup: int) -> PatchedMaskablePPO:
         },
         value_warmup_updates=n_warmup,
     )
+    model.value_warmup_contract_id = _TABLE_ID
+    return model
 
 
 def _run_one_update(model: PatchedMaskablePPO) -> dict[str, float]:

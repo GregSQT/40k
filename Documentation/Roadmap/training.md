@@ -192,6 +192,11 @@ Le critic ayant appris une cible qui ignorait les VP cédés, la reprise s'ouvre
 `model_params.value_warmup_updates` updates où seule la value loss est optimisée (politique et
 entropie annulées, KL désactivé, `train/value_warmup_active`) — régime de run, jamais hérité
 d'un checkpoint (ni la clé ni le compteur ne voyagent dans le zip ; seul le profil l'active).
+Décision B (2026-09-14) : la clé restant dans `x1_lineage`, le zip retient sous quelle table de
+récompense le dernier échauffement s'est achevé (`value_warmup_done_under`, empreinte clés +
+valeurs de `training_contract.reward_table_fingerprint`), et `arm_value_warmup` (ai/train.py)
+REFUSE un `--append` qui redemanderait l'échauffement sous la même table — retirer la clé du
+profil ou changer la table sont les deux issues, pas de drapeau de contournement.
 Reviews du 2026-09-14 : l'extracteur étant PARTAGÉ (`PointerMaskablePolicy`), tout ce qui n'est
 pas le critic (`mlp_extractor.value_net` + `value_net`) est GELÉ pendant le warmup — paramètres
 (`grad = None`) ET statistiques d'`EntityRunningNorm` (`eval()`), sinon la value loss déplaçait

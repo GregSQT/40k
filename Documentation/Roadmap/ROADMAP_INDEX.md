@@ -196,8 +196,9 @@ dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps — un plat
 (4) **B6, marge de VP en ledger** (`vp_margin_factor × Δ(VP_moi − VP_lui)` à la place de
 `objective_reward_factor × VP_propres`, un VP cédé coûte −6) **+ échauffement du critic**
 (`value_warmup_updates`, extracteur et statistiques de normalisation gelés, jamais hérité d'un
-zip) — **code livré et mergé le 2026-09-14, contrat P0 réécrit, `value_warmup_updates: 20`
-posé ; run « marge » à lancer** ([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12).
+zip, marqueur anti-rejeu `value_warmup_done_under` : un `--append` qui redemande l'échauffement
+sous la même table de récompense est refusé) — **code livré et mergé le 2026-09-14, contrat P0
+réécrit, `value_warmup_updates: 20` posé ; run « marge » à lancer** ([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12).
 **Point de reprise sans contexte : dossier
 [#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
 plafond 0,65 par un exploiteur contre P0 (jamais fait).
