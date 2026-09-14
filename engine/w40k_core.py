@@ -2527,12 +2527,12 @@ class W40KEngine(gym.Env):
     def _account_step_metrics(self, reward: float, reserves_penalty: float) -> None:
         """COMPTABILITE D'UN STEP MOTEUR : accumulateurs, ventilation, penalite de reserves.
 
-        DEUX APPELANTS, et le contrat est qu'ils comptent IDENTIQUEMENT : la porte « limite de
-        tours atteinte » de `step_with_mask` et son retour normal. Les quatre gestes sont
-        solidaires — `_build_terminal_info` les LIT juste apres, `episode_reward_accumulator`
-        remplissant `info["episode"]["r"]` — et la porte est nee sans aucun des quatre. Une
-        exigence d'identite tenue par une recopie ne survit pas au premier geste ajoute : un seul
-        corps, appele des deux endroits.
+        TROIS APPELANTS, et le contrat est qu'ils comptent IDENTIQUEMENT : les portes « limite de
+        tours atteinte » et « pool vide -> advance_phase » de `step_with_mask` et son retour
+        normal. Les quatre gestes sont solidaires — `_build_terminal_info` les LIT juste apres,
+        `episode_reward_accumulator` remplissant `info["episode"]["r"]` — et chaque porte est nee
+        sans aucun des quatre. Une exigence d'identite tenue par une recopie ne survit pas au
+        premier geste ajoute : un seul corps, appele des trois endroits.
 
         VENTILATION cumulee ICI, pas cote callback. Chaque step moteur pose la sienne dans
         `last_reward_breakdown` et l'ecrase au suivant. Le callback d'entrainement ne voit, lui,
@@ -3296,7 +3296,7 @@ class W40KEngine(gym.Env):
             _reserves = self._drain_pending_reserves()
             reward += _reserves
             # COMPTABILITE AVANT le bilan, comme au retour normal (cf. `_account_step_metrics`,
-            # dont cette porte est le second appelant) : `_build_terminal_info` LIT les
+            # dont cette porte est un des trois appelants) : `_build_terminal_info` LIT les
             # accumulateurs et la ventilation. La porte doit les poser elle-meme — le retour
             # normal ne les met a jour qu'APRES ce return, donc sans cet appel `info["episode"]`
             # vaut {'r': 0.0, 'l': 0} et `last_reward_breakdown` survit au reset().
@@ -3380,11 +3380,27 @@ class W40KEngine(gym.Env):
             # ci-dessus peut franchir la limite de tours, et l'episode se terminait alors ici avec
             # `winner` seul, ce qui ne suffit pas a l'entrainement.
             #
-            # RECOMPENSE 0.0 et AUCUNE COMPTABILITE : aucune action n'a ete jouee sur ce chemin.
+            # RECOMPENSE PAR `calculate_reward`, comme les deux autres portes. Aucune action n'a ete
+            # jouee, mais la transition elle-meme peut ATTRIBUER des VP (marquage de la phase
+            # command, marquage du second joueur en fin de round 5) et terminer la partie : le
+            # ledger de marge (`vp_margin_paid`) et le +-situational se versent au step qui porte
+            # ce changement d'etat, et quand ce step est terminal, personne d'autre ne peut les
+            # verser — `reset` remet le filigrane a 0. Rendre 0.0 ici rompait la somme
+            # telescopique « facteur x marge finale » sur cette porte. Le payload est classe
+            # REPONSE SYSTEME par `reason == "pool_empty"` (reward_calculator, indicateur
+            # explicite) ; `system_response` vaut 0.0 dans les baremes, seuls les termes de
+            # frontiere s'y ajoutent. Comptabilite identique aux deux autres portes
+            # (`_account_step_metrics`) : `_build_terminal_info` lit la ventilation juste apres.
             # L'acteur rendu est celui d'AVANT la transition — la chaine d'attentes forcees ne doit
             # pas se poursuivre pour l'adversaire si la phase a change de joueur.
+            reward = self.reward_calculator.calculate_reward(
+                True, {**result, **advance_action}, self.game_state
+            )
+            _reserves = self._drain_pending_reserves()
+            reward += _reserves
+            self._account_step_metrics(reward, _reserves)
             return _StepOutcome(
-                observation, 0.0, terminated, False,
+                observation, reward, terminated, False,
                 {"phase_auto_advanced": True, "previous_phase": current_phase},
                 self._build_terminal_info() if terminated else {},
                 out_mask, player_before_advance,

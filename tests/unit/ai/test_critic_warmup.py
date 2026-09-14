@@ -5,7 +5,12 @@ policy_loss et entropy sont annulés. L'early-stop KL est désactivé pendant ce
 Après N updates, le comportement normal reprend.
 
 `train/value_warmup_active` est publié à 1 pendant le régime warmup, 0 ensuite.
-`_vwu_done` compte le nombre d'updates warmup effectuées.
+`_vwu_done` compte le nombre d'updates warmup effectuées. Ni la clé ni le compteur ne sont
+sérialisés : le régime appartient au run, jamais au checkpoint.
+
+Pendant le warmup, la politique est immobile au bit près : paramètres hors critic gelés
+(`grad = None`) ET statistiques d'`EntityRunningNorm` figées (`eval()` sur ces sous-modules,
+sinon `set_training_mode(True)` les fait avancer à chaque minibatch).
 """
 
 from __future__ import annotations
@@ -71,7 +76,10 @@ def _run_one_update(model: PatchedMaskablePPO) -> dict[str, float]:
     try:
         model.learn(total_timesteps=8)
     finally:
-        model.train = original_train  # type: ignore[method-assign]
+        # `del`, pas une réassignation : `model.train = original_train` laisserait une méthode
+        # LIÉE dans `__dict__`, que `save()` sérialise (cloudpickle) et que `load()` restaure —
+        # le modèle rechargé entraînerait alors une copie du modèle d'origine, pas lui-même.
+        del model.train
     return recorded
 
 
@@ -193,10 +201,15 @@ def test_la_cle_est_acceptee_par_le_constructeur_comme_en_new() -> None:
 
 
 def test_le_warmup_est_un_regime_de_run_pas_un_heritage_de_checkpoint(tmp_path) -> None:
-    """Sauver après le warmup puis recharger : `_vwu_done` repart de 0, la clé est conservée.
+    """Sauver après un run échauffé puis recharger : ni la clé ni le compteur ne voyagent.
 
-    Sans `_excluded_save_params`, `_vwu_done = N` voyagerait dans le zip et le run `--append`
-    suivant sauterait en silence l'échauffement que son profil demande.
+    Deux défauts distincts, un seul verrou. Sans `_vwu_done` dans `_excluded_save_params`,
+    `_vwu_done = N` voyagerait dans le zip et le run `--append` suivant sauterait en silence
+    l'échauffement que son profil demande. Sans `value_warmup_updates` dans la même liste, la
+    clé restaurée au `load` + le compteur remis à 0 rejouaient N updates critic-only sur tout
+    `--append` dont le profil ne porte pas la clé (`_apply_curriculum_model_params` ne pose que
+    ce que le profil porte). Un checkpoint ne porte donc AUCUN régime d'échauffement : c'est le
+    profil du run, et lui seul, qui l'active.
     """
     model = _model_with_warmup(n_warmup=1)
     _run_one_update(model)
@@ -205,8 +218,14 @@ def test_le_warmup_est_un_regime_de_run_pas_un_heritage_de_checkpoint(tmp_path) 
     model.save(str(path))
 
     loaded = PatchedMaskablePPO.load(str(path), env=_TinyMaskedEnv(), device="cpu")
-    assert loaded.value_warmup_updates == 1, "la clé fait partie du checkpoint, comme entropy_normalize_by_legal"
+    assert loaded.value_warmup_updates == 0, (
+        "la clé a voyagé dans le zip : un --append sans la clé rejouerait le warmup en silence"
+    )
     assert loaded._vwu_done == 0, "le compteur ne doit pas être hérité du checkpoint"
+    recorded = _run_one_update(loaded)
+    assert recorded.get("train/value_warmup_active") == pytest.approx(0.0), (
+        "le modèle rechargé a rejoué un warmup que son run n'a pas demandé"
+    )
 
 
 def test_un_checkpoint_anterieur_a_b6_charge_sans_warmup(tmp_path) -> None:
@@ -378,3 +397,63 @@ def test_sur_la_policy_de_production_seul_le_critic_bouge_pendant_le_warmup() ->
         f"des paramètres hors critic ont bougé pendant le warmup : "
         f"{[n for n in moved if not n.startswith(('mlp_extractor.value_net.', 'value_net.'))]}"
     )
+
+
+def test_sur_la_policy_de_production_les_statistiques_de_normalisation_sont_figees_pendant_le_warmup() -> None:
+    """Le gel des paramètres ne fige pas les BUFFERS : `EntityRunningNorm` avance ses
+    `running_mean/var/count` à chaque forward en mode entraînement, et les logits de la
+    politique bougent avec eux (mesuré sans le gel : 9 buffers sur 16 déplacés, Δprobs 4,5e-4
+    après une update warmup). Pendant le warmup, ni les buffers ni la distribution de la
+    politique sur une observation fixe ne doivent changer, au bit près.
+
+    Rouge sans le `eval()` des `EntityRunningNorm` en tête de `train`.
+    """
+    from ai.pointer_policy import PointerMaskablePolicy
+    from ai.spatial_extractor import EntityRunningNorm, SpatialCombinedExtractor
+    from tests.unit.ai.test_pointer_head import _ToyEnv
+
+    th.manual_seed(7)
+    model = PatchedMaskablePPO(
+        PointerMaskablePolicy, _ToyEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
+        device="cpu", verbose=0,
+        policy_kwargs={
+            "net_arch": [16, 16],
+            "features_extractor_class": SpatialCombinedExtractor,
+            "features_extractor_kwargs": {"cnn_features": 8},
+        },
+        value_warmup_updates=1,
+    )
+    pol = model.policy
+    norms = [m for m in pol.modules() if isinstance(m, EntityRunningNorm)]
+    assert norms, "VERT VACANT : l'extracteur de production porte des EntityRunningNorm"
+    buffers_before = {n: b.detach().clone() for n, b in pol.named_buffers()}
+    assert any("running_mean" in n for n in buffers_before)
+
+    env = _ToyEnv()
+    obs, _ = env.reset(seed=1)
+    obs_t, _ = pol.obs_to_tensor(obs)
+    mask = env.action_masks()
+    def _probs() -> th.Tensor:
+        pol.set_training_mode(False)
+        with th.no_grad():
+            inner = pol.get_distribution(obs_t, action_masks=mask).distribution
+        assert isinstance(inner, th.distributions.Categorical), type(inner).__name__
+        return inner.probs.clone()
+
+    probs_before = _probs()
+
+    _run_one_update(model)
+
+    moved = sorted(n for n, b in pol.named_buffers() if not th.equal(buffers_before[n], b.detach()))
+    assert moved == [], f"statistiques de normalisation déplacées pendant le warmup : {moved}"
+    probs_after = _probs()
+    assert th.equal(probs_before, probs_after), (
+        f"la politique a bougé pendant le warmup : max |Δprobs| = "
+        f"{float((probs_after - probs_before).abs().max())}"
+    )
+    # Hors warmup (update suivante), les statistiques reprennent leur mise à jour : le gel est
+    # bien un régime, pas une désactivation.
+    _run_one_update(model)
+    assert model._vwu_done == 1
+    moved_after = [n for n, b in pol.named_buffers() if not th.equal(buffers_before[n], b.detach())]
+    assert moved_after, "les statistiques ne bougent plus du tout : le gel a survécu au warmup"

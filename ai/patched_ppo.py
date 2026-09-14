@@ -51,6 +51,7 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
+from ai.spatial_extractor import EntityRunningNorm
 from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
@@ -181,9 +182,13 @@ class PatchedMaskablePPO(MaskablePPO):
         reapplique depuis le profil en `--append`.
 
         `value_warmup_updates` (B6) : nombre d'updates du run pendant lesquelles seule la value
-        loss est optimisee (voir `train`). Meme cycle de vie que la cle ci-dessus. Le compteur
-        `_vwu_done` n'est PAS serialise (`_excluded_save_params`) : l'echauffement est un regime
-        de RUN, rejoue par tout run dont le profil porte la cle, jamais herite d'un checkpoint.
+        loss est optimisee (voir `train`). Cycle de vie DIFFERENT de la cle ci-dessus : ni la
+        cle ni le compteur `_vwu_done` ne sont serialises (`_excluded_save_params`). L'echauffement
+        est un regime de RUN — un `--append` le joue si et seulement si SON profil porte la cle
+        (`_apply_curriculum_model_params`, ai/train.py) ; un zip sauve apres un run echauffe ne
+        le rejoue pas de lui-meme. Exclure le compteur seul ne suffisait pas : la cle restauree
+        au `load` et laissee en place par un profil qui ne la porte pas rejouait N updates
+        critic-only en silence.
         """
         self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
             entropy_normalize_by_legal
@@ -193,7 +198,7 @@ class PatchedMaskablePPO(MaskablePPO):
         super().__init__(*args, **kwargs)
 
     def _excluded_save_params(self) -> list[str]:
-        return super()._excluded_save_params() + ["_vwu_done"]
+        return super()._excluded_save_params() + ["value_warmup_updates", "_vwu_done"]
 
     def _critic_only_param_ids(self) -> frozenset[int]:
         """Identités des paramètres que l'échauffement critic (B6) laisse apprendre.
@@ -287,6 +292,19 @@ class PatchedMaskablePPO(MaskablePPO):
         critic_only_param_ids: frozenset[int] = (
             self._critic_only_param_ids() if _in_warmup else frozenset()
         )
+        if _in_warmup:
+            # Le gel des PARAMÈTRES (grad = None, plus bas) ne fige pas les BUFFERS : en
+            # `set_training_mode(True)`, chaque forward d'`EntityRunningNorm` avance ses
+            # `running_mean/var/count` (ai/spatial_extractor.py, `if self.training`), donc les
+            # entrées normalisées de l'extracteur partagé — et les logits de la politique avec
+            # elles — bougeaient à chaque minibatch (mesuré : 9 buffers sur 16 déplacés, Δprobs
+            # 4,5e-4 après une update warmup). Les statistiques passent en mode évaluation pour
+            # l'update entière : figées comme pendant les rollouts. Rien à rétablir en sortie —
+            # `set_training_mode` (False en tête de la collecte, True en tête du prochain
+            # `train`) est récursif et réécrit l'état de tous les sous-modules.
+            for _module in self.policy.modules():
+                if isinstance(_module, EntityRunningNorm):
+                    _module.eval()
 
         _t0_update = time.perf_counter()
         for epoch in range(self.n_epochs):
@@ -376,8 +394,10 @@ class PatchedMaskablePPO(MaskablePPO):
                 # embeddings de l'extracteur), donc la value loss seule le déplacerait, et la
                 # politique avec lui — sans clip ni early-stop KL. D'où le gel plus bas : seuls
                 # les paramètres du critic (`mlp_extractor.value_net` + `value_net`) gardent un
-                # gradient avant `optimizer.step()`. L'early-stop KL n'est pas applicable : la
-                # politique est immobile, approx_kl vaut 0 par construction.
+                # gradient avant `optimizer.step()`, et les statistiques d'`EntityRunningNorm`
+                # sont figées (voir le gel des buffers en tête de `train`). L'early-stop KL n'est
+                # pas applicable : la politique est immobile, approx_kl ne mesure que l'écart
+                # numérique entre le log_prob de collecte et celui de l'update.
                 if _in_warmup:
                     loss = self.vf_coef * value_loss
                 else:

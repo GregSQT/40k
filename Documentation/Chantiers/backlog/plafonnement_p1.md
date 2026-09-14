@@ -363,7 +363,7 @@ log-prob 1,7 × 10⁻⁴).
 | S20 | Ventiler les pénalités −97 | C5 | ☐ non investigué | tracker | |
 | S21 | K ≈ 316 rollouts pour distinguer ‖G‖² = 0 de 8 × 10⁻⁵ | C3 | ✗ jugé inutile pour la décision | ~4 h | même à la borne haute, l'update est du bruit à > 97,8 % |
 | S22 | Second run traité entnorm (variance entre entraînements) | B1 | ☐ non fait | ~6 h | écart holdout < 10 points → « pas de verdict » selon le critère écrit ; remplacé par la mesure S13 plus directe |
-| S24 | **Marge de VP** (B6) : `vp_margin_factor × Δ(VP_moi − VP_lui)` en ledger, à la place de `objective_reward_factor × VP_propres` ; échauffement du critic `value_warmup_updates` | C1, C5 | ☑ **code livré le 2026-09-14 en worktree (§5.12), merge et run après le verdict S11** | moteur + tracker + PPO + contrat | somme téléscopique = 6 × marge finale ; les VP concédés coûtent −6 chacun (0 avant) ; Corr(ΔVP_moi, Δmarge) = 0,82 sur 40 parties → additionner les deux termes aurait fait +11 / −5, rejeté |
+| S24 | **Marge de VP** (B6) : `vp_margin_factor × Δ(VP_moi − VP_lui)` en ledger, à la place de `objective_reward_factor × VP_propres` ; échauffement du critic `value_warmup_updates` | C1, C5 | ☑ **code livré et mergé le 2026-09-14 (§5.12) ; contrat, profil et run à faire** | moteur + tracker + PPO + contrat | somme téléscopique = 6 × marge finale ; les VP concédés coûtent −6 chacun (0 avant) ; Corr(ΔVP_moi, Δmarge) = 0,82 sur 40 parties → additionner les deux termes aurait fait +11 / −5, rejeté |
 | S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (16 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ☑ **testée (2026-09-14, §5.9) → ✗ détruit** : 0,50 → 0,41 en 8 000 épisodes ; λ change la cible du critic, la prédiction f supposait le critic fixe | config `x1_lineage`, 5 lancements (3 tués par la RAM, 1 correctif de collecte, 1 jugé) | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; VRAM mesurée : 3,80 Go réservés à 2 040, 7,47 à 4 080 (replanterait) ; RAM buffer 3,72 Go |
 
 ---
@@ -773,7 +773,7 @@ S14/S15 en réserve, pas avant les résultats ci-dessous ; menace par case en ob
 garde de destruction < 0,50 (moyenne des sondes) après 20 000. Jamais de conclusion sur moins de
 3 sondes ou 20 000 épisodes d'étape.
 
-### 5.12 B6 — marge de VP en ledger + échauffement du critic (2026-09-14, décision utilisateur) — CODE LIVRÉ EN WORKTREE, RUN APRÈS S11
+### 5.12 B6 — marge de VP en ledger + échauffement du critic (2026-09-14, décision utilisateur) — CODE LIVRÉ ET MERGÉ, RUN À LANCER
 
 **Décision.** Le terme d'objectif `objective_reward_factor × VP_propres` (versé une fois par tour à
 la frontière command → move, joueur contrôlé seulement) est remplacé par un **ledger de marge** :
@@ -787,7 +787,7 @@ SON tour — aucun filtre `current_player`, `BotControlledEnv` (`accumulate_rewa
 le step gym de l'agent. Le bonus « se poser sur un objectif » (`on_objective_bonus`) est conservé
 et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
 
-**Livré (worktree `worktree-marge-vp-b6`, non mergé : le run S11 lit main et `config/` à chaud).**
+**Livré (worktree `worktree-marge-vp-b6`, mergé dans main le 2026-09-14 après l'arrêt de S11).**
 - `engine/reward_calculator.py::_calculate_vp_margin_reward`, appelée au site des récompenses de
   frontière (avant le tri action / réponse système), propagée par tous les chemins de retour ;
   `_calculate_objective_reward_per_turn`, `_calculate_objective_reward_turn5` (mort :
@@ -803,8 +803,12 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   (kwarg du constructeur, comme `entropy_normalize_by_legal` ; dans `_PLAIN_CURRICULUM_KEYS`
   pour `--append`). Pendant les N premières updates du run, `loss = vf_coef × value_loss` —
   politique et entropie annulées, early-stop KL désactivé ; `train/value_warmup_active` publié.
-  Le compteur `_vwu_done` est exclu du zip : l'échauffement est un régime de run, jamais hérité
-  d'un checkpoint. Motif : le critic a appris une cible qui payait +6 par VP propre et 0 par VP
+  La clé ET le compteur `_vwu_done` sont exclus du zip (`_excluded_save_params`) : l'échauffement
+  est un régime de run, jamais hérité d'un checkpoint — seul le profil du run l'active. Second
+  review du 2026-09-14 : exclure le compteur seul ne suffisait pas, la clé restaurée au `load`
+  et laissée en place par un profil qui ne la porte pas (`_apply_curriculum_model_params` ne
+  pose que ce que le profil porte) aurait rejoué N updates critic-only sur tout `--append`
+  ultérieur. Motif : le critic a appris une cible qui payait +6 par VP propre et 0 par VP
   cédé ; à la reprise, sa cible change, et le premier gradient de politique serait calculé sur
   des avantages faux.
   **Gel hors critic (review du 2026-09-14).** Annuler les termes ne suffit pas : l'extracteur
@@ -817,6 +821,13 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   immobile au bit près, mesuré sur `PointerMaskablePolicy` + `SpatialCombinedExtractor`. Coût
   assumé : l'extracteur n'apprend pas la nouvelle cible pendant le warmup, seule la tête critic
   (2 × 512 + linéaire) la remappe ; l'apprentissage joint reprend après.
+  **Buffers gelés aussi (second review du 2026-09-14).** Le gel des paramètres ne figeait pas
+  les statistiques d'`EntityRunningNorm` : `train()` tourne en `set_training_mode(True)`, et
+  chaque forward avance `running_mean/var/count` — mesuré sur la policy de production après une
+  update warmup : 9 buffers sur 16 déplacés, Δprobs 4,5e-4, `approx_kl` 1,7e-3 ≠ 0. Ces modules
+  passent en `eval()` pour l'update warmup (statistiques figées comme pendant les rollouts) ;
+  `set_training_mode` étant récursif, rien à rétablir. Le premier test ne comparait que
+  `named_parameters()`, pas les buffers.
 - **`SelfPlayWrapper` accumule les steps de P2** (`ai/env_wrappers.py`, review du 2026-09-14).
   Le wrapper ne rendait à P0 que le step TERMINAL de P2 et jetait les autres — le ledger
   avançait, l'agent ne touchait rien, et la somme téléscopique était fausse sur le chemin
@@ -826,6 +837,19 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   (avant et après l'action de P0) additionnent maintenant chaque step, pénalité défensive
   comprise. Test : `tests/unit/ai/test_selfplay_wrapper_reward_accumulation.py` (3, rouge sur
   l'ancien wrapper).
+- **Porte « pool vide → advance_phase » de `step_with_mask`** (`engine/w40k_core.py`, second
+  review du 2026-09-14) : elle rendait 0.0 sans passer par `calculate_reward` ni compter le
+  step. Or la transition elle-même peut attribuer des VP et terminer la partie (marquage de la
+  phase command, marquage du second joueur en fin de round 5 → limite de tours) : le dernier
+  delta du ledger et le ±situational y étaient perdus, `reset` remettait `vp_margin_paid` à 0,
+  et la somme téléscopique était fausse sur cette porte (le ±150 y était déjà perdu avant B6).
+  La porte verse maintenant `calculate_reward` sur le payload `{**result, action: advance_phase,
+  reason: pool_empty}` (classé réponse système par l'indicateur explicite `pool_empty`,
+  `system_response` = 0) et compte le step (`_account_step_metrics`, troisième appelant).
+  Mesure de reachabilité : 0 passage par cette porte sur 110 parties aléatoires
+  `BotControlledEnv` (agent P1 et P2) — la cascade absorbe les phases vides ; la porte reste le
+  chemin des WAIT forcés des deux wrappers, et elle était déjà verrouillée comme porte
+  terminale (`test_terminal_info_all_paths.py`).
 - **Format de save `W40KTL10`** (`services/game_saves.py`) : `vp_margin_paid` est une clé
   mutable de premier niveau lue par `require_key` à chaque step, PvP compris — une row TL09
   rendrait un état amputé et le premier step lèverait. Bump + TL09 en `_LEGACY_LOSSES`,
@@ -835,20 +859,24 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   ventilation) — rouge sur « filtre `current_player` réintroduit » et « filigrane non écrit » ;
   `test_s11_reward_on_expectation_e2e.py` : somme des `vp_margin` sur une partie moteur réelle =
   6 × marge finale (rouge sur le filtre, marge 25 → 150 attendus manqués) ;
-  `tests/unit/ai/test_critic_warmup.py` (12) : politique immobile / critic mobile pendant le
+  `tests/unit/ai/test_critic_warmup.py` (13) : politique immobile / critic mobile pendant le
   warmup (rouge si la loss complète revient), compteur saturant, kwarg accepté en `--new`,
-  `_vwu_done` non hérité (rouge sans `_excluded_save_params`), zip antérieur à B6 chargé à 0,
-  extracteur partagé à paramètres immobile (rouge sans le gel), `PointerMaskablePolicy` réelle :
-  seuls les tenseurs `mlp_extractor.value_net.*` / `value_net.*` bougent.
+  ni clé ni compteur hérités du zip + modèle rechargé sans warmup (rouge si la clé voyage), zip
+  antérieur à B6 chargé à 0, extracteur partagé à paramètres immobile (rouge sans le gel),
+  `PointerMaskablePolicy` réelle : seuls les tenseurs `mlp_extractor.value_net.*` /
+  `value_net.*` bougent, buffers d'`EntityRunningNorm` et distribution de la politique
+  identiques au bit près pendant le warmup puis mobiles après (rouge sans le `eval()`) ;
+  `test_terminal_info_all_paths.py::test_pool_empty_gate_pays_the_ledger_and_the_outcome` :
+  la porte pool-vide verse 6 × 15 + 50 et l'accumule (rouge à 0.0).
   Fixtures adaptées : `test_reward_calculator.py`, `test_agent_decision_mechanism.py`,
   `test_terminal_info_all_paths.py`, `test_metrics_single_writer.py`, `test_metrics_tracker_utils.py`,
   `test_train_helpers.py` (couverture synthétique de la clé). 241 verts sur les onze fichiers touchés.
 
-**Reste à faire après le verdict S11** : merge dans main ; `python3 -m ai.training_contract --init`
+**Reste à faire (mergé le 2026-09-14)** : `python3 -m ai.training_contract --init`
 et `write_contract(P0_zip, build_contract(rewards, agent))` (la table de récompense change de
 clés, le contrat refuserait la reprise) ; `value_warmup_updates` dans le profil `x1_lineage`
-(valeur à choisir, ~10 updates = 81 600 pas) ; run « S11 + marge » par la commande habituelle
-`--etape P1`, jugé par la règle §7.
+(valeur à choisir, ~10 updates = 81 600 pas) ; run « marge » (`reward_on_expectation: false`,
+régime de référence) par la commande habituelle `--etape P1`, jugé par la règle §7.
 
 ## 6. Ce qui n'a pas été fait
 
