@@ -2,18 +2,22 @@
 /**
  * 20.01/20.04 — le siège des réserves après la refonte :
  *
- *   - la DÉCLARATION est une question FERMÉE portée par la ligne de l'escouade que le moteur
- *     interroge (`ReservesDeclarationPrompt`, deux boutons tous deux actifs) : 20.01 en fait une
- *     étape antérieure au déploiement, où « ne pas répondre » n'existe pas ;
+ *   - la DÉCLARATION se compose PAR CAMP, sans ordre ni question : `Reserve` sur la ligne
+ *     sélectionnée d'une escouade déclarable, `Cancel` sur une escouade du conteneur tant que le
+ *     camp n'a pas validé, et un bandeau (`ReservesDeclarationBanner`) qui dit QUI déclare et
+ *     porte `Validate` — toujours actif, déclarer zéro réserve étant légal (« can select ») ;
  *   - le CONTENEUR ne dépose plus rien : il montre les escouades hors table du joueur, au format
- *     commun `UnitRosterRow` (figurines, nom, points, nb de figurines, id) ;
+ *     commun `UnitRosterRow` (figurines, nom, points, nb de figurines, id), et le `Cancel` 20.01
+ *     sur celles que le moteur dit annulables ;
  *   - `UnitStatusTable` ne le porte plus du tout — il vit SOUS elle, rendu par `BoardWithAPI`.
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StrategicReservesPlayerSummary, Unit } from "../types/game";
 import {
-  ReservesDeclarationPrompt,
+  CancelReserveButton,
+  ReserveButton,
+  ReservesDeclarationBanner,
   ResetPlacementButton,
   StrategicReservesContainer,
 } from "./StrategicReservesContainer";
@@ -71,44 +75,71 @@ const CONTAINER_PROPS = {
   phase: "move",
 };
 
-describe("ReservesDeclarationPrompt — 20.01", () => {
-  it("porte les DEUX réponses, toutes deux actives", () => {
-    // Le composant n'apparaît que sur l'escouade que le moteur INTERROGE : l'éligibilité est déjà
-    // tranchée, il n'y a donc rien à griser. Un bouton désactivé dirait « tu peux ne pas
-    // répondre » — faux : sans réponse, aucune pose n'est possible et la question revient.
-    const onDeclare = vi.fn();
-    const onKeep = vi.fn();
-    render(<ReservesDeclarationPrompt onDeclare={onDeclare} onKeep={onKeep} />);
+describe("Reserve / Cancel — 20.01", () => {
+  it("`Reserve` est actif et appelle son geste, sans `Deploy` en face", () => {
+    // Le bouton n'apparaît que sur une escouade que le moteur liste comme déclarable :
+    // l'éligibilité est déjà tranchée, il n'y a rien à griser. Ne pas réserver, c'est déployer —
+    // aucun second bouton n'existe pour ça.
+    const onReserve = vi.fn();
+    render(<ReserveButton onReserve={onReserve} />);
 
-    const declare = screen.getByTestId("strategic-reserves-declare") as HTMLButtonElement;
-    const keep = screen.getByTestId("strategic-reserves-keep") as HTMLButtonElement;
-    expect(declare.disabled).toBe(false);
-    expect(keep.disabled).toBe(false);
+    const reserve = screen.getByTestId("strategic-reserves-declare") as HTMLButtonElement;
+    expect(reserve.disabled).toBe(false);
+    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
 
-    fireEvent.click(declare);
-    expect(onDeclare).toHaveBeenCalledTimes(1);
-    expect(onKeep).not.toHaveBeenCalled();
+    fireEvent.click(reserve);
+    expect(onReserve).toHaveBeenCalledTimes(1);
+  });
 
-    fireEvent.click(keep);
-    expect(onKeep).toHaveBeenCalledTimes(1);
-    expect(onDeclare).toHaveBeenCalledTimes(1);
+  it("`Cancel` est actif et appelle son geste", () => {
+    const onCancel = vi.fn();
+    render(<CancelReserveButton onCancel={onCancel} />);
+
+    const cancel = screen.getByTestId("strategic-reserves-cancel") as HTMLButtonElement;
+    expect(cancel.disabled).toBe(false);
+    fireEvent.click(cancel);
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it("le clic ne remonte pas à la ligne, qui est elle-même cliquable", () => {
-    // Sans `stopPropagation`, répondre rejouerait aussi la sélection de l'escouade dont la
-    // question vient de disparaître.
+    // Sans `stopPropagation`, réserver rejouerait aussi la sélection de l'escouade dont le
+    // bouton vient de disparaître — et annuler, celle d'une ligne du conteneur.
     const onRowClick = vi.fn();
     // Le guetteur est un écouteur NATIF posé au-dessus de la racine React : c'est exactement ce
     // que la ligne cliquable du panneau verrait remonter. Un `<div onClick>` de doublure aurait
     // été un élément statique rendu interactif — ce que le lint refuse, à raison.
-    render(<ReservesDeclarationPrompt onDeclare={vi.fn()} onKeep={vi.fn()} />);
+    render(
+      <>
+        <ReserveButton onReserve={vi.fn()} />
+        <CancelReserveButton onCancel={vi.fn()} />
+      </>
+    );
     document.body.addEventListener("click", onRowClick);
     try {
       fireEvent.click(screen.getByTestId("strategic-reserves-declare"));
+      fireEvent.click(screen.getByTestId("strategic-reserves-cancel"));
       expect(onRowClick).not.toHaveBeenCalled();
     } finally {
       document.body.removeEventListener("click", onRowClick);
     }
+  });
+});
+
+describe("ReservesDeclarationBanner — 20.01", () => {
+  it("nomme le camp déclarant et porte un `Validate` TOUJOURS actif", () => {
+    // Déclarer zéro réserve est une déclaration légale (« can select »), et c'est le cas
+    // majoritaire : un `Validate` grisé sur un conteneur vide dirait au joueur qu'il doit
+    // réserver quelque chose, ce qui est faux.
+    const onValidate = vi.fn();
+    render(<ReservesDeclarationBanner playerLabel="Player 2" onValidate={onValidate} />);
+
+    expect(screen.getByTestId("strategic-reserves-declaration-banner").textContent).toContain(
+      "Player 2"
+    );
+    const validate = screen.getByTestId("strategic-reserves-validate") as HTMLButtonElement;
+    expect(validate.disabled).toBe(false);
+    fireEvent.click(validate);
+    expect(onValidate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -128,7 +159,7 @@ describe("StrategicReservesContainer", () => {
     expect(screen.getByTestId("roster-row-points-7").textContent).toBe("120 pts");
   });
 
-  it("ne porte aucune réponse 20.01 — la question vit dans la liste à déployer", () => {
+  it("ne porte aucun `Reserve` — ce geste vit dans la liste à déployer", () => {
     render(
       <StrategicReservesContainer
         {...CONTAINER_PROPS}
@@ -139,6 +170,32 @@ describe("StrategicReservesContainer", () => {
     );
     expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
     expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
+    // Rien d'annulable non plus : la liste du moteur est vide par défaut.
+    expect(screen.queryByTestId("strategic-reserves-cancel")).toBeNull();
+  });
+
+  it("porte `Cancel` sur les seules escouades que le moteur dit annulables", () => {
+    // La liste `strategic_reserves.cancellable` est LUE, jamais déduite de `in_strategic_reserves` :
+    // après validation, une escouade réservée reste dans le conteneur sans `Cancel`.
+    const onCancelReserve = vi.fn();
+    render(
+      <StrategicReservesContainer
+        {...CONTAINER_PROPS}
+        reserveUnits={[reserveUnit(7), reserveUnit(9)]}
+        summary={SUMMARY}
+        canSelectReserveUnit={false}
+        cancellableUnitIds={["7"]}
+        onCancelReserve={onCancelReserve}
+      />
+    );
+    expect(screen.getAllByTestId("strategic-reserves-cancel")).toHaveLength(1);
+    expect(
+      screen
+        .getByTestId("strategic-reserves-unit-7")
+        .querySelector("[data-testid='strategic-reserves-cancel']")
+    ).toBeTruthy();
+    fireEvent.click(screen.getByTestId("strategic-reserves-cancel"));
+    expect(onCancelReserve).toHaveBeenCalledWith(7);
   });
 
   it("demande l'aire d'arrivée au clic quand la phase l'autorise (20.04)", () => {

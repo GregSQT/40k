@@ -579,6 +579,14 @@ class PatchedMaskablePPO(MaskablePPO):
 
         subproc = _get_maskable_subproc_vec_env(env)
         if subproc is not None:
+            # Les workers rendent leurs observations en dict-of-arrays par clé (norm_obs_seq),
+            # copiées clé par clé dans `rollout_buffer.observations[key]` : le chemin distribué
+            # n'existe que pour un espace Dict. Un buffer plat ici est une erreur de montage.
+            if not isinstance(rollout_buffer, MaskableDictRolloutBuffer):
+                raise TypeError(
+                    "collecte distribuée (MaskableSubprocVecEnv) : le rollout buffer doit être un "
+                    f"MaskableDictRolloutBuffer, reçu {type(rollout_buffer).__name__}"
+                )
             return self._collect_rollouts_distributed(
                 env, subproc, callback, rollout_buffer, n_rollout_steps, use_masking
             )
@@ -612,7 +620,7 @@ class PatchedMaskablePPO(MaskablePPO):
         env: VecEnv,
         subproc: "Any",
         callback: BaseCallback,
-        rollout_buffer: MaskableRolloutBuffer | MaskableDictRolloutBuffer,
+        rollout_buffer: MaskableDictRolloutBuffer,
         n_rollout_steps: int,
         use_masking: bool,
     ) -> bool:

@@ -12,8 +12,12 @@ Chaîne couverte (lue dans le code, pas supposée) :
 
     SHOOT_CTX.auto_decider = _target_defender_is_ai -> is_programmatic_defender -> is_programmatic_owner
     FIGHT_CTX.auto_decider = _fight_auto_defender   -> _is_ai_controlled_fight_unit -> is_programmatic_owner
-    les 4 sites `defender_human` du flux fight      -> _is_ai_controlled_fight_unit -> is_programmatic_owner
-    consommation : _manual_allocation_step (shared_utils ~L6416) `if ctx.auto_decider(...)`
+    consommation : _manual_allocation_step (shared_utils) `if ctx.auto_decider(...)`
+
+Les 4 sites `defender_human` du flux fight (calcul local `not _is_ai_controlled_fight_unit(...)`
+par site) ont disparu avec le chantier « fight PvE par siège » (2026-09-12) : l'allocation des
+pertes en mêlée passe désormais par le SEUL `FIGHT_CTX.auto_decider`. Le verrou structurel porte
+donc sur cette unicité : aucun autre appel du prédicat, aucune lecture directe de `player_types`.
 
 ⚠️ **Miroir PvP obligatoire (§8.1)** : chaque cas gym a son jumeau PvP-humain. Un test qui ne
 couvrirait que la branche gym laisserait passer une casse du PvP — c'est la moitié du contrat.
@@ -21,6 +25,7 @@ couvrirait que la branche gym laisserait passer une casse du PvP — c'est la mo
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 from typing import Any, Dict
 
@@ -91,21 +96,21 @@ def test_fight_auto_defender_missing_target_raises():
         _fight_auto_defender(gs, "404")
 
 
-# ── Les 4 sites `defender_human` du flux fight ─────────────────────────────────
-# Ils calculent tous `not _is_ai_controlled_fight_unit(game_state, target_unit)`
-# (fight_handlers ~L5523, ~L5548, ~L6248, ~L6282). Verrouiller ce prédicat verrouille les 4.
+# ── Le prédicat unique du flux fight ───────────────────────────────────────────
+# `_fight_auto_defender` (FIGHT_CTX) calcule `_is_ai_controlled_fight_unit(game_state, target)`.
+# Verrouiller ce prédicat verrouille le seul site qui décide qui alloue les pertes en mêlée.
 
-def test_defender_human_is_false_in_gym():
-    """En gym, `defender_human` vaut False partout → aucune attente d'un humain absent.
+def test_fight_unit_is_ai_controlled_in_gym():
+    """En gym, le défenseur est AUTO partout → aucune attente d'un humain absent.
 
-    C'est LA rupture R4 : avec un `defender_human` resté True, le moteur rendait la main à un
+    C'est LA rupture R4 : avec un défenseur resté « humain », le moteur rendait la main à un
     joueur qui n'existe pas et l'épisode se bloquait.
     """
     unit = {"player": 1}
     assert _is_ai_controlled_fight_unit(_gs(gym=True, owner_type="human"), unit) is True
 
 
-def test_defender_human_is_true_for_a_human_in_pvp():
+def test_fight_unit_is_not_ai_controlled_for_a_human_in_pvp():
     """MIROIR PvP : hors gym, le joueur humain garde son allocation manuelle."""
     unit = {"player": 1}
     assert _is_ai_controlled_fight_unit(_gs(gym=False, owner_type="human"), unit) is False
@@ -117,32 +122,58 @@ def test_fight_unit_predicate_requires_player():
         _is_ai_controlled_fight_unit(_gs(gym=True, owner_type="human"), {})
 
 
-def test_every_defender_human_site_delegates_to_the_predicate():
-    """⚠️ Verrou STRUCTUREL des 4 sites — sans lui, ce fichier retomberait dans le travers
-    qu'il corrige.
-
-    Les tests ci-dessus vérifient `_is_ai_controlled_fight_unit`, PAS que les 4 sites l'appellent.
-    Conclure « le helper est bon donc les sites le sont » est exactement le raisonnement
-    « prédicat correct donc branchement correct » qui a laissé passer R4. Ce test lit la source
-    et exige que **chaque** affectation de `defender_human` passe par le prédicat — et qu'il y en
-    ait exactement 4, pour qu'un 5ᵉ site non gardé fasse rougir au lieu de passer inaperçu.
-    """
+def _fight_handlers_module() -> ast.Module:
     from pathlib import Path
 
-    src = Path(fight_handlers.__file__).read_text(encoding="utf-8")
-    assignments = [
-        line.strip()
-        for line in src.splitlines()
-        if line.strip().startswith("defender_human =")
-    ]
-    assert len(assignments) == 4, (
-        f"{len(assignments)} affectations de `defender_human` au lieu de 4 — un site a été "
-        f"ajouté ou retiré, vérifier qu'il délègue au prédicat : {assignments}"
+    return ast.parse(Path(fight_handlers.__file__).read_text(encoding="utf-8"))
+
+
+def _enclosing_function_names(tree: ast.Module, wanted: str) -> list[str]:
+    """Nom de la fonction qui contient chaque appel `wanted(...)` ; '<module>' hors fonction."""
+    sites: list[str] = []
+
+    def _walk(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                _walk(child, child.name)
+                continue
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Name)
+                and child.func.id == wanted
+            ):
+                sites.append(scope)
+            _walk(child, scope)
+
+    _walk(tree, "<module>")
+    return sites
+
+
+def test_fight_owner_decision_has_a_single_site_wired_to_the_predicate():
+    """⚠️ Verrou STRUCTUREL — sans lui, ce fichier retomberait dans le travers qu'il corrige.
+
+    Les tests ci-dessus vérifient `_is_ai_controlled_fight_unit`, PAS que le flux fight l'appelle.
+    Conclure « le helper est bon donc le branchement l'est » est exactement le raisonnement qui a
+    laissé passer R4. Ce test lit la SOURCE (AST, pas grep : un appel en commentaire ou en
+    docstring ne compte pas) et exige que le prédicat soit appelé EXACTEMENT UNE fois, depuis
+    `_fight_auto_defender` — un 2ᵉ site local (retour des `defender_human` par site) ou un site
+    qui lirait `player_types` en direct au lieu du prédicat fait rougir au lieu de passer inaperçu.
+    """
+    tree = _fight_handlers_module()
+    sites = _enclosing_function_names(tree, "_is_ai_controlled_fight_unit")
+    assert sites == ["_fight_auto_defender"], (
+        f"appels de `_is_ai_controlled_fight_unit` : {sites} — le flux fight doit décider du "
+        "défenseur par le SEUL `_fight_auto_defender` (FIGHT_CTX.auto_decider)"
     )
-    for line in assignments:
-        assert "_is_ai_controlled_fight_unit" in line, (
-            f"site `defender_human` qui NE délègue PAS au prédicat unique (R4 rompu) : {line}"
-        )
+    direct_reads = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and node.value == "player_types"
+    ]
+    assert direct_reads == [], (
+        f"lecture directe de `player_types` dans fight_handlers (lignes {direct_reads}) — "
+        "le type de propriétaire ne se lit que par `is_programmatic_owner`"
+    )
 
 
 # ── La CONSOMMATION : _manual_allocation_step suit-il vraiment le décideur ? ────

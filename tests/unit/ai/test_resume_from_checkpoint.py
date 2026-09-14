@@ -20,6 +20,7 @@ import shutil
 from typing import Any, cast
 
 import pytest
+from stable_baselines3.common.logger import Logger
 from types import SimpleNamespace
 
 import ai.train
@@ -205,7 +206,6 @@ class _FakeModel:
 def _make_vec_normalize_model():
     import gymnasium as gym
     import numpy as np
-    from stable_baselines3.common.logger import Logger
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
     class _TrivialEnv(gym.Env):
@@ -431,7 +431,7 @@ def test_train_model_keeps_the_checkpoints_of_the_run_after_publishing(
     monkeypatch.setattr(ai.train, "MetricsCollectionCallback", _NoLearnCallback)
 
     model = _make_vec_normalize_model()
-    model.logger = SimpleNamespace(get_dir=lambda: str(tmp_path / "tb"))
+    model.logger = Logger(folder=str(tmp_path / "tb"), output_formats=[])
     callback = VecNormalizeCheckpointCallback(
         run_stamp=RUN, run_contract_path=_run_contract(model_dir),
         save_freq=1, save_path=str(model_dir), name_prefix="ppo_checkpoint",
@@ -500,7 +500,7 @@ def test_train_model_saves_the_interrupted_model_with_the_run_contract(
     monkeypatch.setattr(ai.train, "MetricsCollectionCallback", _NoLearnCallback)
 
     base = _make_vec_normalize_model()
-    model = _InterruptedModel(base.env, SimpleNamespace(get_dir=lambda: str(tmp_path / "tb")))
+    model = _InterruptedModel(base.env, Logger(folder=str(tmp_path / "tb"), output_formats=[]))
     training_config = {"total_timesteps": 1, "callback_params": {"save_best_robust": False}}
 
     assert ai.train.train_model(model, training_config, [], model_path, "x1", "TestAgent") is False

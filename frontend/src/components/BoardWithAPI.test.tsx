@@ -595,6 +595,8 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
     pendingPlayer: 1 | 2;
     pendingUnitId: string;
     seat2: "human" | "ai";
+    /** Escouades déjà en réserves et annulables par le camp déclarant (défaut : aucune). */
+    cancellable?: string[];
   }): Promise<{ aiTurnCalls: () => number }> {
     if (o.mode === "pve") {
       localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);

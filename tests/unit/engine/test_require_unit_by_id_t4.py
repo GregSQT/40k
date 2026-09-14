@@ -73,8 +73,10 @@ def test_move_plan_distance_mode_euclidean_ne_lit_pas_unit():
 
 def _gs_mortal_wounds(squad_in_unit_by_id: bool) -> dict:
     target_unit = {"id": "2", "player": 1, "UNIT_RULES": []}
+    # `UNIT_RULES` propres de la figurine : posées par `build_models_cache` sur toute figurine,
+    # exigées par `_model_rules_view` (FNP near_objective se lit sur la figurine, 19.04).
     target_model = {
-        "id": "T1", "squad_id": "2", "player": 1,
+        "id": "T1", "squad_id": "2", "player": 1, "UNIT_RULES": [],
         "HP_CUR": 2, "HP_MAX": 2, "col": 5, "row": 5,
     }
     return {
