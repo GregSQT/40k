@@ -174,7 +174,10 @@ d'étape 0,509 / 0,519 / 0,572 / 0,577 / 0,585 contre 0,508 / 0,571 / 0,601 / 0,
 référence — même plateau, atteint plus lentement ; 0,17 rétabli (dossier §5.10). **Run S11 depuis
 10:30** (`training_x1_05-p01-s11.log`) : récompense de tir et de mêlée sur l'espérance du choix
 (`squad_shaping.reward_on_expectation`, `expected_attack_pool_damage` = espérance exacte du roller,
-Monte-Carlo verrouillé), profil de référence, jugé par la règle §7 (dossier §5.11).
+Monte-Carlo verrouillé), profil de référence. **ARRÊTÉ par la garde à 20 000 (`run_20260914-103745`)** :
+sondes argmax 0,450 / 0,497 (moyenne 0,473 < 0,50) alors que la courbe échantillonnée est à 0,538 /
+0,549 (référence 0,508 / 0,571) et que l'entropie MONTE (−0,78 → −0,85, référence −0,78 → −0,72).
+Hypothèses et sondes à faire : dossier §5.11. Clé remise à `false`. Suivant : marge de VP B6 (§5.12).
 
 ---
 

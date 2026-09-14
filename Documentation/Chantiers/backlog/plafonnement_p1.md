@@ -67,8 +67,9 @@ gradient du rollout complet (32 640), pas sur la taille du mini-lot.
 **Décision prise le 2026-09-13 : run lancé dans la nuit du 13 au 14 — RÉFUTÉ (§5.9) : `03_selfplay/P0`
 chute 0,50 → 0,41 en 8 000 épisodes, arrêté à 02:22. Lecture : λ change aussi la cible du critic.**
 **2026-09-14 : essai `vf_coef` 0,3 (§5.10) RÉFUTÉ — même plateau 0,585 que la référence, atteint
-plus lentement. Depuis 10:30 : run S11 (§5.11, récompense de tir et de mêlée en espérance),
-seul changement de mécanisme joué à ce jour.**
+plus lentement. Run S11 (§5.11, récompense de tir et de mêlée en espérance) ARRÊTÉ par la garde à
+20 000 : argmax 0,47 contre P0 alors que l'agent échantillonné tient 0,55 et que l'entropie
+monte. Suivant : terme de marge de VP B6 (§5.12, second avis), sur le régime de référence.**
 
 **Si ça ne bouge pas.** Le levier « réglages » est épuisé. Il faut alors changer la façon dont
 l'agent reçoit son conseil : soit une tête « Q » qui moyenne les dés (quelques jours de code),
@@ -350,7 +351,7 @@ log-prob 1,7 × 10⁻⁴).
 | S8 | Entropie normalisée par l'état + `ent_coef` × 5 | B1, B2 | ☑ testée (2026-09-12/13) → **sans effet** | code + agent dédié, 2 runs (11 h 44) | exploration ×2–5 sur têtes courtes ; holdout +0,4 pt, vs P0 −6 pts, dans le bruit ; clé conservée, désactivée par défaut |
 | S9 | Température des logits (T ≈ 2) à la collecte **et** dans le ratio PPO, T = 1 en évaluation | B1, B3 | ☐ envisagée (rapport du 2026-09-13, option C) | code (`_action_logits`, côté workers comme `evaluate_actions`) | nécessaire pour charge/pose, insuffisante seule ; ajoute de la variance : à mesurer **après** la question C1 |
 | S10 | `gae_lambda` 0,95 → 0,8 / 0,5 / 0,2 / 0 ; `gamma` 0,97 | C1, C4 | ☑ **λ mesuré a posteriori (2026-09-13) → ✗ comme levier seul** | config | f(λ=0) = 0,053 [0,036, 0,070] < 0,1 : le critère écrit pour relancer P1 à ce λ n'est pas atteint ; γ non balayé (critic à 0,99) |
-| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☑ **livrée le 2026-09-14, run en cours (§5.11)** | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
+| S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☑ **testée le 2026-09-14 → ✗ garde de destruction** (argmax 0,47 vs P0, échantillonné 0,55, entropie montante ; §5.11) | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
 | S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
 | S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
 | S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ⏳ **désignée par S13, décision en attente (§7)** | code IA | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
@@ -599,7 +600,7 @@ cause, et le tronc partagé « façonné par le bruit » non plus, puisque lui d
 critic (part policy 0,62 → 0,47) ne change rien au jeu. 0,17 rétabli. S5 reste « livrée, aucun
 effet sur le plateau », désormais dans les deux sens.
 
-### 5.11 S11 — récompense en espérance pour tir et mêlée (2026-09-14, décision utilisateur) — CODE EN COURS
+### 5.11 S11 — récompense en espérance pour tir et mêlée (2026-09-14, décision utilisateur) — RUN ARRÊTÉ PAR LA GARDE
 
 Principe : le moteur jette les dés pour la partie (la cible perd ses PV selon le vrai jet), mais la
 récompense versée à l'agent pour un tir ou une mêlée est calculée à partir de l'espérance de son
@@ -662,7 +663,37 @@ l'agent = formule sur l'espérance, ≠ formule sur les événements ; rouge par
 (`vf_coef` 0,17 rétabli), commande habituelle `--etape P1`, `training_x1_05-p01-s11.log`. Seule
 différence avec `run_20260912-065925` : la récompense de tir et de mêlée est l'espérance du choix,
 plus le jet. Jugé par la règle §7 (moyenne de `03_selfplay/P0` sur 20 000–30 000 contre 0,601 /
-plat 0,585 ; sondes ; garde à 20 000). Résultat à consigner ici.
+plat 0,585 ; sondes ; garde à 20 000).
+
+**Résultat (`run_20260914-103745`, 10:37 → 14:05, 20 000 épisodes d'étape, 272 updates) : arrêté
+par la garde de destruction** — sondes contre P0 (argmax des deux côtés) 0,450 à 10 000 et 0,497 à
+20 000, moyenne 0,473 < 0,50. Parité d'ouverture 0,463.
+
+| fenêtre d'étape | [0, 10k) | [10k, 20k) | sonde 10k | sonde 20k |
+|---|---|---|---|---|
+| référence 0,17 | 0,508 | 0,571 | 0,547 | 0,533 |
+| S11 | **0,538** | 0,549 | **0,450** | 0,497 |
+
+Le paradoxe est le fait principal : la courbe d'entraînement (agent **échantillonné** contre P0
+stochastique) est au niveau ou au-dessus de la référence (par tranche de 2 000 : 0,530 / 0,523 /
+0,536 / 0,540 / 0,559 / 0,525 / 0,550 contre 0,468 / 0,504 / 0,523 / 0,509 / 0,523 / 0,554 /
+0,566), les courbes de jeu sont saines et montent (`win_rate_overall` 0,616 → 0,624, kills 10,4 →
+11,1, `damage_efficiency` 3,16 → 3,58, `episode_reward` 373 → 400, EV 0,88), mais la politique
+**argmax** perd contre P0 argmax. Symptôme distinctif : **l'entropie monte** — `train/entropy_loss`
+−0,78 → −0,85 par quart (référence : −0,78 → −0,72, elle **descend**), `entropy_loss_normalized`
+−0,46 → −0,52, `policy_gradient_loss` −0,004 → −0,007, KL et clip_fraction inchangés.
+
+**Lecture (hypothèses, non prouvées).** L'espérance rend les avantages de tir *honnêtes* : deux
+cibles d'espérance voisine gardent des probabilités voisines, là où le jet produisait des pics
+(un kill chanceux → avantage énorme → p → 1) qui **figeaient** les têtes courtes. La politique
+échantillonnée s'en trouve bien, l'argmax d'une distribution plus plate ne coïncide plus avec le
+comportement récompensé. Seconde hypothèse : le proxy linéaire des kills (E[dmg] / HP_MAX) paie
+une blessure partielle comme un tiers de kill, donc ne récompense plus **finir** une figurine
+(concentration de tir) ; les kills réels du run ne baissent pourtant pas. À départager par une
+sonde d'entropie par famille sur le checkpoint S11 (`scripts/family_entropy_probe.py`) et une
+sonde stochastique contre P0 (est-ce l'argmax seul qui perd ?). Ce que S11 ferme : tel quel, sur
+P1 repris de P0, il détruit la politique déterministe. Clé `reward_on_expectation` remise à
+`false` ; le code reste (verrouillé, réversible).
 
 ## 6. Ce qui n'a pas été fait
 
@@ -675,7 +706,7 @@ plat 0,585 ; sondes ; garde à 20 000). Résultat à consigner ici.
 - [x] Sonde avec **P0 déterministe** — faite le 2026-09-13 : mêmes nombres (B4, S12).
 - [x] **Levier S23** (λ 0,2 + 32 640 / 2 040) — testé dans la nuit du 2026-09-13 au 14, réfuté (§5.9).
 - [x] **`vf_coef` 0,3** — run du 2026-09-14 02:36 → 10:26, réfuté (§5.10).
-- [ ] **S11** — code livré et mergé (§5.11) ; run en cours depuis le 2026-09-14 10:30.
+- [x] **S11** — code livré et mergé ; run du 2026-09-14 10:37 → 14:05 arrêté par la garde (moyenne des sondes 0,473 < 0,50) ; entropie montante, argmax perd, échantillonné tient (§5.11).
 - [ ] Température d'exploration (S9) — après la question de variance, pas avant.
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
 - [ ] Ventilation des pénalités −97 (C5) ; déploiement auto à 0,50 (D4).
