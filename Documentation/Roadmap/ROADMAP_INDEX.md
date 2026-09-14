@@ -190,13 +190,16 @@ critic, la prédiction f supposait le critic fixe. Au passage : correctif de col
 le learner tenait trois exemplaires des observations). Profil ramené au régime de référence.
 **Décisions utilisateur du 2026-09-14** : (1) essai `vf_coef` 0,3 (02:36 → 10:26) **réfuté** — même
 plateau 0,585 que la référence, atteint plus lentement (dossier §5.10) ; (2) **S11**, récompense en
-espérance pour tir et mêlée, livrée et mergée (`296c1bc3d`), **run en cours depuis 10:30**
-(`training_x1_05-p01-s11.log`, dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps —
-un plateau est un symptôme ; (4) **B6, marge de VP en ledger** (`vp_margin_factor × Δ(VP_moi −
-VP_lui)` à la place de `objective_reward_factor × VP_propres`, un VP cédé coûte −6) **+ échauffement
-du critic** (`value_warmup_updates`) — **code livré en worktree `worktree-marge-vp-b6`, non mergé
-tant que S11 tourne** ; merge, contrat, profil et run « S11 + marge » après le verdict S11
-([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12). En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
+espérance pour tir et mêlée, livrée et mergée (`296c1bc3d` + `472f5dd53`), **run 10:37 → 14:05 arrêté
+par la garde** (argmax 0,47 contre P0, échantillonné 0,55, entropie montante ; clé remise à `false`,
+dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps — un plateau est un symptôme ;
+(4) **B6, marge de VP en ledger** (`vp_margin_factor × Δ(VP_moi − VP_lui)` à la place de
+`objective_reward_factor × VP_propres`, un VP cédé coûte −6) **+ échauffement du critic**
+(`value_warmup_updates`, extracteur et statistiques de normalisation gelés, jamais hérité d'un
+zip) — **code livré et mergé le 2026-09-14** ; reste avant le run « marge » : contrat, clé dans
+le profil `x1_lineage` ([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12).
+**Point de reprise sans contexte : dossier
+[#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
 plafond 0,65 par un exploiteur contre P0 (jamais fait).
 
 ---

@@ -2232,7 +2232,6 @@ class SelfPlayWrapper(gym.Wrapper):
                     except (OSError, IOError):
                         pass
                 self.episode_length += 1
-                p1_actions_after += 1
                 # Meme accumulation qu'avant l'action de P0 : chaque step de P1 rend la
                 # recompense de P0 (defensive, ledger de marge, et le +-50 terminal).
                 p0_reward += float(p1_step_reward)
