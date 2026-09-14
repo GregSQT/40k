@@ -155,6 +155,16 @@ restent dans les sections ci-dessous ([#entropie-normalisee](#entropie-normalise
 [#signal-p1-2026-09-13](#signal-p1-2026-09-13), [#holdout-2026-09-13](#holdout-2026-09-13),
 [#run-s23-2026-09](#run-s23-2026-09)) ; toute nouvelle mesure s'ajoute aux deux endroits.
 
+**Relecture du 2026-09-14 soir — [dossier §9](../Chantiers/backlog/plafonnement_p1.md#relecture-2026-09-14).**
+Faits manqués retrouvés dans `curriculum.log` : P1 sous `x1_lineage` à **0,713** contre P0 avant
+les correctifs moteur du 09-10, 0,563 après, seuil passé à 0,65 le jour même ; le zip P0 porte
+lr 0,0005 et `x1_lineage` reprend à 0,001 ; le protocole à une graine ne voit pas un effet de
+5 points (`vf_coef` 0,3 requalifié « nul dans le bruit »). **Décision utilisateur : 0,65 est un
+seuil de confirmation, le plafond attendu contre P0 est ~0,90 ; « plateau normal » écarté.**
+Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur agent dédié (S25 :
+lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
+graines sous 10 points d'effet ; B6 après, sur deux graines.
+
 ### Run S23 — λ 0,2 + rollout 32 640 / lot 2 040 — RÉFUTÉ (nuit du 2026-09-13 au 14) {#run-s23-2026-09}
 
 Commande habituelle `--etape P1` sous `x1_lineage` (`gae_lambda` 0,2, `n_steps` 32 640,

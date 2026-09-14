@@ -275,7 +275,7 @@ log-prob 1,7 × 10⁻⁴).
 |---|---|---|---|---|
 | A1 | Lot trop petit : l'update est dominée par le bruit d'échantillonnage | chaque pas de gradient est un tirage ; la politique marche au hasard | ☑ **bruit confirmé**, ✗ **levier réfuté** | f_8160 = 0,005 [−0,012, 0,022], f_1020 = 0,0006 ; B_noise ≥ 358 000 pas (×44 minimum) ; les 8 mini-lots d'un rollout n'ont aucune composante commune (E‖G_rollout‖² = E‖g_mb‖² / 8 exactement) |
 | A2 | Early-stop KL coupant chaque update (≈ 15 pas sur 32) | la moitié du rollout n'est jamais apprise | ☑ symptôme confirmé, ✗ cause réfutée | 761/761 sur P1 ; la KL de coupure est produite par un pas de bruit ; à 32 640 la coupure tombait au 32ᵉ/128 (pire) |
-| A3 | Learning rate inadapté | pas trop grand (désapprend) ou trop petit (n'avance pas) | ✗ écarté | il règle l'amplitude d'une direction qui n'en est pas une ; lr ×2 a participé à une destruction (2026-09-06) |
+| A3 | Learning rate inadapté | pas trop grand (désapprend) ou trop petit (n'avance pas) | ☐ **ROUVERT le 2026-09-14 soir (§9.2)** | l'argument « amplitude d'une direction qui n'en est pas une » ne vaut que pour une update, pas pour un run ; FAIT : le zip P0 porte lr 0,0005 (fin de rampe), `x1_lineage` reprend à 0,001 — une politique convergée reprise au double de son lr ; coupure KL à 11–16 mini-lots sur 32 sur les deux runs qui publient le compteur ; jamais testé isolément (le lr ×2 du 2026-09-06 était mêlé à trois autres leviers) |
 | A4 | `n_epochs` trop faible | plus de passes sur le même lot | ✗ écarté | 4 vs 6 mesuré par l'utilisateur, 4 retenu ; les epochs ne moyennent pas le bruit, ils ajoutent du biais off-policy |
 | A5 | Écrêtage `max_grad_norm` détruisant l'amplitude | pas de taille fixe | ☑ réfuté depuis vf_coef 0,17 | norme brute 0,39, écrêtage sur 15 % des mini-lots (93 % avant le 2026-09-07) |
 | A6 | Critic captant le gradient | la politique n'en reçoit qu'un quart | ☑ réfuté (corrigé le 2026-09-07) | part policy 0,235 → 0,62 ; EV 0,87 → 0,89 ; le critic reçoit encore un gradient réel (f = 0,27) |
@@ -311,14 +311,14 @@ log-prob 1,7 × 10⁻⁴).
 | D3 | Siège P2 sur-représenté (0,70) | P2 plus dur (0,627 vs 0,656 en jeu, 85,7 vs 97,7 en holdout) | ◐ décision du 2026-09-11, effet non isolé | l'écart de siège n'a pas bougé depuis le 2026-08-12 (12 points) |
 | D4 | 10 % d'épisodes déployés par le moteur joués à 0,50 | position non choisie par l'agent | ☐ non traité | `s_win_rate_deploy_auto` 0,50 vs 0,69 en actif ; `r_obj_held_diff_deploy_auto` −0,24 |
 | D5 | Deux fichiers de scénario | diversité de terrain faible | ☐ non testé | É9 (second scénario) ouvert par ailleurs |
-| D6 | Moteur modifié pendant la lignée (35 commits entre les holdouts) | références invalidées | ☑ acté, pas une cause du plateau | P0 et P1 jouent le même moteur ; seules les comparaisons avant/après sont interdites |
+| D6 | Moteur modifié pendant la lignée (35 commits entre les holdouts) | références invalidées | ☑ acté, pas une cause du plateau ; **complété §9.1 : le seuil 0,65 a été posé le 09-11 sur un jeu où P1 faisait 0,713** | P0 et P1 jouent le même moteur ; seules les comparaisons avant/après sont interdites — et la référence 0,713 (curriculum.log ligne 10, autre P0, autre observation) n'est PAS comparable au 0,60 actuel ; le seul point de référence valide est ce qu'un exploiteur atteint MAINTENANT (S25) |
 
 ### E. Mesure et critère
 
 | # | cause | mécanisme | statut | preuve / observation |
 |---|---|---|---|---|
 | E1 | Sonde argmax contre argmax : blocs corrélés | ±5 points entre sondes voisines | ☑ connu, traité | décision sur la moyenne de 3 sondes ; graines tirées au hasard depuis le 2026-09-07 |
-| E2 | Seuil 0,65 hors de portée de ce dispositif | le même dispositif promouvait à 0,55 | ☑ fait établi ; ✗ **baisser le seuil écarté par décision** (2026-09-12) | §1.4 ; un seuil abaissé promeut un agent qui n'apprend plus |
+| E2 | Seuil 0,65 hors de portée de ce dispositif | le même dispositif promouvait à 0,55 | ☑ fait établi ; ✗ **baisser le seuil écarté par décision** (2026-09-12), **réaffirmé le 2026-09-14 soir (§9.4)** | §1.4 ; un seuil abaissé promeut un agent qui n'apprend plus ; 0,65 est un seuil de CONFIRMATION de domination, le plafond attendu contre P0 est ~0,90 — « plateau normal d'un self-play » est écarté |
 | E3 | Fenêtre de lecture trop courte | conclusion prématurée | ☑ écarté | 7 sondes, 4 quarts plats, 1 052 updates |
 | E4 | Instrument de mesure du signal biaisé | faux zéro | ☑ **réfuté (2026-09-13)** | contrôle à poids aléatoires (`--random-init`) : f = 0,43 [0,27, 0,59] à λ = 0,95, K = 12 ; value f 0,97 ; le contrôle `entnorm_040721` rend f = 0,006 comme P1 — il n'était pas positif, pas l'instrument cassé ; implémentation indépendante (40k-a2) concordante |
 
@@ -333,7 +333,7 @@ log-prob 1,7 × 10⁻⁴).
 
 | # | cause | mécanisme | statut | preuve / observation |
 |---|---|---|---|---|
-| G1 | P1 = P0 + entraînement contre lui-même : +10 points puis limite de ce que PPO extrait d'un adversaire identique avec des dés | le gain marginal tombe sous le bruit | ☐ non distingué de C1 / C3 | 0,50 → 0,60 en 40 000 épisodes puis plat ; reproductible (P1 du 2026-09-11 : 0,561 à 30 000) |
+| G1 | P1 = P0 + entraînement contre lui-même : +10 points puis limite de ce que PPO extrait d'un adversaire identique avec des dés | le gain marginal tombe sous le bruit | ☐ non distingué de C1 / C3 ; **la lecture « limite normale » est écartée par décision (§9.4) ; le plafond réel se mesure par S25** | 0,50 → 0,60 en 40 000 épisodes puis plat ; reproductible (P1 du 2026-09-11 : 0,561 à 30 000) |
 
 ---
 
@@ -345,7 +345,7 @@ log-prob 1,7 × 10⁻⁴).
 | S2 | `batch_size` 4 080 | A1 | ☑ testée → ✗ | config | crash VRAM (8,89 Go) ; VRAM libérée depuis (obs non résidentes), mais levier réfuté par f |
 | S3 | `target_kl` relevé / `n_epochs` | A2 | ✗ écarté | config | 0,03 prendrait des pas de 0,045 nat hors région de confiance ; direction = bruit |
 | S4 | `learning_rate` | A3 | ✗ écarté | config | idem ; antécédent de destruction |
-| S5 | `vf_coef` 0,5 → 0,17 | A6 | ☑ livrée (2026-09-07) ; **0,3 testé le 2026-09-14 → ✗ même plateau (§5.10)** | config | part policy 0,62, EV intacte ; aucun effet sur le plateau ; question rouverte par l'utilisateur : à 0,17 le tronc partagé est façonné à 62 % par un gradient qui est du bruit à 98 % |
+| S5 | `vf_coef` 0,5 → 0,17 | A6 | ☑ livrée (2026-09-07) ; **0,3 testé le 2026-09-14 → résultat NUL dans le bruit (§5.10, requalifié §9.3 : une graine, sonde ±2,9 pts, blocs ±5 — ce n'est pas une réfutation)** | config | part policy 0,62, EV intacte ; aucun effet sur le plateau ; question rouverte par l'utilisateur : à 0,17 le tronc partagé est façonné à 62 % par un gradient qui est du bruit à 98 % |
 | S6 | `max_grad_norm` 2,0 | A5 | ☑ testée (2026-09-06) → instrument seulement | config | redescendu à 0,5 ; norme brute publiée depuis |
 | S7 | Régime scalaire de lignée (lr 0,001, ent_coef 0,01) | rampes reparcourues | ☑ livrée (2026-09-07/08) | config + code | a stoppé les destructions ; n'a pas produit de progression au-delà de 0,60 |
 | S8 | Entropie normalisée par l'état + `ent_coef` × 5 | B1, B2 | ☑ testée (2026-09-12/13) → **sans effet** | code + agent dédié, 2 runs (11 h 44) | exploration ×2–5 sur têtes courtes ; holdout +0,4 pt, vs P0 −6 pts, dans le bruit ; clé conservée, désactivée par défaut |
@@ -367,6 +367,10 @@ log-prob 1,7 × 10⁻⁴).
 | S23 | **λ court ET lot ×4 ensemble** : `gae_lambda` 0,2, `n_steps` 32 640, `batch_size` 2 040 (16 mini-lots, `target_kl` inchangé) | C1, C4, A1 | ☑ **testée (2026-09-14, §5.9) → ✗ détruit** : 0,50 → 0,41 en 8 000 épisodes ; λ change la cible du critic, la prédiction f supposait le critic fixe | config `x1_lineage`, 5 lancements (3 tués par la RAM, 1 correctif de collecte, 1 jugé) | f attendu ≈ 0,18 [0,13, 0,32] contre 0,018 aujourd'hui (f_B = 1 / (1 + B_noise / B), B_noise(λ = 0,2) = 145 000 [69 000, 222 000]) ; ni λ seul ni lot seul n'ont été testés ensemble ; VRAM mesurée : 3,80 Go réservés à 2 040, 7,47 à 4 080 (replanterait) ; RAM buffer 3,72 Go |
 
 ---
+
+| S25 | **Exploiteur de P0, meilleur cas** : agent dédié (copie de config, curriculum réduit à P0 + E0 ciblant P0), reprise de P0, 100 % P0, adversaire déterministe, siège 0,5, lr 0,0005, 60 000 épisodes, sonde argmax habituelle | plafond (E2, G1, D6) | ⏳ **désignée §9.5, à lancer sur décision** | config seule (agent dédié comme `ArmageddonAgent_x1_entnorm`) + copie du zip P0 | mesure le meilleur cas sans attribution ; verdict ≥ 0,68 → bissecter avec P1 (lr, déterminisme, siège, bots) ; plat ~0,60 → le mécanisme d'apprentissage est le goulot, pas le gate, et S9 / deux λ / S14 / S15 se jouent dans CE dispositif (le plus lisible) |
+| S26 | **lr de reprise 0,0005** (valeur finale de P0) au lieu de 0,001 dans `x1_lineage` | A3 | ☐ à tester, second bras de S25 seulement si S25 ≥ 0,68 | config | jugé d'abord par `train/n_minibatches_done` (attendu : 32 sur 32), puis par `03_selfplay/P0` à UPDATES égales |
+| S27 | **Mesures statiques par siège** (aucun entraînement) : P0 argmax vs P0 argmax, P0 échantillonné vs P0 argmax, P1 (`robust_0.9078`) vs P0, 300 parties par cellule et par siège | E1, D3 | ⏳ **désignée §9.5, à faire d'abord** | script lecture seule | dit quelle part du 0,60 est structurelle (siège, dés) ; mesure partielle existante à 40 parties (siège 1 : 6/15, siège 2 : 16/25) dans le sens INVERSE de l'écart de siège holdout — non concluante à ce n |
 
 ## 5. Ce qui a été fait, en détail
 
@@ -751,7 +755,9 @@ VP_lui), `objective_reward_factor` retiré, `on_objective_bonus` laissé — sec
 2026-09-14, mesure sur 40 parties : VP concédés corrélés −0,83 à l'issue, marge par tour sd 6,8) ;
 S14/S15 en réserve, pas avant les résultats ci-dessous ; menace par case en observation écartée.
 
-**Prochaines actions, dans l'ordre.**
+**⚠️ Relecture du 2026-09-14 soir (§9) : l'ordre ci-dessous est REMPLACÉ par le plan §9.5 — mesures statiques S27, puis exploiteur meilleur cas S25, puis leviers de mécanisme dans ce dispositif ; B6 passe après, sur deux graines.**
+
+**Prochaines actions, dans l'ordre (état au 14:30, périmé par §9.5).**
 1. **Marge de VP B6** : code en cours dans une autre session (worktree, prompt du 2026-09-14
    ~13:00 : terme ledger dans `calculate_reward` au site de `objective_turn_reward`, composante
    `vp_margin`, suppression de `_calculate_objective_reward_per_turn` / `once_claim` /
@@ -1051,6 +1057,115 @@ TD(0,2)). Suite décidée le 2026-09-14 par l'utilisateur : essai `vf_coef` 0,3 
 (§5.11) ; S14 / S15 restent en réserve ; « menace par case » en observation écartée (l'ennemi bouge
 avant de tirer) ; deux λ acteur/critic à dimensionner ; plafond 0,65 jamais mesuré (aucun exploiteur
 n'a tourné contre ce P0).**
+
+---
+
+## 9. Relecture externe du 2026-09-14 soir — faits manqués, corrections, plan {#relecture-2026-09-14}
+
+Relecture par une session indépendante du dépôt (pas du dossier), contre-relue par la session
+du dossier. Ce qui suit est **vérifié dans le dépôt** sauf mention contraire.
+
+### 9.1 Trois scores P1 ≥ 0,69 que le dossier ne cite pas
+
+`curriculum.log` (ignoré par git, non daté ligne à ligne) :
+
+| ligne | étape | régime | épisodes | vs P0 (gate) | quand |
+|---|---|---|---|---|---|
+| 7 | P1 | x1_long, new | 100 000 | 0,737 | avant option A |
+| 9 | P1 | from:P00 | 80 000 | 0,697 | avant option A |
+| 10 | P1 | **x1_lineage, from:P0** | 30 008 | **0,713** | entre la ligne P0 à 75 001 et le P0 actuel (09-10 22:31) |
+| 14 | P1 | x1_lineage, from:P0 | 30 000 | 0,563 | 09-11 05:06 |
+| 15 | P2 | x1_lineage, from:P1 | 30 000 | 0,650 vs P0, 0,579 vs P1 | 09-11 13:09 |
+
+Entre la ligne 10 et la ligne 14 : les quatre commits moteur du 2026-09-10 (`ab669cdd4` OC
+sommée par figurine — `engine/game_state.py` + `engine/observation_entities.py` ;
+`422115af4` exclusivité combi — `engine/observation_*` ; `35382ab9b` dégâts espérés sur cible
+effective ; `e2040c062` table de dégâts complétée — `engine/weapon_damage_cache.py`, consommée
+par `ai/bot_doctrines.py`, `ai/benchmark_bots.py` et le cache de meilleure arme de
+`engine/w40k_core.py` ; 0 hit `expected_damage|weapon_damage` dans `engine/observation_*.py`),
+plus deux changements d'observation du 09-09 qui ont imposé un P0 neuf. Le seuil est passé de
+0,55 à 0,65 le 09-11 (§1.4), le jour du 0,563. **Le seuil 0,65 a donc été fixé sur un jeu où P1
+faisait 0,71, et n'a jamais été confronté au jeu actuel.** Réserve : le P0 de la ligne 10 n'est
+pas le P0 actuel (75 001 épisodes contre 50 000, autre observation), donc « même adversaire »
+n'est pas acquis et le 0,713 n'est **pas** une référence comparable. **Conclusion sur les
+commits du 09-10 : aucune action code ; la seule référence valide est ce qu'un exploiteur
+atteint maintenant (S25).** Ce que ces commits ont changé pour le joueur (qui tient un
+objectif, adversité des bots) ne se lit pas dans le code, il se lit dans les parties : S27.
+
+### 9.2 Le régime de reprise double le learning rate
+
+Vérifié : `model_ArmageddonAgent_x1_P0.zip` porte `learning_rate` 0,0005 (fin de la rampe
+0,002 → 0,0005 de `x1_long`, `training_x1_01-p00.log` ligne 55) ; `x1_lineage` pose 0,001,
+constant, et `_apply_curriculum_model_params` (`ai/train.py`) l'applique à la reprise ;
+`train/learning_rate` est plat à 0,001 sur les 1 052 updates de `run_20260912-065925` ;
+`train/approx_kl_max` ≥ 0,0225 sur 1 052/1 052 ; `train/n_minibatches_done` 11–16 sur 32 sur
+les deux runs qui le publient (§5.10, §5.11). Le rejet de A3 (« amplitude d'une direction qui
+n'en est pas une ») vaut pour une update, pas pour un run où seule la dérive cumulée compte et
+où la moitié de chaque rollout n'entre jamais dans un gradient. Effet attendu sur le plafond :
+réel mais modeste (l'équivalent gratuit d'un lot doublé), **hygiène du régime, pas explication
+du plafond**. Retiré comme preuve : « les pas Adam successifs sont alignés par le momentum »
+(mécanisme plausible, non mesuré ; le seul fait est la coupure à mi-rollout).
+
+### 9.3 Le protocole ne peut pas voir l'effet qu'il cherche
+
+Une graine par levier, une référence unique, jamais deux graines du même réglage ; erreur-type
+d'une sonde 2,9 points, sondes voisines à ±5 par blocs corrélés, écart visé 5 points. Donc
+**« `vf_coef` 0,3 réfuté » est un résultat nul dans le bruit** (S5 requalifié), et B6 jugé sur
+une graine le sera aussi. Seuls S23 et S11 ont un verdict hors bruit, par destruction. Règle à
+partir de maintenant : **tout levier à effet attendu < 10 points se juge sur deux graines**, et
+un run d'exploration se lit à updates égales quand le régime change la cadence d'update.
+
+Deux affirmations de la relecture retirées après contre-relecture : « P1 et P0 tous deux à
+0,91 en holdout » (non vérifié : P0 = score robuste 0,868, P1 = holdout 0,907–0,910, métriques
+différentes ; l'argument « holdout bots saturé » tient par les témoins entnorm à 0,875–0,879
+qui font 22–28 % contre P0) ; « S23 était prévisible » (recul après coup ; la forme utile est
+la règle : avant tout changement de λ ou γ, écrire ce qu'il fait à la CIBLE du critic).
+
+### 9.4 Décision utilisateur (2026-09-14 soir) — le gate n'est pas le sujet
+
+**« Plafonner vers 0,60 contre un adversaire figé de même architecture serait normal »
+(lecture AlphaGo Zero à 55 %) : ÉCARTÉ.** P0 ne sait battre que les bots ; une politique
+entraînée à l'exploiter doit pouvoir monter vers **0,90**. 0,65 est un seuil de **confirmation
+de domination** posé bas exprès pour éviter la suradaptation, pas un objectif. Conséquence : si
+même l'exploiteur meilleur cas (S25) plafonne vers 0,60, ce n'est pas le jeu qui plafonne, c'est
+le **mécanisme d'apprentissage** qui n'extrait pas ce qui est là — et c'est dans le dispositif
+exploiteur (100 % P0, déterministe, le plus lisible) que les leviers de mécanisme se jugent.
+E2 / S18 restent clos ; G1 « limite normale » écarté.
+
+### 9.5 Plan (ordre, coût, règle de lecture écrite avant)
+
+1. **S27 — mesures statiques** (~1 h CPU, aucun code d'entraînement, lecture seule des
+   modèles) : table siège × mode. Lecture : si P0 vs P0 argmax s'écarte de 0,50 par siège de
+   plus de 5 points, le siège est une variable à équilibrer dans tout ce qui suit.
+2. **S25 — exploiteur de P0, meilleur cas, UN bras** (~6 h) : lr 0,0005, P0 déterministe,
+   siège 0,5, 100 % P0, 60 000 épisodes, sondes à 10 000. Règle : moyenne des 3 dernières
+   sondes ; **≥ 0,68** → le défaut de P1 est dans l'écart de config, bissection en un run par
+   variable (lr → déterminisme → siège → part de bots) ; **≥ 0,80** → la config P1 est le seul
+   problème ; **< 0,62 plat** → goulot = mécanisme, passer au 3.
+3. **Si goulot = mécanisme, dans le dispositif S25, un levier par run, deux graines quand
+   l'effet attendu est < 10 points**, dans cet ordre : (a) exploration structurée S9
+   (température de collecte, ratio corrigé) — contre un adversaire déterministe, une politique
+   à p ≈ 0,99 ne peut pas DÉCOUVRIR l'exploit, c'est le levier le plus directement lié à la
+   thèse « P0 est exploitable » ; (b) poids de l'issue vs façonnage (C2 : objectifs 62 %,
+   issue ±150 ; contre un adversaire figé, l'issue est le signal exact de l'exploit et le
+   façonnage peut le contredire) ; (c) deux λ acteur / critic ; (d) B6 (déjà codé) sur deux
+   graines ; (e) S11b si les sondes de §5.11 désignent le proxy des kills ; (f) S14 tête Q ;
+   (g) S15 recherche. Chaque run : règle de lecture écrite avant, jugé à updates égales,
+   consigné ici ET dans `training.md`.
+4. Seulement ensuite : transfert du régime gagnant dans `x1_lineage`, reprise de la lignée.
+
+**Plomberie vérifiée pour S25** : E1 cible P3 (« ni init ni pool ne peuvent nommer une étape
+qui n'a pas encore tourné », `_doc_ordre`), les surcharges d'étape sont interdites sur les
+exploiteurs, `training_configs.lineage` impose `x1_lineage`, `opponent.deterministic` est
+global, `EXPECTED_STAGES` (`tests/unit/ai/test_curriculum.py`) épingle champion et poids de
+chaque étape. Donc pas de modification temporaire de la config x1 : **agent dédié**
+`ArmageddonAgent_x1_expl` (copie de `config/agents/ArmageddonAgent_x1/`, curriculum réduit à
+`order: [P0, E0]` avec E0 exploiteur `from:P0` ciblant P0, profil de lignée à lr 0,0005 et
+siège 0,5, `opponent.deterministic: true`), même précédent que `ArmageddonAgent_x1_entnorm`.
+Nécessite la copie de `model_ArmageddonAgent_x1_P0.zip` + pkl + contrat sous le nom du nouvel
+agent (copie, pas modification — à faire ou autoriser par l'utilisateur). L'exploiteur s'arrête
+seul à `win_rate_target` 0,70 par sa sonde de confirmation : à relever à 0,95 dans SA copie de
+curriculum pour lire jusqu'où il monte.
 
 ---
 
