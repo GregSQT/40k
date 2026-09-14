@@ -2129,121 +2129,45 @@ class SelfPlayWrapper(gym.Wrapper):
                     f.write(f"BETWEEN_STEP_TIMING episode={ep} step_index={step_idx} duration_s={between_s:.6f}\n")
             except (OSError, IOError):
                 pass
-        # CRITICAL: First handle any pending Player 2 turns before Player 1's action
-        # This shouldn't happen normally, but safety check
-        obs = None
-        reward = 0.0
-        terminated = False
-        truncated = False
-        info = {}
-
+        # Récompense de P0 ACCUMULÉE sur TOUS les steps moteur du step gym — jumeau de
+        # `BotControlledEnv` (`accumulate_reward=True`). Le moteur rend la récompense du joueur
+        # CONTRÔLÉ à chaque step, quel que soit le joueur qui joue : pénalité défensive des tirs
+        # adverses, et depuis B6 le ledger de marge (`vp_margin_paid`), qui avance à CHAQUE step
+        # où les VP bougent. Ne garder que le step terminal de P1 jetait tout ce qui tombait
+        # pendant son tour : le ledger avançait, l'agent ne touchait rien, et la somme
+        # télescopique « 6 x marge finale » était fausse (mesuré : -150 reçus pour une marge
+        # finale de +5).
+        p0_reward = 0.0
         agent_step_info: Dict[str, Any] = {}
 
-        # Track P1 actions for diagnostic
-        p1_actions_before = 0
-        # Recompense de P0 ACCUMULEE sur les steps de P1 qui precedent son action — jumeau de
-        # `BotControlledEnv` (`accumulate_reward=True`). Le moteur rend la recompense du joueur
-        # CONTROLE a chaque step, quel que soit le joueur qui joue : penalite defensive des tirs
-        # adverses, et depuis B6 le ledger de marge (`vp_margin_paid`), qui avance a CHAQUE step
-        # ou les VP bougent. Ne garder que le step terminal jetait tout ce qui tombait pendant
-        # le tour de P1 : le ledger avancait, l'agent ne touchait rien, et la somme telescopique
-        # « 6 x marge finale » etait fausse (mesure : -150 recus pour une marge finale de +5).
-        p1_reward_before = 0.0
-        # Garde anti-boucle-infinie derive de game_rules. Portee = les activations
-        # CONSECUTIVES d'un joueur avant que P0 reprenne la main : la borne naturelle est
-        # celle d'un TOUR (max_steps_per_turn * marge), pas celle d'un episode entier.
-        max_iterations = self.engine.get_turn_step_limit()
-        while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
-            p1_actions_before += 1
-            if p1_actions_before > max_iterations:
-                current_phase = require_key(self.engine.game_state, "phase")
-                print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 before loop! Count: {p1_actions_before}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
-                raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 before): {p1_actions_before} iterations, phase={current_phase}")
-            player1_action = self._get_frozen_model_action()
-            # LOG TEMPORAIRE: time full env.step() (--debug)
-            t0_p1 = time.perf_counter() if debug_mode else None
-            obs, reward, terminated, truncated, info = self.env.step(player1_action)
-            if debug_mode and t0_p1 is not None:
-                ep = int(require_key(self.engine.game_state, "episode_number"))
-                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
-                duration_s = time.perf_counter() - t0_p1
-                try:
-                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
-                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
-                except (OSError, IOError):
-                    pass
-            self.episode_length += 1
-            p1_reward_before += float(reward)
-            self.episode_reward += float(reward)
+        # P1 a la main à l'entrée du step gym : il joue jusqu'à la rendre à P0.
+        obs, terminated, truncated, info, p0_reward = self._play_p1_until_p0(
+            None, False, False, {}, debug_mode, p0_reward, "P1 before"
+        )
 
         # Now execute Player 0's action (if game not over)
-        p0_reward = p1_reward_before
         if not (terminated or truncated):
             # LOG TEMPORAIRE: time full env.step() (--debug)
             t0_p0 = time.perf_counter() if debug_mode else None
             obs, reward, terminated, truncated, info = self.env.step(action)
             if debug_mode and t0_p0 is not None:
-                ep = int(require_key(self.engine.game_state, "episode_number"))
-                step_idx = int(require_key(self.engine.game_state, "episode_steps"))
-                duration_s = time.perf_counter() - t0_p0
-                try:
-                    debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                    with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
-                        f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
-                except (OSError, IOError):
-                    pass
-            p0_reward += float(reward)  # s'ajoute aux steps de P1 joues AVANT (jamais ecrases)
+                self._write_step_timing(t0_p0)
+            p0_reward += float(reward)
             # Meme releve que dans BotControlledEnv, et pour la meme raison : les steps de P1
             # qui suivent vont remplacer `info`, et les cles qui decrivent l'action de P0 (la
             # phase ou elle a ete jouee, sa reussite, une charge aboutie) se liraient alors
             # comme celles de l'adversaire.
             agent_step_info = {key: info[key] for key in AGENT_STEP_INFO_KEYS if key in info}
-            self.episode_reward += float(reward)
             self.episode_length += 1
 
-            # DIAGNOSTIC: Log P0's reward for debugging (disabled for cleaner output)
-            # if self.total_episodes < 3 and abs(reward) > 0.1:
-            #     phase = self.engine.game_state.get("phase", "?")
-            #     print(f"      [P0 Reward] action={agent_action}, reward={reward:.2f}, phase={phase}")
-
             # Handle any Player 1 turns that follow
-            p1_actions_after = 0
-            while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
-                p1_actions_after += 1
-                if p1_actions_after > max_iterations:
-                    current_phase = require_key(self.engine.game_state, "phase")
-                    print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in P1 after loop! Count: {p1_actions_after}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
-                    raise RuntimeError(f"SelfPlayEnvWrapper infinite loop (P1 after): {p1_actions_after} iterations, phase={current_phase}")
-                player1_action = self._get_frozen_model_action()
-                # CRITICAL FIX: Capture reward when P1's action ends game!
-                # When P1 kills last P0 unit, reward contains P0's LOSE penalty
-                # LOG TEMPORAIRE: time full env.step() (--debug)
-                t0_p1_after = time.perf_counter() if debug_mode else None
-                obs, p1_step_reward, terminated, truncated, info = self.env.step(player1_action)
-                if debug_mode and t0_p1_after is not None:
-                    ep = int(require_key(self.engine.game_state, "episode_number"))
-                    step_idx = int(require_key(self.engine.game_state, "episode_steps"))
-                    duration_s = time.perf_counter() - t0_p1_after
-                    try:
-                        debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
-                        with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
-                            f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
-                    except (OSError, IOError):
-                        pass
-                self.episode_length += 1
-                # Meme accumulation qu'avant l'action de P0 : chaque step de P1 rend la
-                # recompense de P0 (defensive, ledger de marge, et le +-50 terminal).
-                p0_reward += float(p1_step_reward)
-                self.episode_reward += float(p1_step_reward)
-
-            # DIAGNOSTIC: Log if P1 took actions (disabled for cleaner output)
-            # if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:
-            #     phase = self.engine.game_state.get("phase", "?")
-            #     print(f"    [SelfPlay] P0 action={agent_action}, P1 took {p1_actions_before}+{p1_actions_after} actions, phase={phase}")
+            obs, terminated, truncated, info, p0_reward = self._play_p1_until_p0(
+                obs, terminated, truncated, info, debug_mode, p0_reward, "P1 after"
+            )
 
         # CRITICAL: Return P0's reward to SB3, not P1's!
         reward = p0_reward
+        self.episode_reward += reward
         apply_agent_step_info(info, agent_step_info)
 
         # Track episode end statistics
@@ -2265,6 +2189,56 @@ class SelfPlayWrapper(gym.Wrapper):
         if terminated or truncated:
             obs = _detach_terminal_obs(obs)
         return obs, reward, terminated, truncated, info
+
+    def _write_step_timing(self, t0: float) -> None:
+        """LOG TEMPORAIRE (--debug) : durée d'un `env.step()` complet dans debug.log."""
+        ep = int(require_key(self.engine.game_state, "episode_number"))
+        step_idx = int(require_key(self.engine.game_state, "episode_steps"))
+        duration_s = time.perf_counter() - t0
+        try:
+            debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug.log")
+            with open(debug_path, "a", encoding="utf-8", errors="replace") as f:
+                f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
+        except (OSError, IOError):
+            pass
+
+    def _play_p1_until_p0(
+        self,
+        obs: Any,
+        terminated: bool,
+        truncated: bool,
+        info: Dict[str, Any],
+        debug_mode: bool,
+        cumulative_reward: float,
+        label: str,
+    ) -> tuple[Any, bool, bool, Dict[str, Any], float]:
+        """Fait jouer P1 (modèle gelé) jusqu'à ce que la main revienne à P0 ou que la partie finisse.
+
+        Chaque step de P1 rend la récompense de P0 (défensive, ledger de marge, et le ±50
+        terminal) : elle s'ajoute à `cumulative_reward`, jamais écrasée. Jumeau de
+        `BotControlledEnv._run_bot_until_not_bot_turn`. `label` distingue les deux appels
+        (avant/après l'action de P0) dans la garde anti-boucle.
+        """
+        # Garde anti-boucle-infinie derive de game_rules. Portee = les activations
+        # CONSECUTIVES d'un joueur avant que P0 reprenne la main : la borne naturelle est
+        # celle d'un TOUR (max_steps_per_turn * marge), pas celle d'un episode entier.
+        max_iterations = self.engine.get_turn_step_limit()
+        p1_actions = 0
+        while not (terminated or truncated) and self.engine.game_state["current_player"] == 2:
+            p1_actions += 1
+            if p1_actions > max_iterations:
+                current_phase = require_key(self.engine.game_state, "phase")
+                print(f"\n[DEBUG] SelfPlayEnvWrapper: Infinite loop detected in {label} loop! Count: {p1_actions}, episode_length: {self.episode_length}, phase: {current_phase}", flush=True)
+                raise RuntimeError(f"SelfPlayEnvWrapper infinite loop ({label}): {p1_actions} iterations, phase={current_phase}")
+            player1_action = self._get_frozen_model_action()
+            # LOG TEMPORAIRE: time full env.step() (--debug)
+            t0_p1 = time.perf_counter() if debug_mode else None
+            obs, reward, terminated, truncated, info = self.env.step(player1_action)
+            if debug_mode and t0_p1 is not None:
+                self._write_step_timing(t0_p1)
+            self.episode_length += 1
+            cumulative_reward += float(reward)
+        return obs, terminated, truncated, info, cumulative_reward
 
     def _get_frozen_model_action(self) -> int:
         """

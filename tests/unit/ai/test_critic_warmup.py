@@ -9,47 +9,30 @@ Après N updates, le comportement normal reprend.
 sérialisés : le régime appartient au run, jamais au checkpoint.
 
 Pendant le warmup, la politique est immobile au bit près : paramètres hors critic gelés
-(`grad = None`) ET statistiques d'`EntityRunningNorm` figées (`eval()` sur ces sous-modules,
-sinon `set_training_mode(True)` les fait avancer à chaque minibatch).
+(`grad = None`) ET statistiques d'`EntityRunningNorm` figées (tout ce qui n'est pas critic passe
+en mode évaluation, sinon `set_training_mode(True)` les fait avancer à chaque minibatch).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
-import gymnasium
 import numpy as np
 import pytest
+import torch as th
 from gymnasium import spaces
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from ai.patched_ppo import PatchedMaskablePPO
+from ai.pointer_policy import PointerMaskablePolicy
+from ai.spatial_extractor import EntityRunningNorm, SpatialCombinedExtractor
+from tests.unit.ai.test_gradient_norm_is_pre_clip import _TinyMaskedEnv
+from tests.unit.ai.test_pointer_head import _ToyEnv
 
 
-class _TinyMaskedEnv(gymnasium.Env):
-    """Env minimal : 3 obs, 2 actions, 4 steps par épisode. Identique à test_gradient_norm."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.observation_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
-        self.action_space = spaces.Discrete(2)
-        self._t = 0
-
-    def reset(self, *, seed: Any = None, options: Any = None):
-        self._t = 0
-        return np.zeros(3, dtype=np.float32), {}
-
-    def step(self, action):
-        self._t += 1
-        obs = np.full(3, self._t / 10.0, dtype=np.float32)
-        reward = float(action) * self._t
-        return obs, reward, self._t >= 4, False, {}
-
-    def action_masks(self) -> np.ndarray:
-        return np.ones(2, dtype=bool)
-
-
-def _model_with_warmup(n_warmup: int) -> PatchedMaskablePPO:
-    model = PatchedMaskablePPO(
+def _model(n_warmup: int, **policy_kwargs: Any) -> PatchedMaskablePPO:
+    """`MlpPolicy` sur `_TinyMaskedEnv` ; la clé passe par le constructeur, comme en `--new`."""
+    return PatchedMaskablePPO(
         "MlpPolicy",
         _TinyMaskedEnv(),
         n_steps=8,
@@ -57,10 +40,23 @@ def _model_with_warmup(n_warmup: int) -> PatchedMaskablePPO:
         n_epochs=1,
         seed=0,
         device="cpu",
-        policy_kwargs={"net_arch": [8]},
+        policy_kwargs={"net_arch": [8], **policy_kwargs},
+        value_warmup_updates=n_warmup,
     )
-    model.value_warmup_updates = n_warmup
-    return model
+
+
+def _production_model(n_warmup: int) -> PatchedMaskablePPO:
+    """Le VRAI chemin : `PointerMaskablePolicy` + `SpatialCombinedExtractor` (extracteur partagé imposé)."""
+    return PatchedMaskablePPO(
+        PointerMaskablePolicy, _ToyEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
+        device="cpu", verbose=0,
+        policy_kwargs={
+            "net_arch": [16, 16],
+            "features_extractor_class": SpatialCombinedExtractor,
+            "features_extractor_kwargs": {"cnn_features": 8},
+        },
+        value_warmup_updates=n_warmup,
+    )
 
 
 def _run_one_update(model: PatchedMaskablePPO) -> dict[str, float]:
@@ -83,6 +79,26 @@ def _run_one_update(model: PatchedMaskablePPO) -> dict[str, float]:
     return recorded
 
 
+def _snapshot(*param_sources: Iterable[th.nn.Parameter]) -> list[th.Tensor]:
+    """Copie détachée des tenseurs, pour comparer au bit près avant/après une update."""
+    return [t.detach().clone() for source in param_sources for t in source]
+
+
+def _policy_head_params(model: PatchedMaskablePPO) -> list[th.Tensor]:
+    """Poids de la politique seule : tête d'action + tronc pi (le tronc vf est séparé)."""
+    pol = model.policy
+    return _snapshot(pol.action_net.parameters(), pol.mlp_extractor.policy_net.parameters())
+
+
+def _value_head_params(model: PatchedMaskablePPO) -> list[th.Tensor]:
+    pol = model.policy
+    return _snapshot(pol.value_net.parameters(), pol.mlp_extractor.value_net.parameters())
+
+
+def _all_equal(before: list[th.Tensor], after: list[th.Tensor]) -> bool:
+    return all(th.equal(a, b) for a, b in zip(before, after))
+
+
 def test_value_warmup_active_est_1_pendant_le_warmup() -> None:
     """train/value_warmup_active = 1 pendant la première update warmup.
 
@@ -90,99 +106,83 @@ def test_value_warmup_active_est_1_pendant_le_warmup() -> None:
     de _vwu_done ferait tomber ce test au ROUGE : soit le compteur ne monterait jamais, soit
     l'indicateur resterait 0 même avec value_warmup_updates > 0.
     """
-    model = _model_with_warmup(n_warmup=3)
+    model = _model(n_warmup=3)
     recorded = _run_one_update(model)
 
     assert "train/value_warmup_active" in recorded, "train() ne publie pas train/value_warmup_active"
     assert recorded["train/value_warmup_active"] == pytest.approx(1.0), (
         "première update avec value_warmup_updates=3 doit avoir warmup_active=1"
     )
-    assert getattr(model, "_vwu_done", 0) == 1, "_vwu_done doit être 1 après la première update"
+    assert model._vwu_done == 1, "_vwu_done doit être 1 après la première update"
 
 
 def test_value_warmup_active_est_0_sans_warmup() -> None:
     """Sans value_warmup_updates, train/value_warmup_active = 0 dès la première update."""
-    model = _model_with_warmup(n_warmup=0)
+    model = _model(n_warmup=0)
     recorded = _run_one_update(model)
 
     assert recorded.get("train/value_warmup_active") == pytest.approx(0.0), (
         "sans warmup, value_warmup_active doit valoir 0"
     )
-    assert getattr(model, "_vwu_done", 0) == 0, "_vwu_done ne doit pas incrementer hors warmup"
+    assert model._vwu_done == 0, "_vwu_done ne doit pas incrementer hors warmup"
 
 
 def test_vwu_done_incremente_puis_sature() -> None:
     """_vwu_done monte jusqu'à value_warmup_updates puis s'arrête.
 
-    VERROU. Sans la condition `if _was_warmup`, _vwu_done continuerait d'incrémenter au-delà
+    VERROU. Sans la condition `if _in_warmup`, _vwu_done continuerait d'incrémenter au-delà
     de value_warmup_updates et pousserait _in_warmup à True pour toujours.
     """
     n = 2
-    model = _model_with_warmup(n_warmup=n)
+    model = _model(n_warmup=n)
 
     # Update 1 : warmup actif
     _run_one_update(model)
-    assert getattr(model, "_vwu_done", 0) == 1
+    assert model._vwu_done == 1
 
-    # Reset le logger pour capturer la seconde update
+    # Update 2 : warmup actif
     _run_one_update(model)
-    assert getattr(model, "_vwu_done", 0) == 2
+    assert model._vwu_done == 2
 
     # Update 3 : warmup terminé, _vwu_done ne monte plus
     recorded = _run_one_update(model)
-    assert getattr(model, "_vwu_done", 0) == 2, "_vwu_done ne doit pas dépasser value_warmup_updates"
+    assert model._vwu_done == 2, "_vwu_done ne doit pas dépasser value_warmup_updates"
     assert recorded.get("train/value_warmup_active") == pytest.approx(0.0), (
         "après N updates, warmup_active doit valoir 0"
     )
 
 
-def _policy_head_params(model: PatchedMaskablePPO) -> list:
-    """Poids de la politique seule : tête d'action + tronc pi (le tronc vf est séparé)."""
-    pol = model.policy
-    tensors = list(pol.action_net.parameters()) + list(pol.mlp_extractor.policy_net.parameters())
-    return [t.detach().clone() for t in tensors]
-
-
-def _value_head_params(model: PatchedMaskablePPO) -> list:
-    pol = model.policy
-    tensors = list(pol.value_net.parameters()) + list(pol.mlp_extractor.value_net.parameters())
-    return [t.detach().clone() for t in tensors]
-
-
 def test_la_politique_ne_bouge_pas_pendant_le_warmup_mais_le_critic_oui() -> None:
     """Pendant le warmup, seul le critic apprend : les poids de la politique restent identiques.
 
-    VERROU. Remettre `loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef *
-    value_loss` dans la branche `_in_warmup` fait passer ce test au ROUGE : la tête d'action
-    reçoit un gradient et ses poids changent.
+    VERROU. Retirer le gel `grad = None` des paramètres hors critic dans la branche
+    `_in_warmup` de `PatchedMaskablePPO.train` ET remettre la loss complète fait passer ce test
+    au ROUGE : la tête d'action reçoit un gradient et ses poids changent.
     CONTRÔLE NON VACANT : les poids du critic DOIVENT changer sur la même update, sinon
     l'égalité de la politique pourrait venir d'un learning rate nul.
     """
-    model = _model_with_warmup(n_warmup=1)
+    model = _model(n_warmup=1)
     pi_before = _policy_head_params(model)
     vf_before = _value_head_params(model)
 
     _run_one_update(model)
 
-    pi_after = _policy_head_params(model)
-    vf_after = _value_head_params(model)
-    assert all(np.array_equal(a.numpy(), b.numpy()) for a, b in zip(pi_before, pi_after)), (
+    assert _all_equal(pi_before, _policy_head_params(model)), (
         "la politique a bougé pendant le warmup critic"
     )
-    assert any(not np.array_equal(a.numpy(), b.numpy()) for a, b in zip(vf_before, vf_after)), (
+    assert not _all_equal(vf_before, _value_head_params(model)), (
         "le critic n'a pas bougé : l'update n'a rien appris, le test ne prouve rien"
     )
 
 
 def test_la_politique_bouge_hors_warmup() -> None:
     """Miroir : sans warmup, la même update déplace la politique."""
-    model = _model_with_warmup(n_warmup=0)
+    model = _model(n_warmup=0)
     pi_before = _policy_head_params(model)
 
     _run_one_update(model)
 
-    pi_after = _policy_head_params(model)
-    assert any(not np.array_equal(a.numpy(), b.numpy()) for a, b in zip(pi_before, pi_after))
+    assert not _all_equal(pi_before, _policy_head_params(model))
 
 
 def test_la_cle_est_acceptee_par_le_constructeur_comme_en_new() -> None:
@@ -192,10 +192,7 @@ def test_la_cle_est_acceptee_par_le_constructeur_comme_en_new() -> None:
     fait lever `TypeError: unexpected keyword argument` — exactement ce qu'un run `--new` ferait
     le jour où le profil porte la clé.
     """
-    model = PatchedMaskablePPO(
-        "MlpPolicy", _TinyMaskedEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
-        device="cpu", policy_kwargs={"net_arch": [8]}, value_warmup_updates=2,
-    )
+    model = _model(n_warmup=2)
     assert model.value_warmup_updates == 2
     assert model._vwu_done == 0
 
@@ -211,7 +208,7 @@ def test_le_warmup_est_un_regime_de_run_pas_un_heritage_de_checkpoint(tmp_path) 
     ce que le profil porte). Un checkpoint ne porte donc AUCUN régime d'échauffement : c'est le
     profil du run, et lui seul, qui l'active.
     """
-    model = _model_with_warmup(n_warmup=1)
+    model = _model(n_warmup=1)
     _run_one_update(model)
     assert model._vwu_done == 1
     path = tmp_path / "m.zip"
@@ -233,7 +230,7 @@ def test_un_checkpoint_anterieur_a_b6_charge_sans_warmup(tmp_path) -> None:
 
     Simule l'antériorité en retirant la clé du `__dict__` avant la sauvegarde.
     """
-    model = _model_with_warmup(n_warmup=0)
+    model = _model(n_warmup=0)
     delattr(model, "value_warmup_updates")
     path = tmp_path / "old.zip"
     model.save(str(path))
@@ -253,9 +250,6 @@ def test_un_checkpoint_anterieur_a_b6_charge_sans_warmup(tmp_path) -> None:
 # politique — sans clip (policy_loss hors de la loss) et sans early-stop KL. Le montage
 # ci-dessous reproduit la structure : un extracteur `Linear` partagé par l'acteur et le critic.
 
-import torch as th
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-
 
 class _LinearExtractor(BaseFeaturesExtractor):
     """Extracteur partagé À PARAMÈTRES : une couche linéaire 3 -> 6."""
@@ -269,26 +263,13 @@ class _LinearExtractor(BaseFeaturesExtractor):
 
 
 def _model_with_shared_extractor(n_warmup: int) -> PatchedMaskablePPO:
-    model = PatchedMaskablePPO(
-        "MlpPolicy",
-        _TinyMaskedEnv(),
-        n_steps=8,
-        batch_size=4,
-        n_epochs=1,
-        seed=0,
-        device="cpu",
-        policy_kwargs={
-            "net_arch": [8],
-            "features_extractor_class": _LinearExtractor,
-            "share_features_extractor": True,
-        },
+    return _model(
+        n_warmup, features_extractor_class=_LinearExtractor, share_features_extractor=True
     )
-    model.value_warmup_updates = n_warmup
-    return model
 
 
-def _extractor_params(model: PatchedMaskablePPO) -> list:
-    return [t.detach().clone() for t in model.policy.features_extractor.parameters()]
+def _extractor_params(model: PatchedMaskablePPO) -> list[th.Tensor]:
+    return _snapshot(model.policy.features_extractor.parameters())
 
 
 def _policy_logits(model: PatchedMaskablePPO) -> np.ndarray:
@@ -325,14 +306,14 @@ def test_avec_extracteur_partage_les_logits_de_la_politique_sont_immobiles_penda
 
     _run_one_update(model)
 
-    assert all(np.array_equal(a.numpy(), b.numpy()) for a, b in zip(ext_before, _extractor_params(model))), (
+    assert _all_equal(ext_before, _extractor_params(model)), (
         "l'extracteur partagé a bougé pendant le warmup critic : la politique qui le lit a bougé"
     )
-    assert all(np.array_equal(a.numpy(), b.numpy()) for a, b in zip(pi_before, _policy_head_params(model)))
+    assert _all_equal(pi_before, _policy_head_params(model))
     assert np.array_equal(logits_before, _policy_logits(model)), (
         "les logits de la politique ont changé pendant le warmup critic"
     )
-    assert any(not np.array_equal(a.numpy(), b.numpy()) for a, b in zip(vf_before, _value_head_params(model))), (
+    assert not _all_equal(vf_before, _value_head_params(model)), (
         "le critic n'a pas bougé : l'update n'a rien appris, le test ne prouve rien"
     )
 
@@ -346,11 +327,13 @@ def test_avec_extracteur_partage_l_extracteur_bouge_hors_warmup() -> None:
 
     _run_one_update(model)
 
-    assert any(not np.array_equal(a.numpy(), b.numpy()) for a, b in zip(ext_before, _extractor_params(model)))
+    assert not _all_equal(ext_before, _extractor_params(model))
     assert not np.array_equal(logits_before, _policy_logits(model))
 
 
 # --- Le VRAI chemin : PointerMaskablePolicy + SpatialCombinedExtractor --------------------------
+
+_CRITIC_PREFIXES = ("mlp_extractor.value_net.", "value_net.")
 
 
 def test_sur_la_policy_de_production_seul_le_critic_bouge_pendant_le_warmup() -> None:
@@ -359,27 +342,12 @@ def test_sur_la_policy_de_production_seul_le_critic_bouge_pendant_le_warmup() ->
     `mlp_extractor.value_net` et `value_net` changent.
 
     C'est le montage qui manquait : `MlpPolicy` a un extracteur sans paramètre, et son vert ne
-    disait rien de la policy réellement entraînée.
+    disait rien de la policy réellement entraînée. L'assertion finale est NOMMÉE (préfixes),
+    indépendante de la partition que le modèle déclare (`_critic_only_param_ids`).
     """
-    from ai.pointer_policy import PointerMaskablePolicy
-    from ai.spatial_extractor import SpatialCombinedExtractor
-    from tests.unit.ai.test_pointer_head import _ToyEnv
-
-    th.manual_seed(7)
-    model = PatchedMaskablePPO(
-        PointerMaskablePolicy, _ToyEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
-        device="cpu", verbose=0,
-        policy_kwargs={
-            "net_arch": [16, 16],
-            "features_extractor_class": SpatialCombinedExtractor,
-            "features_extractor_kwargs": {"cnn_features": 8},
-        },
-        value_warmup_updates=1,
-    )
+    model = _production_model(n_warmup=1)
     pol = model.policy
-    critic_ids = {id(p) for p in pol.mlp_extractor.value_net.parameters()} | {
-        id(p) for p in pol.value_net.parameters()
-    }
+    critic_ids = model._critic_only_param_ids()
     named_before = {n: p.detach().clone() for n, p in pol.named_parameters()}
     assert len(named_before) > 20, "VERT VACANT : la policy de production porte des dizaines de tenseurs"
     non_critic = [n for n, p in pol.named_parameters() if id(p) not in critic_ids]
@@ -393,10 +361,8 @@ def test_sur_la_policy_de_production_seul_le_critic_bouge_pendant_le_warmup() ->
         if not th.equal(named_before[n], p.detach())
     )
     assert moved, "le critic n'a pas bougé : l'update n'a rien appris, le test ne prouve rien"
-    assert all(n.startswith(("mlp_extractor.value_net.", "value_net.")) for n in moved), (
-        f"des paramètres hors critic ont bougé pendant le warmup : "
-        f"{[n for n in moved if not n.startswith(('mlp_extractor.value_net.', 'value_net.'))]}"
-    )
+    leaked = [n for n in moved if not n.startswith(_CRITIC_PREFIXES)]
+    assert not leaked, f"des paramètres hors critic ont bougé pendant le warmup : {leaked}"
 
 
 def test_sur_la_policy_de_production_les_statistiques_de_normalisation_sont_figees_pendant_le_warmup() -> None:
@@ -406,23 +372,9 @@ def test_sur_la_policy_de_production_les_statistiques_de_normalisation_sont_fige
     après une update warmup). Pendant le warmup, ni les buffers ni la distribution de la
     politique sur une observation fixe ne doivent changer, au bit près.
 
-    Rouge sans le `eval()` des `EntityRunningNorm` en tête de `train`.
+    Rouge sans le passage en mode évaluation de tout ce qui n'est pas critic en tête de `train`.
     """
-    from ai.pointer_policy import PointerMaskablePolicy
-    from ai.spatial_extractor import EntityRunningNorm, SpatialCombinedExtractor
-    from tests.unit.ai.test_pointer_head import _ToyEnv
-
-    th.manual_seed(7)
-    model = PatchedMaskablePPO(
-        PointerMaskablePolicy, _ToyEnv(), n_steps=8, batch_size=4, n_epochs=1, seed=0,
-        device="cpu", verbose=0,
-        policy_kwargs={
-            "net_arch": [16, 16],
-            "features_extractor_class": SpatialCombinedExtractor,
-            "features_extractor_kwargs": {"cnn_features": 8},
-        },
-        value_warmup_updates=1,
-    )
+    model = _production_model(n_warmup=1)
     pol = model.policy
     norms = [m for m in pol.modules() if isinstance(m, EntityRunningNorm)]
     assert norms, "VERT VACANT : l'extracteur de production porte des EntityRunningNorm"
@@ -433,6 +385,7 @@ def test_sur_la_policy_de_production_les_statistiques_de_normalisation_sont_fige
     obs, _ = env.reset(seed=1)
     obs_t, _ = pol.obs_to_tensor(obs)
     mask = env.action_masks()
+
     def _probs() -> th.Tensor:
         pol.set_training_mode(False)
         with th.no_grad():

@@ -16,38 +16,11 @@ non terminale, qui doit se retrouver dans la récompense rendue.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
-
 from ai.env_wrappers import SelfPlayWrapper
-from tests.unit.ai.test_wrapper_agent_step_info import _ScriptedDecoder
-from tests.unit.ai.test_env_wrappers import _DummyEngine
+from tests.unit.ai.test_wrapper_agent_step_info import _ScriptedEngine
 
 
-class _RewardScriptedEngine(_DummyEngine):
-    """Moteur double : une entrée par step moteur → (récompense de P0, joueur suivant, fin)."""
-
-    def __init__(self, script: List[Dict[str, Any]], first_player: int = 1) -> None:
-        super().__init__(decoder=None)
-        self.action_decoder = _ScriptedDecoder(self)
-        self._script = script
-        self.steps_taken = 0
-        self.game_state["current_player"] = first_player
-        self.game_state["phase"] = "shoot"
-
-    def step_with_mask(self, action, mask_and_eligible=None) -> tuple:
-        _ = (action, mask_and_eligible)
-        if self.steps_taken >= len(self._script):
-            raise AssertionError("le montage a joué plus de steps moteur que le script n'en prévoit")
-        entry = self._script[self.steps_taken]
-        self.steps_taken += 1
-        self.game_state["current_player"] = int(entry["next_player"])
-        obs, out_mask = self._step_observation()
-        terminated = bool(entry.get("terminated", False))
-        info: Dict[str, Any] = {"winner": entry.get("winner")} if terminated else {}
-        return obs, float(entry["reward"]), terminated, False, info, out_mask
-
-
-def _wrapper(engine: _RewardScriptedEngine) -> SelfPlayWrapper:
+def _wrapper(engine: _ScriptedEngine) -> SelfPlayWrapper:
     return SelfPlayWrapper(engine, frozen_model=None, update_frequency=100, allow_random_opponent=True)
 
 
@@ -57,7 +30,7 @@ def test_les_recompenses_des_steps_de_p1_apres_p0_sont_additionnees() -> None:
 
     VERROU. Revenir à « seul le step terminal de P1 compte » rend 1.0 → ROUGE constaté.
     """
-    engine = _RewardScriptedEngine([
+    engine = _ScriptedEngine([
         {"reward": 1.0, "next_player": 2},
         {"reward": -6.0, "next_player": 2},
         {"reward": -6.0, "next_player": 1},
@@ -78,7 +51,7 @@ def test_les_recompenses_des_steps_de_p1_avant_p0_sont_additionnees() -> None:
     C'était le trou de la boucle « P1 before » : elle ne gardait la récompense que si P1
     TERMINAIT la partie. Ici P1 ne la termine pas et son −6 doit quand même être rendu.
     """
-    engine = _RewardScriptedEngine([
+    engine = _ScriptedEngine([
         {"reward": -6.0, "next_player": 1},   # P1 joue avant P0
         {"reward": 2.0, "next_player": 2},    # action de P0
         {"reward": 0.0, "next_player": 1},    # P1 rejoue
@@ -95,7 +68,7 @@ def test_les_recompenses_des_steps_de_p1_avant_p0_sont_additionnees() -> None:
 def test_le_step_terminal_de_p1_reste_compte_avec_les_precedents() -> None:
     """P0 agit (+1), P1 joue un step non terminal (−6) puis termine la partie (−50) :
     la récompense rendue additionne les trois, et `winner` est lu sur le dernier info."""
-    engine = _RewardScriptedEngine([
+    engine = _ScriptedEngine([
         {"reward": 1.0, "next_player": 2},
         {"reward": -6.0, "next_player": 2},
         {"reward": -50.0, "next_player": 2, "terminated": True, "winner": 2},

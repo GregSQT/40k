@@ -65,19 +65,20 @@ class _ScriptedDecoder:
 
 
 class _ScriptedEngine(_DummyEngine):
-    """Moteur double qui joue une SEQUENCE d'infos, un par step moteur.
+    """Moteur double qui joue une SEQUENCE d'entrees, une par step moteur.
 
-    Chaque entree du script donne l'`info` rendu et le joueur courant APRES le step. Le dernier
-    info du script est celui que gym rendrait sans report — c'est exactement ce que les tests
-    doivent voir corrige.
+    Chaque entree du script donne le joueur courant APRES le step (`next_player`, obligatoire)
+    et, au choix : l'`info` rendu (le dernier du script est celui que gym rendrait sans report —
+    c'est exactement ce que les tests doivent voir corrige), la recompense de P0 (`reward`,
+    0.0 sinon), et la fin de partie (`terminated` + `winner`).
     """
 
-    def __init__(self, script: List[Dict[str, Any]]) -> None:
+    def __init__(self, script: List[Dict[str, Any]], first_player: int = 1) -> None:
         super().__init__(decoder=None)
         self.action_decoder = _ScriptedDecoder(self)
         self._script = script
         self.steps_taken = 0
-        self.game_state["current_player"] = 1
+        self.game_state["current_player"] = first_player
         # Phase de TIR : en phase move, le choix du bot passe par la carte de cellules memoisee
         # du vrai moteur, que ce double ne construit pas. Le tir suffit — ce qui est teste ici
         # est le report de l'info, pas le decodage d'une destination.
@@ -91,7 +92,11 @@ class _ScriptedEngine(_DummyEngine):
         self.steps_taken += 1
         self.game_state["current_player"] = int(entry["next_player"])
         obs, out_mask = self._step_observation()
-        return obs, 0.0, False, False, dict(entry["info"]), out_mask
+        terminated = bool(entry.get("terminated", False))
+        info: Dict[str, Any] = dict(entry.get("info", {}))
+        if terminated:
+            info["winner"] = entry["winner"]
+        return obs, float(entry.get("reward", 0.0)), terminated, False, info, out_mask
 
     def step(self, action) -> tuple:
         obs, reward, terminated, truncated, info, _mask = self.step_with_mask(action)
