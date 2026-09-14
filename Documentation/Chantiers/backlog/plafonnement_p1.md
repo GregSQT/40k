@@ -645,7 +645,19 @@ merger après le jugement de vf_coef — les workers d'évaluation rechargent le
   → `_model_rules_view` exige `UNIT_RULES` sur la figurine blessée depuis `2693007f2`, et ces fixtures
   n'en portent pas. Identiques avec et sans S11 (listes comparées) ; non corrigés ici.
 
-**Run S11 lancé le 2026-09-14 à 10:30** : S11 mergé dans main (`296c1bc3d`),
+**Deux refus au lancement, corrigés.** (1) Le contrat d'entraînement (`ai/training_contract.py`)
+refuse de reprendre P0 avec une table de récompense dont les clés ont changé : réécrit sciemment
+pour le snapshot P0 et le canonique (`write_contract`, même espérance de récompense par
+construction — l'espérance a la moyenne du jet). (2) Le run est mort à sa première activation de
+tir : `_build_target_meta` lisait `units_cache[sid]["HP_MAX"]`, présent dans toutes les doublures
+de test et **absent en production** (`units_cache` ne porte que `HP_CUR`) — code testé mais jamais
+appelé sur le vrai chemin. Corrigé (`_target_base_hp_max` : HP_MAX de la première figurine vivante
+du `models_cache`) et verrouillé par `tests/unit/engine/test_s11_reward_on_expectation_e2e.py` :
+partie réelle (`W40KEngine` + `BotControlledEnv`, actions légales au hasard, espion sur
+`calculate_reward`), résumés complets sur de vraies figurines, `result_bonuses` de chaque tir de
+l'agent = formule sur l'espérance, ≠ formule sur les événements ; rouge par réintroduction du défaut.
+
+**Run S11 lancé le 2026-09-14 à 11:00** : S11 mergé dans main (`296c1bc3d` + correctif),
 `reward_on_expectation: true` dans `ArmageddonAgent_x1_rewards_config.json`, profil de référence
 (`vf_coef` 0,17 rétabli), commande habituelle `--etape P1`, `training_x1_05-p01-s11.log`. Seule
 différence avec `run_20260912-065925` : la récompense de tir et de mêlée est l'espérance du choix,

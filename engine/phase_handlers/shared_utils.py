@@ -11425,6 +11425,26 @@ def _target_within_half_range(
     return _ranged_squad_edge_distance(game_state, attacker_sid, target_sid) <= rng / 2.0
 
 
+def _target_base_hp_max(game_state: Dict[str, Any], target_sid: str) -> int:
+    """HP_MAX de la PREMIÈRE figurine vivante de l'escouade cible (Wounds de son profil).
+
+    Source : `models_cache` (chaque figurine porte `HP_MAX`, `_build_models_for_unit`) — PAS
+    `units_cache`, qui ne porte que `HP_CUR` (total de l'escouade) : une première version de S11
+    lisait `units_cache[sid]["HP_MAX"]`, présent dans les doublures de test et absent en
+    production — le run S11 du 2026-09-14 10:29 est mort à sa première activation de tir.
+    Première figurine vivante = même échantillon pour `intent_expected_damage` et
+    `_build_target_meta` (leader attaché à plus de PV non distingué, cf. docstrings).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    alive = [m for m in require_key(game_state, "squad_models").get(target_sid, []) if m in models_cache]  # get allowed
+    if not alive:
+        raise ValueError(f"escouade cible {target_sid!r} sans figurine vivante — l eligibilite a la cible aurait du l ecarter")
+    hp_max = int(require_key(models_cache[alive[0]], "HP_MAX"))
+    if hp_max <= 0:
+        raise ValueError(f"HP_MAX invalide ({hp_max}) sur la figurine {alive[0]!r} de l escouade {target_sid!r}")
+    return hp_max
+
+
 def intent_expected_damage(
     game_state: Dict[str, Any],
     *,
@@ -11447,8 +11467,8 @@ def intent_expected_damage(
     Facteurs, dans l'ordre du roller : `expected_attack_pool_damage` (touche, blessure,
     sauvegarde, relances, plancher 10.07, règles d'arme) sur les MÊMES seuils que
     `roll_attack_pool` reçoit ; dégât par blessure non sauvée = E[min(D + bonus, HP_MAX)] avec
-    le HP_MAX du profil de base de la cible (`units_cache[sid]["HP_MAX"]`, la caractéristique
-    Wounds de la datasheet ; 05.04 : l'excès est perdu, `expected_capped_dice_value`) ; Feel No
+    le HP_MAX de la première figurine vivante de la cible (`_target_base_hp_max` ; 05.04 :
+    l'excès est perdu, `expected_capped_dice_value`) ; Feel No
     Pain 24.12 par le facteur P(aucun seuil ne sauve), seuils d'UNITÉ (`feel_no_pain`,
     `feel_no_pain_vs_psychic`, union 19.04 lue sur `unit_by_id`).
 
@@ -11464,10 +11484,7 @@ def intent_expected_damage(
     """
     from engine.phase_handlers.attack_sequence import expected_attack_pool_damage
 
-    target_uc = require_key(game_state, "units_cache")[str(target_sid)]
-    hp_max = int(require_key(target_uc, "HP_MAX"))
-    if hp_max <= 0:
-        raise ValueError(f"intent_expected_damage: HP_MAX invalide ({hp_max}) sur l escouade {target_sid!r}")
+    hp_max = _target_base_hp_max(game_state, str(target_sid))
     bonus = int(dmg_bonus)
     if hp_max <= bonus:
         damage = float(hp_max)
@@ -11502,18 +11519,16 @@ def _build_target_meta(game_state: Dict[str, Any], target_sid: str) -> Dict[str,
     _tgt_uc = require_key(game_state, "units_cache")[target_sid]
     _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
     # S11 : de quoi convertir une espérance de dégâts en récompense
-    # (`RewardCalculator._squad_combat_shaping`, `reward_on_expectation`), sur les MÊMES caches
-    # d'escouade que les clés ci-dessus — aucune lecture par figurine : HP_MAX du profil de base
-    # (Wounds de la datasheet, `units_cache`), points par PV et valeur par figurine MOYENS à la
-    # construction (VALUE d'escouade / effectif initial, la même convention que `points_per_hp`
-    # par figurine), effectif VIVANT à la déclaration (`squad_models` ∩ `models_cache`).
+    # (`RewardCalculator._squad_combat_shaping`, `reward_on_expectation`) : HP_MAX de la première
+    # figurine vivante (`_target_base_hp_max`, seule lecture par figurine — `units_cache` ne porte
+    # pas HP_MAX en production), points par PV et valeur par figurine MOYENS à la construction
+    # (VALUE d'escouade / effectif initial, la même convention que `points_per_hp` par figurine),
+    # effectif VIVANT à la déclaration (`squad_models` ∩ `models_cache`).
     value = float(require_key(_tgt_uc, "VALUE"))
     mcs = int(require_key(_tgt_sc, "model_count_at_start"))
-    hp_max = int(require_key(_tgt_uc, "HP_MAX"))
-    if mcs <= 0 or hp_max <= 0:
-        raise ValueError(
-            f"_build_target_meta: escouade {target_sid!r} avec model_count_at_start={mcs}, HP_MAX={hp_max}"
-        )
+    if mcs <= 0:
+        raise ValueError(f"_build_target_meta: escouade {target_sid!r} avec model_count_at_start={mcs}")
+    hp_max = _target_base_hp_max(game_state, target_sid)
     models_cache = require_key(game_state, "models_cache")
     alive_count = sum(1 for m in require_key(game_state, "squad_models").get(target_sid, []) if m in models_cache)  # get allowed
     return {
