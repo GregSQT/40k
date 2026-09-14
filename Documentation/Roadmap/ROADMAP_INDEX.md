@@ -193,7 +193,8 @@ plateau 0,585 que la référence, atteint plus lentement (dossier §5.10) ; (2) 
 espérance pour tir et mêlée, livrée et mergée (`296c1bc3d` + `472f5dd53`), **run 10:37 → 14:05 arrêté
 par la garde** (argmax 0,47 contre P0, échantillonné 0,55, entropie montante ; clé remise à `false`,
 dossier §5.11) ; suivant : terme de marge de VP B6 sur le registre `victory_points` (second avis,
-dossier §5.12, en cours de code dans une autre session) ; (3) « plat » n'est jamais rejoué plus longtemps —
+dossier §5.12, en cours de code dans une autre session). **Point de reprise sans contexte : dossier
+[#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** (3) « plat » n'est jamais rejoué plus longtemps —
 un plateau est un symptôme. En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
 plafond 0,65 par un exploiteur contre P0 (jamais fait).
 

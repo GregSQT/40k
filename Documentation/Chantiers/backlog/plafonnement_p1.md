@@ -713,6 +713,65 @@ prouvé. Clé `reward_on_expectation` remise à `false` ; le code reste, verroui
    sur le résultat **réel** (finir une figurine reste payé au jet) — une clé de plus, 5 lignes dans
    `_squad_combat_shaping`, testable en 6 h. À ne lancer que si 1-2 désignent le proxy des kills.
 
+Précision à updates égales (240 premières updates, même horloge) : `train/entropy_loss` référence
+−0,767 / −0,786 / −0,796 / −0,782 / −0,806 / −0,788 par sixième (oscille, +0,02) ; S11 −0,775 /
+−0,796 / −0,828 / −0,821 / −0,875 / −0,860 (+0,08, monotone) ; KL, clip_fraction, value_loss et EV
+identiques entre les deux. C'est un aplatissement mesuré mais modéré, pas une politique qui part
+en vrille — d'où la sonde par famille pour nommer les têtes concernées.
+
+---
+
+## ÉTAT AU 2026-09-14 14:30 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-14}
+
+**Où on en est.** Quatre leviers joués depuis le 2026-09-13 soir, tous réfutés ou arrêtés :
+S23 (λ 0,2 + rollout ×4, §5.9 : critic qui dérive), `vf_coef` 0,3 (§5.10 : même plateau 0,585,
+plus lent), S11 tel que codé (§5.11 : garde de destruction, argmax 0,47 contre P0 alors que
+l'agent échantillonné tient 0,55, entropie +0,08 nat). Le plateau 0,59-0,60 contre P0 tient.
+Correctifs livrés au passage : collecte Phase 3 (`a59ff5a61`, RAM ÷ 3), 57 tests rouges
+préexistants sur main identifiés (fixtures sans `UNIT_RULES`, non corrigés — voir SUITE du rapport
+de session, `_model_rules_view` exige la clé sur la figurine blessée depuis `2693007f2`).
+
+**Artefacts.** Config : `x1_lineage` au régime de référence (lr 0,001, ent 0,01, n_steps 8 160,
+vf_coef 0,17, tout le reste hérité) ; `rewards_config.squad_shaping.reward_on_expectation` doit
+être **`false`** (à vérifier : remis après la fin du holdout de clôture du run S11, qui tournait
+encore à 14:30). Contrats d'entraînement du canonique et du snapshot P0 réécrits avec la clé S11
+(`write_contract`, 2026-09-14 10:29) — ils restent valides clé à true ou false (le contrat compare
+les CLÉS, pas les valeurs). Checkpoint S11 à 20 000 épisodes pour les sondes :
+`ai/models/ArmageddonAgent_x1/ppo_checkpoint_20260914-103747_7687944_steps.zip` (+ pkl compagnon) ;
+P1 de référence : `ArmageddonAgent_x1_12345_robust_0.9078.zip` ; P0 : `model_ArmageddonAgent_x1_P0.zip`.
+Logs : `training_x1_03-p01-s23_*.log` (5 tentatives), `training_x1_04-p01-vf030.log`,
+`training_x1_05-p01-s11.log`. TensorBoard : `run_20260914-004747` (S23), `run_20260914-023713`
+(vf 0,3), `run_20260914-103745` (S11). Aucun run ne doit être lancé tant que `pgrep -af ai/train.py`
+n'est pas vide.
+
+**Décisions utilisateur en vigueur.** « Plat » n'est jamais rejoué plus longtemps ; payer les VP
+(registre `victory_points`), pas la tenue d'objectifs ; marge de VP en **B6** (6 × Δ(VP_moi −
+VP_lui), `objective_reward_factor` retiré, `on_objective_bonus` laissé — second avis du
+2026-09-14, mesure sur 40 parties : VP concédés corrélés −0,83 à l'issue, marge par tour sd 6,8) ;
+S14/S15 en réserve, pas avant les résultats ci-dessous ; menace par case en observation écartée.
+
+**Prochaines actions, dans l'ordre.**
+1. **Marge de VP B6** : code en cours dans une autre session (worktree, prompt du 2026-09-14
+   ~13:00 : terme ledger dans `calculate_reward` au site de `objective_turn_reward`, composante
+   `vp_margin`, suppression de `_calculate_objective_reward_per_turn` / `once_claim` /
+   `reward_per_objective_turn5`, contrats à réécrire pour le canonique ET le snapshot P0). Après
+   merge : run sur le régime de référence, clé S11 à false, `training_x1_06-p01-marge.log`, jugé
+   par la règle §7 contre la référence `run_20260912-065925` (0,601 sur 20-30k, plat 0,585).
+   Surveiller `01_VP/a_vp_diff` à côté de `03_selfplay/P0` (marge qui monte avec win-rate plate =
+   prise de risque).
+2. **Pendant ce run, départager idée et exécution de S11 (CPU, ~1 h)** : sondes 1 et 2 ci-dessus
+   sur le checkpoint S11 ; puis S11b seulement si le proxy des kills est désigné, et après le
+   verdict de la marge, jamais empilé.
+3. En réserve, par ordre : deux λ acteur/critic (override de `compute_returns_and_advantage` dans
+   `ai/gpu_rollout_buffer.py` + clé `model_params`, décision utilisateur requise) ; mesure du plafond
+   0,65 par un exploiteur E1 contre P0 (jamais fait) ; S16 pool élargi ; S14/S15.
+
+**Règle de lecture (§7, inchangée)** : moyenne de `03_selfplay/P0` sur les épisodes d'étape
+20 000-30 000 ; ≥ 0,65 ou promotion → la lignée reprend ; 0,62-0,65 montante → 60 000 ;
+< 0,62 montante → 60 000 puis rejuger ; < 0,62 plate → levier épuisé ; < 0,585 → arrêt ;
+garde de destruction < 0,50 (moyenne des sondes) après 20 000. Jamais de conclusion sur moins de
+3 sondes ou 20 000 épisodes d'étape.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
