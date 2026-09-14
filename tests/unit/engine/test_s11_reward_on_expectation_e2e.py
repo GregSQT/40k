@@ -152,3 +152,57 @@ def test_la_recompense_du_tir_est_l_esperance_pas_le_jet() -> None:
         if abs(on - off) > 1e-9:
             n_differ += 1
     assert n_differ > 0, "espérance et jet identiques sur toutes les activations de l'agent : suspect"
+
+
+def test_somme_vp_margin_egal_facteur_fois_marge_finale() -> None:
+    """La somme des versements vp_margin sur toute la partie = factor × marge finale.
+
+    Propriété télescopique (B6) : chaque appel à _calculate_vp_margin_reward verse
+    factor × Δ(marge − filigrane). La somme = factor × (marge_finale − 0) puisque
+    vp_margin_paid démarre à 0 au reset. Vérifiée sur un VRAI run moteur (deux joueurs,
+    toutes transitions), pas sur des fixtures isolées.
+
+    VERROU. Un filtre current_player réintroduit dans _calculate_vp_margin_reward ferait
+    rater la moitié des deltas (ceux du tour adverse) et romprait l'égalité.
+    """
+    from config_loader import get_config_loader
+
+    env = _make_env(reward_on_expectation=True)
+    controlled = int(require_key(env.engine.reward_calculator.config, "controlled_player"))
+    opp = 2 if controlled == 1 else 1
+    cfg = get_config_loader().load_agent_rewards_config("ArmageddonAgent_x1")["ArmageddonAgent_x1"]
+    factor = float(cfg["objective_rewards"]["vp_margin_factor"])
+
+    calc = env.engine.reward_calculator
+    original_cr = calc.calculate_reward
+    vp_margin_total = 0.0
+    last_vp: Dict[Any, float] = {}
+
+    def spy(success, result, game_state):
+        nonlocal vp_margin_total, last_vp
+        reward = original_cr(success, result, game_state)
+        bd = game_state.get("last_reward_breakdown", {})
+        vp_margin_total += float(bd.get("vp_margin", 0.0))
+        last_vp = {k: float(v) for k, v in game_state.get("victory_points", {}).items()}
+        return reward
+
+    calc.calculate_reward = spy  # type: ignore[method-assign]
+    try:
+        rng = np.random.default_rng(42)
+        env.reset(seed=42)
+        terminated = truncated = False
+        while not (terminated or truncated):
+            legal = np.flatnonzero(np.asarray(env.action_masks()))
+            assert legal.size > 0
+            _, _, terminated, truncated, _ = env.step(int(rng.choice(legal)))
+    finally:
+        calc.calculate_reward = original_cr  # type: ignore[method-assign]
+
+    assert last_vp, "aucune transition de reward capturée : le test ne prouve rien"
+    final_margin = last_vp.get(controlled, 0.0) - last_vp.get(opp, 0.0)
+    expected = factor * final_margin
+
+    assert vp_margin_total == pytest.approx(expected, abs=0.01), (
+        f"somme vp_margin {vp_margin_total:.4f} ≠ factor×marge_finale {expected:.4f} "
+        f"(VP moi={last_vp.get(controlled)}, lui={last_vp.get(opp)}, marge={final_margin:.1f})"
+    )

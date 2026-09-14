@@ -254,6 +254,7 @@ CURRICULUM_EXCLUDED_MODEL_PARAMS = frozenset({
 _PLAIN_CURRICULUM_KEYS = (
     "ent_coef", "normalize_advantage", "target_kl", "gamma", "gae_lambda",
     "batch_size", "n_epochs", "vf_coef", "max_grad_norm", "entropy_normalize_by_legal",
+    "value_warmup_updates",
 )
 
 

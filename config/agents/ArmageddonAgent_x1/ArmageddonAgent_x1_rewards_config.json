@@ -31,8 +31,8 @@
       "draw": 0.0
     },
     "objective_rewards": {
-      "objective_reward_factor": 6.0,
-      "reward_per_objective_turn5": 0.0,
+      "vp_margin_factor": 6.0,
+      "vp_margin_factor_normal": "B6 (2026-09-14) : remplace objective_reward_factor × VP_propres par vp_margin_factor × Δ(VP_moi − VP_lui) ledger. Facteur 6 inchange — marginal +6 par VP propre, −6 par VP cede. Corr(ΔVP_moi, Δmarge)=0,82 (colinearite mesurée 2026-09-14 sur 40 parties) : additionner les deux revenait à +11/−5, option A rejetée. Somme téléscopique = 6 × marge finale, y compris élimination.",
       "on_objective_bonus": 5.0
     },
     "system_penalties": {

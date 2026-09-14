@@ -27,6 +27,7 @@ Quatre overrides, sans changer les maths :
 """
 from __future__ import annotations
 
+import itertools
 import time
 from copy import deepcopy
 from typing import Any, TypeVar
@@ -50,6 +51,7 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
+from ai.spatial_extractor import EntityRunningNorm
 from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
@@ -164,7 +166,13 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
 
-    def __init__(self, *args: Any, entropy_normalize_by_legal: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        entropy_normalize_by_legal: bool = False,
+        value_warmup_updates: int = 0,
+        **kwargs: Any,
+    ) -> None:
         """`entropy_normalize_by_legal` : cle `model_params`, voir `entropy_loss_normalized_by_legal`.
 
         Absente (False) : le terme d'entropie de la loss reste `-mean(H)`, strictement le
@@ -172,11 +180,43 @@ class PatchedMaskablePPO(MaskablePPO):
         calculee sans gradient. Attribut d'instance ordinaire : SB3 le serialise dans le `data` du
         zip et le restaure au chargement ; `_apply_curriculum_model_params` (ai/train.py) le
         reapplique depuis le profil en `--append`.
+
+        `value_warmup_updates` (B6) : nombre d'updates du run pendant lesquelles seule la value
+        loss est optimisee (voir `train`). Cycle de vie DIFFERENT de la cle ci-dessus : ni la
+        cle ni le compteur `_vwu_done` ne sont serialises (`_excluded_save_params`). L'echauffement
+        est un regime de RUN — un `--append` le joue si et seulement si SON profil porte la cle
+        (`_apply_curriculum_model_params`, ai/train.py) ; un zip sauve apres un run echauffe ne
+        le rejoue pas de lui-meme. Exclure le compteur seul ne suffisait pas : la cle restauree
+        au `load` et laissee en place par un profil qui ne la porte pas rejouait N updates
+        critic-only en silence.
         """
         self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
             entropy_normalize_by_legal
         )
+        self.value_warmup_updates: int = int(value_warmup_updates)
+        self._vwu_done: int = 0
         super().__init__(*args, **kwargs)
+
+    def _excluded_save_params(self) -> list[str]:
+        return super()._excluded_save_params() + ["value_warmup_updates", "_vwu_done"]
+
+    def _critic_only_param_ids(self) -> frozenset[int]:
+        """Identités des paramètres que l'échauffement critic (B6) laisse apprendre.
+
+        Le tronc critic de `MlpExtractor` et la tête de valeur : les deux seuls que
+        `evaluate_actions` traverse SANS que la politique les lise. Tout le reste — extracteur
+        de features PARTAGÉ, tronc pi, têtes pointeur et dense — est gelé pendant le warmup
+        (`grad = None` avant `optimizer.step()`, voir `train`). `ActorCriticPolicy` garantit
+        ces deux attributs ; `PointerMaskablePolicy` les construit elle-même
+        (ai/pointer_policy.py).
+        """
+        return frozenset(
+            id(p)
+            for p in itertools.chain(
+                self.policy.mlp_extractor.value_net.parameters(),
+                self.policy.value_net.parameters(),
+            )
+        )
 
     # ── 2.1 — GPU-resident buffer ─────────────────────────────────────────────────────────────
 
@@ -246,6 +286,25 @@ class PatchedMaskablePPO(MaskablePPO):
         _diag_grad_norms_mb0: dict[str, float] | None = None
         continue_training = True
         loss: th.Tensor = th.tensor(float("nan"))
+        # Échauffement critic (B6) : les paramètres que le warmup laisse apprendre, calculés une
+        # fois par update et SEULEMENT pendant le régime (voir `_critic_only_param_ids`).
+        _in_warmup: bool = self._vwu_done < self.value_warmup_updates
+        critic_only_param_ids: frozenset[int] = (
+            self._critic_only_param_ids() if _in_warmup else frozenset()
+        )
+        if _in_warmup:
+            # Le gel des PARAMÈTRES (grad = None, plus bas) ne fige pas les BUFFERS : en
+            # `set_training_mode(True)`, chaque forward d'`EntityRunningNorm` avance ses
+            # `running_mean/var/count` (ai/spatial_extractor.py, `if self.training`), donc les
+            # entrées normalisées de l'extracteur partagé — et les logits de la politique avec
+            # elles — bougeaient à chaque minibatch (mesuré : 9 buffers sur 16 déplacés, Δprobs
+            # 4,5e-4 après une update warmup). Les statistiques passent en mode évaluation pour
+            # l'update entière : figées comme pendant les rollouts. Rien à rétablir en sortie —
+            # `set_training_mode` (False en tête de la collecte, True en tête du prochain
+            # `train`) est récursif et réécrit l'état de tous les sous-modules.
+            for _module in self.policy.modules():
+                if isinstance(_module, EntityRunningNorm):
+                    _module.eval()
 
         _t0_update = time.perf_counter()
         for epoch in range(self.n_epochs):
@@ -326,7 +385,23 @@ class PatchedMaskablePPO(MaskablePPO):
                     entropy_loss_normalized if self.entropy_normalize_by_legal else entropy_loss
                 )
 
-                loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef * value_loss
+                # ECHAUFFEMENT CRITIC (décision B) : pendant les `value_warmup_updates`
+                # premières updates du run, seul le critic s'ajuste. La politique et l'entropie
+                # sont annulées (pas seulement réduites) pour éviter tout déplacement de la
+                # politique pendant que le critic recalibre sa cible. Annuler les termes ne
+                # suffit PAS : l'extracteur de features est PARTAGÉ (`PointerMaskablePolicy`
+                # exige `share_features_extractor=True`, et ses logits `q · e_i` lisent les
+                # embeddings de l'extracteur), donc la value loss seule le déplacerait, et la
+                # politique avec lui — sans clip ni early-stop KL. D'où le gel plus bas : seuls
+                # les paramètres du critic (`mlp_extractor.value_net` + `value_net`) gardent un
+                # gradient avant `optimizer.step()`, et les statistiques d'`EntityRunningNorm`
+                # sont figées (voir le gel des buffers en tête de `train`). L'early-stop KL n'est
+                # pas applicable : la politique est immobile, approx_kl ne mesure que l'écart
+                # numérique entre le log_prob de collecte et celui de l'update.
+                if _in_warmup:
+                    loss = self.vf_coef * value_loss
+                else:
+                    loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef * value_loss
 
                 # Norme du gradient de CHAQUE terme, pondere comme dans la loss.
                 # `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
@@ -352,8 +427,10 @@ class PatchedMaskablePPO(MaskablePPO):
                 with th.no_grad():
                     approx_kl_div_t = th.mean((th.exp(log_ratio) - 1) - log_ratio)
 
-                if self.target_kl is not None:
+                if self.target_kl is not None and not _in_warmup:
                     # Early-stopping exige la valeur scalaire maintenant.
+                    # Désactivé pendant le warmup critic : pas de gradient de politique,
+                    # approx_kl ne mesure pas une divergence de politique réelle.
                     approx_kl_val = float(approx_kl_div_t.cpu().numpy())
                     approx_kl_divs.append(approx_kl_val)
                     if approx_kl_val > 1.5 * self.target_kl:
@@ -369,6 +446,14 @@ class PatchedMaskablePPO(MaskablePPO):
 
                 self.policy.optimizer.zero_grad()
                 loss.backward()
+                if _in_warmup:
+                    # Gel de tout ce qui n'est pas le critic : `grad = None` fait sauter le
+                    # paramètre par Adam, donc l'extracteur partagé et les têtes de politique
+                    # restent identiques au bit près. La norme clippée ci-dessous ne porte alors
+                    # que sur le gradient du critic (clip_grad_norm_ ignore les grads None).
+                    for _param in self.policy.parameters():
+                        if id(_param) not in critic_only_param_ids:
+                            _param.grad = None
                 grad_norms_t.append(
                     th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 )
@@ -471,6 +556,11 @@ class PatchedMaskablePPO(MaskablePPO):
         # Bootstrap : last_values GPU vs last_value CPU (posés par _collect_rollouts_distributed).
         self.logger.record("diag/last_values_gpu_mean", getattr(self, "_diag_last_values_gpu_mean", _nan))
         self.logger.record("diag/last_values_cpu_mean", getattr(self, "_diag_last_values_cpu_mean", _nan))
+        # Echauffement critic B6 : 1 pendant les N premières updates, 0 ensuite.
+        _was_warmup: bool = self._vwu_done < self.value_warmup_updates
+        self.logger.record("train/value_warmup_active", int(_was_warmup))
+        if _was_warmup:
+            self._vwu_done += 1
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 

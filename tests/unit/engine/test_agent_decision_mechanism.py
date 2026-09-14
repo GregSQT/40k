@@ -187,6 +187,7 @@ def _game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "objectives": [{"id": "obj1", "hexes": [[5, 5]]}],
         "inches_to_subhex": 1,
         "victory_points": {1: 0, 2: 0},
+        "vp_margin_paid": 0,
         # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
         "command_points": {1: 0, 2: 0},
         "objective_controllers": {},

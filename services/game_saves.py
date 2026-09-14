@@ -135,7 +135,13 @@ _log = logging.getLogger(__name__)
 # ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
 # statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
 # tests/unit/services/test_game_snapshots_static_keys.py.
-_MAGIC = b"W40KTL09"
+#
+# TL10 = TL09 + `vp_margin_paid` au PREMIER niveau : le filigrane du ledger de marge de VP (B6,
+# `engine/reward_calculator._calculate_vp_margin_reward`), posé à 0 par le reset et lu par
+# `require_key` à CHAQUE step, PvP compris (`W40KEngine.step` appelle `calculate_reward` quel que
+# soit le mode). Une row TL09 rend un game_state sans cette clé et le premier step après le
+# chargement lève au fond du moteur — la partie en cours déjà écrasée. Exactement le cas AJOUT.
+_MAGIC = b"W40KTL10"
 #: Formats PÉRIMÉS, et ce que chacun n'a PAS. UNE table pour les deux moitiés, parce qu'elles
 #: doivent tomber ensemble : la magic qui fait refuser le fichier, et la clause qui l'explique au
 #: joueur. Écrites séparément — un `frozenset` ici, une f-string de quinze lignes dans
@@ -172,6 +178,11 @@ _LEGACY_LOSSES: Dict[bytes, str] = {
         "`deployment_state` — l'étape Declare Battle Formations 20.01 se déclare désormais par "
         "camp et non plus par une file alternée d'escouades, et sans ces deux clés le premier "
         "lecteur de l'étape lève une fois la partie en cours déjà écrasée"
+    ),
+    b"W40KTL09": (
+        "sans `vp_margin_paid`, le filigrane du ledger de marge de VP lu à chaque step par le "
+        "calcul de récompense — sans lui le premier step après le chargement lève une fois la "
+        "partie en cours déjà écrasée"
     ),
 }
 _LEGACY_MAGICS = frozenset(_LEGACY_LOSSES)

@@ -31,8 +31,8 @@
       "draw": 0.0
     },
     "objective_rewards": {
-      "objective_reward_factor": 6.0,
-      "reward_per_objective_turn5": 0.0,
+      "vp_margin_factor": 6.0,
+      "vp_margin_factor_normal": "B6 (2026-09-14) : remplace objective_reward_factor × VP_propres par vp_margin_factor × Δ(VP_moi − VP_lui) ledger. Miroir de ArmageddonAgent_x1.",
       "on_objective_bonus": 5.0
     },
     "system_penalties": {

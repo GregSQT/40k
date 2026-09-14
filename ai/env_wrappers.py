@@ -2141,7 +2141,14 @@ class SelfPlayWrapper(gym.Wrapper):
 
         # Track P1 actions for diagnostic
         p1_actions_before = 0
-        p1_terminal_reward = 0.0  # Capture lose penalty if P1 ends game before P0 acts
+        # Recompense de P0 ACCUMULEE sur les steps de P1 qui precedent son action — jumeau de
+        # `BotControlledEnv` (`accumulate_reward=True`). Le moteur rend la recompense du joueur
+        # CONTROLE a chaque step, quel que soit le joueur qui joue : penalite defensive des tirs
+        # adverses, et depuis B6 le ledger de marge (`vp_margin_paid`), qui avance a CHAQUE step
+        # ou les VP bougent. Ne garder que le step terminal jetait tout ce qui tombait pendant
+        # le tour de P1 : le ledger avancait, l'agent ne touchait rien, et la somme telescopique
+        # « 6 x marge finale » etait fausse (mesure : -150 recus pour une marge finale de +5).
+        p1_reward_before = 0.0
         # Garde anti-boucle-infinie derive de game_rules. Portee = les activations
         # CONSECUTIVES d'un joueur avant que P0 reprenne la main : la borne naturelle est
         # celle d'un TOUR (max_steps_per_turn * marge), pas celle d'un episode entier.
@@ -2167,13 +2174,11 @@ class SelfPlayWrapper(gym.Wrapper):
                 except (OSError, IOError):
                     pass
             self.episode_length += 1
-
-            # If P1's action ended the game before P0 could act, capture the reward
-            if terminated or truncated:
-                p1_terminal_reward = reward
+            p1_reward_before += float(reward)
+            self.episode_reward += float(reward)
 
         # Now execute Player 0's action (if game not over)
-        p0_reward = p1_terminal_reward  # Start with any terminal reward from P1's pre-emptive kill
+        p0_reward = p1_reward_before
         if not (terminated or truncated):
             # LOG TEMPORAIRE: time full env.step() (--debug)
             t0_p0 = time.perf_counter() if debug_mode else None
@@ -2188,7 +2193,7 @@ class SelfPlayWrapper(gym.Wrapper):
                         f.write(f"WRAPPER_STEP_TIMING episode={ep} step_index={step_idx} duration_s={duration_s:.6f}\n")
                 except (OSError, IOError):
                     pass
-            p0_reward = float(reward)  # CRITICAL: Save P0's reward before P1 overwrites it
+            p0_reward += float(reward)  # s'ajoute aux steps de P1 joues AVANT (jamais ecrases)
             # Meme releve que dans BotControlledEnv, et pour la meme raison : les steps de P1
             # qui suivent vont remplacer `info`, et les cles qui decrivent l'action de P0 (la
             # phase ou elle a ete jouee, sa reussite, une charge aboutie) se liraient alors
@@ -2227,11 +2232,10 @@ class SelfPlayWrapper(gym.Wrapper):
                     except (OSError, IOError):
                         pass
                 self.episode_length += 1
-
-                # If P1's action ended the game, P0 needs the situational reward (win/lose)
-                # The engine returns P0's perspective reward even for P1's actions
-                if terminated or truncated:
-                    p0_reward += float(p1_step_reward)  # Add win/lose bonus to P0's total
+                # Meme accumulation qu'avant l'action de P0 : chaque step de P1 rend la
+                # recompense de P0 (defensive, ledger de marge, et le +-50 terminal).
+                p0_reward += float(p1_step_reward)
+                self.episode_reward += float(p1_step_reward)
 
             # DIAGNOSTIC: Log if P1 took actions (disabled for cleaner output)
             # if (p1_actions_before + p1_actions_after) > 0 and self.total_episodes < 3:

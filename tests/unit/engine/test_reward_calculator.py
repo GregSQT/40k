@@ -231,6 +231,8 @@ _MINIMAL_GS: Dict[str, Any] = {
     "objectives": [],
     "objective_controllers": {},
     "game_over": False,
+    "victory_points": {1: 0, 2: 0},
+    "vp_margin_paid": 0,
 }
 
 
@@ -311,7 +313,6 @@ def _fight_calculator() -> RewardCalculator:
     rc._get_reward_mapper = lambda: _FakeMapper()  # type: ignore[method-assign]
     rc._enrich_unit_for_reward_mapper = lambda u: u  # type: ignore[method-assign]
     rc._get_all_valid_targets = lambda u, gs: []  # type: ignore[method-assign]
-    rc._calculate_objective_reward_per_turn = lambda gs, r: 0.0  # type: ignore[method-assign]
     rc._calculate_coherency_penalty_per_turn = lambda gs, r: 0.0  # type: ignore[method-assign]
     return rc
 
@@ -410,52 +411,6 @@ class TestCoherencyPenaltyNoActingUnit:
         assert call_count == 0  # once_claim court-circuite avant _get_controlled_player_unit
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# _calculate_objective_reward_per_turn — idempotence quand aucune unité active
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestObjectiveRewardPerTurnNoActingUnit:
-    """Sans unité contrôlée vivante, le reward est 0.0 et ne se recalcule pas au 2e appel."""
-
-    def _gs(self) -> Dict[str, Any]:
-        # units_cache vide → _get_controlled_player_unit retourne None (pas d'unité contrôlée)
-        return {
-            **_MINIMAL_GS,
-            "units_cache": {},
-            "turn": 1,
-            "current_player": 1,
-            "primary_objective": {"scoring": {"start_turn": 1}},
-        }
-
-    def test_returns_zero_when_no_unit(self) -> None:
-        """objective_reward_no_unit_zero : 0.0 quand aucune unité contrôlée vivante."""
-        rc = _make_minimal_rc()
-        gs = self._gs()
-        reward = rc._calculate_objective_reward_per_turn(gs, _PHASE_MOVE_TRANSITION)
-        assert reward == 0.0
-
-    def test_idempotent_on_second_call(self) -> None:
-        """objective_reward_no_unit_idempotent : once_claim posé au 1er appel → court-circuit au 2e."""
-        rc = _make_minimal_rc()
-        gs = self._gs()
-        result = dict(_PHASE_MOVE_TRANSITION)
-        rc._calculate_objective_reward_per_turn(gs, result)
-
-        # Après le 1er appel, once_claim doit avoir été posé même si acting_unit est None.
-        # On instrument _get_controlled_player_unit pour vérifier qu'il n'est PAS rappelé.
-        call_count = 0
-        original_get_unit = rc._get_controlled_player_unit
-
-        def counting_get_unit(game_state: Any) -> Dict[str, Any] | None:
-            nonlocal call_count
-            call_count += 1
-            return original_get_unit(game_state)
-
-        rc._get_controlled_player_unit = counting_get_unit  # type: ignore[method-assign]
-        reward2 = rc._calculate_objective_reward_per_turn(gs, result)
-        assert reward2 == 0.0
-        assert call_count == 0  # once_claim court-circuite avant _get_controlled_player_unit
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # P3-8 split-fire — reward_calculator doit gérer tous les états intermédiaires
@@ -536,7 +491,7 @@ def _rc_with_lowest_hp_bonus(bonus: float) -> RewardCalculator:
                 "result_bonuses": {"kill_target": 1.0, "target_lowest_hp": bonus},
                 "target_type_bonuses": {},
                 "situational_modifiers": {"win": 0, "lose": 0, "draw": 0},
-                "objective_rewards": {"objective_reward_factor": 0.0, "reward_per_objective_turn5": 0.0, "on_objective_bonus": 0.0},
+                "objective_rewards": {"vp_margin_factor": 0.0, "on_objective_bonus": 0.0},
                 "system_penalties": {"forbidden_action": 0.0, "invalid_action": 0.0, "system_response": 0.0, "generic_error": 0.0},
             }
         },

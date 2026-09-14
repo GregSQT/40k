@@ -261,13 +261,10 @@ class W40KMetricsTracker:
         _rewards_cfg = _config_loader.load_agent_rewards_config(_base_key)
         _agent_rewards = require_key(_rewards_cfg, _base_key)
         _objective_rewards = require_key(_agent_rewards, "objective_rewards")
-        # Facteur d'echelle du versement d'objectif : le reward vaut EXACTEMENT ce facteur fois
-        # les VP marques (cf. _calculate_objective_reward_per_turn). Les trois reglages qui
-        # occupaient cette place (reward_per_objective / use_objective_lead /
-        # reward_for_objective_lead) decrivaient une formule LINEAIRE que ce fichier rejouait sur
-        # les echantillons — un miroir de la formule du moteur, donc une divergence en attente.
-        self.objective_reward_factor: float = float(
-            require_key(_objective_rewards, "objective_reward_factor")
+        # Facteur d'echelle du ledger B6 : le reward vaut EXACTEMENT ce facteur fois
+        # la marge de VP finale (cf. _calculate_vp_margin_reward, teleskopage).
+        self.vp_margin_factor: float = float(
+            require_key(_objective_rewards, "vp_margin_factor")
         )
         self.reward_kill_target: float = float(
             require_key(require_key(_agent_rewards, "result_bonuses"), "kill_target")
@@ -1078,17 +1075,11 @@ class W40KMetricsTracker:
             diff = float(np.mean(samples)) - float(np.mean(opp_samples))
             self._emit_game('01_VP/d_objectives_held_diff', 'objectives_held_diff', diff)
 
-            # f_obj_rewards : le montant verse par
-            # RewardCalculator._calculate_objective_reward_per_turn sur l'episode. Il vaut
-            # `facteur x VP marques` PAR CONSTRUCTION, donc il se LIT sur les VP au lieu de se
-            # rejouer : cette ligne rejouait la formule du versement sur les echantillons, un
-            # miroir qui redevenait faux a chaque changement de forme du reward (c'est
-            # exactement ce qui vient d'arriver au passage lineaire -> escalier).
-            # Limite connue, celle du versement lui-meme : au round 5, le SECOND joueur marque a
-            # la fin de la phase fight alors que le reward est calcule a la frontiere
-            # command -> move — les deux comptages peuvent differer sur ce seul marquage.
-            obj_rewards_ep = self.objective_reward_factor * float(
-                require_key(tactical_data, 'victory_points_controlled_episode')
+            # f_obj_rewards : approximation du versement ledger B6 sur l'episode.
+            # vp_margin_factor × marge finale = somme telesopique exacte SAUF si des VP
+            # ont ete verses pendant l'entraitement terminal (rare, acceptable).
+            obj_rewards_ep = self.vp_margin_factor * float(
+                require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent')
             )
             self._emit_game('01_VP/f_obj_rewards', 'obj_rewards', obj_rewards_ep)
 
@@ -1284,16 +1275,19 @@ class W40KMetricsTracker:
     def log_reward_decomposition(self, reward_data: Dict[str, Any]):
         """Log reward decomposition for debugging reward engineering.
 
-        METRIQUES (6):
+        METRIQUES (8):
         - reward/base_actions_total
         - reward/result_bonuses_total
-        - reward/objective_total
+        - reward/objective_total       (on_objective_bonus uniquement depuis B6)
+        - reward/vp_margin_total       (ledger B6)
         - reward/situational_total
         - reward/penalties_total
-        - reward/objective_share  (part de l'objectif dans ce que l'episode a RAPPORTE)
+        - reward/vp_margin_total       (scalar TB)
+        - reward/objective_share  (part SCORE dans ce que l'episode a RAPPORTE ; numerateur
+                                   = objective_positive + vp_margin_positive depuis B6)
 
         `objective_share` est la mesure qui motive tout le reste : la victoire se decide aux
-        VP d'objectifs (game_state.determine_winner_with_method), donc une part d'objectif
+        VP d'objectifs (game_state.determine_winner_with_method), donc une part de SCORE
         marginale signifie que l'agent est paye pour autre chose que pour gagner.
         """
         if not reward_data:
@@ -1303,8 +1297,9 @@ class W40KMetricsTracker:
         # `*_positive` accompagne chaque composante DENSE : c'est le flux positif cumule pas a
         # pas par le callback, la seule forme utilisable pour une part (cf. plus bas).
         required_fields = [
-            'base_actions', 'result_bonuses', 'objective', 'situational', 'penalties',
+            'base_actions', 'result_bonuses', 'objective', 'vp_margin', 'situational', 'penalties',
             'base_actions_positive', 'result_bonuses_positive', 'objective_positive',
+            'vp_margin_positive',
         ]
         for field in required_fields:
             if field not in reward_data:
@@ -1324,7 +1319,7 @@ class W40KMetricsTracker:
         objective = reward_data['objective']
         situational = reward_data['situational']
         penalties = reward_data['penalties']
-        
+
         # `self.reward_components` (historique de 100 episodes par composante) etait alimente
         # ici et relu par PERSONNE : les cinq courbes ci-dessous sont per-episode, elles ne
         # lissent rien. Supprime avec son accumulateur.
@@ -1332,38 +1327,37 @@ class W40KMetricsTracker:
         self.writer.add_scalar('reward/base_actions_total', float(base_actions), x)
         self.writer.add_scalar('reward/result_bonuses_total', float(result_bonuses), x)
         self.writer.add_scalar('reward/objective_total', float(objective), x)
+        self.writer.add_scalar('reward/vp_margin_total', float(reward_data['vp_margin']), x)
         self.writer.add_scalar('reward/situational_total', float(situational), x)
         self.writer.add_scalar('reward/penalties_total', float(penalties), x)
 
-        # Part de l'objectif dans ce qui RAPPORTE sur l'episode. `situational` (le terminal
-        # +-50) est exclu : il recompense le RESULTAT, pas le comportement qui y mene, et sa
-        # masse ecraserait la comparaison entre les deux signaux denses qu'on veut arbitrer.
-        # `penalties` est exclu pour deux raisons : il est negatif, et il n'est pas disjoint de
-        # `base_actions` (wait / charge_fail sont ecrits dans les DEUX par reward_calculator).
+        # Part du SCORE (objectif + marge VP) dans ce qui RAPPORTE sur l'episode.
+        # `situational` (le terminal +-150) est exclu : il recompense le RESULTAT, pas le
+        # comportement qui y mene, et sa masse ecraserait la comparaison entre les signaux
+        # denses. `penalties` est exclu : il est negatif et non disjoint de `base_actions`.
         #
-        # Le denominateur somme les FLUX POSITIFS accumules pas a pas, jamais les totaux nets :
-        # `base_actions` melange sur un episode les +0,3 de chaque tir et les -0,1 de chaque
-        # attente, et un agent passif peut cumuler +18 de combat pour un net de -2. Filtrer les
-        # totaux nets sur leur signe — ce que faisait la version precedente — jetait alors les
-        # 18 points entiers du denominateur et gonflait la part de l'objectif exactement quand
-        # les recompenses d'action sont les plus denses.
-        # Numerateur = le flux positif de l'objectif lui aussi : la part reste dans [0,1] sans
-        # rien supposer du signe des composantes.
+        # Numerateur = flux positif de l'objectif + flux positif de la marge B6 : la part
+        # reste dans [0,1] sans supposer le signe des composantes.
+        # Denominateur elargi a `vp_margin_positive` depuis B6 : les VP marqués ont un flux
+        # positif via la marge ; les VP concedes ont un flux negatif, deja exclus par la
+        # formule flux-positif.
         objective_positive = float(reward_data['objective_positive'])
+        vp_margin_positive = float(reward_data['vp_margin_positive'])
+        score_positive = objective_positive + vp_margin_positive
         positive_total = (
             float(reward_data['base_actions_positive'])
             + float(reward_data['result_bonuses_positive'])
-            + objective_positive
+            + score_positive
         )
         if positive_total > 0.0:
-            self.writer.add_scalar('reward/objective_share', objective_positive / positive_total, x)
+            self.writer.add_scalar('reward/objective_share', score_positive / positive_total, x)
         # Denominateur nul = aucune recompense positive sur l'episode : il n'y a pas de part a
-        # mesurer. On n'ecrit RIEN plutot qu'un 0.0, qui se lirait « part d'objectif nulle » et
+        # mesurer. On n'ecrit RIEN plutot qu'un 0.0, qui se lirait « part de score nulle » et
         # serait indiscernable du cas ou l'agent n'a rien gagne du tout.
 
         # NOTE : 01_VP/f_obj_rewards est calcule dans log_tactical_metrics depuis les
-        # echantillons d'objectifs tenus, et non depuis episode_reward_components (cette chaine
-        # ne tient pas avec n_envs=48).
+        # echantillons VP, et non depuis episode_reward_components (cette chaine ne tient pas
+        # avec n_envs=48).
 
     def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
         """Log tour_de_jeu.md compliance validation metrics.

@@ -84,10 +84,10 @@ def _rewards() -> Dict[str, Any]:
         AGENT_KEY: {
             "base_actions": {"wait": -0.1, "ranged_attack": 1.0},
             "objective_rewards": {
-                "objective_reward_factor": 6.0,
-                "reward_per_objective_turn5": 0.0,
+                "vp_margin_factor": 6.0,
                 "on_objective_bonus": 5.0,
             },
+            "situational_modifiers": {"win": 50.0, "lose": -50.0, "draw": 0.0},
         }
     }
 
@@ -203,8 +203,12 @@ class _EmptyEntryMask:
         return self._real(game_state)
 
 
-def _step_through_empty_entry_mask(engine: W40KEngine) -> Tuple[Dict[str, Any], bool]:
-    """Joue UN step dont le masque d'entree est vide et dont la transition finit la partie."""
+def _step_through_empty_entry_mask(engine: W40KEngine) -> Tuple[Dict[str, Any], bool, float]:
+    """Joue UN step dont le masque d'entree est vide et dont la transition finit la partie.
+
+    Rend aussi la recompense du step : cette porte doit VERSER ce que la transition change
+    (ledger de marge, +-situational), cf. `test_pool_empty_gate_pays_the_ledger_and_the_outcome`.
+    """
     empty_first = _EmptyEntryMask(engine)
     # La transition de phase franchit la limite de tours : `_check_game_over` la lit APRES
     # l'`advance_phase`, exactement comme en production quand le dernier tour se referme.
@@ -218,15 +222,15 @@ def _step_through_empty_entry_mask(engine: W40KEngine) -> Tuple[Dict[str, Any], 
     with patch.object(
         engine.action_decoder, "get_squad_action_mask_and_eligible_units", empty_first
     ), patch.object(engine, "_advance_phase_and_drain", advance_then_end):
-        _obs, _reward, terminated, _truncated, info = engine.step(ACTIVATE_SLOT_BASE)
+        _obs, reward, terminated, _truncated, info = engine.step(ACTIVATE_SLOT_BASE)
     assert empty_first.calls >= 1, "le masque d'entree n'a pas ete demande"
-    return info, terminated
+    return info, terminated, float(reward)
 
 
 def test_pool_empty_gate_reports_the_episode_summary():
     engine = _make_engine()
 
-    info, terminated = _step_through_empty_entry_mask(engine)
+    info, terminated, _reward = _step_through_empty_entry_mask(engine)
 
     # Premisses : c'est bien cette porte, et l'episode s'est bien termine dedans.
     assert info.get("phase_auto_advanced") is True, (
@@ -243,10 +247,41 @@ def test_pool_empty_gate_keeps_its_own_keys():
     """Le bilan s'AJOUTE aux cles de la porte, il ne les remplace pas."""
     engine = _make_engine()
 
-    info, _terminated = _step_through_empty_entry_mask(engine)
+    info, _terminated, _reward = _step_through_empty_entry_mask(engine)
 
     assert info["phase_auto_advanced"] is True
     assert "previous_phase" in info, "la porte a perdu la phase d'ou elle venait"
+
+
+def test_pool_empty_gate_pays_the_ledger_and_the_outcome():
+    """La porte verse le ledger de marge (B6) et le +-situational, et les COMPTE.
+
+    Elle rendait 0.0 sans passer par `calculate_reward` : le dernier delta du ledger (les VP
+    attribues par la transition qui termine la partie) n'etait jamais verse, `reset` remettait
+    `vp_margin_paid` a 0, et la somme telescopique « facteur x marge finale » etait fausse sur
+    cette porte — le +-situational y etait deja perdu. Rouge si la porte rend 0.0 a nouveau.
+    """
+    engine = _make_engine()
+    controlled = int(engine.reward_calculator.config["controlled_player"])
+    opponent = 2 if controlled == 1 else 1
+    # Marge +15 non encore versee : le filigrane est a 0 (reset), comme si la transition qui
+    # termine la partie venait d'attribuer ces VP.
+    engine.game_state["victory_points"] = {controlled: 15, opponent: 0}
+    assert engine.game_state["vp_margin_paid"] == 0
+
+    info, terminated, reward = _step_through_empty_entry_mask(engine)
+
+    assert terminated and info.get("phase_auto_advanced") is True
+    assert info["winner"] == controlled, "premisse : marge +15 -> le joueur controle gagne"
+    expected = 6.0 * 15 + 50.0  # ledger + situational `win`
+    assert reward == pytest.approx(expected), (
+        f"la porte a rendu {reward} au lieu de {expected} : ledger et/ou situational non verses"
+    )
+    assert engine.game_state["vp_margin_paid"] == 15, "filigrane non avance : le delta serait reverse"
+    ventilation = info["tactical_data"]["reward_breakdown"]
+    assert ventilation["vp_margin"] == pytest.approx(90.0), ventilation
+    assert ventilation["situational"] == pytest.approx(50.0), ventilation
+    assert info["episode"]["r"] == pytest.approx(expected), "accumulateur non alimente par la porte"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

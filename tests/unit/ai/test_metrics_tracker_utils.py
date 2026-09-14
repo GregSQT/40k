@@ -195,8 +195,8 @@ def _tracker_stub() -> W40KMetricsTracker:
     # t.episode_tactical_data occupait cette place : supprime du tracker avec son unique
     # lecteur (le 2e ecrivain de invalid_action_rate). Le reposer ici ferait passer un stub
     # pour un etat valide qui ne l'est plus.
-    # Lu de la config d'agent par __init__ : f_obj_rewards vaut ce facteur fois les VP marques.
-    t.objective_reward_factor = 3.0
+    # Lu de la config d'agent par __init__ : f_obj_rewards vaut ce facteur fois la marge finale.
+    t.vp_margin_factor = 3.0
     # Idem, pour 02_combat/b_kill_rewards. Valeur de la config ArmageddonAgent au moment ou ce
     # stub la reprend (result_bonuses.kill_target) : aucun test ne l'observe aujourd'hui, mais
     # celui qui l'observera un jour doit lire un facteur plausible, pas un nombre invente.
@@ -398,10 +398,10 @@ def test_log_faction_bot_win_rates_refuses_what_it_cannot_publish() -> None:
 def _reward_data(**overrides: Any) -> Dict[str, Any]:
     """Ventilation complete d'un episode, telle que le callback l'emet."""
     data: Dict[str, Any] = {
-        "base_actions": 1.0, "result_bonuses": 0.5, "objective": 0.2,
+        "base_actions": 1.0, "result_bonuses": 0.5, "objective": 0.2, "vp_margin": 0.0,
         "situational": 0.1, "penalties": -0.1,
         "base_actions_positive": 1.0, "result_bonuses_positive": 0.5,
-        "objective_positive": 0.2,
+        "objective_positive": 0.2, "vp_margin_positive": 0.0,
     }
     data.update(overrides)
     return data
@@ -417,7 +417,7 @@ def test_log_reward_decomposition_validation() -> None:
     with pytest.raises(KeyError, match=r"base_actions_positive"):
         t.log_reward_decomposition(
             {
-                "base_actions": 1, "result_bonuses": 1, "objective": 1,
+                "base_actions": 1, "result_bonuses": 1, "objective": 1, "vp_margin": 0,
                 "situational": 1, "penalties": 1,
             }
         )

@@ -109,7 +109,9 @@ SCENARIO = os.path.join(
 #: TL08 = TL07 à la clé de PREMIER niveau près : le bump vient d'une sous-clé de
 #: `deployment_state` (`reserves_declaration_started`), donc de la table du second niveau — d'où
 #: deux formats de suite au même compte (131) et à la même empreinte, fait mesuré et non doublon.
-_TL09_KEYS: FrozenSet[str] = frozenset({
+#: TL10 = TL09 + `vp_margin_paid` (B6, ledger de marge de VP) : premier mouvement du PREMIER
+#: niveau depuis TL05 — 132 clés.
+_TL10_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
         '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
         '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
@@ -147,16 +149,16 @@ _TL09_KEYS: FrozenSet[str] = frozenset({
         'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
         'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
         'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
-        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
-        'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
+        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'vp_margin_paid',
+        'waaagh_active', 'waaagh_called', 'winner', 'zone_intent_free_steps_remaining',
+        'zone_intents',
 })
 
 #: La table reste indexée par la magic — c'est ce qui rend le premier geste du bump vérifiable :
 #: renommer le littéral sans re-tagger la clé laisserait `_MAGIC` sans entrée, et
 #: `test_the_current_magic_declares_its_key_set` rougit.
 MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
-    b"W40KTL08": _TL09_KEYS,
-    b"W40KTL09": _TL09_KEYS,
+    b"W40KTL10": _TL10_KEYS,
 }
 
 #: --- DEUXIÈME NIVEAU : sous-clés des dicts mutables publiés par le reset ---------------------
@@ -177,7 +179,7 @@ MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
 #: réponse 20.01 a été donnée », lu par `_execute_change_roster_action` pour refuser le
 #: remplacement d'armée une fois l'étape commencée. Une row TL07 restitue `deployment_state` en
 #: bloc, donc sans lui, et ce lecteur lève.
-_TL09_SUBKEYS: Dict[str, FrozenSet[str]] = {
+_TL10_SUBKEYS: Dict[str, FrozenSet[str]] = {
     # Comptabilité MUTABLE de la phase de déploiement. Les quatre dernières sont les clés 20.01
     # (`deployment_handlers.RESERVES_DECLARATION_DECLINED_KEY` / `_VALIDATED_KEY` / `_CLOSED_KEY`
     # / `_STARTED_KEY`). `reserves_declaration_queue` a disparu en TL09 : l'étape Declare Battle
@@ -219,7 +221,7 @@ _TL09_SUBKEYS: Dict[str, FrozenSet[str]] = {
 }
 
 MUTABLE_SUBKEYS_BY_MAGIC: Dict[bytes, Dict[str, FrozenSet[str]]] = {
-    b"W40KTL09": _TL09_SUBKEYS,
+    b"W40KTL10": _TL10_SUBKEYS,
 }
 
 #: Dicts mutables dont les sous-clés sont des DONNÉES de la partie — identifiants d'unité ou de
@@ -273,8 +275,10 @@ _FORMAT_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     # TL08 vient d'une sous-clé, TL09 d'un échange de sous-clés : le premier niveau n'a pas
     # bougé depuis TL05. Faits mesurés, pas des copier-coller à corriger.
     b"W40KTL08": (131, "bc1d5f0c7f07dc36"),
-    #: COURANTE — vérifiée contre `_TL09_KEYS` à chaque exécution.
+    # TL09 : échange de sous-clés, premier niveau inchangé depuis TL05 — fait mesuré.
     b"W40KTL09": (131, "bc1d5f0c7f07dc36"),
+    #: COURANTE — vérifiée contre `_TL10_KEYS` à chaque exécution : `vp_margin_paid` en plus.
+    b"W40KTL10": (132, "293d42d78788d736"),
 }
 
 #: Même registre pour le SECOND niveau, né sous TL06 : les magics antérieures n'y figurent pas,
@@ -285,9 +289,12 @@ _FORMAT_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL07": (24, "f5d15abb41f83555"),
     #: `reserves_declaration_started` est la sous-clé qui sépare cette empreinte de celle de TL07.
     b"W40KTL08": (24, "982bf7cde624e5aa"),
-    #: COURANTE — vérifiée contre `_TL09_SUBKEYS` à chaque exécution ; `reserves_declaration_queue`
-    #: y est remplacée par `reserves_declaration_declined` et `reserves_declaration_validated`.
+    #: TL09 : `reserves_declaration_queue` y est remplacée par `reserves_declaration_declined` et
+    #: `reserves_declaration_validated`.
     b"W40KTL09": (24, "9a31f524e24f7534"),
+    #: COURANTE — vérifiée contre `_TL10_SUBKEYS` à chaque exécution. Même empreinte que TL09 :
+    #: TL10 vient d'une clé de PREMIER niveau (`vp_margin_paid`), aucune sous-clé ne bouge.
+    b"W40KTL10": (24, "9a31f524e24f7534"),
 }
 
 #: Première magic relevée par chacun des deux registres. Avant elles, le fichier n'a jamais décrit
@@ -360,14 +367,14 @@ def test_the_current_format_matches_its_recorded_fingerprint() -> None:
     la marche à suivre est d'écrire ICI la nouvelle valeur, sciemment.
     """
     couple = _FORMAT_FINGERPRINTS[_MAGIC]
-    assert (len(_TL09_KEYS), _fingerprint(_TL09_KEYS)) == couple, (
-        f"le littéral de {_MAGIC.decode()} vaut {len(_TL09_KEYS)} clés / "
-        f"{_fingerprint(_TL09_KEYS)}, le registre dit {couple[0]} / {couple[1]}."
+    assert (len(_TL10_KEYS), _fingerprint(_TL10_KEYS)) == couple, (
+        f"le littéral de {_MAGIC.decode()} vaut {len(_TL10_KEYS)} clés / "
+        f"{_fingerprint(_TL10_KEYS)}, le registre dit {couple[0]} / {couple[1]}."
     )
     couple = _FORMAT_SUBKEY_FINGERPRINTS[_MAGIC]
-    assert (len(_TL09_SUBKEYS), _subkey_fingerprint(_TL09_SUBKEYS)) == couple, (
-        f"la table de sous-clés de {_MAGIC.decode()} vaut {len(_TL09_SUBKEYS)} dicts / "
-        f"{_subkey_fingerprint(_TL09_SUBKEYS)}, le registre dit {couple[0]} / {couple[1]}."
+    assert (len(_TL10_SUBKEYS), _subkey_fingerprint(_TL10_SUBKEYS)) == couple, (
+        f"la table de sous-clés de {_MAGIC.decode()} vaut {len(_TL10_SUBKEYS)} dicts / "
+        f"{_subkey_fingerprint(_TL10_SUBKEYS)}, le registre dit {couple[0]} / {couple[1]}."
     )
 
 

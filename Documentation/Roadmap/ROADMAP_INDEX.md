@@ -192,10 +192,14 @@ le learner tenait trois exemplaires des observations). Profil ramené au régime
 plateau 0,585 que la référence, atteint plus lentement (dossier §5.10) ; (2) **S11**, récompense en
 espérance pour tir et mêlée, livrée et mergée (`296c1bc3d` + `472f5dd53`), **run 10:37 → 14:05 arrêté
 par la garde** (argmax 0,47 contre P0, échantillonné 0,55, entropie montante ; clé remise à `false`,
-dossier §5.11) ; suivant : terme de marge de VP B6 sur le registre `victory_points` (second avis,
-dossier §5.12, en cours de code dans une autre session). **Point de reprise sans contexte : dossier
-[#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** (3) « plat » n'est jamais rejoué plus longtemps —
-un plateau est un symptôme. En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
+dossier §5.11) ; (3) « plat » n'est jamais rejoué plus longtemps — un plateau est un symptôme ;
+(4) **B6, marge de VP en ledger** (`vp_margin_factor × Δ(VP_moi − VP_lui)` à la place de
+`objective_reward_factor × VP_propres`, un VP cédé coûte −6) **+ échauffement du critic**
+(`value_warmup_updates`, extracteur et statistiques de normalisation gelés, jamais hérité d'un
+zip) — **code livré et mergé le 2026-09-14** ; reste avant le run « marge » : contrat, clé dans
+le profil `x1_lineage` ([training.md#marge-vp-2026-09](training.md#marge-vp-2026-09), dossier §5.12).
+**Point de reprise sans contexte : dossier
+[#etat-2026-09-14](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-14).** En réserve : S14 / S15, deux λ acteur/critic (à dimensionner), mesure du
 plafond 0,65 par un exploiteur contre P0 (jamais fait).
 
 ---

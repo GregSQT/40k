@@ -179,6 +179,31 @@ sondes argmax 0,450 / 0,497 (moyenne 0,473 < 0,50) alors que la courbe échantil
 0,549 (référence 0,508 / 0,571) et que l'entropie MONTE (−0,78 → −0,85, référence −0,78 → −0,72).
 Hypothèses et sondes à faire : dossier §5.11. Clé remise à `false`. Suivant : marge de VP B6 (§5.12).
 
+### Marge de VP en ledger + échauffement du critic — B6, mergé, run à lancer {#marge-vp-2026-09}
+
+**Décision utilisateur du 2026-09-14.** `objective_reward_factor × VP_propres` (versé au tour
+du joueur contrôlé) devient `vp_margin_factor × Δ(VP_moi − VP_lui)`, versé à chaque changement
+de score, quel que soit le joueur dont c'est le tour (`BotControlledEnv` accumule). Somme
+téléscopique = 6 × marge finale, élimination comprise ; un VP concédé coûte désormais −6 (0
+avant). Remplacement et non ajout : Corr(ΔVP_moi, Δmarge) = 0,82 sur 40 parties, les deux
+termes ensemble auraient valu +11 / −5. Nouveau composant de ventilation `vp_margin`
+(`reward/vp_margin_total`, `objective_share` = part de score, `01_VP/f_obj_rewards` = 6 × marge).
+Le critic ayant appris une cible qui ignorait les VP cédés, la reprise s'ouvre par
+`model_params.value_warmup_updates` updates où seule la value loss est optimisée (politique et
+entropie annulées, KL désactivé, `train/value_warmup_active`) — régime de run, jamais hérité
+d'un checkpoint (ni la clé ni le compteur ne voyagent dans le zip ; seul le profil l'active).
+Reviews du 2026-09-14 : l'extracteur étant PARTAGÉ (`PointerMaskablePolicy`), tout ce qui n'est
+pas le critic (`mlp_extractor.value_net` + `value_net`) est GELÉ pendant le warmup — paramètres
+(`grad = None`) ET statistiques d'`EntityRunningNorm` (`eval()`), sinon la value loss déplaçait
+la politique via l'extracteur ; `SelfPlayWrapper` accumule désormais chaque step de P2 comme
+`BotControlledEnv` (le ledger était perdu sur le chemin self-play pur) ; la porte « pool vide →
+advance_phase » du moteur passe par `calculate_reward` (le dernier delta du ledger et le
+±situational y étaient perdus quand la transition terminait la partie) ; format de save bumpé
+en `W40KTL10` (`vp_margin_paid`). **Mergé dans main le 2026-09-14** (S11 arrêté). Reste :
+`ai.training_contract --init` + `write_contract` sur le zip P0 (les clés de récompense
+changent), `value_warmup_updates` dans `x1_lineage`, run « marge » par la commande habituelle
+`--etape P1`. Détail, tests et mutations constatées : dossier §5.12.
+
 ---
 
 ## 🟡 Entropie normalisée par l'état — contrôle vs traité mesurés, arbitrage ouvert {#entropie-normalisee}
