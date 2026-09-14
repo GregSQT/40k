@@ -27,7 +27,6 @@ Quatre overrides, sans changer les maths :
 """
 from __future__ import annotations
 
-import itertools
 import time
 from copy import deepcopy
 from typing import Any, TypeVar
@@ -51,7 +50,6 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
-from ai.spatial_extractor import EntityRunningNorm
 from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
@@ -200,22 +198,23 @@ class PatchedMaskablePPO(MaskablePPO):
     def _excluded_save_params(self) -> list[str]:
         return super()._excluded_save_params() + ["value_warmup_updates", "_vwu_done"]
 
-    def _critic_only_param_ids(self) -> frozenset[int]:
-        """Identités des paramètres que l'échauffement critic (B6) laisse apprendre.
+    def _critic_modules(self) -> tuple[th.nn.Module, th.nn.Module]:
+        """Les modules que l'échauffement critic (B6) laisse apprendre — la SEULE partition.
 
         Le tronc critic de `MlpExtractor` et la tête de valeur : les deux seuls que
         `evaluate_actions` traverse SANS que la politique les lise. Tout le reste — extracteur
-        de features PARTAGÉ, tronc pi, têtes pointeur et dense — est gelé pendant le warmup
-        (`grad = None` avant `optimizer.step()`, voir `train`). `ActorCriticPolicy` garantit
-        ces deux attributs ; `PointerMaskablePolicy` les construit elle-même
-        (ai/pointer_policy.py).
+        de features PARTAGÉ, tronc pi, têtes pointeur et dense — est gelé pendant le warmup :
+        paramètres sans gradient (`_critic_only_param_ids`, `grad = None` avant
+        `optimizer.step()`) ET mode évaluation (statistiques d'`EntityRunningNorm` figées),
+        voir `train`. `ActorCriticPolicy` garantit ces deux attributs ; `PointerMaskablePolicy`
+        les construit elle-même (ai/pointer_policy.py).
         """
+        return self.policy.mlp_extractor.value_net, self.policy.value_net
+
+    def _critic_only_param_ids(self) -> frozenset[int]:
+        """Identités des paramètres de `_critic_modules`."""
         return frozenset(
-            id(p)
-            for p in itertools.chain(
-                self.policy.mlp_extractor.value_net.parameters(),
-                self.policy.value_net.parameters(),
-            )
+            id(p) for m in self._critic_modules() for p in m.parameters()
         )
 
     # ── 2.1 — GPU-resident buffer ─────────────────────────────────────────────────────────────
@@ -298,13 +297,14 @@ class PatchedMaskablePPO(MaskablePPO):
             # `running_mean/var/count` (ai/spatial_extractor.py, `if self.training`), donc les
             # entrées normalisées de l'extracteur partagé — et les logits de la politique avec
             # elles — bougeaient à chaque minibatch (mesuré : 9 buffers sur 16 déplacés, Δprobs
-            # 4,5e-4 après une update warmup). Les statistiques passent en mode évaluation pour
-            # l'update entière : figées comme pendant les rollouts. Rien à rétablir en sortie —
-            # `set_training_mode` (False en tête de la collecte, True en tête du prochain
-            # `train`) est récursif et réécrit l'état de tous les sous-modules.
-            for _module in self.policy.modules():
-                if isinstance(_module, EntityRunningNorm):
-                    _module.eval()
+            # 4,5e-4 après une update warmup). Règle générale, dérivée de la même partition que
+            # les gradients : tout ce qui est gelé est en mode évaluation, figé comme pendant
+            # les rollouts ; seuls les modules critic restent en mode entraînement. Rien à
+            # rétablir en sortie — `set_training_mode` (False en tête de la collecte, True en
+            # tête du prochain `train`) est récursif et réécrit l'état de tous les sous-modules.
+            self.policy.eval()
+            for _module in self._critic_modules():
+                _module.train()
 
         _t0_update = time.perf_counter()
         for epoch in range(self.n_epochs):
@@ -557,9 +557,8 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("diag/last_values_gpu_mean", getattr(self, "_diag_last_values_gpu_mean", _nan))
         self.logger.record("diag/last_values_cpu_mean", getattr(self, "_diag_last_values_cpu_mean", _nan))
         # Echauffement critic B6 : 1 pendant les N premières updates, 0 ensuite.
-        _was_warmup: bool = self._vwu_done < self.value_warmup_updates
-        self.logger.record("train/value_warmup_active", int(_was_warmup))
-        if _was_warmup:
+        self.logger.record("train/value_warmup_active", int(_in_warmup))
+        if _in_warmup:
             self._vwu_done += 1
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
