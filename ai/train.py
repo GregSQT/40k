@@ -335,21 +335,26 @@ def arm_value_warmup(
     agent_key: str,
     log=print,
 ) -> None:
-    """ECHAUFFEMENT CRITIC (B6) : pose l'identite de la table du run, refuse un rejeu.
+    """ECHAUFFEMENT CRITIC (B6) : pose l'identite de la table du run, saute un rejeu.
 
     Appele apres la creation (`--new`) ou le chargement + curriculum (`--append`) du modele, par
     les deux chemins d'entrainement. `value_warmup_contract_id` est TOUJOURS pose — c'est ce que
-    `train` inscrit dans `value_warmup_done_under` a la fin du regime — et le refus ne vaut que
-    si le profil demande un echauffement :
+    `train` inscrit dans `value_warmup_done_under` a la fin du regime — et la comparaison ne
+    vaut que si le profil demande un echauffement :
 
     - profil sans `value_warmup_updates` (ou 0) : rien a verifier, quel que soit le marqueur ;
     - profil avec la cle et zip sans marqueur, ou marqueur d'une AUTRE table : l'echauffement
       se joue, et le log dit sous quelle empreinte ;
-    - profil avec la cle et marqueur de CETTE table : REFUS. La cle vit dans le profil de lignee
-      (`x1_lineage`), donc elle serait encore la a chaque etape suivante, et chacune rejouait
-      20 updates critic-only (~1 440 episodes, politique figee) sans qu'aucun garde-fou ne le
-      voie. Retirer la cle du profil, ou changer la table, sont les deux seules issues — pas de
-      drapeau de contournement.
+    - profil avec la cle et marqueur de CETTE table : SAUT — `value_warmup_updates` est remis a
+      0 sur le modele pour ce run, et le log le dit. La cle vit dans le profil de lignee
+      (`x1_lineage`) et y reste : elle dit « ce critic doit avoir ete echauffe sous la table
+      courante avant que la politique apprenne », et le marqueur atteste que c'est fait. Un
+      `--append` d'etape suivante comme un `--resume-from` de reprise apres crash (qui applique
+      le meme profil, `_prepare_curriculum_stage`) passent sans toucher au profil. La version
+      precedente REFUSAIT (`ValueError`) : elle bloquait la reprise d'un run plante apres la
+      20e update tant que la cle n'etait pas retiree du profil, puis remise au changement de
+      table suivant — un etat manuel a gerer, precisement ce que le marqueur devait supprimer,
+      pour un rejeu que le saut empeche tout autant.
     """
     empreinte = reward_table_fingerprint(rewards_config, agent_key)
     model.value_warmup_contract_id = empreinte
@@ -358,14 +363,14 @@ def arm_value_warmup(
         return
     deja = model.value_warmup_done_under
     if deja == empreinte:
-        raise ValueError(
-            f"Echauffement critic refuse : le modele charge porte deja le marqueur "
-            f"value_warmup_done_under={deja} — un echauffement s'est acheve sous CETTE table de "
-            f"recompense, et le profil demande value_warmup_updates={demande}. Le rejouer figerait "
-            f"la politique {demande} updates pour rien. Retire `value_warmup_updates` du profil "
-            f"(config/agents/<agent>/*_training_config.json), ou change la table de recompense si "
-            f"la cible du critic a reellement change."
+        # `_apply_curriculum_model_params` (ou le constructeur) a pose `demande` sur le modele :
+        # sans cette remise a 0, `train` rejouerait le regime.
+        model.value_warmup_updates = 0
+        log(
+            f"⏭️  Echauffement critic non rejoue : deja acheve sous cette table de recompense "
+            f"({empreinte}), le profil demande value_warmup_updates={demande}"
         )
+        return
     if deja is None:
         log(f"🔥 Echauffement critic : {demande} updates (table de recompense {empreinte}, jamais echauffee)")
     else:

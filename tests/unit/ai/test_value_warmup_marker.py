@@ -5,8 +5,10 @@ suivant la porte encore : sans marqueur, chaque étape rejouait 20 updates criti
 épisodes, politique figée) sans qu'aucun garde-fou ne le voie. Le zip retient désormais sous
 quelle table de récompense le dernier échauffement s'est ACHEVÉ (`value_warmup_done_under`,
 écrit par `PatchedMaskablePPO.train` à la dernière update du régime), et
-`ai/train.py::arm_value_warmup` refuse à l'ouverture un run dont le profil demande un
-échauffement déjà fait sous cette table. L'identité de la table est
+`ai/train.py::arm_value_warmup` saute à l'ouverture d'un run dont le profil demande un
+échauffement déjà fait sous cette table (`value_warmup_updates` remis à 0 sur le modèle,
+journalisé) — un `--append` d'étape suivante comme un `--resume-from` après crash passent sans
+toucher au profil. L'identité de la table est
 `training_contract.reward_table_fingerprint` : clés ET valeurs, hors clés de documentation —
 le critic apprend la somme des récompenses, un facteur doublé est une autre cible.
 """
@@ -116,17 +118,35 @@ def test_arm_pose_toujours_l_identite_de_la_table_du_run() -> None:
     assert model.value_warmup_contract_id == reward_table_fingerprint(_rewards(), _AGENT)
 
 
-def test_arm_refuse_un_echauffement_deja_fait_sous_cette_table() -> None:
-    """Profil avec la clé + zip marqué de CETTE table → ValueError, et l'identité reste posée.
+def test_arm_saute_un_echauffement_deja_fait_sous_cette_table() -> None:
+    """Profil avec la clé + zip marqué de CETTE table → `value_warmup_updates` remis à 0 sur le
+    modèle, saut journalisé, identité du run posée, pas de levée.
 
-    VERROU. Retirer le `raise` d'`arm_value_warmup` fait passer ce test au ROUGE — et rend au
-    profil de lignée son rejeu silencieux de 20 updates à chaque étape.
+    VERROU. Retirer la remise à 0 d'`arm_value_warmup` fait passer ce test au ROUGE — et rend
+    au profil de lignée son rejeu silencieux de 20 updates à chaque étape et à chaque reprise.
     """
     rewards = _rewards()
     model = _model(n_warmup=0)
+    model.value_warmup_updates = 20  # ce que `_apply_curriculum_model_params` a posé
     model.value_warmup_done_under = reward_table_fingerprint(rewards, _AGENT)
-    with pytest.raises(ValueError, match="value_warmup_done_under"):
-        arm_value_warmup(model, {"value_warmup_updates": 20}, rewards, _AGENT, log=_logs().append)
+    journal = _logs()
+    arm_value_warmup(model, {"value_warmup_updates": 20}, rewards, _AGENT, log=journal.append)
+    assert model.value_warmup_updates == 0, "le régime serait rejoué par `train`"
+    assert model.value_warmup_contract_id == reward_table_fingerprint(rewards, _AGENT)
+    assert len(journal) == 1 and "non rejoue" in journal[0]
+    assert reward_table_fingerprint(rewards, _AGENT) in journal[0]
+
+
+def test_le_saut_tient_sur_le_vrai_chemin_de_reprise() -> None:
+    """Reprise après crash : zip échauffé sous cette table, profil inchangé → `train` ne joue
+    aucune update critic-only (`train/value_warmup_active` = 0, politique libre)."""
+    rewards = _rewards()
+    model = _model(n_warmup=1)
+    model.value_warmup_done_under = reward_table_fingerprint(rewards, _AGENT)
+    arm_value_warmup(model, {"value_warmup_updates": 1}, rewards, _AGENT, log=_logs().append)
+    metrics = _run_one_update(model)
+    assert metrics["train/value_warmup_active"] == 0
+    assert model._vwu_done == 0
 
 
 def test_arm_laisse_passer_quand_le_profil_ne_demande_rien() -> None:
