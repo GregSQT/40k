@@ -822,11 +822,18 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   échauffé, `--resume-from` rejoue le régime entier. `ai/train.py::arm_value_warmup` (les
   deux chemins d'entraînement, après création ou chargement + curriculum) pose
   `value_warmup_contract_id` (empreinte du run, exclue du zip, obligatoire sinon `train`
-  lève) et REFUSE (`ValueError`) un profil qui demande la clé quand le zip porte déjà cette
-  empreinte — issues : retirer la clé du profil, ou changer la table. Marqueur d'une autre
-  table ou absent : l'échauffement se joue, le log dit les deux empreintes. Tests :
-  `tests/unit/ai/test_value_warmup_marker.py` (13) — rouge constaté sans le `raise`, et rouge
-  si le marqueur est écrit dès la première update.
+  lève) et SAUTE l'échauffement (`value_warmup_updates` remis à 0 sur le modèle, log « non
+  rejoué ») quand le profil demande la clé et que le zip porte déjà cette empreinte : la clé
+  reste dans `x1_lineage` sans état à gérer, `--append` d'étape suivante et `--resume-from`
+  après crash passent. Le refus `ValueError` livré le matin est retiré le soir même (review :
+  `--resume-from` pose `append=True` et applique le même profil, donc la reprise d'un run
+  planté après la 20e update était refusée tant que la clé n'était pas retirée, puis remise au
+  changement de table — un état manuel, précisément ce que le marqueur devait supprimer ; le
+  saut empêche le rejeu tout autant). Marqueur d'une autre table ou absent : l'échauffement se
+  joue, le log dit les deux empreintes. Tests : `tests/unit/ai/test_value_warmup_marker.py`
+  (14) — rouge constaté sans la remise à 0 (2 tests, dont un qui joue une update sur le vrai
+  `train` : `value_warmup_active` = 0), et rouge si le marqueur est écrit dès la première
+  update.
   **Gel hors critic (review du 2026-09-14).** Annuler les termes ne suffit pas : l'extracteur
   de features est PARTAGÉ (`PointerMaskablePolicy` exige `share_features_extractor=True`, et
   ses logits `q · e_i` lisent les embeddings de l'extracteur), donc la value loss seule

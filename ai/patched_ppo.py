@@ -197,8 +197,10 @@ class PatchedMaskablePPO(MaskablePPO):
           `train` leve si elle manque (T1), un echauffement sans identite ne peut pas s'inscrire ;
         - `value_warmup_done_under` : empreinte sous laquelle le DERNIER echauffement s'est
           ACHEVE, ecrite par `train` a la derniere update du regime, SERIALISEE dans le zip.
-          `arm_value_warmup` refuse un run dont le profil porte la cle si le zip charge porte
-          deja cette empreinte. Ecrite a l'ACHEVEMENT et non a l'ouverture : un checkpoint pris
+          `arm_value_warmup` remet `value_warmup_updates` a 0 (saut, journalise) quand le
+          profil porte la cle et que le zip charge porte deja cette empreinte : un `--append`
+          d'etape suivante ou un `--resume-from` apres crash ne rejouent rien, et le profil
+          n'a pas a bouger. Ecrite a l'ACHEVEMENT et non a l'ouverture : un checkpoint pris
           au milieu de l'echauffement ne porte pas le marqueur, et `--resume-from` le rejoue en
           entier — le compteur n'etant pas serialise, un echauffement partiel n'existe pas.
         """

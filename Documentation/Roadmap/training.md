@@ -195,8 +195,11 @@ d'un checkpoint (ni la clé ni le compteur ne voyagent dans le zip ; seul le pro
 Décision B (2026-09-14) : la clé restant dans `x1_lineage`, le zip retient sous quelle table de
 récompense le dernier échauffement s'est achevé (`value_warmup_done_under`, empreinte clés +
 valeurs de `training_contract.reward_table_fingerprint`), et `arm_value_warmup` (ai/train.py)
-REFUSE un `--append` qui redemanderait l'échauffement sous la même table — retirer la clé du
-profil ou changer la table sont les deux issues, pas de drapeau de contournement.
+SAUTE l'échauffement (`value_warmup_updates` remis à 0 sur le modèle, journalisé) quand le profil
+le redemande sous la même table : `--append` d'étape suivante et `--resume-from` après crash
+passent sans toucher au profil. Le refus `ValueError` du matin est retiré le soir même (review) :
+il bloquait la reprise d'un run planté après la 20e update tant que la clé restait dans
+`x1_lineage`.
 Reviews du 2026-09-14 : l'extracteur étant PARTAGÉ (`PointerMaskablePolicy`), tout ce qui n'est
 pas le critic (`mlp_extractor.value_net` + `value_net`) est GELÉ pendant le warmup — paramètres
 (`grad = None`) ET statistiques d'`EntityRunningNorm` (`eval()`), sinon la value loss déplaçait
