@@ -165,6 +165,16 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-15 soir — S14 RÉFUTÉ ([dossier §5.13.1](../Chantiers/backlog/plafonnement_p1.md#s14c-2026-09-15)).**
+Run non centré (`run_20260915-134839`) disqualifié par audit (94 % de Var(A) = constante par
+état, mesuré par `scripts/q_head_structure_probe.py`) ; centrage sous π codé et mergé
+(`5288f3921`) ; rerun centré (`run_20260915-155352`) : garde déclenchée à 10 000 (0,362),
+`q_loss_mb0 − value_loss_mb0` jamais négatif, entropie 0,71 → 0,28 nat, coupure KL à 6/32 —
+la tête Q n'a pas de données contrefactuelles (politique à p_max 0,66–0,99), variante S14c
+écartée sans run. Suite (§9.9) : **S9** température de collecte T = 2 sous GAE, précédée d'une
+mesure de 30 min (tête Q sur données exploratoires, politique figée : `q_loss_mb0 −
+value_loss_mb0 < −0,002` → S14-sur-S9 rejouable, sinon S14 mort).
+
 **2026-09-15 — verdict S25, S14 lancé, ordre de la suite figé ([dossier §9.9](../Chantiers/backlog/plafonnement_p1.md#suite-2026-09-15)).**
 S25 (exploiteur de P0 meilleur cas, `run_20260914-215728` + reprise `run_20260915-123205` après
 un reboot Windows à 04:29) : sondes exploiteur 0,61 / 0,63 / 0,75 / 0,62 / 0,77 / 0,72 sur

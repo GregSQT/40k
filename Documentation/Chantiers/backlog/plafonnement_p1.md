@@ -355,7 +355,7 @@ log-prob 1,7 × 10⁻⁴).
 | S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☑ **testée le 2026-09-14 → ✗ garde de destruction** (argmax 0,47 vs P0, échantillonné 0,55, entropie montante ; §5.11) | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
 | S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
 | S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
-| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ☑ **codée le 2026-09-15 (§5.13) ; run non centré lancé puis disqualifié par l'audit, centrage sous π codé (§5.13.1), rerun à l'arrêt du run** | code IA (`adv_heads`, `advantage_source`, `q_coef`) | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
+| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ✗ **codée, centrée sous π, RÉFUTÉE le 2026-09-15 (§5.13.1) : pas de données contrefactuelles ; rejouable seulement SUR S9 si la mesure 2a de §9.9 est positive** | code IA (`adv_heads`, `advantage_source`, `q_coef`) | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
 | S15 | Distillation par recherche (MCTS S0 → S2, `mcts.md`) | C1, G1 | ☐ gelée « après J3, seulement si la démo l'exige » (ROADMAP_INDEX) | semaines ; clone d'état 745 ms → ≤ 30 ms | remède de principe quand le gradient de politique est du bruit ; à ouvrir sur décision si S13 / S14 échouent |
 | S16 | Pool élargi dès P1 (P0 + exploiteur) ou part de bots | D1 | ☐ non testée | curriculum | rien ne dit que la diversité crée du signal là où P0 n'en donne plus |
 | S17 | Second scénario / rosters (É9) | D5 | ☐ ouvert ailleurs | scénarios | |
@@ -1114,6 +1114,51 @@ tag `adv_q_offset_abs_mean` du rerun. Il ne conditionne ni le code ni la relance
   Q jamais entraînée — jamais sauté ». Lecture par la règle ci-dessus : garde à 10 000 (~17:20),
   verdict à 30 000 (~20:30).
 
+**Verdict S14c (2026-09-15, 19:10) — RÉFUTÉ, issue (iii), garde déclenchée.** Run
+`run_20260915-155352` (`training_x1_expl_04-e00-s14c.log`). Sondes 2 000 → 20 000 : 0,53 / 0,49 /
+0,31 / 0,23 / 0,25 / 0,27 / 0,42 / 0,41 / 0,51 / 0,45. **Garde à 10 000 déclenchée** (moyenne
+2 000–10 000 = **0,362** ≤ 0,45) à 17:20 — **non lue à temps par l'agent**, run arrêté à
+20 000 (19:10) au lieu de 10 000 : deux heures de GPU perdues, sans conséquence sur le verdict.
+Dernier checkpoint `ppo_checkpoint_20260915-155353_7687944_steps.zip` (20 000 d'étape).
+
+Mécanisme, 283 updates (TensorBoard `run_20260915-155352`) :
+- `q_loss_mb0 − value_loss_mb0` **≥ 0 sur toute la durée** (+0,0002 à +0,0018 par tranche de
+  20 updates, jamais négatif) → la tête centrée ne prédit rien du résidu de V hors échantillon :
+  **issue (iii)** de la règle.
+- `adv_q_abs_mean` **0,006** (l'avantage centré de l'action jouée est ~0 : c'est l'action
+  dominante, centrée sur elle-même) ; sortie brute en dérive libre (`adv_q_offset_abs_mean`
+  0,12 → 0,17, retiré avant la perte, sans effet sur l'acteur).
+- `normalize_advantage` ramène ces ~0 à variance 1 : les rares coups non dominants, dont A_c est
+  une estimation à UN échantillon, reçoivent des poussées de pleine force. Signature : entropie
+  **0,71 → 0,28 nat** (S25 plate à 0,68), coupure KL après **6 mini-lots sur 32** (S25 : 15–16),
+  part policy du gradient 0,90, `policy_gradient_loss` −0,015. La courbe échantillonnée fait la
+  même vague que la sonde (0,49 → 0,32 → 0,50 → 0,34) : une politique qui s'aiguise à toute
+  vitesse sur des avantages à un échantillon, puis oscille quand ils changent de signe
+  (malédiction du vainqueur, exactement le mécanisme anticipé en §5.13.1).
+- Ce n'est PAS la provenance de P0 (hypothèse utilisateur, écartée) : S25 a repris le même zip
+  (copie identique), même profil, même échauffement, même adversaire, et est monté de 0,43 à
+  0,73 ; la seule différence est `advantage_source`.
+
+**Diagnostic.** Le centrage a fait ce qu'il devait (l'offset ne pousse plus l'acteur) et a révélé
+le problème de fond : une tête Q(s, a) n'apprend les alternatives que si on les JOUE. Avec une
+politique à p_max 0,66–0,99, elle n'a presque aucune donnée contrefactuelle ; ce qu'elle « sait »
+des coups rares est le bruit d'un jet. Ce n'est pas un défaut de code : c'est un manque de
+données d'exploration. **La variante S14c prévue par l'issue (iii) (régularisation / lr de
+tête / mélange A_c–GAE) est ÉCARTÉE sans run** : aucune ne crée de données contrefactuelles ;
+un mélange A_c–GAE redonnerait S25 plus du bruit. L'agent 2 avait raison sur le mécanisme,
+l'agent 1 sur le défaut de construction ; les deux étaient nécessaires pour arriver ici.
+
+**Ce qui départagerait S14 sans payer un run (≈ 30 min, décision utilisateur du 2026-09-15
+soir).** Avec le code S9 (température de collecte), depuis le checkpoint S25 à 40 000
+(`ppo_checkpoint_20260915-123207_10087944_steps.zip`, sans tête Q → tête à zéro, échauffement
+jamais sauté) : profil `q_head` + `logits_temperature` 2 + `value_warmup_updates` 40 → la
+politique reste FIGÉE (mode échauffement), la collecte se fait à T = 2 (coups exploratoires
+joués), seules V et la tête Q apprennent ; lire `q_loss_mb0 − value_loss_mb0` sur les 20
+dernières updates du régime. Règle : moyenne < −2 erreurs-types (≈ −0,002) → la tête sait
+apprendre des alternatives quand on les lui joue, S14-SUR-S9 mérite un run plus tard ; sinon
+S14 est mort dans ce dispositif, quoi qu'on fasse, et ne sera plus relancé. C'est le test qui
+aurait dû précéder le run du matin.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -1533,8 +1578,8 @@ midi (§5.13).
 
 | étape | levier | dispositif | règle de lecture | si oui | si non |
 |---|---|---|---|---|---|
-| 1 | **S14 tête Q CENTRÉE sous π** (§5.13.1 ; `run_20260915-134839` non centré ne juge pas), `q_coef` 0,17 | S25 (agent expl, E0, P0 déterministe 100 %, siège 0,5, lr 0,0005, B6, échauffement 20) | §5.13.1 : mécanisme `q_loss_mb0 − value_loss_mb0 < 0` sur ≥ 10 updates après l'échauffement + score §5.13 : garde à 10 000 (≤ 0,45), verdict à 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 non ; ≤ 0,63 régression | gap < 0 et score monte : continuer à 60 000 ; gap < 0 et score plat → étape 2 SUR S14 ; sinon étape 4 | gap ≥ 0 : UNE variante S14c (régularisation / lr de tête / mélange A_c–GAE, une seule) ; sinon réfuté → étape 2 |
-| 2 | **S9 exploration structurée** : température T ≈ 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation | S25, sous l'estimateur retenu à l'étape 1 | même instrument : moyenne 20 000–30 000 contre la référence du même estimateur (0,677 sous GAE, ou la valeur S14) ; ≥ +4 pts oui | garder T ; étape 3 | réfuté ; étape 3 |
+| 1 | ~~S14 tête Q centrée sous π~~ — **RÉFUTÉ le 2026-09-15 (§5.13.1)** : garde déclenchée (0,362 à 10 000), `q_loss_mb0 − value_loss_mb0` ≥ 0 partout, entropie 0,71 → 0,28 : la tête n'a pas de données contrefactuelles (politique à p_max 0,66–0,99). Variante S14c écartée sans run (aucune ne crée ces données). | — | — | — | → étape 2 sous **GAE** |
+| 2 | **S9 exploration structurée** : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
 | 3 | **C2 issue vs façonnage** : poids de l'issue ±150 contre les 62 % d'objectifs (config seule) puis **B6 seconde graine** | S25 | idem, un run par variable, deux graines si effet < 10 pts | garder | — |
 | 4 | **Transfert** du régime gagnant dans `x1_lineage` de `ArmageddonAgent_x1` : relire lr / `target_kl` / `ent_coef` / `vf_coef` sur `n_minibatches_done` et `grad_share_policy` SOUS le nouvel estimateur (réglages mesurés sous GAE, §5.4, non transférables), puis reprise de la lignée P1 → gate 0,65 | lignée | règle §7 | lignée relancée | — |
 | 5 | **S11b** (espérance sur les dégâts seuls, kills au jet) seulement si les sondes de §5.11 désignent le proxy des kills ; **S15** recherche en dernier recours | — | — | — | — |
