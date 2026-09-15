@@ -355,7 +355,7 @@ log-prob 1,7 × 10⁻⁴).
 | S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☑ **testée le 2026-09-14 → ✗ garde de destruction** (argmax 0,47 vs P0, échantillonné 0,55, entropie montante ; §5.11) | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
 | S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
 | S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
-| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ☑ **codée le 2026-09-15 (§5.13), run lancé dans le dispositif S25** | code IA (`adv_heads`, `advantage_source`, `q_coef`) | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
+| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ☑ **codée le 2026-09-15 (§5.13) ; run non centré lancé puis disqualifié par l'audit, centrage sous π codé (§5.13.1), rerun à l'arrêt du run** | code IA (`adv_heads`, `advantage_source`, `q_coef`) | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
 | S15 | Distillation par recherche (MCTS S0 → S2, `mcts.md`) | C1, G1 | ☐ gelée « après J3, seulement si la démo l'exige » (ROADMAP_INDEX) | semaines ; clone d'état 745 ms → ≤ 30 ms | remède de principe quand le gradient de politique est du bruit ; à ouvrir sur décision si S13 / S14 échouent |
 | S16 | Pool élargi dès P1 (P0 + exploiteur) ou part de bots | D1 | ☐ non testée | curriculum | rien ne dit que la diversité crée du signal là où P0 n'en donne plus |
 | S17 | Second scénario / rosters (É9) | D5 | ☐ ouvert ailleurs | scénarios | |
@@ -1013,6 +1013,80 @@ validées ensemble en `--new` comme en `--append`, sérialisées dans le zip.
 - Jugement à graine unique : un effet < 10 points exige une seconde graine (§9.5) avant de
   transférer le régime dans `x1_lineage` de `ArmageddonAgent_x1`.
 
+#### 5.13.1 S14c — centrage de la tête Q sous π (2026-09-15, décision utilisateur de l'après-midi) {#s14c-2026-09-15}
+
+**`run_20260915-134839` (log `training_x1_expl_03-e00-s14.log`) est la version NON CENTRÉE : il
+ne juge pas S14.** Il court jusqu'à la garde de 10 000 puis est arrêté par l'utilisateur ; le
+code centré n'est mergé qu'à cet arrêt (les workers d'évaluation rechargent le code de `main`).
+
+**Cause, mesurée.** Audit sur 978 états du checkpoint
+`ppo_checkpoint_20260915-134841_5767944_steps.zip` : **98 % de Var(A(s, a_jouée)) est une
+constante par état** — écart-type 0,222 pour l'offset `Σ_a π(a|s)·A(s, a)` contre 0,027 entre
+actions d'un même état. Rien dans `Q = V.detach() + A` ne distingue `V + A` de `(V − c) + (A + c)` :
+la tête absorbait le biais de V dans un terme qui ne dépend que de `s`. Pour l'acteur, ce terme
+est un gradient NUL en espérance (une baseline) mais, après `normalize_advantage` (par mini-lot,
+pas par état), c'est lui qui fixe l'écart-type : le signal entre actions sortait à ~0,12
+d'écart-type. L'acteur recevait un terme à variance 1 dont 98 % est un bruit d'espérance nulle,
+persistant d'un mini-lot à l'autre — pire que le GAE. À réconcilier à la relecture : le run
+loggue `train/adv_q_abs_mean` 0,055–0,076 sur ses mini-lots quand l'audit mesure sd 0,222 sur
+ses 978 états ; un facteur ~4 entre E|A| et sd(A) exige une queue lourde (quelques familles
+d'états à |offset| ~1) ou une distribution d'états différente ; la part de 98 % est un ratio,
+robuste à ça. L'argument `q_loss − value_loss` (+0,0032 après l'échauffement, −0,0022 pendant,
+lu sur les 85 premières updates) n'est PAS la justification et n'a pas à être prouvé.
+
+**Correctif (worktree `tete-q-centrage-sous-pi`).** `ai/pointer_policy.py::center_under_policy` :
+`A_c = A − Σ_a π(a|s)·A(s, a)` sur les probabilités MASQUÉES de la politique courante
+(`MaskableCategorical` pose −1e8 hors légales : probs exactement nulles), π DÉTACHÉE (la perte Q
+ne déplace pas la politique par le centrage) ; `evaluate_actions_q` rend cinq valeurs
+(values, log_prob, entropy, `A_c(s, a_t)`, offset). Pourquoi π et non la moyenne uniforme :
+`a_t ~ π`, donc `V = E_π[Q]` exactement et le biais de V est orthogonal au sous-espace de
+moyenne nulle sous π — il reste à la charge de V. π courante et non celle du rollout : le
+buffer ne garde que `old_log_prob` de l'action jouée ; l'écart est borné par le clip et la
+coupure KL. `ai/patched_ppo.py::train` : `q_loss = MSE(retour λ, V.detach() + A_c)`, acteur sur
+`A_c.detach()` ; tags `train/adv_q_offset_abs_mean` (offset retiré), `train/q_loss_mb0` et
+`train/value_loss_mb0` (premier mini-lot AVANT tout pas d'Adam, V brute : la seule comparaison
+hors échantillon par construction — `train/q_loss` mélange in-sample et hors-sample selon la
+coupure KL, et dès le mini-lot 1 les retours λ de pas voisins déjà ajustés se recouvrent).
+`is_untrained` et l'init à zéro inchangés : tête fraîche → A = 0, offset = 0, A_c = 0.
+Tests `tests/unit/ai/test_q_head.py` : Σ π·A_c = 0 par ligne, invariance à une constante par
+état, colonnes illégales sans effet, formes refusées, `evaluate_actions_q` = gather de A_c avec
+offset = Σ π·A brut et (values, log_prob, entropy) inchangés, tags publiés en `q_head` et NaN
+en `gae` (sauf `value_loss_mb0`, valide sous toute source) ; centrage retiré par mutation →
+3 rouges.
+
+**Lecture attendue, à ne pas prendre pour une régression.** Un offset à 0,222 d'écart-type
+signifie que V est hors de ~0,2 dans certains états et que la tête le rapiéçait ; après
+centrage ce biais retombe sur `value_loss` : EV peut fléchir au démarrage, c'est le critic qui
+reprend sa charge.
+
+**Règle du rerun, écrite AVANT relance — UN SEUL rerun S14 centré, pas de troisième version.**
+Relance par l'utilisateur après merge : `python3 ai/train.py --agent ArmageddonAgent_x1_expl
+--training-config x1_lineage --scenario bot --etape E0` (reprend P0, tête à zéro, échauffement
+20 rejoué « jamais entraînée — jamais sauté »), log `training_x1_expl_04-e00-s14c.log`.
+- Critère MÉCANISME : `train/q_loss_mb0 − train/value_loss_mb0 < 0` après l'échauffement, lu sur
+  une fenêtre d'au moins 10 updates (erreur-type ~0,001 par update sur un mini-lot) = la tête
+  centrée prédit une part du résidu de V sur des retours qu'elle n'a pas vus.
+  `train/adv_q_offset_abs_mean` doit rester petit devant `train/adv_q_abs_mean` (le centrage
+  retire l'offset AVANT la perte : une tête sous contrainte n'a plus de raison d'en produire).
+- Critère SCORE : §5.13 inchangé — garde 10 000 (moyenne des sondes 2 000–10 000 ≤ 0,45 →
+  arrêt), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 : ≥ 0,72 oui ; 0,64–0,72
+  réfuté ; ≤ 0,63 régression.
+- Trois issues : (i) gap < 0 ET score monte → S14 tient, continuer à 60 000 (§9.9 étape 1,
+  « si oui ») ; (ii) gap < 0 ET score plat → l'acteur n'exploite pas ce que la tête sait :
+  jonction avec S9 (§9.9 étape 2 SUR S14) ; (iii) gap ≥ 0 → mémorisation résiduelle (capacité
+  de la tête, un échantillon par (s, a), malédiction du vainqueur : l'acteur sélectionne sur les
+  erreurs positives de A) → UNE variante S14c autorisée, choisie sur les tags et non les trois :
+  régularisation de `adv_heads` (weight decay propre) / lr propre à la tête / mélange A_c–GAE.
+
+**Instrument non bloquant** : `scripts/q_head_structure_probe.py` (test
+`tests/unit/scripts/test_q_head_structure_probe.py`) décompose `q_loss − value_loss` en part
+offset `E[c² − 2·c·R]` et part centrée `E[A_c² − 2·A_c·R]` sur un checkpoint `q_head`, collecte
+sans entraînement (contexte de `grad_signal_probe.py::build_probe_context` avec
+`allow_q_head=True` explicite — `refuse_q_head_model` reste intact pour la sonde de gradient),
+jackknife par rollout. À lancer sur le dernier checkpoint du run non centré quand le GPU est
+libre : il documente le point de départ (part d'offset attendue ~0,98) et sert de référence au
+tag `adv_q_offset_abs_mean` du rerun. Il ne conditionne ni le code ni la relance.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -1432,7 +1506,7 @@ midi (§5.13).
 
 | étape | levier | dispositif | règle de lecture | si oui | si non |
 |---|---|---|---|---|---|
-| 1 | **S14 tête Q** (§5.13), `q_coef` 0,17 | S25 (agent expl, E0, P0 déterministe 100 %, siège 0,5, lr 0,0005, B6, échauffement 20) | §5.13 : garde à 10 000 (≤ 0,45), verdict à 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 non ; ≤ 0,63 régression | continuer à 60 000 ; si la montée s'arrête sous 0,80 → étape 2 SUR S14 ; sinon étape 4 | régression : un seul rerun `q_coef` 0,05 si `grad_share_policy` < 0,4, sinon réfuté → étape 2 |
+| 1 | **S14 tête Q CENTRÉE sous π** (§5.13.1 ; `run_20260915-134839` non centré ne juge pas), `q_coef` 0,17 | S25 (agent expl, E0, P0 déterministe 100 %, siège 0,5, lr 0,0005, B6, échauffement 20) | §5.13.1 : mécanisme `q_loss_mb0 − value_loss_mb0 < 0` sur ≥ 10 updates après l'échauffement + score §5.13 : garde à 10 000 (≤ 0,45), verdict à 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 non ; ≤ 0,63 régression | gap < 0 et score monte : continuer à 60 000 ; gap < 0 et score plat → étape 2 SUR S14 ; sinon étape 4 | gap ≥ 0 : UNE variante S14c (régularisation / lr de tête / mélange A_c–GAE, une seule) ; sinon réfuté → étape 2 |
 | 2 | **S9 exploration structurée** : température T ≈ 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation | S25, sous l'estimateur retenu à l'étape 1 | même instrument : moyenne 20 000–30 000 contre la référence du même estimateur (0,677 sous GAE, ou la valeur S14) ; ≥ +4 pts oui | garder T ; étape 3 | réfuté ; étape 3 |
 | 3 | **C2 issue vs façonnage** : poids de l'issue ±150 contre les 62 % d'objectifs (config seule) puis **B6 seconde graine** | S25 | idem, un run par variable, deux graines si effet < 10 pts | garder | — |
 | 4 | **Transfert** du régime gagnant dans `x1_lineage` de `ArmageddonAgent_x1` : relire lr / `target_kl` / `ent_coef` / `vf_coef` sur `n_minibatches_done` et `grad_share_policy` SOUS le nouvel estimateur (réglages mesurés sous GAE, §5.4, non transférables), puis reprise de la lignée P1 → gate 0,65 | lignée | règle §7 | lignée relancée | — |

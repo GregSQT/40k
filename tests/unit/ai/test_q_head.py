@@ -3,7 +3,11 @@
 Ce que la tête doit garantir, chacun verrouillé ici :
 - même structure que les têtes de politique (noms et formes), enregistrée EN DERNIER ;
 - fraîche, elle rend un avantage nul pour toute action ; `evaluate_actions_q` rend l'avantage
-  de l'action JOUÉE, et laisse (values, log_prob, entropy) identiques à `evaluate_actions` ;
+  de l'action JOUÉE CENTRÉ sous π (`center_under_policy` : Σ_a π·A_c = 0 par état, l'offset
+  par état que la tête absorbait — 98 % de Var(A) mesuré le 2026-09-15 — est retiré) et
+  l'offset lui-même, et laisse (values, log_prob, entropy) identiques à `evaluate_actions` ;
+- tags `adv_q_offset_abs_mean`, `q_loss_mb0`, `value_loss_mb0` (mini-lot 0 avant tout pas :
+  la comparaison hors échantillon de la règle §5.13) ;
 - un zip sauvé SANS la tête charge PAR TOUS LES CHEMINS (`MaskablePPO.load` nu compris : PvE,
   workers d'évaluation, pool) : anciens poids identiques, états Adam alignés sur les mêmes rangs,
   tête à zéro ; toute autre différence de `state_dict` reste refusée ;
@@ -32,7 +36,9 @@ from ai.pointer_policy import (
     HeadNets,
     PointerHeadNets,
     PointerMaskablePolicy,
+    center_under_policy,
     extend_optimizer_state,
+    masked_probs,
 )
 from ai.spatial_extractor import SpatialCombinedExtractor
 from tests.unit.ai.test_critic_warmup import _run_one_update, _TABLE_ID
@@ -121,30 +127,86 @@ def test_une_tete_fraiche_rend_un_avantage_nul_pour_toute_action() -> None:
     assert th.equal(adv_all, th.zeros_like(adv_all))
 
 
-def test_evaluate_actions_q_rend_l_avantage_de_l_action_jouee_sans_changer_le_reste() -> None:
+# --- centrage sous π ----------------------------------------------------------------------------
+
+
+def test_center_under_policy_annule_la_moyenne_sous_pi_par_etat() -> None:
+    """Σ_a π·A_c = 0 ligne par ligne, pour des poids quelconques ; l'offset rendu est Σ_a π·A."""
+    g = th.Generator().manual_seed(3)
+    adv_all = th.randn(4, 9, generator=g, dtype=th.float64)
+    probs = th.softmax(th.randn(4, 9, generator=g, dtype=th.float64), dim=1)
+    adv_c, offset = center_under_policy(adv_all, probs)
+    assert adv_c.shape == adv_all.shape and offset.shape == (4,)
+    assert th.allclose((probs * adv_c).sum(dim=1), th.zeros(4, dtype=th.float64), atol=1e-12)
+    assert th.allclose(offset, (probs * adv_all).sum(dim=1))
+    assert not th.allclose(offset, th.zeros(4, dtype=th.float64)), "VERT VACANT : offset nul"
+
+
+def test_center_under_policy_est_invariant_a_une_constante_par_etat() -> None:
+    """`(V − c) + (A + c)` : la constante par état que la tête absorbait est retirée exactement."""
+    g = th.Generator().manual_seed(5)
+    adv_all = th.randn(3, 7, generator=g, dtype=th.float64)
+    probs = th.softmax(th.randn(3, 7, generator=g, dtype=th.float64), dim=1)
+    c = th.tensor([[10.0], [-3.5], [0.25]], dtype=th.float64)
+    adv_c, _ = center_under_policy(adv_all, probs)
+    adv_c_shifted, offset_shifted = center_under_policy(adv_all + c, probs)
+    assert th.allclose(adv_c, adv_c_shifted, atol=1e-12)
+    _, offset = center_under_policy(adv_all, probs)
+    assert th.allclose(offset_shifted, offset + c.squeeze(1))
+
+
+def test_center_under_policy_ignore_les_colonnes_illegales() -> None:
+    """Probs nulles hors légales : la valeur de A sur une action illégale ne change rien."""
+    probs = th.tensor([[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]], dtype=th.float64)
+    adv_all = th.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=th.float64)
+    adv_all_garbage = adv_all.clone()
+    adv_all_garbage[0, 1] = 1e6
+    adv_all_garbage[1, 0] = -1e6
+    adv_all_garbage[1, 2] = 1e6
+    _, offset = center_under_policy(adv_all, probs)
+    _, offset_garbage = center_under_policy(adv_all_garbage, probs)
+    assert th.equal(offset, th.tensor([2.0, 5.0], dtype=th.float64))
+    assert th.equal(offset_garbage, offset)
+
+
+def test_center_under_policy_refuse_des_formes_differentes() -> None:
+    with pytest.raises(ValueError, match="formes"):
+        center_under_policy(th.zeros(2, 5), th.zeros(2, 4))
+
+
+def test_evaluate_actions_q_rend_l_avantage_centre_de_l_action_jouee_sans_changer_le_reste() -> None:
+    """`adv` = A_c(s, a_t) avec A_c centré sous la π MASQUÉE de la politique ; `offset` = Σ π·A
+    brut ; (values, log_prob, entropy) identiques à `evaluate_actions`."""
     pol = _policy(_model())
     pol.set_training_mode(False)
-    # Poids NON nuls sur la tête, sinon l'avantage vaut zéro partout et le gather ne prouve rien.
+    # Poids NON nuls sur la tête, sinon l'avantage vaut zéro partout et rien ne se prouve.
     with th.no_grad():
         for p in pol.adv_heads.parameters():
             p.normal_()
     obs_t = _obs_tensor(pol)
     actions = th.tensor([0, 1024, 1025 + 2])
     masks = np.ones((3, TOTAL_ACTION_SIZE), dtype=bool)
+    masks[1, 1030:] = False  # un état partiellement masqué : π nulle sur ces colonnes
     with th.no_grad():
-        values, log_prob, entropy, adv = pol.evaluate_actions_q(obs_t, actions, masks)
+        values, log_prob, entropy, adv, offset = pol.evaluate_actions_q(obs_t, actions, masks)
         values_ref, log_prob_ref, entropy_ref = pol.evaluate_actions(
             cast(Any, obs_t), actions, cast(Any, masks)
         )
         feats = pol._split_features(obs_t)
-        _, latent_vf = pol.mlp_extractor(feats.trunk)
+        latent_pi, latent_vf = pol.mlp_extractor(feats.trunk)
         adv_all = pol.expected_advantages(latent_vf, feats)
+        probs = masked_probs(pol._distribution_from(latent_pi, feats, masks))
     assert th.equal(values, values_ref)
     assert th.equal(log_prob, log_prob_ref)
     assert entropy is not None and entropy_ref is not None and th.equal(entropy, entropy_ref)
-    assert adv.shape == (3,)
-    expected = th.stack([adv_all[i, int(a)] for i, a in enumerate(actions)])
-    assert th.equal(adv, expected)
+    assert adv.shape == (3,) and offset.shape == (3,)
+    assert th.equal(probs[1, 1030:], th.zeros_like(probs[1, 1030:])), "VERT VACANT : masque sans effet"
+    expected_offset = (probs * adv_all).sum(dim=1)
+    assert th.allclose(offset, expected_offset)
+    expected_adv = th.stack([adv_all[i, int(a)] for i, a in enumerate(actions)]) - expected_offset
+    assert th.allclose(adv, expected_adv)
+    raw = th.stack([adv_all[i, int(a)] for i, a in enumerate(actions)])
+    assert not th.allclose(adv, raw), "VERT VACANT : centrage sans effet (offset nul)"
     assert not th.equal(adv, th.zeros_like(adv)), "VERT VACANT : avantages tous nuls"
 
 
@@ -305,6 +367,42 @@ def test_hors_echauffement_la_politique_bouge_sous_l_avantage_q() -> None:
     assert np.isfinite(recorded["train/q_loss"]) and np.isfinite(recorded["train/adv_q_abs_mean"])
     assert recorded["train/adv_q_abs_mean"] > 0.0
     assert np.isfinite(recorded["diag/grad_norm_q_mb0"])
+
+
+def test_les_tags_du_centrage_et_du_mini_lot_0_sont_publies_en_q_head() -> None:
+    """`adv_q_offset_abs_mean` (offset retiré, > 0 sur une tête non nulle), `q_loss_mb0` et
+    `value_loss_mb0` (premier mini-lot AVANT tout pas d'Adam, V brute). Sur ce mini-lot,
+    `q_loss_mb0 − value_loss_mb0 = E[A_c² − 2·A_c·R]` : recalculé ici à la main sur le buffer
+    avec les poids d'AVANT l'update, pour prouver que le tag est bien la mesure pré-update."""
+    model = _model(advantage_source="q_head", q_coef=0.5, value_warmup_updates=0)
+    pol = _policy(model)
+    with th.no_grad():
+        for p in pol.adv_heads.parameters():
+            p.normal_(std=0.1)
+    recorded = _run_one_update(model)
+    assert np.isfinite(recorded["train/adv_q_offset_abs_mean"])
+    assert recorded["train/adv_q_offset_abs_mean"] > 0.0, "VERT VACANT : offset nul sur une tête non nulle"
+    assert np.isfinite(recorded["train/q_loss_mb0"]) and np.isfinite(recorded["train/value_loss_mb0"])
+    # n_steps = batch_size = 8, n_epochs = 1 : UN seul mini-lot, donc `train/q_loss` (moyenne
+    # sur les mini-lots, calculée AVANT le pas) doit coïncider avec `q_loss_mb0` — et diverger
+    # d'une mesure faite APRÈS l'update sur le même lot.
+    assert recorded["train/q_loss"] == pytest.approx(recorded["train/q_loss_mb0"])
+    pol.set_training_mode(False)
+    buf = next(model.rollout_buffer.get(8))
+    with th.no_grad():
+        values, _, _, adv_c, _ = pol.evaluate_actions_q(
+            cast(Any, buf.observations), buf.actions.long().flatten(), buf.action_masks
+        )
+        after = float(th.nn.functional.mse_loss(buf.returns, values.flatten() + adv_c))
+    assert after != pytest.approx(recorded["train/q_loss_mb0"]), "VERT VACANT : l'update n'a rien changé"
+
+
+def test_les_tags_du_centrage_et_du_mini_lot_0_sont_nan_en_gae_sauf_value_loss_mb0() -> None:
+    recorded = _run_one_update(_model())
+    assert np.isnan(recorded["train/adv_q_offset_abs_mean"])
+    assert np.isnan(recorded["train/q_loss_mb0"])
+    # V brute du mini-lot 0 existe sous toute source : une mesure valide n'est pas jetée.
+    assert np.isfinite(recorded["train/value_loss_mb0"])
 
 
 def test_la_tete_q_ne_recoit_de_gradient_que_de_sa_propre_perte() -> None:

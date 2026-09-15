@@ -141,6 +141,53 @@ def extend_optimizer_state(saved: Mapping[str, Any], n_params: int) -> Dict[str,
     return extended
 
 
+def center_under_policy(
+    adv_all: torch.Tensor, probs: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """`(A_c, offset)` : avantages CENTRÉS sous la politique, et l'offset par état retiré.
+
+    `adv_all` (B, n_actions) : la sortie BRUTE de la tête Q ; `probs` (B, n_actions) : π(·|s)
+    masquée — nulle hors actions légales, DÉTACHÉE par l'appelant. `offset` (B,) = Σ_a π·A,
+    `A_c = A − offset`, donc Σ_a π·A_c = 0 pour chaque état par construction.
+
+    POURQUOI (mesuré le 2026-09-15 sur 978 états du run S14 non centré,
+    ppo_checkpoint_20260915-134841_5767944_steps.zip) : 98 % de Var(A(s, a_jouée)) était une
+    constante par état — écart-type 0,222 pour l'offset contre 0,027 entre actions d'un même
+    état. Sans contrainte, rien ne distingue `V + A` de `(V − c) + (A + c)` : la tête absorbait
+    le biais de V dans un terme qui ne dépend que de s. Pour l'acteur, un tel terme est un
+    gradient NUL en espérance (baseline) mais, après `normalize_advantage`, c'est lui qui fixe
+    l'écart-type du mini-lot : le signal entre actions sortait à ~0,12 d'écart-type, noyé.
+
+    POURQUOI π et non la moyenne uniforme : `a_t ~ π`, donc `V(s) = E_π[Q(s, ·)]` exactement
+    et le biais de V est orthogonal au sous-espace de moyenne nulle sous π — il reste à la
+    charge de V et ne peut pas fuir dans `A_c`. Sous la moyenne uniforme, les actions légales
+    jamais jouées porteraient l'offset et la contrainte ne dirait rien de l'action jouée.
+    π DÉTACHÉE : la perte Q ne doit pas déplacer la politique par le centrage.
+    """
+    if adv_all.shape != probs.shape:
+        raise ValueError(
+            f"center_under_policy : avantages {tuple(adv_all.shape)} et probabilités "
+            f"{tuple(probs.shape)} de formes differentes."
+        )
+    offset = (probs * adv_all).sum(dim=1)
+    return adv_all - offset.unsqueeze(1), offset
+
+
+def masked_probs(distribution: MaskableDistribution) -> torch.Tensor:
+    """π(·|s) (B, n_actions) de la distribution MASQUÉE construite par `_distribution_from`.
+
+    `MaskableCategorical` pose −1e8 sur les logits masqués : probs EXACTEMENT nulles hors
+    actions légales en float32. Reliée au graphe : l'appelant détache s'il le faut.
+    """
+    inner = distribution.distribution
+    if not isinstance(inner, MaskableCategorical):
+        raise TypeError(
+            "masked_probs attend la distribution categorielle masquee de PointerMaskablePolicy "
+            f"(recu : {type(inner).__name__})."
+        )
+    return inner.probs
+
+
 _LENIENT_OPTIMIZERS: Dict[type, type] = {}
 
 
@@ -209,9 +256,11 @@ class PointerHeadNets(nn.Module):
     `action_net`, …, clés du `state_dict` inchangées depuis T-E). Ce module en porte un SECOND,
     de structure identique, sous `adv_heads.*` : la TÊTE Q (S14, dossier plafonnement_p1.md
     §9.5). Lue sur le tronc CRITIC (`latent_vf`), elle rend pour chaque action non pas un logit
-    mais un AVANTAGE attendu `A(s, a) = E[retour | s, a] − V(s)` : Q(s, a) = V(s) + A(s, a)
-    (forme duelling, V détaché), régressée sur le même retour λ que V. L'acteur PPO reçoit alors
-    `A(s, a_jouée)` à la place de l'avantage GAE : une différence de deux espérances apprises
+    mais un AVANTAGE attendu `A(s, a) = E[retour | s, a] − V(s)` : Q(s, a) = V(s) + A_c(s, a)
+    (forme duelling, V détaché, `A_c` CENTRÉ sous π par `center_under_policy` — sans quoi la
+    tête absorbait le biais de V dans une constante par état, 98 % de sa variance le
+    2026-09-15), régressée sur le même retour λ que V. L'acteur PPO reçoit alors
+    `A_c(s, a_jouée)` à la place de l'avantage GAE : une différence de deux espérances apprises
     sur des milliers de jets de dés, là où le GAE porte le jet de CE tir (mesuré le 2026-09-13 :
     86 % de Var(δ) est Var(r), 96 % sur le tir).
 
@@ -1169,19 +1218,31 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         obs: PyTorchObs,
         actions: torch.Tensor,
         action_masks: Optional[Any] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
-        """`evaluate_actions` + l'avantage attendu de l'action JOUÉE : (values, log_prob, entropy, adv).
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, torch.Tensor]:
+        """`evaluate_actions` + l'avantage attendu CENTRÉ de l'action JOUÉE :
+        (values, log_prob, entropy, adv, offset).
 
-        `adv` (B,) = `A(s_t, a_t)` de la tête Q, relié au graphe : `PatchedMaskablePPO.train`
-        en fait la cible de régression `Q = V.detach() + adv` contre le retour λ, et le DÉTACHE
-        avant de le donner à l'acteur. Une seule passe avant pour les deux têtes : `feats` et les
-        deux troncs sont calculés une fois. `actions` : ids d'action (B,), entiers.
+        `adv` (B,) = `A_c(s_t, a_t)` = `A(s_t, a_t) − Σ_a π(a|s_t)·A(s_t, a)` (voir
+        `center_under_policy` : cause mesurée, pourquoi π), relié au graphe :
+        `PatchedMaskablePPO.train` en fait la cible de régression `Q = V.detach() + adv` contre
+        le retour λ, et le DÉTACHE avant de le donner à l'acteur. `offset` (B,) : la constante
+        par état retirée, DÉTACHÉE, pour le tag `train/adv_q_offset_abs_mean`. Les probabilités
+        sont celles de la politique COURANTE (recalculées à chaque mini-lot) alors que `a_t` a
+        été tirée sous celle du rollout : le buffer ne garde que `old_log_prob` de l'action
+        jouée, et l'écart entre les deux est borné par le clip et la coupure KL. Une seule passe
+        avant pour les deux têtes : `feats` et les deux troncs sont calculés une fois.
+        `actions` : ids d'action (B,), entiers.
         """
         feats = self._split_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(feats.trunk)
         distribution = self._distribution_from(latent_pi, feats, action_masks)
         adv_all = self.expected_advantages(latent_vf, feats)
-        adv = adv_all.gather(1, actions.long().view(-1, 1)).squeeze(1)
+        adv_centered, offset = center_under_policy(adv_all, masked_probs(distribution).detach())
+        adv = adv_centered.gather(1, actions.long().view(-1, 1)).squeeze(1)
         return (
-            self.value_net(latent_vf), distribution.log_prob(actions), distribution.entropy(), adv,
+            self.value_net(latent_vf),
+            distribution.log_prob(actions),
+            distribution.entropy(),
+            adv,
+            offset.detach(),
         )

@@ -249,7 +249,8 @@ class PatchedMaskablePPO(MaskablePPO):
           entier — le compteur n'etant pas serialise, un echauffement partiel n'existe pas.
 
         TÊTE Q (S14, `advantage_source` / `q_coef`). `q_head` : `train` demande a la politique
-        `evaluate_actions_q`, prend `adv = A(s_t, a_t)` de `adv_heads` (ai/pointer_policy.py),
+        `evaluate_actions_q`, prend `adv = A_c(s_t, a_t)` de `adv_heads` (ai/pointer_policy.py),
+        CENTRE sous π (`center_under_policy` : Σ_a π·A_c = 0 par etat, le biais de V reste a V),
         regresse `Q = V.detach() + adv` sur le retour λ du buffer (perte `q_coef × MSE`, comme
         `vf_coef × MSE` pour V — V garde SA cible, la lecon de S23) et donne `adv.detach()` a
         l'acteur a la place de l'avantage GAE. Attributs d'instance ordinaires, serialises et
@@ -409,6 +410,16 @@ class PatchedMaskablePPO(MaskablePPO):
             )
         q_losses_t: list[th.Tensor] = []
         adv_q_abs_t: list[th.Tensor] = []
+        adv_q_offset_abs_t: list[th.Tensor] = []
+        # Pertes Q et V du PREMIER mini-lot, AVANT tout pas d'optimisation : la seule mesure
+        # HORS ÉCHANTILLON par construction. `train/q_loss` et `train/value_loss` moyennent sur
+        # les epochs, donc mélangent in-sample et hors-sample selon la coupure KL ; et dès le
+        # mini-lot 1 de l'epoch 0 les retours λ de pas voisins déjà ajustés se recouvrent. Règle
+        # §5.13 : `q_loss_mb0 − value_loss_mb0 < 0` après l'échauffement = la tête centrée prédit
+        # une part du résidu de V sur des retours qu'elle n'a pas vus. Erreur-type ~0,001 par
+        # update sur un mini-lot : se lit sur une fenêtre d'au moins 10 updates, jamais seul.
+        _diag_q_loss_mb0: th.Tensor | None = None
+        _diag_value_loss_mb0: th.Tensor | None = None
         if _in_warmup and self.value_warmup_contract_id is None:
             raise RuntimeError(
                 "value_warmup_updates > 0 exige value_warmup_contract_id (empreinte de la table "
@@ -442,8 +453,9 @@ class PatchedMaskablePPO(MaskablePPO):
                     actions = rollout_data.actions.long().flatten()
 
                 adv_q: th.Tensor | None = None
+                adv_q_offset: th.Tensor | None = None
                 if use_q:
-                    values, log_prob, entropy, adv_q = self.policy.evaluate_actions_q(  # type: ignore[attr-defined]
+                    values, log_prob, entropy, adv_q, adv_q_offset = self.policy.evaluate_actions_q(  # type: ignore[attr-defined]
                         rollout_data.observations,
                         actions,
                         action_masks=rollout_data.action_masks,
@@ -468,16 +480,19 @@ class PatchedMaskablePPO(MaskablePPO):
                         # insensible aux extrêmes individuels (pas de débordement float32 sur le mean).
                         _diag_ratio_mb0 = th.exp(_lp_drift.mean())
 
-                # AVANTAGE DE L'ACTEUR. `q_head` : `A(s_t, a_t)` de la tête Q, DÉTACHÉ — l'acteur
-                # ne doit pas pouvoir déformer la tête pour grossir son propre objectif — et
-                # recalculé par les réseaux courants à chaque mini-lot (pas figé au rollout : la
-                # tête continue d'apprendre pendant les epochs). La perte Q régresse
-                # `Q = V.detach() + adv` sur le même retour λ que V : V garde sa cible (S23), et
-                # la tête n'apprend que l'écart attendu de l'action jouée.
-                if adv_q is not None:
+                # AVANTAGE DE L'ACTEUR. `q_head` : `A_c(s_t, a_t)` de la tête Q, CENTRÉ sous π
+                # (`center_under_policy` : Σ_a π·A_c = 0 par état, aucune constante par état ne
+                # peut s'y loger, le biais reste à la charge de V), DÉTACHÉ — l'acteur ne doit
+                # pas pouvoir déformer la tête pour grossir son propre objectif — et recalculé
+                # par les réseaux courants à chaque mini-lot (pas figé au rollout : la tête
+                # continue d'apprendre pendant les epochs). La perte Q régresse
+                # `Q = V.detach() + A_c` sur le même retour λ que V : V garde sa cible (S23), et
+                # la tête n'apprend que l'écart attendu de l'action jouée à la moyenne sous π.
+                if adv_q is not None and adv_q_offset is not None:
                     q_loss = F.mse_loss(rollout_data.returns, values.detach() + adv_q)
                     q_losses_t.append(q_loss)
                     adv_q_abs_t.append(adv_q.detach().abs().mean())
+                    adv_q_offset_abs_t.append(adv_q_offset.abs().mean())
                     advantages = adv_q.detach()
                 else:
                     q_loss = None
@@ -504,6 +519,12 @@ class PatchedMaskablePPO(MaskablePPO):
                     )
                 value_loss = F.mse_loss(rollout_data.returns, values_pred)
                 value_losses_t.append(value_loss)
+                if epoch == 0 and _diag_value_loss_mb0 is None:
+                    # V BRUTE (pas `values_pred` clippée) : la même que dans `q_loss`, sinon la
+                    # différence des deux mesurerait le clip et non la tête.
+                    with th.no_grad():
+                        _diag_value_loss_mb0 = F.mse_loss(rollout_data.returns, values)
+                    _diag_q_loss_mb0 = q_loss.detach() if q_loss is not None else None
 
                 if entropy is None:
                     if self.entropy_normalize_by_legal:
@@ -656,6 +677,17 @@ class PatchedMaskablePPO(MaskablePPO):
         # l'action jouée. NaN quand la source est `gae` (rien n'est calculé, comportement inchangé).
         self.logger.record("train/q_loss", _mean_item(q_losses_t))
         self.logger.record("train/adv_q_abs_mean", _mean_item(adv_q_abs_t))
+        # Offset par état retiré par le centrage sous π (amplitude moyenne) ; NaN sous `gae`.
+        self.logger.record("train/adv_q_offset_abs_mean", _mean_item(adv_q_offset_abs_t))
+        # Mini-lot 0 avant tout pas : la comparaison HORS ÉCHANTILLON (voir _diag_q_loss_mb0).
+        self.logger.record(
+            "train/q_loss_mb0",
+            _diag_q_loss_mb0.item() if _diag_q_loss_mb0 is not None else float("nan"),
+        )
+        self.logger.record(
+            "train/value_loss_mb0",
+            _diag_value_loss_mb0.item() if _diag_value_loss_mb0 is not None else float("nan"),
+        )
         self.logger.record("train/advantage_source_q", int(use_q))
         # Norme BRUTE, moyennee sur les minibatches de l'update, et part de ces minibatches ou
         # elle depassait `max_grad_norm`. La norme APRES ecretage n'est pas republiee : elle vaut
