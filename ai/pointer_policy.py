@@ -216,6 +216,20 @@ def lenient_optimizer_class(base: Type[torch.optim.Optimizer]) -> Type[torch.opt
     return _LenientOptimizer
 
 
+def check_logits_temperature(value: Any) -> float:
+    """`model_params.logits_temperature` (S9) : flottant strictement positif, ou ValueError.
+
+    UN SEUL refus pour `--new` (constructeur de `PatchedMaskablePPO`) et `--append`
+    (`_apply_curriculum_model_params`) : un booléen, une chaîne ou un zéro ne doivent pas
+    retomber en silence sur T = 1 d'un côté et lever de l'autre.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0:
+        raise ValueError(
+            f"model_params.logits_temperature doit etre un flottant > 0 (got {value!r})"
+        )
+    return float(value)
+
+
 class HeadNets(Protocol):
     """Ce que l'assemblage des logits LIT : un jeu de têtes nommées, poids seuls.
 
@@ -438,6 +452,17 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     - laisse TOUT le reste à SB3 (distribution masquée, log_prob, entropie, value net).
     """
 
+    #: TEMPÉRATURE DES LOGITS (S9, plafonnement_p1.md §9.9 étape 2) — régime de RUN, jamais
+    #: sérialisée. `_distribution_from` divise les logits par T AVANT le masquage, donc PARTOUT
+    #: où la politique construit une distribution : collecte (`forward`, dans les workers qui
+    #: reçoivent la politique par `deepcopy` + cloudpickle), `evaluate_actions` (ratio PPO et
+    #: entropie) et `get_distribution`. Collecte ET ratio sous la même π_T : le ratio reste
+    #: on-policy, PPO optimise π_T. L'argmax est invariant à T : les sondes et le holdout
+    #: (déterministes) mesurent la même politique qu'à T = 1, et un zip rechargé (évaluation,
+    #: adversaire figé du pool, PvE) repart à 1,0 — attribut d'instance ordinaire, absent du
+    #: `state_dict` et des `policy_kwargs`. Posée par `PatchedMaskablePPO.logits_temperature`.
+    logits_temperature: float = 1.0
+
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         if not self.share_features_extractor:
@@ -445,6 +470,7 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 "PointerMaskablePolicy exige share_features_extractor=True : la tete pointeur "
                 "lit les embeddings ennemis produits par l'extracteur de features."
             )
+        self.logits_temperature = 1.0
 
     # -- construction ------------------------------------------------------
     def _build_mlp_extractor(self) -> None:
@@ -1116,6 +1142,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         action_masks: Optional[np.ndarray],
     ) -> MaskableCategoricalDistribution:
         logits = self._action_logits(latent_pi, feats)
+        if self.logits_temperature != 1.0:
+            # S9 : π_T = softmax(logits / T) sur les légales. Avant le masquage (le −1e8 du
+            # masque n'a pas à être tempéré) et avant le garde-fou (un logit non fini le reste).
+            logits = logits / self.logits_temperature
         # Garde-fou de divergence. Ne PAS s'en remettre aux contraintes de `torch.distributions` :
         # `Distribution._validate_args` vaut `__debug__`, donc toute cette validation disparaît
         # sous `python -O` (et sb3 peut l'éteindre globalement). Elle ne couvre de toute façon pas

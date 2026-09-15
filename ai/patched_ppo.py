@@ -50,7 +50,7 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
-from ai.pointer_policy import PointerHeadNets
+from ai.pointer_policy import PointerHeadNets, check_logits_temperature
 from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
@@ -213,6 +213,7 @@ class PatchedMaskablePPO(MaskablePPO):
         value_warmup_updates: int = 0,
         advantage_source: str = "gae",
         q_coef: float | None = None,
+        logits_temperature: float = 1.0,
         **kwargs: Any,
     ) -> None:
         """`entropy_normalize_by_legal` : cle `model_params`, voir `entropy_loss_normalized_by_legal`.
@@ -272,12 +273,50 @@ class PatchedMaskablePPO(MaskablePPO):
         self.value_warmup_done_under: str | None = None
         self.advantage_source: str = check_advantage_source(advantage_source)
         self.q_coef: float | None = check_q_coef(q_coef, self.advantage_source)
+        # Avant `super().__init__` : la politique n'existe pas encore, le setter ne pose que
+        # `_logits_temperature` ; `_setup_model` la reporte sur la politique construite.
+        self.logits_temperature = logits_temperature
         super().__init__(*args, **kwargs)
 
     def _excluded_save_params(self) -> list[str]:
         return super()._excluded_save_params() + [
             "value_warmup_updates", "_vwu_done", "value_warmup_contract_id",
+            "_logits_temperature",
         ]
+
+    # ── Température des logits (S9) ──────────────────────────────────────────────────────────
+
+    @property
+    def logits_temperature(self) -> float:
+        """T de `model_params.logits_temperature` (S9) : régime de RUN, exclu du zip.
+
+        `_distribution_from` (ai/pointer_policy.py) divise les logits par T partout où la
+        politique construit une distribution — collecte dans les workers (politique transportée
+        par `_serialize_policy_for_workers`), ratio PPO et entropie dans `train`. Un zip
+        rechargé repart à 1,0 : évaluation, adversaires figés du pool et PvE jouent la politique
+        à T = 1 (l'argmax des sondes y est de toute façon invariant). Le setter ÉCRIT SUR LA
+        POLITIQUE : c'est ce qui rend la clé applicable par `setattr` depuis
+        `_apply_curriculum_model_params` (`_PLAIN_CURRICULUM_KEYS`, ai/train.py) en `--append`,
+        comme par le constructeur en `--new`.
+        """
+        return self._logits_temperature
+
+    @logits_temperature.setter
+    def logits_temperature(self, value: Any) -> None:
+        self._logits_temperature = check_logits_temperature(value)
+        policy = getattr(self, "policy", None)
+        if policy is None:
+            return
+        if not hasattr(type(policy), "logits_temperature"):
+            # Une politique qui ne tempère pas ses logits (MlpPolicy des tests) : T = 1 est
+            # son seul régime possible ; poser autre chose serait ignoré en silence.
+            if self._logits_temperature != 1.0:
+                raise TypeError(
+                    "logits_temperature != 1 exige une politique qui tempere ses logits "
+                    f"(PointerMaskablePolicy) ; recu {type(policy).__name__}."
+                )
+            return
+        policy.logits_temperature = self._logits_temperature
 
     # ── Tête Q ────────────────────────────────────────────────────────────────────────────────
 
@@ -304,6 +343,9 @@ class PatchedMaskablePPO(MaskablePPO):
         super()._setup_model()
         if self.uses_q_head:
             self._require_adv_heads()
+        # La politique vient d'être construite (ou rechargée, `load` rejoue `_setup_model`) :
+        # elle repart à T = 1 ; le régime du run (constructeur ou profil) la rattrape ici.
+        self.logits_temperature = self._logits_temperature
         # Remplacer le buffer Dict par la version GPU-résidente.
         if isinstance(self.observation_space, spaces.Dict):
             self.rollout_buffer = GpuMaskableDictRolloutBuffer(  # type: ignore[assignment]
