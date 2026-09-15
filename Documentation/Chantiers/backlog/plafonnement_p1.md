@@ -1273,6 +1273,18 @@ plafonne même dans le meilleur cas », leviers de mécanisme (étape 3) dans ce
 est la sonde argmax, pas `03_selfplay/P0` (échantillonné, 10 % d'épisodes déployés par le moteur
 à 0,41). Holdout bots lu en parallèle contre la suradaptation.
 
+**Lecture à 30 000 (2026-09-15, 03:50).** Sondes 20 000 → 30 000 : 0,68 / 0,71 / 0,73 / 0,64 /
+0,69 / **0,61**, moyenne de fenêtre **0,677**, moyenne des trois dernières 0,647. `03_selfplay/P0`
+par 4 000 : 0,489 → 0,549 → 0,586 → 0,602 → 0,634 → 0,645 → 0,649 → **0,633** — plat à 0,63–0,65
+depuis 18 000. Sièges (échantillonné) 0,60 / 0,59 ; déploiement actif 0,66 / moteur 0,44 ;
+`a_vp_diff` 4,8 → 4,1. **Holdout bots à 20 000 d'étape : combined 0,933, pire bot 0,85, siège 1
+0,989 / siège 2 0,89** — au-dessus de P0 (0,863–0,910) et de P1 (0,907) : zéro suradaptation à P0,
+la généralité MONTE avec 0 % de bots à l'entraînement. Santé : entropie plate à −0,68 depuis
+15 000, EV 0,88, KL 0,009, **coupure après 15–16 mini-lots sur 32** — la même signature que le
+plateau de P1 (761/761 coupées, ~15 pas). Lecture : le meilleur cas a gagné ~9 points sur P1 au
+même instrument, puis s'est posé au même régime d'update ; verdict de stagnation à 40 000 selon la
+règle ci-dessus.
+
 **Bissection préparée (config seule, agent dédié), à lancer après S25 — un GPU, donc en série.**
 S25 diffère du régime P1 par quatre variables : lr 0,0005 / 0,001 ; P0 déterministe / stochastique ;
 siège 0,5 / 0,7 ; 100 % P0 / 70 % P0 + 30 % bots. La récompense B6 est commune à tout ce qui
