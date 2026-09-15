@@ -1087,6 +1087,33 @@ jackknife par rollout. À lancer sur le dernier checkpoint du run non centré qu
 libre : il documente le point de départ (part d'offset attendue ~0,98) et sert de référence au
 tag `adv_q_offset_abs_mean` du rerun. Il ne conditionne ni le code ni la relance.
 
+**Exécution (2026-09-15, 15:30 → 15:53).**
+- **Garde à 10 000 NON déclenchée** : sondes 2 000–10 000 du run non centré 0,46 / 0,42 / 0,53 /
+  0,50 / 0,51 → moyenne **0,484** > 0,45 (S25 au même point : 0,536, soit −5 pts). L'audit
+  annonçait qu'elle tomberait ; elle ne tombe pas. Le run est arrêté à 10 150 **sur décision**
+  (version disqualifiée par construction, GPU nécessaire à la version centrée), pas par la
+  règle ; dernier checkpoint `ppo_checkpoint_20260915-134841_6487944_steps.zip` (59 118 cumulés).
+- **Sonde de structure sur ce checkpoint** (6 rollouts, 48 960 pas, P0 déterministe,
+  `logs/q_head_structure_s14_noncentre_10000.json`) : gap `q_loss − value_loss` = **+0,00408**
+  [+0,0025, +0,0056] = offset **+0,00365** + centré **+0,00042** [+0,0002, +0,0006] + croisé 0,00001.
+  **Part de Var(A) qui est l'offset : 0,941 [0,932, 0,950]** — la mesure de l'audit (0,98) est
+  reproduite en ordre de grandeur. sd(A jouée) 0,087 ; sd(offset) 0,085 ; sd intra-état sous π
+  0,0095 (rapport 8,9). E|A| 0,057 = le tag `train/adv_q_abs_mean` du run (0,055–0,076) :
+  l'incohérence « sd 0,222 » venait du script jetable de l'audit (états ou normalisation
+  différents), pas du run ; la part de 94 % tient. Référence pour le rerun :
+  E|offset| 0,056 sur la tête non centrée.
+- **Ce que la sonde ajoute au débat** : les DEUX parts sont positives hors échantillon — l'offset
+  (mémorisation par état, +0,0037) ET la part centrée (+0,0004, sd(A_c) 0,02). Sur cette tête,
+  la structure entre actions ne prédit rien du résidu non plus. Ça ne réfute pas le centrage
+  (cette tête a dépensé sa capacité dans l'offset ; seule la version contrainte répond), mais
+  ça donne son poids à l'issue (iii) de la règle : si `q_loss_mb0 − value_loss_mb0` reste ≥ 0
+  sur le rerun, c'est la capacité / le bruit mémorisé, pas l'offset.
+- Merge `5288f3921` (worktree `tete-q-centrage-sous-pi`, laissé en place : verrou d'une autre
+  session vivante). **Rerun S14c lancé à 15:53** : `run_20260915-155352`, log
+  `training_x1_expl_04-e00-s14c.log`, prologue « Echauffement critic + tête Q : 20 updates, tête
+  Q jamais entraînée — jamais sauté ». Lecture par la règle ci-dessus : garde à 10 000 (~17:20),
+  verdict à 30 000 (~20:30).
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
