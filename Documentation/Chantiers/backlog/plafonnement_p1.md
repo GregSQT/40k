@@ -1257,7 +1257,7 @@ contre argmax, holdout, sièges 50/50) à 2 000 / 4 000 / … / 20 000 : 0,43 ·
 l'avantage construit passe par le déploiement de l'agent. **Holdout bots à 10 000 : combined 0,887,
 pire bot 0,83, siège 1 0,947 / siège 2 0,839** — 0 % de bots à l'entraînement et la généralité
 tient (P0 : 0,863–0,910 ; P1 : 0,907). Santé : EV 0,87, KL 0,010, coupure après 15–25 mini-lots
-sur 32 (11–16 sur P1), entropie −0,82 → −0,65 (monte, mais l'argmax gagne : l'inverse de S11),
+sur 32 (11–16 sur P1), `train/entropy_loss` −0,82 → −0,65, soit une entropie qui **baisse** de 0,82 à 0,65 nat (politique qui se resserre — l'inverse de S11 où elle s'aplatissait, −0,78 → −0,85 ; erreur de signe corrigée le 2026-09-15 à 02:30),
 lr 0,0005 (les trois premières updates du warmup affichent 0,001 dans `train/learning_rate`,
 politique figée alors — à vérifier, sans effet mesurable). Le run continue jusqu'à 60 000 ; la
 branche « ≥ 0,68 → bissection » est déjà la plus probable.
