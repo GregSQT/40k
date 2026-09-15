@@ -165,6 +165,25 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-15 — verdict S25, S14 lancé, ordre de la suite figé ([dossier §9.9](../Chantiers/backlog/plafonnement_p1.md#suite-2026-09-15)).**
+S25 (exploiteur de P0 meilleur cas, `run_20260914-215728` + reprise `run_20260915-123205` après
+un reboot Windows à 04:29) : sondes exploiteur 0,61 / 0,63 / 0,75 / 0,62 / 0,77 / 0,72 sur
+30 000–40 000, moyenne **0,683** contre 0,677 sur 20 000–30 000 → **stagnation** par la règle du
+03:10 : le mécanisme plafonne même dans le meilleur cas (+9 pts sur P1, puis même signature
+d'update : coupure KL 15–16 sur 32, entropie plate). Holdout bots 0,933 à 20 000 (aucune
+suradaptation). **S14 — tête Q d'avantage attendu — codée cette nuit (décision utilisateur
+01:48), corrigée de ses deux findings de review et mergée le 2026-09-15** ([dossier
+§5.13](../Chantiers/backlog/plafonnement_p1.md#s14-2026-09-15)) : `adv_heads` sur le tronc
+critic, `Q = V.detach() + A` régressée sur le retour λ, l'acteur reçoit `A(s_t, a_t).detach()`
+à la place du GAE, V garde sa cible ; clés `advantage_source` / `q_coef`, échauffement exigé
+et jamais sauté sur une tête jamais entraînée ; zips antérieurs chargés par tous les chemins
+(`MaskablePPO.load` nu compris). **Run S14 lancé dans le dispositif S25** (agent expl, E0,
+`q_coef` 0,17) ; règle de lecture écrite avant : garde à 10 000, verdict à 30 000 sur la moyenne
+20 000–30 000 contre 0,677 (≥ 0,72 oui, 0,64–0,72 réfuté, ≤ 0,63 régression). **Ordre figé** :
+S14 → S9 (température, code) seulement si S14 réfuté → C2 / B6 seconde graine → transfert dans
+`x1_lineage` avec relecture de lr / `target_kl` sous le nouvel estimateur → S11b / S15 en
+dernier recours. Bissection de config suspendue ; gate 0,65, S23, `vf_coef`, S11, entnorm clos.
+
 ### Run S23 — λ 0,2 + rollout 32 640 / lot 2 040 — RÉFUTÉ (nuit du 2026-09-13 au 14) {#run-s23-2026-09}
 
 Commande habituelle `--etape P1` sous `x1_lineage` (`gae_lambda` 0,2, `n_steps` 32 640,

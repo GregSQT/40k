@@ -1,6 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
+> **Point de reprise sans contexte (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -354,7 +355,7 @@ log-prob 1,7 × 10⁻⁴).
 | S11 | Récompense en **espérance** pour tir et mêlée (dés joués pour la partie, récompensés sur la valeur attendue) | C1, C6 | ☑ **testée le 2026-09-14 → ✗ garde de destruction** (argmax 0,47 vs P0, échantillonné 0,55, entropie montante ; §5.11) | moteur + contrat d'entraînement | borne : Var(r) = 86 % de Var(δ), portée par tir (0,96) et combat (0,7–0,8) ; la part exactement retirée, Var(r − E[r∣s,a]), n'est pas identifiable sans l'espérance (ΔV dépend aussi du dé) |
 | S12 | P0 **déterministe** à l'entraînement | B4 | ☑ **mesurée (2026-09-13) → ✗** | config (`opponent.deterministic`) | mêmes f et même Var(δ) qu'en stochastique ; ne retire rien de mesurable |
 | S13 | Sonde étendue : balayage λ appairé + décomposition de Var(δ) + contrôle positif + P0 déterministe | C1, C3, C4, E4 | ☑ **livrée et exploitée (2026-09-13, suite 123)** | script + tests (24), 4 collectes (~1 h 30 de GPU) | verdict : aucune des trois issues écrites ne s'applique telle quelle ; par élimination argumentée → changer le mécanisme (S14 / S15), S11 dimensionnée ; [training.md#signal-p1-lambda-2026-09-13](../../Roadmap/training.md#signal-p1-lambda-2026-09-13) |
-| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ⏳ **désignée par S13, décision en attente (§7)** | code IA | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
+| S14 | Avantage moyenné pour l'acteur : tête Q(s,a) dans PPO (A = Q − V, dés moyennés par régression) | C1 | ☑ **codée le 2026-09-15 (§5.13), run lancé dans le dispositif S25** | code IA (`adv_heads`, `advantage_source`, `q_coef`) | mesurable par la même sonde ; S13 a conclu « le bruit d'un pas noie le ΔQ restant, à lot fixe ni λ ni l'adversaire ne le réduisent » |
 | S15 | Distillation par recherche (MCTS S0 → S2, `mcts.md`) | C1, G1 | ☐ gelée « après J3, seulement si la démo l'exige » (ROADMAP_INDEX) | semaines ; clone d'état 745 ms → ≤ 30 ms | remède de principe quand le gradient de politique est du bruit ; à ouvrir sur décision si S13 / S14 échouent |
 | S16 | Pool élargi dès P1 (P0 + exploiteur) ou part de bots | D1 | ☐ non testée | curriculum | rien ne dit que la diversité crée du signal là où P0 n'en donne plus |
 | S17 | Second scénario / rosters (É9) | D5 | ☐ ouvert ailleurs | scénarios | |
@@ -921,6 +922,89 @@ et reste dans `objective` ; `vp_margin` est un composant de ventilation à part.
   `training_x1_06-p01-marge.log`, jugé par la règle §7 contre 0,601 / 0,585 ; surveiller
   `01_VP/a_vp_diff` à côté de `03_selfplay/P0`.
 
+### 5.13 S14 — tête Q d'avantage attendu (2026-09-15, décision utilisateur de la nuit) — CODE LIVRÉ, RUN LANCÉ {#s14-2026-09-15}
+
+**Décision (2026-09-15, 01:48, session `05a43ec2` dans le worktree `worktree-tete-q-avantage-espere`).**
+Après la lecture de S25 à 20 000 (plateau naissant à 0,69 avec la même signature d'update que
+P1 : coupure KL après 15 mini-lots sur 32, entropie plate), l'utilisateur a tranché : « on fait
+cette implémentation et on teste ». C'est la ligne « avantage moyenné » désignée par S13 (§5.8) :
+le gradient de politique est du bruit à 98 % parce que l'avantage GAE `r + γV(s′) − V(s)` porte
+le jet de dés du pas (86 % de Var(δ) est Var(r), 96 % sur le tir). La normalisation d'avantage
+n'y peut rien (signal et bruit divisés par la même constante) ; le critic ne retire que ce qui se
+prédit depuis `s`, et le dé d'un tir décidé en `s` ne s'y prédit pas.
+
+**Ce que fait S14.** Une seconde tête, `adv_heads` (`ai/pointer_policy.py::PointerHeadNets`), de
+structure IDENTIQUE aux têtes de politique (mêmes noms, mêmes formes, même assemblage
+`_action_logits` — un avantage par action lit exactement les mêmes entrées qu'un logit par
+action) mais lue sur le tronc CRITIC (`latent_vf`) : elle rend `A(s, a)` pour toute action, et
+`Q(s, a) = V(s).detach() + A(s, a)` est régressée sur le même retour λ que V (perte
+`q_coef × MSE`). **V garde sa cible** (leçon de S23 : changer la cible du critic fait dériver la
+politique). L'acteur PPO reçoit `A(s_t, a_t).detach()` à la place de l'avantage GAE — une
+différence de deux espérances apprises sur des milliers de jets, recalculée par les réseaux
+courants à chaque mini-lot. Initialisation à zéro des couches de sortie : une tête fraîche rend
+`A = 0` partout, donc l'échauffement (`value_warmup_updates`, politique figée) la fait apprendre
+d'abord, avec V ; `arm_value_warmup` ne le saute JAMAIS sur une tête jamais entraînée (lue sur le
+CONTENU, couches de sortie exactement nulles — pas sur la provenance : un zip entraîné en `gae`
+après S14 porte une tête présente mais inerte). Clés `model_params.advantage_source`
+(`gae` = référence bit à bit | `q_head`) et `q_coef` (exigé avec `q_head`, interdit avec `gae`),
+validées ensemble en `--new` comme en `--append`, sérialisées dans le zip.
+
+**Livré.**
+- Commit `bf1fcc7f2` (04:17) : `ai/pointer_policy.py` (+231), `ai/patched_ppo.py` (+271),
+  `ai/train.py` (+37), `tests/unit/ai/test_q_head.py` (18 tests : mêmes têtes noms/formes,
+  enregistrées en dernier, tête fraîche → avantage nul, `evaluate_actions_q` inchangé sur
+  (values, log_prob, entropy), zip antérieur chargé avec états Adam alignés, échauffement = tête
+  et V apprennent, politique figée au bit près, `gae` inchangé, clés validées ensemble),
+  `Documentation/Reference/training/entrainement.md` (deux clés, trois tags).
+- `/code-review` (04:18) : 2 findings, tous deux mesurés. (1) HIGH — `adv_heads` enregistré sur
+  toute `PointerMaskablePolicy` : tout zip antérieur devenait inchargeable par `MaskablePPO.load`
+  NU (`engine/pve_controller.py:115`, `ai/bot_evaluation.py:982` et `:1011`, snapshots du pool,
+  replay), seul `PatchedMaskablePPO.set_parameters` tolérait l'absence — mesuré sur
+  `model_ArmageddonAgent_x1.zip` : `Missing key(s) in state_dict: "adv_heads…"`. (2) MEDIUM —
+  fraîcheur déduite de l'absence des clés : un zip entraîné en `gae` après S14 puis repris en
+  `q_head` avec marqueur d'échauffement posé sautait l'échauffement et l'acteur lisait des
+  avantages tous nuls (`policy_loss ≡ 0`). La correction était en cours au **reboot Windows de
+  04:29:28** (arrêt propre de l'instance WSL par l'hôte, `journalctl -b -1`) ; reprise et finie
+  le 2026-09-15 midi, commit `0ceaa86b0` : tolérance déplacée dans la politique
+  (`PointerMaskablePolicy.load_state_dict` : seules les clés `adv_heads.*` peuvent manquer,
+  tout autre écart lève comme avant) et dans son optimiseur (`lenient_optimizer_class` : état
+  Adam étendu aux rangs de la tête, enregistrée en dernier), `_archive_architecture`
+  (`ai/bot_evaluation.py`) ignore `adv_heads.*` dans la signature de compatibilité ;
+  `PointerHeadNets.is_untrained()` remplace le drapeau ; 2 tests nouveaux (chemin
+  `MaskablePPO.load` nu, tête présente mais jamais entraînée), rouges par mutation (tolérance
+  retirée → 4 rouges ; `is_untrained` forcé faux → 4 rouges). 20 verts ; typage 0 erreur sur les
+  5 fichiers.
+- Vrai chemin vérifié sur le zip P0 réel de l'agent expl (77 rangs Adam → 111, tête à zéro,
+  `q_head` + `q_coef` 0,17 appliqués par le profil, échauffement 20 updates armé « tête Q jamais
+  entraînée — jamais sauté »).
+- Config (commit `a10adfdd9`) : `x1_lineage` de `ArmageddonAgent_x1_expl` porte
+  `advantage_source: q_head`, `q_coef: 0.17` (= `vf_coef`, PREMIÈRE valeur, non calibrée — à
+  lire sur `diag/grad_norm_q_mb0` contre `diag/grad_norm_policy_mb0` et
+  `diag/grad_share_policy_mb0`, 0,62 sous `gae`). Le run est la MÊME étape E0 que S25 : P0,
+  100 % P0 déterministe, siège 0,5, lr 0,0005, échauffement 20 ; seule la source d'avantage change.
+
+**Règle de lecture, écrite AVANT le lancement.** Instrument : sondes exploiteur (100 parties /
+2 000 épisodes, argmax des deux côtés, holdout, sièges 50/50), comparées à S25 au même point
+(`training_x1_expl_01-e00-s25.log` + reprise `_02-e00-s25-reprise.log`) ; `03_selfplay/P0`
+(échantillonné) en second ; holdout bots en parallèle (S25 : 0,933 à 20 000).
+- **Garde de destruction à 10 000** : moyenne des sondes 2 000–10 000 ≤ 0,45 (S25 : 0,536 ;
+  S11 détruit : 0,473 à 20 000) → S14 tel que codé détruit la politique déterministe ; arrêt.
+  Diagnostic AVANT tout rerun : `diag/grad_share_policy_mb0` < 0,4 (le terme Q étouffe la
+  politique sur le tronc partagé) → UN second run à `q_coef` 0,05, sinon réfuté.
+- **Verdict à 30 000** : moyenne des sondes 20 000–30 000 (6 sondes, 600 parties, erreur-type
+  ~1,9 pt) contre **0,677** (S25). ≥ 0,72 (+4 pts, plus de deux erreurs-types) → S14 déplace le
+  plateau : continuer à 60 000 et lire si la montée continue vers 0,90 (objectif §9.4) ; entre
+  0,64 et 0,72 → S14 ne change pas le plateau : réfuté comme levier, passer à S9 ; ≤ 0,63 →
+  régression, arrêt et diagnostic ci-dessus.
+- **Mécanisme, lu à updates égales** (même horloge que S25) : `train/adv_q_abs_mean` et
+  `train/q_loss` (la tête apprend-elle ? `q_loss` doit descendre sous `value_loss` après
+  l'échauffement), position de la coupure KL `train/n_minibatches_done` (S25 : 15–16 sur 32 ; un
+  avantage moins dispersé doit la déplacer), `train/entropy_loss` (S25 plat à −0,68), EV. Un
+  score qui monte SANS que la signature d'update bouge serait une surprise à expliquer avant
+  d'y croire.
+- Jugement à graine unique : un effet < 10 points exige une seconde graine (§9.5) avant de
+  transférer le régime dans `x1_lineage` de `ArmageddonAgent_x1`.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -1293,6 +1377,63 @@ comparable, à lancer par elle ou ici) ; (2) **H1** = S25 + {P0 stochastique, 30
 (adversité de P1, régime de S25) ; (3) **H2** = S25 + {lr 0,001, siège 0,7} (régime de P1,
 adversité de S25) ; puis une variable dans la paire désignée. Jugement à 30 000 sur la moyenne
 des trois dernières sondes, comparée à S25 au même point ; écart < 10 points → deuxième graine.
+
+
+**Lecture à 40 000 (2026-09-15, 13:32) — verdict.** Sondes 32 000 → 40 000 : 0,63 / 0,75 / (reprise
+34 104 : 0,68) / 0,62 / 0,77 / 0,72. Fenêtre 30 000–40 000 (0,61 / 0,63 / 0,75 / 0,62 / 0,77 /
+0,72) : **0,683** contre 0,677 → +0,6 pt, sous le seuil de +3 : **stagnation**. Fait à ne pas
+cacher : les deux dernières sondes sont les plus hautes du run et la moyenne glissante de trois
+(0,62 / 0,77 / 0,72) touche **0,703**, l'objectif « ≥ 0,70 » du 03:10 — mais de 0,3 pt avec une
+erreur-type de 2,6 pts, et la moyenne de fenêtre (600 parties) ne bouge pas : c'est le bruit de
+l'instrument, pas une montée. Run arrêté à 40 084 (SIGINT, 13:33) ; dernier checkpoint
+`ppo_checkpoint_20260915-123207_10087944_steps.zip` (90 084 cumulés), reprenable par
+`--resume-from` si l'on veut un jour lire 60 000. Suite : §9.9.
+
+### 9.9 Journée du 2026-09-15 — verdict S25, reboot, S14 lancé, ORDRE DE LA SUITE FIGÉ {#suite-2026-09-15}
+
+**Verdict S25 (règle du 2026-09-15 03:10, §9.8) : STAGNATION.** Sondes exploiteur 30 000 → 40 000 :
+0,61 / 0,63 / 0,75 / 0,62 / 0,77 / 0,72 → moyenne de fenêtre **0,683** contre 0,677 pour
+20 000–30 000 (+0,6 pt, seuil +3). Le meilleur cas (100 % P0 déterministe, siège 0,5, lr
+0,0005, B6) a gagné ~9 points sur P1 au même instrument puis s'est posé à 0,64–0,69 avec la
+signature d'update de P1 (coupure KL 15–16 sur 32, entropie plate −0,68) : **le mécanisme
+d'apprentissage plafonne même dans le meilleur cas** ; le gate (§9.4) n'est pas le sujet, la
+bissection de config (§9.8) est SANS OBJET tant que le mécanisme n'a pas bougé. Run arrêté à
+40 084 d'étape (pas de 60 000 : la branche stagnation ne l'exige pas). Lecture : sondes du log
+`training_x1_expl_01-e00-s25.log` (2 000 → 34 000) et `training_x1_expl_02-e00-s25-reprise.log`
+(34 104 → 40 084).
+
+**Incident.** Reboot Windows le 2026-09-15 à 04:29:28 (arrêt propre de l'instance WSL par l'hôte,
+`journalctl -b -1` ; ni OOM ni traceback) : S25 tué à 35 320 d'étape, repris à 12:32 depuis
+`ppo_checkpoint_20260914-215730_9367944_steps.zip` (84 104 cumulés = 34 104 d'étape) par
+`--resume-from` + `--etape E0` (`run_20260915-123205`, échauffement sauté par le marqueur, compteur
+d'étape ancré sur l'archive P0 : `ai/train.py::stage_origin`). Perte : ~1 200 épisodes. Le
+canonique 0,9094 (holdout bots) écarté en `_pre_resume_20260915-123142` ; copie
+`ArmageddonAgent_x1_expl_12345_robust_0.9094.zip`. La même nuit, la session S14 (worktree
+`worktree-tete-q-avantage-espere`) mourait en pleine correction de review — reprise et finie à
+midi (§5.13).
+
+**Décisions du jour (utilisateur).**
+1. Reprendre S25 depuis le checkpoint plutôt que juger sur 3 sondes (12:30).
+2. Ordre des leviers : « S9 puis S14 » (13:00), pris sur une prémisse fausse de l'agent (S9
+   décrit comme config seule ; c'est du code, §4 ligne S9) et sans savoir que S14 était codé
+   à 90 % depuis la nuit → **re-tranché à 13:15 : option A, S14 d'abord** (décision de la nuit
+   confirmée), S9 seulement si S14 est réfuté.
+3. Le dossier fixe l'ORDRE DE LA SUITE ci-dessous pour ne plus retrancher.
+
+**ORDRE DE LA SUITE — figé le 2026-09-15, à ne rouvrir que sur un fait nouveau mesuré.**
+
+| étape | levier | dispositif | règle de lecture | si oui | si non |
+|---|---|---|---|---|---|
+| 1 | **S14 tête Q** (§5.13), `q_coef` 0,17 | S25 (agent expl, E0, P0 déterministe 100 %, siège 0,5, lr 0,0005, B6, échauffement 20) | §5.13 : garde à 10 000 (≤ 0,45), verdict à 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 non ; ≤ 0,63 régression | continuer à 60 000 ; si la montée s'arrête sous 0,80 → étape 2 SUR S14 ; sinon étape 4 | régression : un seul rerun `q_coef` 0,05 si `grad_share_policy` < 0,4, sinon réfuté → étape 2 |
+| 2 | **S9 exploration structurée** : température T ≈ 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation | S25, sous l'estimateur retenu à l'étape 1 | même instrument : moyenne 20 000–30 000 contre la référence du même estimateur (0,677 sous GAE, ou la valeur S14) ; ≥ +4 pts oui | garder T ; étape 3 | réfuté ; étape 3 |
+| 3 | **C2 issue vs façonnage** : poids de l'issue ±150 contre les 62 % d'objectifs (config seule) puis **B6 seconde graine** | S25 | idem, un run par variable, deux graines si effet < 10 pts | garder | — |
+| 4 | **Transfert** du régime gagnant dans `x1_lineage` de `ArmageddonAgent_x1` : relire lr / `target_kl` / `ent_coef` / `vf_coef` sur `n_minibatches_done` et `grad_share_policy` SOUS le nouvel estimateur (réglages mesurés sous GAE, §5.4, non transférables), puis reprise de la lignée P1 → gate 0,65 | lignée | règle §7 | lignée relancée | — |
+| 5 | **S11b** (espérance sur les dégâts seuls, kills au jet) seulement si les sondes de §5.11 désignent le proxy des kills ; **S15** recherche en dernier recours | — | — | — | — |
+
+Ce qui est CLOS et ne se rouvre pas : gate 0,65 (§9.4), λ court / lot ×4 (S23, §5.9), `vf_coef`
+(§5.10), S11 tel que codé (§5.11), entnorm (§5.5), « plateau normal » (§9.4), bissection de
+config avant le mécanisme (§9.8, suspendue : elle ne se justifie que si le mécanisme retenu
+remonte le meilleur cas).
 
 ## 8. Références
 
