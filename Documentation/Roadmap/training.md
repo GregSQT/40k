@@ -165,6 +165,15 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-15, 20:34 — S9 lancé, S14 définitivement clos ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Température des logits `logits_temperature` (collecte ET ratio sous π_T, hors zip, T = 1 en
+évaluation) codée et mergée (`571b0732f`, 8 tests). Mesure 2a (tête Q sur données exploratoires
+à T = 2, politique figée 40 updates) : gap hors échantillon **+0,0025 ± 0,001** → la tête Q ne
+prédit rien de plus que V même avec des coups alternatifs ; S14 ne sera plus relancé (S15,
+recherche par simulation, non touché). Run S9 `run_20260915-203437` (`training_x1_expl_05-e00-s9.log`)
+depuis P0, règle §5.14 2b : garde 10 000, absorption sur `train/entropy_loss`, verdict 30 000
+contre 0,677 ; `03_selfplay/P0` n'est pas un juge sous T.
+
 **2026-09-15 soir — S14 RÉFUTÉ ([dossier §5.13.1](../Chantiers/backlog/plafonnement_p1.md#s14c-2026-09-15)).**
 Run non centré (`run_20260915-134839`) disqualifié par audit (94 % de Var(A) = constante par
 état, mesuré par `scripts/q_head_structure_probe.py`) ; centrage sous π codé et mergé

@@ -1216,6 +1216,29 @@ donc être transitoire.
   têtes qui ont gardé de l'entropie.
 - Si oui : garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3.
 
+**Résultat 2a (2026-09-15, 19:42 → 20:33, `run_20260915-194206`, log
+`training_x1_expl_mesure2a-q-head-T2.log`) — NÉGATIF : S14 est mort dans ce dispositif.** Reprise
+du checkpoint S25 40 000 (compteur 90 084, d'où le départ à 90k sur TensorBoard : c'est S25
+prolongé, politique figée, PAS le run S9), échauffement 40 updates (KL = 0 sur les 40), collecte
+à T = 2 : entropie sous π_T **1,04 nat** (0,68 à T = 1), `adv_q_abs_mean` **0,03** (0,006 sur
+S14c : les coups joués sont 5 fois plus variés — la tête AVAIT des données contrefactuelles).
+`q_loss_mb0 − value_loss_mb0` sur les updates 20–40 : **+0,00250 ± 0,00098** (2 erreurs-types),
+même signe et même ordre que sur S14c (+0,0002 à +0,0018) ; en in-sample (`train/q_loss` contre
+`train/value_loss`) le gap est nul à 10⁻⁴ près : la tête n'améliore la prédiction du retour ni
+hors ni dans l'échantillon. `03_selfplay/P0` à 0,53 contre 0,65 : effet du seul échantillonnage à
+T = 2 (politique figée), confirmation que cette courbe n'est pas un juge sous T. **Conclusion :
+une tête Q(s, a) régressée sur le retour λ, même nourrie de coups alternatifs, ne prédit rien de
+plus que V dans ce jeu — le résidu R − V est du dé, pas de la structure (s, a) apprenable à un
+échantillon par pas. S14 ne sera plus relancé, ni seul ni sur S9.** Ce qui reste de S14 : le code
+(désactivé, `gae`), `q_head_structure_probe.py`, et une conclusion mesurée qui vaut pour toute
+variante « avantage appris par régression » — S15 (recherche : moyenne les dés par SIMULATION,
+pas par régression) n'est pas touché par ce verdict.
+
+**Run S9 lancé à 20:34** : `run_20260915-203437`, log `training_x1_expl_05-e00-s9.log`, E0
+depuis P0 (50 000), échauffement critic 20, `advantage_source: gae`, `logits_temperature` 2,0.
+Lecture par la règle 2b ci-dessus : garde 10 000, absorption sur `train/entropy_loss`, verdict
+30 000 contre 0,677.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -1636,7 +1659,7 @@ midi (§5.13).
 | étape | levier | dispositif | règle de lecture | si oui | si non |
 |---|---|---|---|---|---|
 | 1 | ~~S14 tête Q centrée sous π~~ — **RÉFUTÉ le 2026-09-15 (§5.13.1)** : garde déclenchée (0,362 à 10 000), `q_loss_mb0 − value_loss_mb0` ≥ 0 partout, entropie 0,71 → 0,28 : la tête n'a pas de données contrefactuelles (politique à p_max 0,66–0,99). Variante S14c écartée sans run (aucune ne crée ces données). | — | — | — | → étape 2 sous **GAE** |
-| 2 | **S9 exploration structurée** (§5.14 : règle complète, absorption, juge = sonde argmax, pas `03_selfplay`) : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
+| 2 | **S9 exploration structurée** — **EN COURS** (`run_20260915-203437`, 20:34) ; **mesure 2a NÉGATIVE** (+0,0025 ± 0,001 : S14 mort, ni seul ni sur S9) (§5.14 : règle complète, absorption, juge = sonde argmax, pas `03_selfplay`) : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
 | 3 | **C2 issue vs façonnage** : poids de l'issue ±150 contre les 62 % d'objectifs (config seule) puis **B6 seconde graine** | S25 | idem, un run par variable, deux graines si effet < 10 pts | garder | — |
 | 4 | **Transfert** du régime gagnant dans `x1_lineage` de `ArmageddonAgent_x1` : relire lr / `target_kl` / `ent_coef` / `vf_coef` sur `n_minibatches_done` et `grad_share_policy` SOUS le nouvel estimateur (réglages mesurés sous GAE, §5.4, non transférables), puis reprise de la lignée P1 → gate 0,65 | lignée | règle §7 | lignée relancée | — |
 | 5 | **S11b** (espérance sur les dégâts seuls, kills au jet) seulement si les sondes de §5.11 désignent le proxy des kills ; **S15** recherche en dernier recours | — | — | — | — |
