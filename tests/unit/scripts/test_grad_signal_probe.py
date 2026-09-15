@@ -679,3 +679,20 @@ def test_recorder_score_les_issues_et_leve_sur_une_troncature_du_moteur():
         rec._on_step()
     rec._on_rollout_start()
     assert rec.episodes_total == 0 and rec.dones == []
+
+
+def test_la_sonde_applique_la_temperature_du_profil_au_checkpoint():
+    """S9 : `logits_temperature` est un régime de run exclu du zip ; la sonde doit mesurer π_T
+    comme le run, donc poser la valeur du PROFIL sur le modèle rechargé (1,0 si absente)."""
+    from types import SimpleNamespace
+
+    from scripts.grad_signal_probe import apply_run_temperature
+
+    messages: list[str] = []
+    model = SimpleNamespace(logits_temperature=1.0)
+    assert apply_run_temperature(model, {"logits_temperature": 2.0}, messages.append) == 2.0
+    assert model.logits_temperature == 2.0 and any("T = 2.0" in m for m in messages)
+    other = SimpleNamespace(logits_temperature=1.0)
+    assert apply_run_temperature(other, {}, messages.append) == 1.0
+    assert other.logits_temperature == 1.0
+

@@ -124,7 +124,7 @@ import tempfile
 import time
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -842,6 +842,22 @@ TERMS = ("policy", "value", "entropy", "outcome")
 # ── Plomberie P1 (briques d'ai/train.py) ─────────────────────────────────────────────────────
 
 
+def apply_run_temperature(model: Any, model_params: Mapping[str, Any], log: Callable[[str], None]) -> float:
+    """Pose sur le modèle la température de collecte du PROFIL (S9, `logits_temperature`).
+
+    Régime de run exclu du zip : un checkpoint rechargé repart à T = 1 (`PatchedMaskablePPO`),
+    alors que le run qu'on veut décomposer collectait et calculait son ratio sous π_T. Sans
+    cette étape la sonde mesurerait un gradient que le run n'applique pas, et le contrôle
+    « checkpoint ≠ profil » ne peut pas le voir (la clé n'est pas dans le zip). Même source que
+    `ai/train.py::_apply_curriculum_model_params` : la valeur du profil, 1,0 si absente.
+    """
+    temperature = float(model_params.get("logits_temperature", 1.0))  # get allowed: clé optionnelle
+    model.logits_temperature = temperature
+    if temperature != 1.0:
+        log(f"🌡️  température de collecte du profil appliquée : T = {temperature} (π_T, comme le run)")
+    return temperature
+
+
 def refuse_if_training_runs() -> None:
     """Un `ai/train.py` en cours relit les JSON de config à chaud : on ne charge rien à côté."""
     result = subprocess.run(["pgrep", "-af", "ai/train.py"], capture_output=True, text=True, check=False)
@@ -979,6 +995,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     T.apply_rollout_n_steps(model_params, n_envs, vec_env.observation_space, log=log)
     model_params = T._model_params_with_ent_coef_frozen(model_params, log=log)
     model = T._load_checkpoint(probe_model_path, vec_env, device)
+    apply_run_temperature(model, model_params, log)
     if random_init_seed is not None:
         n_reset = reset_policy_parameters(model.policy, random_init_seed)
         log(f"🎲 poids RÉINITIALISÉS en mémoire (graine {random_init_seed}, {n_reset} modules) : contrôle positif aléatoire")
