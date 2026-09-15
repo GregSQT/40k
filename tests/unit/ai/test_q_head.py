@@ -4,8 +4,11 @@ Ce que la tête doit garantir, chacun verrouillé ici :
 - même structure que les têtes de politique (noms et formes), enregistrée EN DERNIER ;
 - fraîche, elle rend un avantage nul pour toute action ; `evaluate_actions_q` rend l'avantage
   de l'action JOUÉE, et laisse (values, log_prob, entropy) identiques à `evaluate_actions` ;
-- un zip sauvé SANS la tête charge : anciens poids identiques, états Adam alignés sur les mêmes
-  rangs, tête marquée fraîche ; toute autre différence de `state_dict` reste refusée ;
+- un zip sauvé SANS la tête charge PAR TOUS LES CHEMINS (`MaskablePPO.load` nu compris : PvE,
+  workers d'évaluation, pool) : anciens poids identiques, états Adam alignés sur les mêmes rangs,
+  tête à zéro ; toute autre différence de `state_dict` reste refusée ;
+- « tête fraîche » se lit sur le CONTENU (`is_untrained`, couches de sortie exactement nulles),
+  pas sur la provenance : un zip entraîné en `gae` après S14 porte une tête jamais entraînée ;
 - `q_head` : l'acteur reçoit `adv.detach()` — la tête ne reçoit de gradient que de sa perte —,
   pendant l'échauffement la tête apprend avec V, politique figée ; hors échauffement la
   politique bouge ; `gae` reste bit à bit le comportement antérieur (tête immobile) ;
@@ -19,17 +22,18 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch as th
+from sb3_contrib import MaskablePPO
 from stable_baselines3.common.save_util import load_from_zip_file, save_to_zip_file
 
 import ai.train as train_module
-from ai.patched_ppo import (
+from ai.patched_ppo import PatchedMaskablePPO, check_advantage_source, check_q_coef
+from ai.pointer_policy import (
     ADV_HEADS_PREFIX,
-    PatchedMaskablePPO,
-    _extend_optimizer_state,
-    check_advantage_source,
-    check_q_coef,
+    HeadNets,
+    PointerHeadNets,
+    PointerMaskablePolicy,
+    extend_optimizer_state,
 )
-from ai.pointer_policy import HeadNets, PointerHeadNets, PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
 from tests.unit.ai.test_critic_warmup import _run_one_update, _TABLE_ID
 from tests.unit.ai.test_gradient_norm_is_pre_clip import _TinyMaskedEnv
@@ -182,7 +186,7 @@ def test_un_zip_sans_tete_q_charge_avec_poids_et_etats_adam_alignes(tmp_path) ->
 
     loaded = PatchedMaskablePPO.load(path, env=_ToyEnv(), device="cpu")
 
-    assert loaded._adv_heads_fresh is True
+    assert _policy(loaded).adv_heads.is_untrained(), "tête absente du zip : elle doit rester à zéro"
     for n, p in _policy(loaded).named_parameters():
         if n.startswith(ADV_HEADS_PREFIX):
             continue
@@ -198,13 +202,44 @@ def test_un_zip_sans_tete_q_charge_avec_poids_et_etats_adam_alignes(tmp_path) ->
 
 
 def test_un_zip_complet_charge_par_le_chemin_sb3_et_n_est_pas_fraiche(tmp_path) -> None:
-    model = _model()
+    """Tête entraînée (un pas d'Adam en `q_head`) : le zip la porte, le modèle rechargé la lit
+    telle quelle et `is_untrained()` est faux — aucun échauffement n'est exigé."""
+    model = _model(advantage_source="q_head", q_coef=0.5, value_warmup_updates=1)
+    _run_one_update(model)
+    assert not _policy(model).adv_heads.is_untrained(), "VERT VACANT : la tête n'a pas appris"
     path = str(tmp_path / "full.zip")
     model.save(path)
     loaded = PatchedMaskablePPO.load(path, env=_ToyEnv(), device="cpu")
-    assert loaded._adv_heads_fresh is False
+    assert loaded.uses_q_head and loaded.adv_heads_untrained is False
     for (n, p), (m, q) in zip(_policy(model).named_parameters(), _policy(loaded).named_parameters()):
         assert n == m and th.equal(p.detach(), q.detach()), n
+
+
+def test_un_zip_sans_tete_q_charge_par_maskable_ppo_nu(tmp_path) -> None:
+    """Finding de review du 2026-09-15 : `MaskablePPO.load` NU (engine/pve_controller.py:115,
+    ai/bot_evaluation.py:982 et :1011, snapshots du pool) ne passe pas par `PatchedMaskablePPO`.
+    La tolérance vit donc dans la politique (`load_state_dict`) et dans son optimiseur
+    (`lenient_optimizer_class`), pas dans le modèle. Mesuré avant correction sur
+    `model_ArmageddonAgent_x1.zip` : `RuntimeError: Missing key(s) in state_dict: "adv_heads…"`."""
+    model = _model()
+    _run_one_update(model)
+    path = str(tmp_path / "old.zip")
+    _save_without_adv_heads(model, path)
+    before = {n: p.detach().clone() for n, p in _policy(model).named_parameters()}
+
+    loaded = MaskablePPO.load(path, env=_ToyEnv(), device="cpu")
+
+    assert type(loaded) is MaskablePPO, "VERT VACANT : le chemin testé doit être le chemin nu"
+    policy = loaded.policy
+    assert isinstance(policy, PointerMaskablePolicy)
+    assert policy.adv_heads.is_untrained()
+    for n, p in policy.named_parameters():
+        if not n.startswith(ADV_HEADS_PREFIX):
+            assert th.equal(before[n], p.detach()), n
+    assert len(policy.optimizer.param_groups[0]["params"]) == len(list(policy.parameters()))
+    # Le chemin nu joue : une prédiction déterministe sur l'observation nulle.
+    action, _ = loaded.predict(_zero_obs(1), deterministic=True)
+    assert action.shape == (1,)
 
 
 def test_une_autre_difference_de_state_dict_reste_refusee(tmp_path) -> None:
@@ -217,16 +252,18 @@ def test_une_autre_difference_de_state_dict_reste_refusee(tmp_path) -> None:
     save_to_zip_file(path, data=data, params=params, pytorch_variables=pytorch_variables)
     with pytest.raises(RuntimeError, match="value_net.bias"):
         PatchedMaskablePPO.load(path, env=_ToyEnv(), device="cpu")
+    with pytest.raises(RuntimeError, match="value_net.bias"):
+        MaskablePPO.load(path, env=_ToyEnv(), device="cpu")
 
 
 def test_extend_optimizer_state_refuse_un_etat_inaligne() -> None:
     with pytest.raises(ValueError, match="inaligne"):
-        _extend_optimizer_state({"state": {}, "param_groups": [{"params": [0, 2]}]}, 5)
+        extend_optimizer_state({"state": {}, "param_groups": [{"params": [0, 2]}]}, 5)
     with pytest.raises(ValueError, match="inaligne"):
-        _extend_optimizer_state({"state": {}, "param_groups": [{"params": [0, 1, 2]}]}, 2)
+        extend_optimizer_state({"state": {}, "param_groups": [{"params": [0, 1, 2]}]}, 2)
     with pytest.raises(ValueError, match="groupe"):
-        _extend_optimizer_state({"state": {}, "param_groups": []}, 2)
-    ext = _extend_optimizer_state({"state": {0: {"x": 1}}, "param_groups": [{"params": [0, 1], "lr": 1.0}]}, 4)
+        extend_optimizer_state({"state": {}, "param_groups": []}, 2)
+    ext = extend_optimizer_state({"state": {0: {"x": 1}}, "param_groups": [{"params": [0, 1], "lr": 1.0}]}, 4)
     assert ext["param_groups"][0]["params"] == [0, 1, 2, 3]
     assert ext["param_groups"][0]["lr"] == 1.0
     assert ext["state"] == {0: {"x": 1}}
@@ -336,9 +373,43 @@ def test_une_tete_fraiche_sans_echauffement_est_refusee_par_train_et_par_arm(tmp
     train_module._apply_curriculum_model_params(
         loaded, {"advantage_source": "q_head", "q_coef": 0.5}, log=lambda *_: None
     )
-    assert loaded.uses_q_head and loaded._adv_heads_fresh
+    assert loaded.uses_q_head and loaded.adv_heads_untrained
     with pytest.raises(RuntimeError, match="value_warmup_updates"):
         _run_one_update(loaded)
+
+
+def test_une_tete_presente_mais_jamais_entrainee_en_gae_est_fraiche(tmp_path) -> None:
+    """Finding de review du 2026-09-15 : un zip entraîné en `gae` APRÈS S14 porte la tête (clés
+    présentes) mais elle n'a reçu aucun gradient — ses avantages valent zéro partout. Lue par la
+    provenance (clés absentes), elle passait pour entraînée : marqueur d'échauffement déjà posé
+    → saut → `policy_loss ≡ 0`, seule l'entropie déplaçait la politique. Lue par le CONTENU, elle
+    exige l'échauffement, et `arm_value_warmup` ne le saute jamais."""
+    rewards = {"agent": {"base_actions": {"a": 1.0}}}
+    fingerprint = train_module.reward_table_fingerprint(rewards, "agent")
+    model = _model(value_warmup_updates=1)  # gae : la tête est présente, inerte
+    _run_one_update(model)
+    assert model.value_warmup_done_under == _TABLE_ID, "VERT VACANT : marqueur non posé"
+    path = str(tmp_path / "gae.zip")
+    model.save(path)
+    saved_keys = set(_params_of(path)[1]["policy"])
+    assert any(k.startswith(ADV_HEADS_PREFIX) for k in saved_keys), "VERT VACANT : le zip doit PORTER la tête"
+    loaded = PatchedMaskablePPO.load(path, env=_ToyEnv(), device="cpu")
+    train_module._apply_curriculum_model_params(
+        loaded, {"advantage_source": "q_head", "q_coef": 0.5}, log=lambda *_: None
+    )
+    assert loaded.adv_heads_untrained, "tête présente mais à zéro : elle est fraîche"
+    loaded.value_warmup_contract_id = _TABLE_ID
+    with pytest.raises(RuntimeError, match="value_warmup_updates"):
+        _run_one_update(loaded)
+    # Marqueur de la table courante déjà posé : sans la lecture par le contenu, saut ; ici, jamais.
+    loaded.value_warmup_done_under = fingerprint
+    loaded.value_warmup_updates = 2
+    messages: list[str] = []
+    train_module.arm_value_warmup(
+        loaded, {"value_warmup_updates": 2}, rewards, "agent", log=messages.append
+    )
+    assert loaded.value_warmup_updates == 2
+    assert any("jamais entrainee" in m for m in messages)
 
 
 def test_arm_value_warmup_exige_et_ne_saute_jamais_l_echauffement_d_une_tete_fraiche(tmp_path) -> None:
@@ -361,7 +432,7 @@ def test_arm_value_warmup_exige_et_ne_saute_jamais_l_echauffement_d_une_tete_fra
         loaded, {"value_warmup_updates": 3}, rewards, "agent", log=messages.append
     )
     assert loaded.value_warmup_updates == 3
-    assert any("tete Q fraiche" in m for m in messages)
+    assert any("jamais entrainee" in m for m in messages)
 
 
 def test_apply_curriculum_valide_le_couple_de_cles_en_append() -> None:
@@ -384,11 +455,11 @@ def test_apply_curriculum_valide_le_couple_de_cles_en_append() -> None:
     assert model.advantage_source == "gae" and model.q_coef is None
 
 
-def test_les_cles_de_la_tete_q_voyagent_dans_le_zip_mais_pas_la_fraicheur(tmp_path) -> None:
+def test_les_cles_de_la_tete_q_voyagent_dans_le_zip(tmp_path) -> None:
     model = _model(advantage_source="q_head", q_coef=0.5)
-    model._adv_heads_fresh = True
     path = str(tmp_path / "q.zip")
     model.save(path)
     loaded = PatchedMaskablePPO.load(path, env=_ToyEnv(), device="cpu")
     assert loaded.advantage_source == "q_head" and loaded.q_coef == 0.5
-    assert loaded._adv_heads_fresh is False
+    # La fraîcheur ne voyage pas comme un drapeau : elle se relit sur les poids.
+    assert loaded.adv_heads_untrained is True

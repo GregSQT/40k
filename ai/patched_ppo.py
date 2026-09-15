@@ -50,6 +50,7 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
+from ai.pointer_policy import PointerHeadNets
 from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
@@ -130,10 +131,6 @@ def check_entropy_normalize_by_legal(value: Any) -> bool:
 #: mini-lot par les réseaux courants, et non l'écart `retour − V` porté par le jet de dés.
 ADVANTAGE_SOURCES = ("gae", "q_head")
 
-#: Préfixe des paramètres de la tête Q dans le `state_dict` de la politique.
-ADV_HEADS_PREFIX = "adv_heads."
-
-
 def check_advantage_source(value: Any) -> str:
     """La cle `model_params.advantage_source`, ou ValueError si elle n'est pas une source connue.
 
@@ -206,31 +203,6 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
     return stacked.mean().item(), (stacked >= max_norm).float().mean().item()
 
 
-def _extend_optimizer_state(saved: dict[str, Any], n_params: int) -> dict[str, Any]:
-    """État d'optimiseur d'un zip à `n` paramètres, étendu à `n_params >= n` paramètres.
-
-    Torch identifie les paramètres d'un groupe par leur RANG dans `param_groups[i]["params"]`
-    et indexe `state` par ce rang. Les `n` premiers rangs restent les mêmes (la tête Q est
-    enregistrée en dernier) ; les rangs ajoutés n'ont pas d'état. Un seul groupe attendu
-    (`ActorCriticPolicy._build` n'en crée qu'un) ; plus court que `n_params` impossible : lève.
-    """
-    groups = saved.get("param_groups")
-    if not isinstance(groups, list) or len(groups) != 1:
-        raise ValueError(
-            f"Etat d'optimiseur inattendu : {0 if not isinstance(groups, list) else len(groups)} "
-            "groupe(s) de parametres, 1 attendu."
-        )
-    saved_ranks = list(groups[0]["params"])
-    if len(saved_ranks) > n_params or saved_ranks != list(range(len(saved_ranks))):
-        raise ValueError(
-            f"Etat d'optimiseur inaligne : {len(saved_ranks)} rangs sauves "
-            f"({saved_ranks[:3]}...) pour {n_params} parametres."
-        )
-    extended = {"state": dict(saved["state"]), "param_groups": [dict(groups[0])]}
-    extended["param_groups"][0]["params"] = list(range(n_params))
-    return extended
-
-
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
 
@@ -282,11 +254,13 @@ class PatchedMaskablePPO(MaskablePPO):
         `vf_coef × MSE` pour V — V garde SA cible, la lecon de S23) et donne `adv.detach()` a
         l'acteur a la place de l'avantage GAE. Attributs d'instance ordinaires, serialises et
         reappliques par le profil en `--append` (`_PLAIN_CURRICULUM_KEYS`, ai/train.py).
-        `_adv_heads_fresh` : vrai quand le zip charge ne portait PAS la tete (`set_parameters`) ;
-        non serialise. Une tete fraiche rend `adv = 0` pour toute action (init a zero), donc
-        `q_head` sur un tel zip EXIGE un echauffement (`value_warmup_updates >= 1`, verifie par
-        `train` et par `ai/train.py::arm_value_warmup`, qui ne le saute jamais dans ce cas) :
-        la tete apprend d'abord, politique figee, puis l'acteur la lit.
+        TETE FRAICHE = `adv_heads.is_untrained()` (couches de sortie exactement a zero, l'etat de
+        l'init) : zip charge sans la tete (`PointerMaskablePolicy.load_state_dict` la tolere
+        absente) comme zip entraine en `gae` apres S14 (tete presente, jamais touchee). Elle rend
+        `adv = 0` pour toute action, donc `q_head` sur une telle tete EXIGE un echauffement
+        (`value_warmup_updates >= 1`, verifie par `train` et par `ai/train.py::arm_value_warmup`,
+        qui ne le saute jamais dans ce cas) : la tete apprend d'abord, politique figee, puis
+        l'acteur la lit.
         """
         self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
             entropy_normalize_by_legal
@@ -297,12 +271,11 @@ class PatchedMaskablePPO(MaskablePPO):
         self.value_warmup_done_under: str | None = None
         self.advantage_source: str = check_advantage_source(advantage_source)
         self.q_coef: float | None = check_q_coef(q_coef, self.advantage_source)
-        self._adv_heads_fresh: bool = False
         super().__init__(*args, **kwargs)
 
     def _excluded_save_params(self) -> list[str]:
         return super()._excluded_save_params() + [
-            "value_warmup_updates", "_vwu_done", "value_warmup_contract_id", "_adv_heads_fresh",
+            "value_warmup_updates", "_vwu_done", "value_warmup_contract_id",
         ]
 
     # ── Tête Q ────────────────────────────────────────────────────────────────────────────────
@@ -311,15 +284,20 @@ class PatchedMaskablePPO(MaskablePPO):
     def uses_q_head(self) -> bool:
         return self.advantage_source == "q_head"
 
-    def _require_adv_heads(self) -> th.nn.Module:
+    def _require_adv_heads(self) -> PointerHeadNets:
         """La tête Q de la politique, ou TypeError : `q_head` n'existe que sur `PointerMaskablePolicy`."""
         adv_heads = getattr(self.policy, "adv_heads", None)
-        if not isinstance(adv_heads, th.nn.Module) or not hasattr(self.policy, "evaluate_actions_q"):
+        if not isinstance(adv_heads, PointerHeadNets) or not hasattr(self.policy, "evaluate_actions_q"):
             raise TypeError(
                 "advantage_source='q_head' exige une politique a tete Q (PointerMaskablePolicy, "
                 f"ai/pointer_policy.py) ; recu {type(self.policy).__name__}."
             )
         return adv_heads
+
+    @property
+    def adv_heads_untrained(self) -> bool:
+        """Vrai si `q_head` est actif et que la tête Q n'a encore jamais appris (avantages nuls)."""
+        return self.uses_q_head and self._require_adv_heads().is_untrained()
 
     def _setup_model(self) -> None:
         super()._setup_model()
@@ -337,66 +315,6 @@ class PatchedMaskablePPO(MaskablePPO):
                 n_envs=self.n_envs,
             )
 
-    def set_parameters(
-        self,
-        load_path_or_dict: Any,
-        exact_match: bool = True,
-        device: th.device | str = "auto",
-    ) -> None:
-        """Chargement d'un zip SANS tête Q dans une politique qui en a une (antériorité à S14).
-
-        SB3 charge `policy` en `strict=exact_match` et l'optimiseur tel quel. Un zip sauvé avant
-        la tête Q échoue deux fois : clés `adv_heads.*` manquantes dans le `state_dict`, et
-        `param_groups[0]["params"]` de l'optimiseur plus court que `self.parameters()`. Ici, et
-        SEULEMENT quand la seule différence est l'absence de la tête :
-        - la politique charge en `strict=False` après vérification que les clés manquantes sont
-          TOUTES sous `adv_heads.` et qu'aucune clé n'est inattendue — toute autre différence
-          reste une erreur, comme avant ;
-        - l'état de l'optimiseur est ALIGNÉ : la tête Q est enregistrée en dernier
-          (`PointerMaskablePolicy._build`), donc les `n` paramètres du zip sont les `n` premiers
-          de la politique, dans le même ordre ; les indices sont conservés et les nouveaux
-          paramètres ajoutés SANS état (Adam les initialise à zéro au premier pas). Sans cet
-          alignement, `load_state_dict` refuserait (tailles de groupe) — et un alignement faux
-          appliquerait les moments d'un paramètre à un autre, en silence ;
-        - `_adv_heads_fresh` passe à vrai : `train` exigera l'échauffement si `q_head` est actif.
-        Le cas nominal (zip complet) suit le chemin SB3 inchangé.
-        """
-        params = load_path_or_dict
-        if not isinstance(params, dict):
-            from stable_baselines3.common.save_util import load_from_zip_file
-            _, params, _ = load_from_zip_file(load_path_or_dict, device=device, load_data=False)
-        policy_state = params.get("policy")
-        adv_keys = {
-            k for k in self.policy.state_dict() if k.startswith(ADV_HEADS_PREFIX)
-        }
-        if not (exact_match and isinstance(policy_state, dict) and adv_keys
-                and not any(k.startswith(ADV_HEADS_PREFIX) for k in policy_state)):
-            super().set_parameters(params, exact_match=exact_match, device=device)
-            return
-        expected = set(self.policy.state_dict()) - adv_keys
-        got = set(policy_state)
-        if expected != got:
-            raise RuntimeError(
-                "Chargement de la politique : au-dela de la tete Q absente (adv_heads.*), le "
-                f"state_dict differe — manquantes {sorted(expected - got)[:5]}, inattendues "
-                f"{sorted(got - expected)[:5]}."
-            )
-        self.policy.load_state_dict(policy_state, strict=False)
-        optimizer_state = params.get("policy.optimizer")
-        if optimizer_state is not None:
-            if not isinstance(optimizer_state, dict):
-                raise TypeError(
-                    f"Etat d'optimiseur inattendu : {type(optimizer_state).__name__}, dict attendu."
-                )
-            self.policy.optimizer.load_state_dict(
-                _extend_optimizer_state(optimizer_state, len(list(self.policy.parameters())))
-            )
-        remaining = {
-            k: v for k, v in params.items() if k not in ("policy", "policy.optimizer")
-        }
-        if remaining:
-            super().set_parameters(remaining, exact_match=False, device=device)
-        self._adv_heads_fresh = True
 
     def _critic_modules(self) -> tuple[th.nn.Module, ...]:
         """Les modules que l'échauffement critic (B6) laisse apprendre — la SEULE partition.
@@ -482,12 +400,12 @@ class PatchedMaskablePPO(MaskablePPO):
         # fois par update et SEULEMENT pendant le régime (voir `_critic_only_param_ids`).
         _in_warmup: bool = self._vwu_done < self.value_warmup_updates
         use_q = self.uses_q_head
-        if use_q and self._adv_heads_fresh and self.value_warmup_updates <= 0:
+        if use_q and self.value_warmup_updates <= 0 and self._vwu_done == 0 and self.adv_heads_untrained:
             raise RuntimeError(
-                "advantage_source='q_head' sur un modele charge SANS tete Q : la tete est "
-                "fraiche (avantages a zero) et le profil ne demande aucun echauffement "
-                "(value_warmup_updates). Poser value_warmup_updates >= 1 : la tete doit "
-                "apprendre, politique figee, avant que l'acteur la lise."
+                "advantage_source='q_head' sur une tete Q jamais entrainee (couches de sortie a "
+                "zero : zip charge sans la tete, ou entraine en gae) et aucun echauffement demande "
+                "(value_warmup_updates). Poser value_warmup_updates >= 1 : la tete doit apprendre, "
+                "politique figee, avant que l'acteur lise ses avantages."
             )
         q_losses_t: list[th.Tensor] = []
         adv_q_abs_t: list[th.Tensor] = []

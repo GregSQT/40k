@@ -2211,9 +2211,16 @@ def _archive_architecture(
             f"{os.path.basename(zip_path)} : 'policy' n'est pas un state_dict "
             f"({type(policy_state).__name__})"
         )
+    # La tête Q (S14, `adv_heads.*`) ne joue aucune décision : une archive sauvée sans elle est
+    # JOUABLE contre un modèle qui la porte, et inversement. Elle sort de la signature, sinon
+    # chaque archive antérieure à S14 — P0 en tête — serait écartée comme incompatible et la
+    # sonde contre le pool ne jouerait plus rien. Même tolérance que le chargement
+    # (`PointerMaskablePolicy.load_state_dict`).
+    from ai.pointer_policy import is_adv_heads_key
     signature = {
         str(name): tuple(int(d) for d in tensor.shape)
         for name, tensor in policy_state.items()
+        if not is_adv_heads_key(str(name))
     }
     return data["observation_space"], data["action_space"], signature
 

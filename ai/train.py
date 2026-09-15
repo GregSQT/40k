@@ -375,15 +375,14 @@ def arm_value_warmup(
     empreinte = reward_table_fingerprint(rewards_config, agent_key)
     model.value_warmup_contract_id = empreinte
     demande = int(model_params.get("value_warmup_updates", 0))  # get allowed: cle optionnelle
-    tete_q_fraiche = bool(getattr(model, "uses_q_head", False)) and bool(
-        getattr(model, "_adv_heads_fresh", False)
-    )
+    tete_q_fraiche = bool(getattr(model, "adv_heads_untrained", False))
     if demande <= 0:
         if tete_q_fraiche:
             raise ValueError(
-                "advantage_source='q_head' sur un zip charge SANS tete Q : le profil doit poser "
-                "value_warmup_updates >= 1 pour que la tete apprenne, politique figee, avant que "
-                "l'acteur la lise (ses avantages valent zero a l'initialisation)."
+                "advantage_source='q_head' sur une tete Q jamais entrainee (zip charge sans la "
+                "tete, ou entraine en gae) : le profil doit poser value_warmup_updates >= 1 pour "
+                "que la tete apprenne, politique figee, avant que l'acteur la lise (ses avantages "
+                "valent zero a l'initialisation)."
             )
         return
     deja = model.value_warmup_done_under
@@ -392,7 +391,7 @@ def arm_value_warmup(
         # Q qui n'existait pas encore. Jamais de saut ici.
         log(
             f"🔥 Echauffement critic + tete Q : {demande} updates (table de recompense "
-            f"{empreinte}, tete Q fraiche — zip charge sans elle)"
+            f"{empreinte}, tete Q jamais entrainee — jamais saute dans ce cas)"
         )
         return
     if deja == empreinte:

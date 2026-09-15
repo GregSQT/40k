@@ -48,7 +48,7 @@ de référence sur un cas jouet, tir ET move.
 """
 
 from functools import partial
-from typing import Any, NamedTuple, Optional, Protocol, Tuple
+from typing import Any, Dict, Mapping, NamedTuple, Optional, Protocol, Tuple, Type
 
 import numpy as np
 import torch
@@ -102,6 +102,77 @@ _FIGHT_TARGET_IDX = unit_bin_index("fight_target_selected")
 
 #: Largeur de la couche cachée de la tête de move, par colonne de cellule.
 MOVE_HEAD_HIDDEN = 32
+
+#: Préfixe des paramètres de la tête Q dans le `state_dict` de la politique. Une archive
+#: antérieure à S14 ne les porte pas ; elle reste JOUABLE (la tête Q ne participe à aucune
+#: décision), donc tout ce qui compare ou charge des state_dicts la tolère sur ce seul préfixe.
+ADV_HEADS_PREFIX = "adv_heads."
+
+
+def is_adv_heads_key(name: str) -> bool:
+    """Vrai pour une clé de `state_dict` de la tête Q — la seule absence qu'un chargement tolère."""
+    return name.startswith(ADV_HEADS_PREFIX)
+
+
+def extend_optimizer_state(saved: Mapping[str, Any], n_params: int) -> Dict[str, Any]:
+    """État d'optimiseur sauvé pour `n` paramètres, étendu à `n_params >= n` paramètres.
+
+    Torch identifie les paramètres d'un groupe par leur RANG dans `param_groups[0]["params"]`
+    et indexe `state` par ce rang. Les `n` premiers rangs restent les mêmes — la tête Q est
+    enregistrée EN DERNIER (`PointerMaskablePolicy._build`) — et les rangs ajoutés n'ont pas
+    d'état : Adam les initialise à zéro au premier pas. Un seul groupe attendu
+    (`ActorCriticPolicy._build` n'en crée qu'un) ; plus de rangs que de paramètres, ou des rangs
+    qui ne sont pas `0..n-1` : l'état ne vient pas d'une politique alignée, lever.
+    """
+    groups = saved.get("param_groups")
+    if not isinstance(groups, list) or len(groups) != 1:
+        raise ValueError(
+            f"Etat d'optimiseur inattendu : {0 if not isinstance(groups, list) else len(groups)} "
+            "groupe(s) de parametres, 1 attendu."
+        )
+    saved_ranks = list(groups[0]["params"])
+    if len(saved_ranks) > n_params or saved_ranks != list(range(len(saved_ranks))):
+        raise ValueError(
+            f"Etat d'optimiseur inaligne : {len(saved_ranks)} rangs sauves "
+            f"({saved_ranks[:3]}...) pour {n_params} parametres."
+        )
+    extended: Dict[str, Any] = {"state": dict(saved["state"]), "param_groups": [dict(groups[0])]}
+    extended["param_groups"][0]["params"] = list(range(n_params))
+    return extended
+
+
+_LENIENT_OPTIMIZERS: Dict[type, type] = {}
+
+
+def lenient_optimizer_class(base: Type[torch.optim.Optimizer]) -> Type[torch.optim.Optimizer]:
+    """Sous-classe de `base` dont `load_state_dict` accepte l'état d'une politique SANS tête Q.
+
+    C'est `set_parameters` (SB3) qui charge l'optimiseur, par `attr.load_state_dict(state)` et
+    sans option : pour qu'un zip antérieur à S14 charge par TOUS les chemins — `MaskablePPO.load`
+    nu compris (PvE, workers d'évaluation, snapshots du pool, replay) — la tolérance doit vivre
+    dans l'objet optimiseur lui-même. Un état déjà complet passe tel quel. Une classe par base,
+    mémorisée : `deepcopy` et la sérialisation SB3 (qui ne stocke que `state_dict()`) n'y voient
+    qu'un optimiseur ordinaire.
+    """
+    cached = _LENIENT_OPTIMIZERS.get(base)
+    if cached is not None:
+        return cached
+
+    class _LenientOptimizer(base):  # type: ignore[valid-type, misc]
+        def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+            n_params = sum(len(group["params"]) for group in self.param_groups)
+            groups = state_dict.get("param_groups")
+            n_saved = (
+                sum(len(g["params"]) for g in groups) if isinstance(groups, list) else n_params
+            )
+            if n_saved < n_params:
+                state_dict = extend_optimizer_state(state_dict, n_params)
+            super().load_state_dict(state_dict)  # type: ignore[arg-type]
+
+    _LenientOptimizer.__name__ = f"Lenient{base.__name__}"
+    _LenientOptimizer.__qualname__ = _LenientOptimizer.__name__
+    _LENIENT_OPTIMIZERS[base] = _LenientOptimizer
+    return _LenientOptimizer
 
 
 class HeadNets(Protocol):
@@ -196,6 +267,23 @@ class PointerHeadNets(nn.Module):
             layer = getattr(self, name)
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
+
+    def is_untrained(self) -> bool:
+        """Vrai tant qu'aucun gradient n'a jamais atteint la tête : ses couches de sortie sont
+        EXACTEMENT à zéro, l'état de l'initialisation.
+
+        C'est la définition de « tête fraîche », par le CONTENU et non par la provenance : un zip
+        chargé sans la tête (clés absentes, tête construite à zéro) et un zip entraîné en `gae`
+        après S14 (tête présente, jamais touchée — sous `gae` elle ne reçoit aucun gradient et
+        Adam saute un paramètre sans gradient) sont dans le même état, et tous deux exigent
+        l'échauffement avant qu'un acteur lise leurs avantages, qui valent zéro partout. Une
+        tête qui a reçu un seul pas d'Adam n'a plus aucune couche de sortie exactement nulle.
+        """
+        with torch.no_grad():
+            return all(
+                not bool(getattr(self, name).weight.any()) and not bool(getattr(self, name).bias.any())
+                for name in self.OUTPUT_LAYERS
+            )
 
 
 def _build_head_nets(
@@ -623,7 +711,29 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # `type: ignore`, ici le dict évite l'exception au typage sans rien changer à l'appel.
         optimizer_kwargs = dict(self.optimizer_kwargs)
         optimizer_kwargs["lr"] = lr_schedule(1)
-        self.optimizer = self.optimizer_class(self.parameters(), **optimizer_kwargs)
+        self.optimizer = lenient_optimizer_class(self.optimizer_class)(
+            self.parameters(), **optimizer_kwargs
+        )
+
+    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False) -> Any:  # type: ignore[override]
+        """Charge un `state_dict` SANS tête Q (antérieur à S14) comme s'il était complet.
+
+        Le seul écart toléré : toutes les clés `adv_heads.*` absentes, aucune autre différence.
+        La tête reste alors à son initialisation (zéro), donc `adv_heads.is_untrained()` — c'est
+        ce que lisent `PatchedMaskablePPO.train` et `ai/train.py::arm_value_warmup` pour exiger
+        l'échauffement avant qu'un acteur la lise. Tout autre écart suit le chemin strict de
+        torch et lève comme avant : une clé de politique manquante n'est pas une antériorité,
+        c'est une archive abîmée. Vaut pour TOUS les chemins de chargement (`set_parameters` de
+        SB3 appelle cette méthode, en `strict=True`, depuis `MaskablePPO.load` nu comme depuis
+        `PatchedMaskablePPO.load`).
+        """
+        if strict:
+            expected = set(self.state_dict())
+            got = set(state_dict)
+            missing = expected - got
+            if missing and all(is_adv_heads_key(k) for k in missing) and got <= expected:
+                return super().load_state_dict(state_dict, strict=False, assign=assign)
+        return super().load_state_dict(state_dict, strict=strict, assign=assign)
 
     # -- découpe du vecteur de features ------------------------------------
     def _extract(self, obs: PyTorchObs) -> torch.Tensor:
