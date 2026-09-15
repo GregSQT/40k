@@ -1252,6 +1252,37 @@ réfuté par absorption). Coupure KL **32 → 16,7** mini-lots (S25 : 28,9 → 1
 « il vient de franchir les 70 % » — sonde 20 000 attendue ; **rien n'est arrêté**, verdict à
 30 000 par la règle.
 
+**Lecture à 20 000 (2026-09-16, 00:45) — sonde 0,80, absorption ARRÊTÉE à 0,80 nat, holdout bots en
+recul.** Lecture à épisodes égaux : correspondance épisode → pas par `config/discount_factor` (un point
+par épisode sur l'axe des pas), `train/*` moyennés sur les updates de chaque tranche de 2 000 (26–29
+updates par tranche), S25 = `run_20260914-215728` (+ reprise) aux mêmes tranches.
+- **Sonde 20 000 : 0,80** (S25 au même point : 0,68) — première des six sondes du verdict
+  (20 000 → 30 000 inclus, moyenne contre 0,677). Arithmétique de la règle : les cinq sondes
+  restantes doivent faire ≥ 0,704 en moyenne pour atteindre 0,72 ; S25 y faisait 0,677.
+- **Absorption : arrêtée, pas achevée.** Entropie de π_T par tranche (2 000 → 22 000) :
+  1,07 / 0,95 / 0,91 / 0,88 / 0,85 / 0,81 / 0,80 / 0,80 / 0,79 / 0,80 ; S25 (π à T = 1) aux mêmes
+  tranches : 0,78 / 0,76 / 0,75 / 0,74 / 0,74 / 0,70 / 0,68 / 0,65 / 0,68 / 0,68. La descente
+  s'est arrêtée à 14 000 ; l'écart S9 − S25 est passé de 0,29 nat (2 000–4 000) à 0,12 et n'a plus
+  bougé sur les quatre dernières tranches. 0,68 n'est pas atteint → **pas de réfutation par
+  absorption** ; le surplus d'entropie restant (0,12 nat) est ce que `ent_coef` 0,01 retient.
+- Coupure KL : **15,8 puis 16,5** mini-lots sur 32 (S25 : 13,8 / 15,2) à KL égal
+  (0,0086 / 0,0084) ; EV 0,87–0,88 des deux côtés ; `policy_gradient_loss` −0,010 (S25 −0,007).
+- Courbes échantillonnées (PAS des juges — l'agent S9 y joue à T = 2) : `01_VP/a_vp_diff`
+  **+8,0 / +8,8** sur 18 000–22 000 (S25 : +4,1 / +4,4), `01_VP/d_objectives_held_diff` +0,18 / +0,23
+  (S25 : +0,02 / +0,04), `03_selfplay/P0` 0,667 / 0,673 (S25 : 0,634 / 0,630). Contrairement à
+  l'attente écrite en 2b (« plus basse que S25 par construction »), la courbe échantillonnée est
+  au-dessus de S25 malgré l'échantillonnage à T = 2.
+- **Holdout bots (second juge de la règle) : combiné 0,897 à 10 000 → 0,848 à 20 000, pire bot
+  0,85 → 0,80** (`bot_eval/combined`, `bot_eval/worst_bot_score`) ; S25 : 0,887 → 0,933 → 0,923 à
+  30 000, pire bot 0,83 → 0,85 → 0,89. S9 gagne contre P0 et recule contre les bots ; à 20 000 il
+  est sous P0 lui-même (combiné 0,910 au meilleur robuste de P0). Aucun score robuste enregistré
+  (`robust=NA` sur toute la barre ; S25 affichait 0,9094 dès 20 000). **À relire à 30 000** avec
+  le holdout de 30 000 : sonde qui passe ET holdout qui continue de baisser = spécialisation
+  contre P0, exactement ce que le gate 0,65 + holdout de la lignée est fait pour attraper ; la
+  règle 2b ne tranche que sur la sonde, le holdout est consigné à côté et pèsera au transfert
+  (étape 4).
+- Rien n'est arrêté ; verdict à 30 000 (≈ 02:15 au rythme mesuré de 5 400 épisodes/h) par la règle.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin

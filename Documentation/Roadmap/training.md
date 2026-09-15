@@ -165,6 +165,15 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 00:45 — S9 lecture à 20 000 ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Sondes exploiteur 2 000 → 20 000 : 0,53 / 0,59 / 0,56 / 0,66 / 0,68 / 0,62 / 0,67 / 0,76 / 0,67 /
+**0,80** (S25 à 20 000 : 0,68) ; garde passée à 10 000 (0,604 contre 0,536). Entropie de π_T
+1,07 → 0,80 nat puis **plate depuis 14 000** (S25 : 0,78 → 0,68) : T est absorbé en partie,
+la règle d'absorption (retour à 0,68) n'est pas déclenchée. Coupure KL 16 mini-lots (S25 14–15),
+`a_vp_diff` +8 (S25 +4) sur les courbes échantillonnées. **Holdout bots 0,897 → 0,848 à 20 000
+(S25 : 0,933)**, pire bot 0,80 : l'exploiteur recule contre les bots pendant qu'il monte contre
+P0. Verdict à 30 000 par la règle 2b, rien n'est arrêté.
+
 **2026-09-15, 20:34 — S9 lancé, S14 définitivement clos ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Température des logits `logits_temperature` (collecte ET ratio sous π_T, hors zip, T = 1 en
 évaluation) codée et mergée (`571b0732f`, 8 tests). Mesure 2a (tête Q sur données exploratoires
