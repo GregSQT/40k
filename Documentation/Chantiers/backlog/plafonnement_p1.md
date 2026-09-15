@@ -1159,6 +1159,63 @@ apprendre des alternatives quand on les lui joue, S14-SUR-S9 mérite un run plus
 S14 est mort dans ce dispositif, quoi qu'on fasse, et ne sera plus relancé. C'est le test qui
 aurait dû précéder le run du matin.
 
+### 5.14 S9 — température de collecte T = 2 (2026-09-15 soir, décision utilisateur) — CODE LIVRÉ, RÈGLE ÉCRITE {#s9-2026-09-15}
+
+**Décision (2026-09-15, 19:40).** S14 réfuté faute de coups contrefactuels (§5.13.1) ; étape 2 de
+l'ordre figé (§9.9). Question posée par l'utilisateur au passage : pourquoi P0 atteint 0,90
+contre les bots quand P1 plafonne à 0,65 contre P0 — réponse consignée : ce n'est pas la même
+échelle (P1 fait 0,907–0,933 sur le holdout bots), l'adversaire est d'une autre nature (une
+copie de soi, parité à 0,50 par construction, avantage de siège 21 pts mesuré en S27) et la
+seule différence de régime P0 → P1 jamais testée est l'**exploration** : P0 a appris sous
+`ent_coef` 0,1 → 0,01 depuis une politique naïve, P1 reprend une politique à p ≈ 0,99 sous 0,01
+constant. S9 est ce levier.
+
+**Ce que fait S9.** `logits_temperature` (clé `model_params`, régime de run hors zip) :
+`π_T = softmax(logits / T)` dans `PointerMaskablePolicy._distribution_from`, AVANT le masquage,
+donc partout où l'apprenant construit une distribution — collecte dans les workers (politique
+transportée par `_serialize_policy_for_workers`), ratio PPO et entropie dans `train`. Collecte
+et ratio sous la même π_T : on-policy, PPO optimise π_T. Un zip rechargé repart à T = 1 :
+sondes, holdout, adversaires figés du pool et PvE jouent la politique à T = 1 (l'argmax est
+invariant à T). Propriété `PatchedMaskablePPO.logits_temperature` qui écrit sur la politique
+(`--new` par le constructeur, `--append` par `_PLAIN_CURRICULUM_KEYS`), exclue du zip ; refus
+d'une valeur non flottante > 0 et d'une politique qui ne tempère pas. T = 2 : sur des têtes
+courtes à p ≈ 0,99 (écart de logits ≈ 4,6), l'alternative se joue ~1 fois sur 11 au lieu de
+1 sur 100. Première valeur, non calibrée.
+
+**Livré** (worktree `s9-temperature-collecte`) : `ai/pointer_policy.py`, `ai/patched_ppo.py`,
+`ai/train.py`, `tests/unit/ai/test_logits_temperature.py` (8 tests : softmax(logits/T) sur les
+légales, argmax invariant, collecte et ratio sous la même π_T, constructeur / profil / zip /
+workers, refus ; division retirée par mutation → 2 rouges) ; profil `x1_lineage` de l'agent
+expl : `advantage_source: gae`, `logits_temperature: 2.0`, `_doc` des deux clés ;
+`Documentation/Reference/training/entrainement.md`.
+
+**Limite connue, à lire AVANT le verdict.** Rien n'empêche le réseau d'absorber T en doublant
+l'échelle de ses logits ; seul `ent_coef` 0,01 s'y oppose. L'exploration apportée par T peut
+donc être transitoire.
+
+**Règle de lecture, écrite AVANT le lancement (= §9.9 étape 2b).**
+- **2a — mesure préalable (~30 min)** : checkpoint S25 40 000
+  (`ppo_checkpoint_20260915-123207_10087944_steps.zip`, sans tête Q → tête à zéro) + profil
+  transitoire `q_head` / `q_coef` 0,17 / `value_warmup_updates` 40 / T = 2 : politique FIGÉE
+  (échauffement), collecte à T = 2, seules V et la tête Q apprennent. Lire
+  `train/q_loss_mb0 − train/value_loss_mb0` sur les updates 20–40 : moyenne < −0,002 → la tête
+  sait apprendre des alternatives quand on les lui joue, S14-SUR-S9 rejouable après S9 ;
+  sinon S14 mort dans ce dispositif. Profil remis à `gae` après la mesure (édition transitoire,
+  non commitée).
+- **2b — run S9** : `--etape E0` depuis P0 (échauffement 20 rejoué), log
+  `training_x1_expl_05-e00-s9.log`. **Juge = sonde exploiteur argmax + holdout bots ;
+  `03_selfplay/P0` N'EST PAS un juge** (agent échantillonné, plus aléatoire sous T = 2 par
+  construction : cette courbe sera plus basse que S25 sans rien dire de la politique apprise).
+  Garde à 10 000 : moyenne des sondes 2 000–10 000 ≤ 0,45 → arrêt. Verdict à 30 000 : moyenne
+  20 000–30 000 contre 0,677 (S25) ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression.
+  **Absorption** : `train/entropy_loss` (entropie de π_T) par tranche de 2 000 — elle doit
+  partir nettement au-dessus de S25 (0,68 nat) ; si elle y retombe avant 20 000, S9 est réfuté
+  PAR ABSORPTION (distinct de « l'exploration ne sert à rien ») et le levier suivant n'est pas
+  un T plus grand mais un mécanisme que l'optimiseur ne peut pas défaire — à arbitrer alors,
+  pas maintenant. `family_entropy_probe` sur le checkpoint 30 000 contre S25 pour nommer les
+  têtes qui ont gardé de l'entropie.
+- Si oui : garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -1579,7 +1636,7 @@ midi (§5.13).
 | étape | levier | dispositif | règle de lecture | si oui | si non |
 |---|---|---|---|---|---|
 | 1 | ~~S14 tête Q centrée sous π~~ — **RÉFUTÉ le 2026-09-15 (§5.13.1)** : garde déclenchée (0,362 à 10 000), `q_loss_mb0 − value_loss_mb0` ≥ 0 partout, entropie 0,71 → 0,28 : la tête n'a pas de données contrefactuelles (politique à p_max 0,66–0,99). Variante S14c écartée sans run (aucune ne crée ces données). | — | — | — | → étape 2 sous **GAE** |
-| 2 | **S9 exploration structurée** : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
+| 2 | **S9 exploration structurée** (§5.14 : règle complète, absorption, juge = sonde argmax, pas `03_selfplay`) : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
 | 3 | **C2 issue vs façonnage** : poids de l'issue ±150 contre les 62 % d'objectifs (config seule) puis **B6 seconde graine** | S25 | idem, un run par variable, deux graines si effet < 10 pts | garder | — |
 | 4 | **Transfert** du régime gagnant dans `x1_lineage` de `ArmageddonAgent_x1` : relire lr / `target_kl` / `ent_coef` / `vf_coef` sur `n_minibatches_done` et `grad_share_policy` SOUS le nouvel estimateur (réglages mesurés sous GAE, §5.4, non transférables), puis reprise de la lignée P1 → gate 0,65 | lignée | règle §7 | lignée relancée | — |
 | 5 | **S11b** (espérance sur les dégâts seuls, kills au jet) seulement si les sondes de §5.11 désignent le proxy des kills ; **S15** recherche en dernier recours | — | — | — | — |
