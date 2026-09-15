@@ -1239,6 +1239,19 @@ depuis P0 (50 000), échauffement critic 20, `advantage_source: gae`, `logits_te
 Lecture par la règle 2b ci-dessus : garde 10 000, absorption sur `train/entropy_loss`, verdict
 30 000 contre 0,677.
 
+**Lecture à 18 000 (2026-09-16, 00:05) — garde passée, absorption EN COURS, plateau non tranché.**
+Sondes 2 000 → 18 000 : 0,53 / 0,59 / 0,56 / 0,66 / 0,68 / 0,62 / 0,67 / 0,76 / 0,67. Garde :
+moyenne 2 000–10 000 **0,604** (S25 : 0,536, +7 pts) → passée. 12 000–18 000 : 0,68 (S25 : 0,68) —
+départ plus rapide, même niveau ensuite ; `a_vp_diff` meilleur que S25 (lecture utilisateur, à
+chiffrer sur `01_VP/a_vp_diff`). Mécanisme à updates égales (262 premières updates, S25 sur
+les mêmes) : entropie de π_T **1,16 → 0,80 nat** par huitième (S25 à T = 1 : 0,80 → 0,74) —
+au-dessus du seuil d'absorption (0,68) à 18 000, mais en descente rapide : T est absorbé
+progressivement, pas encore entièrement ; à relire à 20 000 et 30 000 (retour à 0,68 =
+réfuté par absorption). Coupure KL **32 → 16,7** mini-lots (S25 : 28,9 → 13,6) : à KL égal
+(0,009), S9 apprend sur plus de mini-lots par update. EV 0,84 → 0,87. Utilisateur (00:10) :
+« il vient de franchir les 70 % » — sonde 20 000 attendue ; **rien n'est arrêté**, verdict à
+30 000 par la règle.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
