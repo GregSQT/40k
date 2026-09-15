@@ -1262,6 +1262,17 @@ lr 0,0005 (les trois premières updates du warmup affichent 0,001 dans `train/le
 politique figée alors — à vérifier, sans effet mesurable). Le run continue jusqu'à 60 000 ; la
 branche « ≥ 0,68 → bissection » est déjà la plus probable.
 
+**Règle complétée par l'utilisateur à 28 000 (2026-09-15, 03:10), écrite avant lecture.** Sondes
+16 000 → 28 000 : 0,73 / 0,66 / 0,68 / 0,71 / 0,73 / 0,64 / 0,69, moyenne glissante entre 0,68 et
+0,71 — plateau naissant vers 0,69, non prouvé à n = 100. Objectif : **≥ 0,70 sur la moyenne
+glissante de trois sondes** (300 parties, erreur-type 2,6 pts, même instrument que le gate),
+pour établir que la méthode extrait au-delà de tout ce que la lignée a rendu, et non qu'elle
+repousse le plateau de quelques points. **Stagnation** = à 40 000, moyenne des sondes de
+30 000–40 000 supérieure de moins de 3 points à celle de 20 000–30 000 → verdict « le mécanisme
+plafonne même dans le meilleur cas », leviers de mécanisme (étape 3) dans ce dispositif. Le juge
+est la sonde argmax, pas `03_selfplay/P0` (échantillonné, 10 % d'épisodes déployés par le moteur
+à 0,41). Holdout bots lu en parallèle contre la suradaptation.
+
 **Bissection préparée (config seule, agent dédié), à lancer après S25 — un GPU, donc en série.**
 S25 diffère du régime P1 par quatre variables : lr 0,0005 / 0,001 ; P0 déterministe / stochastique ;
 siège 0,5 / 0,7 ; 100 % P0 / 70 % P0 + 30 % bots. La récompense B6 est commune à tout ce qui
