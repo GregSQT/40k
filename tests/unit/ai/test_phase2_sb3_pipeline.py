@@ -364,6 +364,10 @@ class TestPatchedTrainNumericalParity:
         # B6 : attributs d'instance posés par __init__, que ce montage contourne.
         model.value_warmup_updates = 0
         model._vwu_done = 0
+        # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
+        model.advantage_source = "gae"
+        model.q_coef = None
+        model._adv_heads_fresh = False
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -450,6 +454,10 @@ class TestPatchedTrainNumericalParity:
         # B6 : attributs d'instance posés par __init__, que ce montage contourne.
         model.value_warmup_updates = 0
         model._vwu_done = 0
+        # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
+        model.advantage_source = "gae"
+        model.q_coef = None
+        model._adv_heads_fresh = False
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -688,6 +696,10 @@ class TestPatchedVsReferenceParity:
         # B6 : attributs d'instance posés par __init__, que ce montage contourne.
         model.value_warmup_updates = 0
         model._vwu_done = 0
+        # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
+        model.advantage_source = "gae"
+        model.q_coef = None
+        model._adv_heads_fresh = False
         model.target_kl = None
         model.clip_range_vf = None
         model._current_progress_remaining = 1.0
@@ -835,6 +847,10 @@ class TestPatchedVsReferenceParity:
             # B6 : attributs d'instance posés par __init__, que ce montage contourne.
             model.value_warmup_updates = 0
             model._vwu_done = 0
+            # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
+            model.advantage_source = "gae"
+            model.q_coef = None
+            model._adv_heads_fresh = False
             model.target_kl = None
             model.clip_range_vf = None
             model._current_progress_remaining = 1.0

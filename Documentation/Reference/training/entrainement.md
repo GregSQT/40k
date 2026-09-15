@@ -632,6 +632,8 @@ Règles:
 | `batch_size` | 64 | 256 | Training speed vs memory |
 | `gamma` | 0.90 | 0.99 | Long-term vs short-term rewards |
 | `entropy_normalize_by_legal` | `false` (défaut) | `true` | Terme d'entropie rapporté à ln(n légales) par état — chaque tête pèse sa part d'effondrement, pas sa taille ; relever `ent_coef` d'autant (×ln n moyen du mouvement, ~5) pour garder la pression sur le mouvement. Cf. `metriques.md`, `train/entropy_loss_normalized` |
+| `advantage_source` | `gae` (défaut) | `q_head` | Avantage de l'acteur : `gae` = avantage GAE du rollout (historique, bit à bit) ; `q_head` = avantage ATTENDU `A(s, a)` de la tête Q de `PointerMaskablePolicy` (S14, dossier plafonnement_p1.md §9.5) — différence de deux espérances apprises au lieu de l'écart porté par le jet de dés de ce pas. Exige `q_coef` ; sur un zip chargé sans tête Q, exige `value_warmup_updates ≥ 1` (la tête apprend d'abord, politique figée). Tête Q = mêmes têtes que la politique sur le tronc critic, `Q = V.detach() + A`, régressée sur le retour λ ; V garde sa cible. |
+| `q_coef` | — | `0.1`–`0.5` | Poids de la perte de la tête Q (`q_coef × MSE(Q, retour λ)`), comme `vf_coef` pour V. Obligatoire avec `advantage_source: q_head`, interdit avec `gae`. À régler comme `vf_coef` : sur `diag/grad_norm_q_mb0` contre `diag/grad_norm_policy_mb0`. |
 
 ### Rampes `learning_rate` / `ent_coef` — et `decay_fraction`
 
@@ -789,6 +791,7 @@ tensorboard --logdir=./tensorboard/
 | `rollout/` | `ep_len_mean` | Stable or decreasing |
 | `train/` | `entropy_loss` | Decreasing gradually — moyenne brute en nats, dominée par le mouvement |
 | `train/` | `entropy_loss_normalized` | `−mean(H_i / ln n_i)` dans [−1, 0] : ce que les têtes courtes font vraiment ; terme optimisé sous `entropy_normalize_by_legal` |
+| `train/` | `q_loss` / `adv_q_abs_mean` / `advantage_source_q` | Tête Q (S14) : perte de régression de `Q = V + A` sur le retour λ, amplitude moyenne de `A(s_t, a_t)`, et 1 si l'acteur lit la tête Q (0 = GAE). NaN / 0 sous `advantage_source: gae`. `diag/grad_norm_q_mb0` : norme du gradient du terme Q, à côté des trois autres. |
 | `game_critical/` | `win_rate_100ep` | Increasing to target |
 | `game_critical/` | `invalid_action_rate` | <5% (ideally <2%) |
 | `bot_eval/` | `vs_random` / `vs_greedy` / `vs_defensive` / `vs_control` / `vs_adaptive` | Improving |

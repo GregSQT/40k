@@ -48,7 +48,7 @@ de référence sur un cas jouet, tir ET move.
 """
 
 from functools import partial
-from typing import Any, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional, Protocol, Tuple
 
 import numpy as np
 import torch
@@ -102,6 +102,132 @@ _FIGHT_TARGET_IDX = unit_bin_index("fight_target_selected")
 
 #: Largeur de la couche cachée de la tête de move, par colonne de cellule.
 MOVE_HEAD_HIDDEN = 32
+
+
+class HeadNets(Protocol):
+    """Ce que l'assemblage des logits LIT : un jeu de têtes nommées, poids seuls.
+
+    Satisfait structurellement par la politique elle-même (ses attributs, créés dans
+    `_build_mlp_extractor` et `_build`) et par `PointerHeadNets` (la tête Q). Le typage force
+    les deux jeux à porter les mêmes noms — c'est le contrat qu'un assemblage unique exige.
+    """
+
+    query_net: nn.Linear
+    fight_query_net: nn.Linear
+    charge_query_net: nn.Linear
+    charge_pair_net: nn.Linear
+    fight_weapon_query_net: nn.Linear
+    shoot_weapon_sel_query_net: nn.Linear
+    fight_weapon_target_net: nn.Linear
+    shoot_weapon_target_net: nn.Linear
+    choice_query_net: nn.Linear
+    oath_query_net: nn.Linear
+    deploy_query_net: nn.Linear
+    activate_query_net: nn.Linear
+    coherency_query_net: nn.Linear
+    move_cell_net: nn.Conv2d
+    move_ctx_net: nn.Linear
+    move_out_net: nn.Conv2d
+    action_net: nn.Linear
+
+
+class PointerHeadNets(nn.Module):
+    """Un JEU de têtes d'action (les poids seuls), lu par `PointerMaskablePolicy._action_logits`.
+
+    La politique possède son jeu sous forme d'attributs directs (`query_net`, `move_out_net`,
+    `action_net`, …, clés du `state_dict` inchangées depuis T-E). Ce module en porte un SECOND,
+    de structure identique, sous `adv_heads.*` : la TÊTE Q (S14, dossier plafonnement_p1.md
+    §9.5). Lue sur le tronc CRITIC (`latent_vf`), elle rend pour chaque action non pas un logit
+    mais un AVANTAGE attendu `A(s, a) = E[retour | s, a] − V(s)` : Q(s, a) = V(s) + A(s, a)
+    (forme duelling, V détaché), régressée sur le même retour λ que V. L'acteur PPO reçoit alors
+    `A(s, a_jouée)` à la place de l'avantage GAE : une différence de deux espérances apprises
+    sur des milliers de jets de dés, là où le GAE porte le jet de CE tir (mesuré le 2026-09-13 :
+    86 % de Var(δ) est Var(r), 96 % sur le tir).
+
+    Pourquoi la MÊME structure que les têtes de politique : un avantage par action a exactement
+    les mêmes entrées qu'un logit par action — l'entité pointée pour un slot, la colonne de
+    cellule pour un move — et `_assemble_logits` ne lit que des noms d'attributs, donc un seul
+    assemblage sert aux deux (verrouillé : `adv_heads` porte les mêmes noms). Pourquoi un
+    module SÉPARÉ et non des attributs sur la policy : ses paramètres doivent être enregistrés
+    APRÈS tous ceux de la politique pour qu'un zip antérieur (sans tête) charge avec ses états
+    Adam alignés sur les MÊMES indices (`PatchedMaskablePPO.set_parameters`).
+
+    INITIALISATION À ZÉRO de toute couche qui PRODUIT une sortie (requêtes, projections
+    arme x cible, tête dense, paires de charge, `move_out_net`) : une tête fraîche rend
+    `A(s, a) = 0` pour toute action, donc un acteur qui la lit ne bouge pas tant qu'elle n'a
+    pas appris — c'est l'échauffement (`value_warmup_updates`) qui la fait apprendre d'abord,
+    politique figée. `move_cell_net` et `move_ctx_net` (couche cachée) gardent l'init par défaut :
+    à zéro, la ReLU rendrait un gradient nul en aval et la tête de move n'apprendrait jamais.
+    """
+
+    query_net: nn.Linear
+    fight_query_net: nn.Linear
+    charge_query_net: nn.Linear
+    charge_pair_net: nn.Linear
+    fight_weapon_query_net: nn.Linear
+    shoot_weapon_sel_query_net: nn.Linear
+    fight_weapon_target_net: nn.Linear
+    shoot_weapon_target_net: nn.Linear
+    choice_query_net: nn.Linear
+    oath_query_net: nn.Linear
+    deploy_query_net: nn.Linear
+    activate_query_net: nn.Linear
+    coherency_query_net: nn.Linear
+    move_cell_net: nn.Conv2d
+    move_ctx_net: nn.Linear
+    move_out_net: nn.Conv2d
+    action_net: nn.Linear
+
+    OUTPUT_LAYERS: Tuple[str, ...] = (
+        "query_net", "fight_query_net", "charge_query_net", "charge_pair_net",
+        "fight_weapon_query_net", "shoot_weapon_sel_query_net",
+        "fight_weapon_target_net", "shoot_weapon_target_net",
+        "choice_query_net", "oath_query_net", "deploy_query_net", "activate_query_net",
+        "coherency_query_net", "move_out_net", "action_net",
+    )
+
+    def __init__(
+        self, latent_dim: int, entity_dim: int, weapon_dim: int, move_map_channels: int
+    ) -> None:
+        super().__init__()
+        _build_head_nets(self, latent_dim, entity_dim, weapon_dim, move_map_channels)
+        self.action_net = nn.Linear(latent_dim, DENSE_LOGIT_COUNT)
+        for name in self.OUTPUT_LAYERS:
+            layer = getattr(self, name)
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
+
+
+def _build_head_nets(
+    target: "PointerHeadNets", latent_dim: int, entity_dim: int, weapon_dim: int,
+    move_map_channels: int,
+) -> None:
+    """Crée sur `target` les têtes à poids partagés de la tête Q — SAUF `action_net`, que
+    `PointerHeadNets` crée lui-même.
+
+    MIROIR de la construction des têtes de la politique (`_build_mlp_extractor`), qui garde
+    ses créations en place avec les raisons de chaque tête ; ici ce ne sont que des formes.
+    Les deux jeux DOIVENT rester identiques nom pour nom et forme pour forme (à `latent_dim`
+    près, tronc pi d'un côté, tronc vf de l'autre) : `_assemble_logits` lit des noms
+    d'attributs, un nom absent lève, une forme différente scorerait des tenseurs qui ne
+    s'alignent pas. Verrouillé par `tests/unit/ai/test_q_head.py` (mêmes noms, mêmes formes).
+    """
+    target.query_net = nn.Linear(latent_dim, entity_dim)
+    target.fight_query_net = nn.Linear(latent_dim, entity_dim)
+    target.charge_query_net = nn.Linear(latent_dim, entity_dim)
+    target.charge_pair_net = nn.Linear(latent_dim, CHARGE_PAIR_SLOT_COUNT)
+    target.fight_weapon_query_net = nn.Linear(latent_dim, weapon_dim)
+    target.shoot_weapon_sel_query_net = nn.Linear(latent_dim, weapon_dim)
+    target.fight_weapon_target_net = nn.Linear(entity_dim, weapon_dim)
+    target.shoot_weapon_target_net = nn.Linear(entity_dim, weapon_dim)
+    target.choice_query_net = nn.Linear(latent_dim, entity_dim)
+    target.oath_query_net = nn.Linear(latent_dim, entity_dim)
+    target.deploy_query_net = nn.Linear(latent_dim, entity_dim)
+    target.activate_query_net = nn.Linear(latent_dim, entity_dim)
+    target.coherency_query_net = nn.Linear(latent_dim, entity_dim)
+    target.move_cell_net = nn.Conv2d(move_map_channels, MOVE_HEAD_HIDDEN, kernel_size=1)
+    target.move_ctx_net = nn.Linear(latent_dim, MOVE_HEAD_HIDDEN)
+    target.move_out_net = nn.Conv2d(MOVE_HEAD_HIDDEN, 1, kernel_size=1)
 
 #: Actions produites par `action_net`, la SEULE tête dense restante : wait, fight-sans-cible,
 #: tir indirect (20 slots, même compte D1 que le pointeur SHOOT) et les 15 intents de zone. Tout le
@@ -480,6 +606,17 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         )
         if self.ortho_init:
             self.action_net.apply(partial(self.init_weights, gain=0.01))
+        # TÊTE Q (S14), enregistrée EN DERNIER — après `value_net`, dernier module que SB3 crée.
+        # `nn.Module` énumère ses paramètres dans l'ordre d'enregistrement des sous-modules, et
+        # l'optimiseur construit juste après suit `self.parameters()` : les paramètres de la tête
+        # Q occupent donc les DERNIERS indices, et un zip sauvé sans elle charge ses états Adam
+        # sur les mêmes indices qu'avant (`PatchedMaskablePPO.set_parameters`). Réassigner
+        # `action_net` ci-dessus ne change pas SA position : `nn.Module.__setattr__` réécrit la
+        # clé existante de `_modules`, qui garde son rang d'insertion. Verrouillé par test.
+        self.adv_heads = PointerHeadNets(
+            self.mlp_extractor.latent_dim_vf, self.entity_dim, self.weapon_dim,
+            self.move_map_channels,
+        ).to(self.device)
         # Même construction que `ActorCriticPolicy._build` : mêmes classe, mêmes kwargs, même
         # learning rate initial. `lr` passe par les kwargs (et non en argument nommé) parce que la
         # signature générique de `torch.optim.Optimizer` ne le déclare pas — SB3 y met un
@@ -600,8 +737,13 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             self_model_emb, weapon_emb, enemies_present, fight_target,
         )
 
-    def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
+    def _move_logits(
+        self, latent_pi: torch.Tensor, move_map: torch.Tensor, nets: Optional[HeadNets] = None
+    ) -> torch.Tensor:
         """Logits de cellule (B, 1024) — une conv 1x1 par colonne, conditionnée par le tronc.
+
+        `nets` : le jeu de têtes lu (la politique elle-même par défaut, `adv_heads` pour la
+        tête Q) ; la formule est la même, seuls les poids changent.
 
         ⚠️ ALIGNEMENT, c'est le point critique : `move_map` est indexée `[canal, gy, gx]`,
         comme la grille produite par `build_squad_grid`. Le `reshape` final parcourt donc `gy`
@@ -610,8 +752,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         transposition ici ferait viser à l'agent une cellule et en jouer une autre, sans que rien
         ne lève. Verrouillé par `test_move_logit_is_cell_local` (pic injecté dans une cellule).
         """
-        hidden = self.move_cell_net(move_map) + self.move_ctx_net(latent_pi)[:, :, None, None]
-        return self.move_out_net(torch.relu(hidden)).reshape(latent_pi.shape[0], MOVE_CELL_COUNT)
+        heads: HeadNets = self if nets is None else nets
+        hidden = heads.move_cell_net(move_map) + heads.move_ctx_net(latent_pi)[:, :, None, None]
+        return heads.move_out_net(torch.relu(hidden)).reshape(latent_pi.shape[0], MOVE_CELL_COUNT)
 
     def _point(
         self, query_net: nn.Linear, latent_pi: torch.Tensor, embeddings: torch.Tensor
@@ -691,9 +834,15 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         return best.masked_fill(~keep.any(dim=1, keepdim=True), 0.0)
 
     def _deploy_logits(
-        self, latent_pi: torch.Tensor, move: torch.Tensor, feats: PolicyFeatures
+        self,
+        latent_pi: torch.Tensor,
+        move: torch.Tensor,
+        feats: PolicyFeatures,
+        nets: Optional[HeadNets] = None,
     ) -> torch.Tensor:
         """Remplace, QUAND LES IDS 4-11 SONT DES SLOTS DE POSE, les colonnes de cellules de move.
+
+        `nets` : le jeu de têtes lu (la politique par défaut, `adv_heads` pour la tête Q).
 
         Les ids 4-11 portent deux significations : cellule de la grille égocentrique, ou slot de
         pose. Le masque le sait déjà (il n'ouvre jamais les deux familles dans le même état) ; la
@@ -711,15 +860,23 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         identiques (produit scalaire contre des embeddings nuls), donc un choix uniforme sur 8
         cellules parfaitement jouables en phase de mouvement.
         """
-        pointer = self._point(self.deploy_query_net, latent_pi, feats.deploy)
+        heads: HeadNets = self if nets is None else nets
+        pointer = self._point(heads.deploy_query_net, latent_pi, feats.deploy)
         low, high = DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT
         slots = torch.where(
             (feats.is_deploy > 0.5).unsqueeze(1), pointer, move[:, low:high]
         )
         return torch.cat([move[:, :low], slots, move[:, high:]], dim=1)
 
-    def _action_logits(self, latent_pi: torch.Tensor, feats: PolicyFeatures) -> torch.Tensor:
+    def _action_logits(
+        self, latent_pi: torch.Tensor, feats: PolicyFeatures, nets: Optional[HeadNets] = None
+    ) -> torch.Tensor:
         """Logits complets, assemblés dans l'ordre des ids d'action.
+
+        `nets` : le jeu de têtes lu — la politique elle-même par défaut (logits), `adv_heads`
+        pour la tête Q (avantages attendus, sur `latent_vf`). Un seul assemblage pour les deux :
+        c'est ce qui garantit qu'un avantage et un logit d'une même action lisent les mêmes
+        entrées (entité pointée, colonne de cellule, compatibilité arme x cible).
 
         Onze têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
         de mêlée (§9 P3-1) et d'Oath of Moment (chantier 01 : quatre requêtes, MÊMES embeddings
@@ -739,47 +896,48 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         1379-1388 split-fire tir. Une permutation ici ferait jouer à l'agent une action autre que
         celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
+        heads: HeadNets = self if nets is None else nets
         enemies = feats.enemies
         ranged_weapons = feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT]
         melee_weapons = feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:]
-        base = self.action_net(latent_pi)
+        base = heads.action_net(latent_pi)
         move = self._deploy_logits(
-            latent_pi, self._move_logits(latent_pi, feats.move_map), feats
+            latent_pi, self._move_logits(latent_pi, feats.move_map, heads), feats, heads
         )
         return torch.cat(
             [
                 move,
                 base[:, :1],        # wait
-                self._point(self.query_net, latent_pi, enemies),           # tir
-                self._point(self.charge_query_net, latent_pi, enemies),    # charge (cible unique)
-                self.charge_pair_net(latent_pi),                           # charge paires (dense)
-                self._point(self.fight_query_net, latent_pi, enemies),     # mêlée
+                self._point(heads.query_net, latent_pi, enemies),           # tir
+                self._point(heads.charge_query_net, latent_pi, enemies),    # charge (cible unique)
+                heads.charge_pair_net(latent_pi),                           # charge paires (dense)
+                self._point(heads.fight_query_net, latent_pi, enemies),     # mêlée
                 base[:, 1:],        # fight-sans-cible, shoot-indirect, intents de zone
-                self._point(self.choice_query_net, latent_pi, feats.decision),
-                self._point(self.oath_query_net, latent_pi, enemies),      # Oath
+                self._point(heads.choice_query_net, latent_pi, feats.decision),
+                self._point(heads.oath_query_net, latent_pi, enemies),      # Oath
                 # Activation : MES escouades par slot (V11 §0.48 `L2`).
-                self._point(self.activate_query_net, latent_pi, feats.allies),
+                self._point(heads.activate_query_net, latent_pi, feats.allies),
                 # Arme CC (V11 §0.69) : emplacements de MÊLÉE de l'unité active, second bloc
                 # du tenseur d'armes — les profils de tir occupent le premier. Le second terme
                 # confronte chaque arme à la cible DÉJÀ désignée.
                 self._point(
-                    self.fight_weapon_query_net, latent_pi, melee_weapons
+                    heads.fight_weapon_query_net, latent_pi, melee_weapons
                 ) + self._weapon_target_bonus(
-                    self.fight_weapon_target_net,
+                    heads.fight_weapon_target_net,
                     melee_weapons,
                     enemies,
                     feats.fight_target,
                     reduce_max=False,
                 ),
                 # Retrait cohérence : figurines de l'unité active par slot (P3-0).
-                self._point(self.coherency_query_net, latent_pi, feats.self_models),
+                self._point(heads.coherency_query_net, latent_pi, feats.self_models),
                 # Split-fire tir (P3-8) : emplacements de TIR, premier bloc du tenseur d'armes.
                 # Le second terme confronte chaque arme à la MEILLEURE cible encore présente —
                 # aucune n'est désignée à ce point d'arrêt.
                 self._point(
-                    self.shoot_weapon_sel_query_net, latent_pi, ranged_weapons
+                    heads.shoot_weapon_sel_query_net, latent_pi, ranged_weapons
                 ) + self._weapon_target_bonus(
-                    self.shoot_weapon_target_net,
+                    heads.shoot_weapon_target_net,
                     ranged_weapons,
                     enemies,
                     feats.enemies_present,
@@ -788,6 +946,15 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             ],
             dim=1,
         )
+
+    def expected_advantages(self, latent_vf: torch.Tensor, feats: PolicyFeatures) -> torch.Tensor:
+        """Avantages attendus `A(s, ·)` de la tête Q, (B, TOTAL_ACTION_SIZE), sur le tronc CRITIC.
+
+        Même assemblage que les logits, autres poids, autre tronc : la tête Q lit `latent_vf`
+        et non `latent_pi`, comme `value_net` — c'est une quantité de VALEUR, pas de décision,
+        et l'acteur ne doit pas pouvoir la déformer par son propre tronc.
+        """
+        return self._action_logits(latent_vf, feats, self.adv_heads)
 
     def _distribution_from(
         self,
@@ -886,3 +1053,25 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         latent_pi, latent_vf = self.mlp_extractor(feats.trunk)
         distribution = self._distribution_from(latent_pi, feats, action_masks)
         return self.value_net(latent_vf), distribution.log_prob(actions), distribution.entropy()
+
+    def evaluate_actions_q(
+        self,
+        obs: PyTorchObs,
+        actions: torch.Tensor,
+        action_masks: Optional[Any] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
+        """`evaluate_actions` + l'avantage attendu de l'action JOUÉE : (values, log_prob, entropy, adv).
+
+        `adv` (B,) = `A(s_t, a_t)` de la tête Q, relié au graphe : `PatchedMaskablePPO.train`
+        en fait la cible de régression `Q = V.detach() + adv` contre le retour λ, et le DÉTACHE
+        avant de le donner à l'acteur. Une seule passe avant pour les deux têtes : `feats` et les
+        deux troncs sont calculés une fois. `actions` : ids d'action (B,), entiers.
+        """
+        feats = self._split_features(obs)
+        latent_pi, latent_vf = self.mlp_extractor(feats.trunk)
+        distribution = self._distribution_from(latent_pi, feats, action_masks)
+        adv_all = self.expected_advantages(latent_vf, feats)
+        adv = adv_all.gather(1, actions.long().view(-1, 1)).squeeze(1)
+        return (
+            self.value_net(latent_vf), distribution.log_prob(actions), distribution.entropy(), adv,
+        )

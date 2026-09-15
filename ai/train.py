@@ -113,7 +113,10 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecEnv  # VecEnv : resout la forward-ref de GymEnv pour get_type_hints()
 
 # Phase 2 perf_entrainement — sous-classes locales (jamais de fork du venv).
-from ai.patched_ppo import PatchedDummyVecEnv, PatchedMaskablePPO, check_entropy_normalize_by_legal
+from ai.patched_ppo import (
+    PatchedDummyVecEnv, PatchedMaskablePPO, check_advantage_source, check_entropy_normalize_by_legal,
+    check_q_coef,
+)
 from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule  # Convert float hyperparameters to callable schedules
 from stable_baselines3.common.logger import configure as configure_sb3_logger
@@ -254,7 +257,7 @@ CURRICULUM_EXCLUDED_MODEL_PARAMS = frozenset({
 _PLAIN_CURRICULUM_KEYS = (
     "ent_coef", "normalize_advantage", "target_kl", "gamma", "gae_lambda",
     "batch_size", "n_epochs", "vf_coef", "max_grad_norm", "entropy_normalize_by_legal",
-    "value_warmup_updates",
+    "value_warmup_updates", "advantage_source", "q_coef",
 )
 
 
@@ -309,6 +312,19 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
         # Meme refus que le constructeur (`--new`) : sans lui, `"false"` ou `1` passeraient par
         # `setattr` ci-dessous et activeraient le terme normalise en `--append` seulement.
         check_entropy_normalize_by_legal(model_params["entropy_normalize_by_legal"])
+    if "advantage_source" in model_params or "q_coef" in model_params:
+        # Tete Q (S14) : memes refus que le constructeur, et les DEUX cles jugees ensemble — un
+        # profil qui pose `q_coef` sans `advantage_source` (ou l'inverse) est une faute de profil,
+        # pas un etat a completer depuis le zip. `q_coef` absent avec `gae` : None, comme en `--new`.
+        _source = check_advantage_source(model_params.get("advantage_source", "gae"))
+        check_q_coef(model_params.get("q_coef"), _source)
+        if _source == "q_head" and not hasattr(model.policy, "adv_heads"):
+            raise TypeError(
+                "advantage_source='q_head' exige une politique a tete Q (PointerMaskablePolicy) ; "
+                f"le modele charge porte {type(model.policy).__name__}."
+            )
+        model.advantage_source = _source
+        model.q_coef = check_q_coef(model_params.get("q_coef"), _source)
     if "clip_range_vf" in model_params:
         model.clip_range_vf = None if clip_vf is None else FloatSchedule(clip_vf)
     for key in _PLAIN_CURRICULUM_KEYS:
@@ -359,9 +375,26 @@ def arm_value_warmup(
     empreinte = reward_table_fingerprint(rewards_config, agent_key)
     model.value_warmup_contract_id = empreinte
     demande = int(model_params.get("value_warmup_updates", 0))  # get allowed: cle optionnelle
+    tete_q_fraiche = bool(getattr(model, "uses_q_head", False)) and bool(
+        getattr(model, "_adv_heads_fresh", False)
+    )
     if demande <= 0:
+        if tete_q_fraiche:
+            raise ValueError(
+                "advantage_source='q_head' sur un zip charge SANS tete Q : le profil doit poser "
+                "value_warmup_updates >= 1 pour que la tete apprenne, politique figee, avant que "
+                "l'acteur la lise (ses avantages valent zero a l'initialisation)."
+            )
         return
     deja = model.value_warmup_done_under
+    if tete_q_fraiche:
+        # Le marqueur atteste d'un critic V echauffe sous cette table ; il ne dit rien d'une tete
+        # Q qui n'existait pas encore. Jamais de saut ici.
+        log(
+            f"🔥 Echauffement critic + tete Q : {demande} updates (table de recompense "
+            f"{empreinte}, tete Q fraiche — zip charge sans elle)"
+        )
+        return
     if deja == empreinte:
         # `_apply_curriculum_model_params` (ou le constructeur) a pose `demande` sur le modele :
         # sans cette remise a 0, `train` rejouerait le regime.

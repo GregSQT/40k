@@ -124,6 +124,51 @@ def check_entropy_normalize_by_legal(value: Any) -> bool:
     return value
 
 
+#: Sources d'avantage de l'acteur (`model_params.advantage_source`). `gae` : l'avantage GAE du
+#: rollout buffer, comportement historique, bit à bit. `q_head` : l'avantage ATTENDU de la tête Q
+#: de `PointerMaskablePolicy` (S14, plafonnement_p1.md §9.5) — `A(s_t, a_t)` recalculé à chaque
+#: mini-lot par les réseaux courants, et non l'écart `retour − V` porté par le jet de dés.
+ADVANTAGE_SOURCES = ("gae", "q_head")
+
+#: Préfixe des paramètres de la tête Q dans le `state_dict` de la politique.
+ADV_HEADS_PREFIX = "adv_heads."
+
+
+def check_advantage_source(value: Any) -> str:
+    """La cle `model_params.advantage_source`, ou ValueError si elle n'est pas une source connue.
+
+    UN SEUL refus pour `--new` (constructeur) et `--append` (`_apply_curriculum_model_params`),
+    comme `check_entropy_normalize_by_legal` : une faute de frappe (`"Q_head"`, `"qhead"`) ne doit
+    pas retomber en silence sur le GAE d'un côté et lever de l'autre.
+    """
+    if not isinstance(value, str) or value not in ADVANTAGE_SOURCES:
+        raise ValueError(
+            f"model_params.advantage_source doit valoir l'une de {ADVANTAGE_SOURCES} (got {value!r})"
+        )
+    return value
+
+
+def check_q_coef(value: Any, advantage_source: str) -> float | None:
+    """`model_params.q_coef` : flottant > 0 EXIGE avec `q_head`, INTERDIT avec `gae`.
+
+    Un coefficient sans tête Q serait une clé morte que rien ne lit ; une tête Q sans coefficient
+    n'a pas de perte, donc n'apprend rien et l'acteur suivrait des avantages figés à zéro.
+    """
+    if advantage_source == "q_head":
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0:
+            raise ValueError(
+                f"model_params.q_coef doit etre un flottant > 0 avec advantage_source='q_head' "
+                f"(got {value!r})"
+            )
+        return float(value)
+    if value is not None:
+        raise ValueError(
+            f"model_params.q_coef n'a de sens qu'avec advantage_source='q_head' (got {value!r} "
+            f"avec advantage_source={advantage_source!r})"
+        )
+    return None
+
+
 def entropy_loss_normalized_by_legal(entropy: th.Tensor, action_masks: th.Tensor) -> th.Tensor:
     """`-mean_i(H_i / ln n_i)` sur les echantillons a n_i > 1 ; n_i = nombre d'actions LEGALES.
 
@@ -161,6 +206,31 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
     return stacked.mean().item(), (stacked >= max_norm).float().mean().item()
 
 
+def _extend_optimizer_state(saved: dict[str, Any], n_params: int) -> dict[str, Any]:
+    """État d'optimiseur d'un zip à `n` paramètres, étendu à `n_params >= n` paramètres.
+
+    Torch identifie les paramètres d'un groupe par leur RANG dans `param_groups[i]["params"]`
+    et indexe `state` par ce rang. Les `n` premiers rangs restent les mêmes (la tête Q est
+    enregistrée en dernier) ; les rangs ajoutés n'ont pas d'état. Un seul groupe attendu
+    (`ActorCriticPolicy._build` n'en crée qu'un) ; plus court que `n_params` impossible : lève.
+    """
+    groups = saved.get("param_groups")
+    if not isinstance(groups, list) or len(groups) != 1:
+        raise ValueError(
+            f"Etat d'optimiseur inattendu : {0 if not isinstance(groups, list) else len(groups)} "
+            "groupe(s) de parametres, 1 attendu."
+        )
+    saved_ranks = list(groups[0]["params"])
+    if len(saved_ranks) > n_params or saved_ranks != list(range(len(saved_ranks))):
+        raise ValueError(
+            f"Etat d'optimiseur inaligne : {len(saved_ranks)} rangs sauves "
+            f"({saved_ranks[:3]}...) pour {n_params} parametres."
+        )
+    extended = {"state": dict(saved["state"]), "param_groups": [dict(groups[0])]}
+    extended["param_groups"][0]["params"] = list(range(n_params))
+    return extended
+
+
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
 
@@ -169,6 +239,8 @@ class PatchedMaskablePPO(MaskablePPO):
         *args: Any,
         entropy_normalize_by_legal: bool = False,
         value_warmup_updates: int = 0,
+        advantage_source: str = "gae",
+        q_coef: float | None = None,
         **kwargs: Any,
     ) -> None:
         """`entropy_normalize_by_legal` : cle `model_params`, voir `entropy_loss_normalized_by_legal`.
@@ -203,6 +275,18 @@ class PatchedMaskablePPO(MaskablePPO):
           n'a pas a bouger. Ecrite a l'ACHEVEMENT et non a l'ouverture : un checkpoint pris
           au milieu de l'echauffement ne porte pas le marqueur, et `--resume-from` le rejoue en
           entier — le compteur n'etant pas serialise, un echauffement partiel n'existe pas.
+
+        TÊTE Q (S14, `advantage_source` / `q_coef`). `q_head` : `train` demande a la politique
+        `evaluate_actions_q`, prend `adv = A(s_t, a_t)` de `adv_heads` (ai/pointer_policy.py),
+        regresse `Q = V.detach() + adv` sur le retour λ du buffer (perte `q_coef × MSE`, comme
+        `vf_coef × MSE` pour V — V garde SA cible, la lecon de S23) et donne `adv.detach()` a
+        l'acteur a la place de l'avantage GAE. Attributs d'instance ordinaires, serialises et
+        reappliques par le profil en `--append` (`_PLAIN_CURRICULUM_KEYS`, ai/train.py).
+        `_adv_heads_fresh` : vrai quand le zip charge ne portait PAS la tete (`set_parameters`) ;
+        non serialise. Une tete fraiche rend `adv = 0` pour toute action (init a zero), donc
+        `q_head` sur un tel zip EXIGE un echauffement (`value_warmup_updates >= 1`, verifie par
+        `train` et par `ai/train.py::arm_value_warmup`, qui ne le saute jamais dans ce cas) :
+        la tete apprend d'abord, politique figee, puis l'acteur la lit.
         """
         self.entropy_normalize_by_legal = check_entropy_normalize_by_legal(
             entropy_normalize_by_legal
@@ -211,36 +295,36 @@ class PatchedMaskablePPO(MaskablePPO):
         self._vwu_done: int = 0
         self.value_warmup_contract_id: str | None = None
         self.value_warmup_done_under: str | None = None
+        self.advantage_source: str = check_advantage_source(advantage_source)
+        self.q_coef: float | None = check_q_coef(q_coef, self.advantage_source)
+        self._adv_heads_fresh: bool = False
         super().__init__(*args, **kwargs)
 
     def _excluded_save_params(self) -> list[str]:
         return super()._excluded_save_params() + [
-            "value_warmup_updates", "_vwu_done", "value_warmup_contract_id",
+            "value_warmup_updates", "_vwu_done", "value_warmup_contract_id", "_adv_heads_fresh",
         ]
 
-    def _critic_modules(self) -> tuple[th.nn.Module, th.nn.Module]:
-        """Les modules que l'échauffement critic (B6) laisse apprendre — la SEULE partition.
+    # ── Tête Q ────────────────────────────────────────────────────────────────────────────────
 
-        Le tronc critic de `MlpExtractor` et la tête de valeur : les deux seuls que
-        `evaluate_actions` traverse SANS que la politique les lise. Tout le reste — extracteur
-        de features PARTAGÉ, tronc pi, têtes pointeur et dense — est gelé pendant le warmup :
-        paramètres sans gradient (`_critic_only_param_ids`, `grad = None` avant
-        `optimizer.step()`) ET mode évaluation (statistiques d'`EntityRunningNorm` figées),
-        voir `train`. `ActorCriticPolicy` garantit ces deux attributs ; `PointerMaskablePolicy`
-        les construit elle-même (ai/pointer_policy.py).
-        """
-        return self.policy.mlp_extractor.value_net, self.policy.value_net
+    @property
+    def uses_q_head(self) -> bool:
+        return self.advantage_source == "q_head"
 
-    def _critic_only_param_ids(self) -> frozenset[int]:
-        """Identités des paramètres de `_critic_modules`."""
-        return frozenset(
-            id(p) for m in self._critic_modules() for p in m.parameters()
-        )
-
-    # ── 2.1 — GPU-resident buffer ─────────────────────────────────────────────────────────────
+    def _require_adv_heads(self) -> th.nn.Module:
+        """La tête Q de la politique, ou TypeError : `q_head` n'existe que sur `PointerMaskablePolicy`."""
+        adv_heads = getattr(self.policy, "adv_heads", None)
+        if not isinstance(adv_heads, th.nn.Module) or not hasattr(self.policy, "evaluate_actions_q"):
+            raise TypeError(
+                "advantage_source='q_head' exige une politique a tete Q (PointerMaskablePolicy, "
+                f"ai/pointer_policy.py) ; recu {type(self.policy).__name__}."
+            )
+        return adv_heads
 
     def _setup_model(self) -> None:
         super()._setup_model()
+        if self.uses_q_head:
+            self._require_adv_heads()
         # Remplacer le buffer Dict par la version GPU-résidente.
         if isinstance(self.observation_space, spaces.Dict):
             self.rollout_buffer = GpuMaskableDictRolloutBuffer(  # type: ignore[assignment]
@@ -252,6 +336,95 @@ class PatchedMaskablePPO(MaskablePPO):
                 gae_lambda=self.gae_lambda,
                 n_envs=self.n_envs,
             )
+
+    def set_parameters(
+        self,
+        load_path_or_dict: Any,
+        exact_match: bool = True,
+        device: th.device | str = "auto",
+    ) -> None:
+        """Chargement d'un zip SANS tête Q dans une politique qui en a une (antériorité à S14).
+
+        SB3 charge `policy` en `strict=exact_match` et l'optimiseur tel quel. Un zip sauvé avant
+        la tête Q échoue deux fois : clés `adv_heads.*` manquantes dans le `state_dict`, et
+        `param_groups[0]["params"]` de l'optimiseur plus court que `self.parameters()`. Ici, et
+        SEULEMENT quand la seule différence est l'absence de la tête :
+        - la politique charge en `strict=False` après vérification que les clés manquantes sont
+          TOUTES sous `adv_heads.` et qu'aucune clé n'est inattendue — toute autre différence
+          reste une erreur, comme avant ;
+        - l'état de l'optimiseur est ALIGNÉ : la tête Q est enregistrée en dernier
+          (`PointerMaskablePolicy._build`), donc les `n` paramètres du zip sont les `n` premiers
+          de la politique, dans le même ordre ; les indices sont conservés et les nouveaux
+          paramètres ajoutés SANS état (Adam les initialise à zéro au premier pas). Sans cet
+          alignement, `load_state_dict` refuserait (tailles de groupe) — et un alignement faux
+          appliquerait les moments d'un paramètre à un autre, en silence ;
+        - `_adv_heads_fresh` passe à vrai : `train` exigera l'échauffement si `q_head` est actif.
+        Le cas nominal (zip complet) suit le chemin SB3 inchangé.
+        """
+        params = load_path_or_dict
+        if not isinstance(params, dict):
+            from stable_baselines3.common.save_util import load_from_zip_file
+            _, params, _ = load_from_zip_file(load_path_or_dict, device=device, load_data=False)
+        policy_state = params.get("policy")
+        adv_keys = {
+            k for k in self.policy.state_dict() if k.startswith(ADV_HEADS_PREFIX)
+        }
+        if not (exact_match and isinstance(policy_state, dict) and adv_keys
+                and not any(k.startswith(ADV_HEADS_PREFIX) for k in policy_state)):
+            super().set_parameters(params, exact_match=exact_match, device=device)
+            return
+        expected = set(self.policy.state_dict()) - adv_keys
+        got = set(policy_state)
+        if expected != got:
+            raise RuntimeError(
+                "Chargement de la politique : au-dela de la tete Q absente (adv_heads.*), le "
+                f"state_dict differe — manquantes {sorted(expected - got)[:5]}, inattendues "
+                f"{sorted(got - expected)[:5]}."
+            )
+        self.policy.load_state_dict(policy_state, strict=False)
+        optimizer_state = params.get("policy.optimizer")
+        if optimizer_state is not None:
+            if not isinstance(optimizer_state, dict):
+                raise TypeError(
+                    f"Etat d'optimiseur inattendu : {type(optimizer_state).__name__}, dict attendu."
+                )
+            self.policy.optimizer.load_state_dict(
+                _extend_optimizer_state(optimizer_state, len(list(self.policy.parameters())))
+            )
+        remaining = {
+            k: v for k, v in params.items() if k not in ("policy", "policy.optimizer")
+        }
+        if remaining:
+            super().set_parameters(remaining, exact_match=False, device=device)
+        self._adv_heads_fresh = True
+
+    def _critic_modules(self) -> tuple[th.nn.Module, ...]:
+        """Les modules que l'échauffement critic (B6) laisse apprendre — la SEULE partition.
+
+        Le tronc critic de `MlpExtractor` et la tête de valeur : les deux seuls que
+        `evaluate_actions` traverse SANS que la politique les lise. Tout le reste — extracteur
+        de features PARTAGÉ, tronc pi, têtes pointeur et dense — est gelé pendant le warmup :
+        paramètres sans gradient (`_critic_only_param_ids`, `grad = None` avant
+        `optimizer.step()`) ET mode évaluation (statistiques d'`EntityRunningNorm` figées),
+        voir `train`. `ActorCriticPolicy` garantit ces deux attributs ; `PointerMaskablePolicy`
+        les construit elle-même (ai/pointer_policy.py).
+        """
+        modules: tuple[th.nn.Module, ...] = (
+            self.policy.mlp_extractor.value_net, self.policy.value_net,
+        )
+        if self.uses_q_head:
+            # La tête Q est une quantité de VALEUR : elle apprend pendant l'échauffement, avec V,
+            # politique figée — c'est même la raison d'être de l'échauffement sur une tête fraîche.
+            modules = modules + (self._require_adv_heads(),)
+        return modules
+
+    def _critic_only_param_ids(self) -> frozenset[int]:
+        """Identités des paramètres de `_critic_modules`."""
+        return frozenset(
+            id(p) for m in self._critic_modules() for p in m.parameters()
+        )
+
+    # ── 2.1 — GPU-resident buffer : voir `_setup_model` ci-dessus ────────────────────────────
 
     # ── 2.2 — Logging différé (~225 syncs → ~5 syncs par update) ─────────────────────────────
 
@@ -308,6 +481,16 @@ class PatchedMaskablePPO(MaskablePPO):
         # Échauffement critic (B6) : les paramètres que le warmup laisse apprendre, calculés une
         # fois par update et SEULEMENT pendant le régime (voir `_critic_only_param_ids`).
         _in_warmup: bool = self._vwu_done < self.value_warmup_updates
+        use_q = self.uses_q_head
+        if use_q and self._adv_heads_fresh and self.value_warmup_updates <= 0:
+            raise RuntimeError(
+                "advantage_source='q_head' sur un modele charge SANS tete Q : la tete est "
+                "fraiche (avantages a zero) et le profil ne demande aucun echauffement "
+                "(value_warmup_updates). Poser value_warmup_updates >= 1 : la tete doit "
+                "apprendre, politique figee, avant que l'acteur la lise."
+            )
+        q_losses_t: list[th.Tensor] = []
+        adv_q_abs_t: list[th.Tensor] = []
         if _in_warmup and self.value_warmup_contract_id is None:
             raise RuntimeError(
                 "value_warmup_updates > 0 exige value_warmup_contract_id (empreinte de la table "
@@ -340,11 +523,19 @@ class PatchedMaskablePPO(MaskablePPO):
                 if isinstance(self.action_space, spaces.Discrete):
                     actions = rollout_data.actions.long().flatten()
 
-                values, log_prob, entropy = self.policy.evaluate_actions(
-                    rollout_data.observations,
-                    actions,
-                    action_masks=rollout_data.action_masks,
-                )
+                adv_q: th.Tensor | None = None
+                if use_q:
+                    values, log_prob, entropy, adv_q = self.policy.evaluate_actions_q(  # type: ignore[attr-defined]
+                        rollout_data.observations,
+                        actions,
+                        action_masks=rollout_data.action_masks,
+                    )
+                else:
+                    values, log_prob, entropy = self.policy.evaluate_actions(
+                        rollout_data.observations,
+                        actions,
+                        action_masks=rollout_data.action_masks,
+                    )
                 values = values.flatten()
 
                 # Diagnostic minibatch 0/epoch 0 : seul point vraiment pré-update.
@@ -359,7 +550,20 @@ class PatchedMaskablePPO(MaskablePPO):
                         # insensible aux extrêmes individuels (pas de débordement float32 sur le mean).
                         _diag_ratio_mb0 = th.exp(_lp_drift.mean())
 
-                advantages = rollout_data.advantages
+                # AVANTAGE DE L'ACTEUR. `q_head` : `A(s_t, a_t)` de la tête Q, DÉTACHÉ — l'acteur
+                # ne doit pas pouvoir déformer la tête pour grossir son propre objectif — et
+                # recalculé par les réseaux courants à chaque mini-lot (pas figé au rollout : la
+                # tête continue d'apprendre pendant les epochs). La perte Q régresse
+                # `Q = V.detach() + adv` sur le même retour λ que V : V garde sa cible (S23), et
+                # la tête n'apprend que l'écart attendu de l'action jouée.
+                if adv_q is not None:
+                    q_loss = F.mse_loss(rollout_data.returns, values.detach() + adv_q)
+                    q_losses_t.append(q_loss)
+                    adv_q_abs_t.append(adv_q.detach().abs().mean())
+                    advantages = adv_q.detach()
+                else:
+                    q_loss = None
+                    advantages = rollout_data.advantages
                 if self.normalize_advantage:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
@@ -429,6 +633,9 @@ class PatchedMaskablePPO(MaskablePPO):
                     loss = self.vf_coef * value_loss
                 else:
                     loss = policy_loss + self.ent_coef * entropy_term + self.vf_coef * value_loss
+                if q_loss is not None:
+                    # `q_coef` est garanti non nul par `check_q_coef` quand `q_head` est actif.
+                    loss = loss + float(self.q_coef or 0.0) * q_loss
 
                 # Norme du gradient de CHAQUE terme, pondere comme dans la loss.
                 # `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
@@ -437,11 +644,14 @@ class PatchedMaskablePPO(MaskablePPO):
                 # voisins — trois backward par UPDATE, pas par minibatch.
                 if epoch == 0 and _diag_grad_norms_mb0 is None:
                     _diag_grad_norms_mb0 = {}
-                    for _term_name, _term in (
+                    _terms: list[tuple[str, th.Tensor]] = [
                         ("policy", policy_loss),
                         ("value", self.vf_coef * value_loss),
                         ("entropy", self.ent_coef * entropy_term),
-                    ):
+                    ]
+                    if q_loss is not None:
+                        _terms.append(("q", float(self.q_coef or 0.0) * q_loss))
+                    for _term_name, _term in _terms:
                         self.policy.optimizer.zero_grad()
                         _term.backward(retain_graph=True)
                         _diag_grad_norms_mb0[_term_name] = float(
@@ -524,6 +734,11 @@ class PatchedMaskablePPO(MaskablePPO):
             self.logger.record("train/approx_kl_max", approx_kl_max)
         self.logger.record("train/clip_fraction", clip_frac_mean)
         self.logger.record("train/n_minibatches_done", n_minibatches_done)
+        # Tête Q (S14) : perte de régression et amplitude moyenne de l'avantage attendu de
+        # l'action jouée. NaN quand la source est `gae` (rien n'est calculé, comportement inchangé).
+        self.logger.record("train/q_loss", _mean_item(q_losses_t))
+        self.logger.record("train/adv_q_abs_mean", _mean_item(adv_q_abs_t))
+        self.logger.record("train/advantage_source_q", int(use_q))
         # Norme BRUTE, moyennee sur les minibatches de l'update, et part de ces minibatches ou
         # elle depassait `max_grad_norm`. La norme APRES ecretage n'est pas republiee : elle vaut
         # min(brute, max_grad_norm), donc elle se deduit de ces deux scalaires et de la config.
@@ -556,11 +771,11 @@ class PatchedMaskablePPO(MaskablePPO):
             _diag_ratio_mb0.item() if _diag_ratio_mb0 is not None else _nan,
         )
         # Decomposition de la norme du gradient par terme (cf. _diag_grad_norms_mb0).
-        for _term_name in ("policy", "value", "entropy"):
+        for _term_name in ("policy", "value", "entropy", "q"):
             self.logger.record(
                 f"diag/grad_norm_{_term_name}_mb0",
                 _diag_grad_norms_mb0[_term_name]
-                if _diag_grad_norms_mb0 is not None
+                if _diag_grad_norms_mb0 is not None and _term_name in _diag_grad_norms_mb0
                 else _nan,
             )
         # PART du gradient qui revient a la POLITIQUE — la seule des trois tetes qui joue les
