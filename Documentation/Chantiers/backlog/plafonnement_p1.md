@@ -974,6 +974,14 @@ validées ensemble en `--new` comme en `--append`, sérialisées dans le zip.
   `MaskablePPO.load` nu, tête présente mais jamais entraînée), rouges par mutation (tolérance
   retirée → 4 rouges ; `is_untrained` forcé faux → 4 rouges). 20 verts ; typage 0 erreur sur les
   5 fichiers.
+- Seconde `/code-review` (13:45, sur la livraison complète) : 1 finding — `scripts/grad_signal_probe.py`
+  construisait le terme policy sur les avantages GAE et sans terme Q, donc mesurait sur un
+  checkpoint `q_head` un gradient que le run n'applique pas. Corrigé par un REFUS explicite
+  (`refuse_q_head_model`, au chargement et au mini-lot ; test) : la sonde ne décompose que
+  l'acteur GAE. Étendre la sonde à S14 demande d'abord de dire ce que « fraction de signal »
+  veut dire quand l'avantage est une sortie de réseau et non un retour bruité — décision à
+  prendre si S14 passe (§9.9, étape 4). Note de la même review : `test_phase2_sb3_pipeline.py`
+  posait un attribut mort `_adv_heads_fresh` (retiré).
 - Vrai chemin vérifié sur le zip P0 réel de l'agent expl (77 rangs Adam → 111, tête à zéro,
   `q_head` + `q_coef` 0,17 appliqués par le profil, échauffement 20 updates armé « tête Q jamais
   entraînée — jamais sauté »).

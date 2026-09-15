@@ -565,6 +565,40 @@ def test_pertes_policy_des_lambdas_supplementaires_dans_la_meme_passe_avant():
     assert not th.allclose(g_sweep, g_model)
 
 
+def test_un_checkpoint_a_tete_q_est_refuse_par_la_sonde():
+    """Sous `advantage_source='q_head'` (S14), `train` n'applique pas le terme policy que la sonde
+    construit sur les avantages GAE et ajoute un terme Q qu'elle ignore : la mesure porterait
+    un nom faux. Refus explicite, au niveau du mini-lot comme au chargement (`refuse_q_head_model`)."""
+    from types import SimpleNamespace
+
+    import pytest
+    import torch as th
+    from gymnasium import spaces
+
+    from scripts.grad_signal_probe import minibatch_term_losses, refuse_q_head_model
+
+    obs_dim, n_actions, batch = 6, 5, 8
+    policy = _TinyPolicy(obs_dim, n_actions)
+    base = dict(
+        policy=policy, action_space=spaces.Discrete(n_actions), clip_range=lambda _p: 0.2,
+        _current_progress_remaining=1.0, normalize_advantage=True, clip_range_vf=None,
+        vf_coef=0.5, ent_coef=0.01, entropy_normalize_by_legal=False,
+    )
+    data = SimpleNamespace(
+        observations=th.randn(batch, obs_dim), actions=th.zeros(batch, 1),
+        action_masks=th.ones(batch, n_actions, dtype=th.bool), old_log_prob=th.zeros(batch),
+        advantages=th.randn(batch), old_values=th.zeros(batch), returns=th.randn(batch),
+    )
+    zeros = th.zeros(batch)
+    with pytest.raises(NotImplementedError, match="q_head"):
+        minibatch_term_losses(SimpleNamespace(**base, advantage_source="q_head"), data, zeros, zeros)
+    with pytest.raises(NotImplementedError, match="q_head"):
+        refuse_q_head_model(SimpleNamespace(advantage_source="q_head"))
+    # `gae` explicite et attribut absent (modèle antérieur à S14) passent tous deux.
+    refuse_q_head_model(SimpleNamespace(advantage_source="gae"))
+    assert "policy" in minibatch_term_losses(SimpleNamespace(**base), data, zeros, zeros)
+
+
 def test_reset_policy_parameters_change_tout_et_est_reproductible():
     import torch as th
 

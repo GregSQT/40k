@@ -751,9 +751,29 @@ def group_sq_norms(flat: Any, groups: Dict[str, Tuple[int, int]]) -> Dict[str, f
     return out
 
 
+def refuse_q_head_model(model: Any) -> None:
+    """La sonde ne sait décomposer que le gradient d'un acteur à avantage GAE.
+
+    Sous `advantage_source='q_head'` (S14, ai/patched_ppo.py), `train` donne à l'acteur
+    `A(s_t, a_t)` de la tête Q et ajoute un terme `q_coef × MSE` : le terme policy construit ici
+    sur `rollout_data.advantages` serait un gradient que le run n'applique PAS, et le terme Q
+    manquerait. Refus explicite (T1) plutôt qu'une mesure fausse portant le même nom ; ce que
+    « fraction de signal » doit vouloir dire sous un avantage appris est une décision à prendre
+    avant d'étendre la sonde (plafonnement_p1.md §5.13).
+    """
+    if getattr(model, "advantage_source", "gae") != "gae":
+        raise NotImplementedError(
+            "grad_signal_probe : le checkpoint porte advantage_source="
+            f"{getattr(model, 'advantage_source')!r} ; la sonde ne décompose que le gradient d'un "
+            "acteur GAE (le terme policy serait celui que le run n'applique pas, le terme Q absent)."
+        )
+
+
 def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outcome_valid: Any,
                           sweep_advantages: Optional[Dict[float, Any]] = None) -> Dict[str, Any]:
-    """Les termes de la loss PPO d'un mini-lot, comme `PatchedMaskablePPO.train` les calcule.
+    """Les termes de la loss PPO d'un mini-lot, comme `PatchedMaskablePPO.train` les calcule
+    sous `advantage_source='gae'` — le seul régime que la sonde sait décomposer
+    (`refuse_q_head_model`).
 
     `outcome_adv` / `outcome_valid` : avantage d'issue standardisé sur les pas valides du
     mini-lot et masque des pas valides, alignés sur `rollout_data`. Le terme d'issue est un
@@ -767,6 +787,7 @@ def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outco
 
     from ai.patched_ppo import entropy_loss_normalized_by_legal
 
+    refuse_q_head_model(model)
     actions = rollout_data.actions
     if isinstance(model.action_space, spaces.Discrete):
         actions = rollout_data.actions.long().flatten()
@@ -954,6 +975,7 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     T.apply_rollout_n_steps(model_params, n_envs, vec_env.observation_space, log=log)
     model_params = T._model_params_with_ent_coef_frozen(model_params, log=log)
     model = T._load_checkpoint(probe_model_path, vec_env, device)
+    refuse_q_head_model(model)  # avant toute collecte : la sonde ne mesure que l'acteur GAE
     if random_init_seed is not None:
         n_reset = reset_policy_parameters(model.policy, random_init_seed)
         log(f"🎲 poids RÉINITIALISÉS en mémoire (graine {random_init_seed}, {n_reset} modules) : contrôle positif aléatoire")
