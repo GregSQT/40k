@@ -12,8 +12,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from scripts.grad_signal_probe import refuse_q_head_model, require_q_head_model
-from scripts.q_head_structure_probe import ROLLOUT_STATS, decompose, pooled, summarize
+from scripts.grad_signal_probe import refuse_q_head_model
+from scripts.q_head_structure_probe import (
+    ROLLOUT_STATS,
+    decompose,
+    pooled,
+    require_q_head_model,
+    summarize,
+)
 
 
 def _construct(seed: int, n: int = 20_000, sd_offset: float = 0.222, sd_centered: float = 0.027,

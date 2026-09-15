@@ -173,19 +173,13 @@ def center_under_policy(
     return adv_all - offset.unsqueeze(1), offset
 
 
-def masked_probs(distribution: MaskableDistribution) -> torch.Tensor:
+def masked_probs(distribution: MaskableCategoricalDistribution) -> torch.Tensor:
     """π(·|s) (B, n_actions) de la distribution MASQUÉE construite par `_distribution_from`.
 
     `MaskableCategorical` pose −1e8 sur les logits masqués : probs EXACTEMENT nulles hors
     actions légales en float32. Reliée au graphe : l'appelant détache s'il le faut.
     """
-    inner = distribution.distribution
-    if not isinstance(inner, MaskableCategorical):
-        raise TypeError(
-            "masked_probs attend la distribution categorielle masquee de PointerMaskablePolicy "
-            f"(recu : {type(inner).__name__})."
-        )
-    return inner.probs
+    return distribution.distribution.probs
 
 
 _LENIENT_OPTIMIZERS: Dict[type, type] = {}
@@ -1120,7 +1114,7 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         latent_pi: torch.Tensor,
         feats: PolicyFeatures,
         action_masks: Optional[np.ndarray],
-    ) -> MaskableDistribution:
+    ) -> MaskableCategoricalDistribution:
         logits = self._action_logits(latent_pi, feats)
         # Garde-fou de divergence. Ne PAS s'en remettre aux contraintes de `torch.distributions` :
         # `Distribution._validate_args` vaut `__debug__`, donc toute cette validation disparaît

@@ -1081,8 +1081,8 @@ Relance par l'utilisateur après merge : `python3 ai/train.py --agent Armageddon
 **Instrument non bloquant** : `scripts/q_head_structure_probe.py` (test
 `tests/unit/scripts/test_q_head_structure_probe.py`) décompose `q_loss − value_loss` en part
 offset `E[c² − 2·c·R]` et part centrée `E[A_c² − 2·A_c·R]` sur un checkpoint `q_head`, collecte
-sans entraînement (contexte de `grad_signal_probe.py::build_probe_context` avec
-`allow_q_head=True` explicite — `refuse_q_head_model` reste intact pour la sonde de gradient),
+sans entraînement (contexte de `grad_signal_probe.py::build_probe_context`, puis sa propre garde
+`require_q_head_model` — miroir de `refuse_q_head_model`, qui reste à la sonde de gradient),
 jackknife par rollout. À lancer sur le dernier checkpoint du run non centré quand le GPU est
 libre : il documente le point de départ (part d'offset attendue ~0,98) et sert de référence au
 tag `adv_q_offset_abs_mean` du rerun. Il ne conditionne ni le code ni la relance.

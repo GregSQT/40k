@@ -769,17 +769,6 @@ def refuse_q_head_model(model: Any) -> None:
         )
 
 
-def require_q_head_model(model: Any) -> None:
-    """Miroir de `refuse_q_head_model` pour la sonde de STRUCTURE de la tête Q : un checkpoint
-    `gae` n'a pas de tête entraînée (avantages nuls partout), la décomposition n'y mesure rien."""
-    if getattr(model, "advantage_source", "gae") != "q_head":
-        raise ValueError(
-            "q_head_structure_probe : le checkpoint porte advantage_source="
-            f"{getattr(model, 'advantage_source', 'gae')!r} ; la sonde de structure exige une tête Q "
-            "entraînée (advantage_source='q_head')."
-        )
-
-
 def minibatch_term_losses(model: Any, rollout_data: Any, outcome_adv: Any, outcome_valid: Any,
                           sweep_advantages: Optional[Dict[float, Any]] = None) -> Dict[str, Any]:
     """Les termes de la loss PPO d'un mini-lot, comme `PatchedMaskablePPO.train` les calcule
@@ -868,14 +857,12 @@ def snapshot_mtimes(paths: Sequence[Path]) -> Dict[str, float]:
 def build_probe_context(agent: str, stage_name: str, training_config_name: str, resolution: int,
                         device: str, log: Callable[[str], None], model_path: Optional[str] = None,
                         opponent_deterministic: bool = False,
-                        random_init_seed: Optional[int] = None,
-                        allow_q_head: bool = False) -> Dict[str, Any]:
+                        random_init_seed: Optional[int] = None) -> Dict[str, Any]:
     """L'environnement EXACT de l'étape, par les briques d'ai/train.py, et le modèle sondé.
 
-    `allow_q_head` : faux par défaut — cette sonde ne décompose que l'acteur GAE
-    (`refuse_q_head_model`). Vrai SEULEMENT pour `scripts/q_head_structure_probe.py`, qui ne
-    mesure pas un gradient mais la structure de la tête Q elle-même et exige un checkpoint
-    `q_head`.
+    Aucune garde sur `advantage_source` ici : chaque sonde pose la sienne sur `ctx["model"]`
+    (`refuse_q_head_model` pour celle-ci, `require_q_head_model` pour
+    scripts/q_head_structure_probe.py) avant toute collecte.
 
     Même ordre que `main()` → `_prepare_curriculum_stage` → `train_with_scenario_rotation`,
     sans les effets de bord d'un run : ni `prepare_run_artifacts` (contrat, archivage, run-meta),
@@ -992,10 +979,6 @@ def build_probe_context(agent: str, stage_name: str, training_config_name: str, 
     T.apply_rollout_n_steps(model_params, n_envs, vec_env.observation_space, log=log)
     model_params = T._model_params_with_ent_coef_frozen(model_params, log=log)
     model = T._load_checkpoint(probe_model_path, vec_env, device)
-    if allow_q_head:
-        require_q_head_model(model)
-    else:
-        refuse_q_head_model(model)  # avant toute collecte : la sonde ne mesure que l'acteur GAE
     if random_init_seed is not None:
         n_reset = reset_policy_parameters(model.policy, random_init_seed)
         log(f"🎲 poids RÉINITIALISÉS en mémoire (graine {random_init_seed}, {n_reset} modules) : contrôle positif aléatoire")
@@ -1468,6 +1451,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model_path=args.model,
         opponent_deterministic=args.opponent_deterministic, random_init_seed=args.random_init,
     )
+    refuse_q_head_model(ctx["model"])  # avant toute collecte : la sonde ne mesure que l'acteur GAE
     ctx["workdir"] = workdir
     gae_lambdas = sweep_lambdas(float(ctx["model"].gae_lambda), extra_gae_lambdas)
     guarded = [

@@ -28,11 +28,11 @@ du 2026-09-15 (0,98 sur 978 états du run non centré). Dispersion ENTRE actions
 `sd_within = sqrt(Σ_a π·(A − c)²)` moyennée sur les états.
 Intervalles JACKKNIFE sur les K rollouts (± 1,96 erreur-type), comme `grad_signal_probe.py`.
 
-LECTURE SEULE. Contexte de `grad_signal_probe.py::build_probe_context` avec `allow_q_head=True`
-EXPLICITE (`refuse_q_head_model` reste intact pour la sonde de gradient ; ici un checkpoint
-`gae` est refusé — sa tête est vide). Refuse de démarrer si un `ai/train.py` tourne, vérifie en
-sortie que ni le zip ni le pkl ni les JSON de l'agent n'ont bougé. Ne conditionne ni le code ni
-la relance de S14 : instrument.
+LECTURE SEULE. Contexte de `grad_signal_probe.py::build_probe_context`, puis `require_q_head_model`
+(miroir de `refuse_q_head_model` de la sonde de gradient : ici un checkpoint `gae` est refusé —
+sa tête est vide). Refuse de démarrer si un `ai/train.py` tourne, vérifie en sortie que ni le
+zip ni le pkl ni les JSON de l'agent n'ont bougé. Ne conditionne ni le code ni la relance de
+S14 : instrument.
 
 Usage :
     python3 scripts/q_head_structure_probe.py --agent ArmageddonAgent_x1_expl --etape E0 \\
@@ -58,6 +58,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.grad_signal_probe import (  # noqa: E402  (dépend du sys.path ci-dessus)
+    _ratio,
     build_probe_context,
     jackknife,
     make_recorder,
@@ -72,6 +73,17 @@ ROLLOUT_STATS = (
     "var_a", "var_offset", "var_centered", "cov_offset_centered", "sd_within",
     "abs_a", "abs_offset", "abs_centered", "n_steps",
 )
+
+
+def require_q_head_model(model: Any) -> None:
+    """Miroir de `grad_signal_probe.refuse_q_head_model` : un checkpoint `gae` n'a pas de tête
+    entraînée (avantages nuls partout), la décomposition n'y mesure rien."""
+    if getattr(model, "advantage_source", "gae") != "q_head":
+        raise ValueError(
+            "q_head_structure_probe : le checkpoint porte advantage_source="
+            f"{getattr(model, 'advantage_source', 'gae')!r} ; la sonde de structure exige une tête Q "
+            "entraînée (advantage_source='q_head')."
+        )
 
 
 def decompose(returns: np.ndarray, values: np.ndarray, adv_played: np.ndarray,
@@ -119,9 +131,8 @@ def decompose(returns: np.ndarray, values: np.ndarray, adv_played: np.ndarray,
 
 def pooled(per_rollout: np.ndarray, keep: np.ndarray, column: str) -> float:
     """Moyenne pondérée par le nombre de pas de la colonne sur les rollouts `keep`."""
-    cols = {name: i for i, name in enumerate(ROLLOUT_STATS)}
-    n = per_rollout[keep, cols["n_steps"]]
-    return float(np.sum(per_rollout[keep, cols[column]] * n) / np.sum(n))
+    n = per_rollout[keep, ROLLOUT_STATS.index("n_steps")]
+    return float(np.sum(per_rollout[keep, ROLLOUT_STATS.index(column)] * n) / np.sum(n))
 
 
 def summarize(per_rollout: np.ndarray) -> Dict[str, Any]:
@@ -136,12 +147,11 @@ def summarize(per_rollout: np.ndarray) -> Dict[str, Any]:
         out[column] = jackknife(lambda keep, col=column: pooled(per_rollout, keep, col), k)
 
     def _share(keep: np.ndarray) -> float:
-        var_a = pooled(per_rollout, keep, "var_a")
-        return pooled(per_rollout, keep, "var_offset") / var_a if var_a > 0 else float("nan")
+        return _ratio(pooled(per_rollout, keep, "var_offset"), pooled(per_rollout, keep, "var_a"))
 
     def _sd_ratio(keep: np.ndarray) -> float:
-        within = pooled(per_rollout, keep, "sd_within")
-        return float(np.sqrt(pooled(per_rollout, keep, "var_offset"))) / within if within > 0 else float("nan")
+        sd_offset = float(np.sqrt(pooled(per_rollout, keep, "var_offset")))
+        return _ratio(sd_offset, pooled(per_rollout, keep, "sd_within"))
 
     out["offset_var_share"] = jackknife(_share, k)
     out["sd_offset_over_sd_within"] = jackknife(_sd_ratio, k)
@@ -154,7 +164,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None]) -> D
     import torch as th
     from stable_baselines3.common.logger import configure as configure_sb3_logger
 
-    from ai.pointer_policy import PointerMaskablePolicy, masked_probs
+    from ai.pointer_policy import PointerMaskablePolicy, center_under_policy, masked_probs
 
     model = ctx["model"]
     env = ctx["env"]
@@ -180,7 +190,7 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None]) -> D
             raise RuntimeError("collect_rollouts a rendu False")
         t_collect = time.perf_counter() - t0
         buf = model.rollout_buffer
-        chunks: Dict[str, List[np.ndarray]] = {key: [] for key in ("returns", "values", "adv", "offset", "sd_within")}
+        chunks: Dict[str, List[th.Tensor]] = {key: [] for key in ("returns", "values", "adv", "offset", "sd_within")}
         policy.set_training_mode(False)
         with th.no_grad():
             for rollout_data in buf.get(batch_size):
@@ -189,32 +199,27 @@ def measure(ctx: Dict[str, Any], rollouts: int, log: Callable[[str], None]) -> D
                 latent_pi, latent_vf = policy.mlp_extractor(feats.trunk)
                 probs = masked_probs(policy._distribution_from(latent_pi, feats, rollout_data.action_masks))
                 adv_all = policy.expected_advantages(latent_vf, feats)
-                if adv_all.shape != probs.shape:
-                    raise RuntimeError(f"A {tuple(adv_all.shape)} ≠ π {tuple(probs.shape)}")
-                offset = (probs * adv_all).sum(dim=1)
-                sd_within = th.sqrt((probs * (adv_all - offset.unsqueeze(1)) ** 2).sum(dim=1))
-                chunks["returns"].append(rollout_data.returns.flatten().cpu().numpy())
-                chunks["values"].append(policy.value_net(latent_vf).flatten().cpu().numpy())
-                chunks["adv"].append(adv_all.gather(1, actions.view(-1, 1)).squeeze(1).cpu().numpy())
-                chunks["offset"].append(offset.cpu().numpy())
-                chunks["sd_within"].append(sd_within.cpu().numpy())
-        vectors = {key: np.concatenate(v) for key, v in chunks.items()}
+                adv_centered, offset = center_under_policy(adv_all, probs)
+                chunks["returns"].append(rollout_data.returns.flatten())
+                chunks["values"].append(policy.value_net(latent_vf).flatten())
+                chunks["adv"].append(adv_all.gather(1, actions.view(-1, 1)).squeeze(1))
+                chunks["offset"].append(offset)
+                chunks["sd_within"].append(th.sqrt((probs * adv_centered ** 2).sum(dim=1)))
+        vectors = {key: th.cat(v).cpu().numpy() for key, v in chunks.items()}
         stats = decompose(vectors["returns"], vectors["values"], vectors["adv"], vectors["offset"], vectors["sd_within"])
         per_rollout[k] = [stats[name] for name in ROLLOUT_STATS]
-        entry = {
+        rollout_log.append({
             "rollout": k, "t_collect_s": round(t_collect, 1),
             "episodes": recorder.episodes_total, "episodes_pool": recorder.episodes_pool,
-            **{name: stats[name] for name in ("value_loss", "q_loss", "gap", "gap_offset", "gap_centered", "var_a", "var_offset", "sd_within")},
-        }
-        rollout_log.append(entry)
+            **stats,
+        })
         log(
             f"  rollout {k + 1}/{rollouts} ({t_collect:.0f} s, {recorder.episodes_total} épisodes) : "
             f"gap {stats['gap']:+.5f} = offset {stats['gap_offset']:+.5f} + centré {stats['gap_centered']:+.5f} "
             f"+ croisé {stats['gap_cross']:+.5f} ; sd(offset) {np.sqrt(stats['var_offset']):.4f}, "
-            f"sd intra-état {stats['sd_within']:.4f}, part offset {stats['var_offset'] / stats['var_a'] if stats['var_a'] > 0 else float('nan'):.3f}"
+            f"sd intra-état {stats['sd_within']:.4f}, part offset {_ratio(stats['var_offset'], stats['var_a']):.3f}"
         )
-    return {"summary": summarize(per_rollout), "per_rollout": rollout_log,
-            "per_rollout_matrix": {"columns": list(ROLLOUT_STATS), "rows": per_rollout.tolist()}}
+    return {"summary": summarize(per_rollout), "per_rollout": rollout_log}
 
 
 def _fmt(stat: Dict[str, float], digits: int = 5) -> str:
@@ -279,8 +284,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ctx = build_probe_context(
         args.agent, args.etape, args.training_config, args.resolution, args.device, log,
-        model_path=args.model, opponent_deterministic=args.opponent_deterministic, allow_q_head=True,
+        model_path=args.model, opponent_deterministic=args.opponent_deterministic,
     )
+    require_q_head_model(ctx["model"])
     ctx["workdir"] = workdir
     guarded = [
         *dict.fromkeys(Path(ctx[key]) for key in (

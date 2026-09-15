@@ -148,10 +148,9 @@ def test_center_under_policy_est_invariant_a_une_constante_par_etat() -> None:
     adv_all = th.randn(3, 7, generator=g, dtype=th.float64)
     probs = th.softmax(th.randn(3, 7, generator=g, dtype=th.float64), dim=1)
     c = th.tensor([[10.0], [-3.5], [0.25]], dtype=th.float64)
-    adv_c, _ = center_under_policy(adv_all, probs)
+    adv_c, offset = center_under_policy(adv_all, probs)
     adv_c_shifted, offset_shifted = center_under_policy(adv_all + c, probs)
     assert th.allclose(adv_c, adv_c_shifted, atol=1e-12)
-    _, offset = center_under_policy(adv_all, probs)
     assert th.allclose(offset_shifted, offset + c.squeeze(1))
 
 
@@ -203,9 +202,8 @@ def test_evaluate_actions_q_rend_l_avantage_centre_de_l_action_jouee_sans_change
     assert th.equal(probs[1, 1030:], th.zeros_like(probs[1, 1030:])), "VERT VACANT : masque sans effet"
     expected_offset = (probs * adv_all).sum(dim=1)
     assert th.allclose(offset, expected_offset)
-    expected_adv = th.stack([adv_all[i, int(a)] for i, a in enumerate(actions)]) - expected_offset
-    assert th.allclose(adv, expected_adv)
     raw = th.stack([adv_all[i, int(a)] for i, a in enumerate(actions)])
+    assert th.allclose(adv, raw - expected_offset)
     assert not th.allclose(adv, raw), "VERT VACANT : centrage sans effet (offset nul)"
     assert not th.equal(adv, th.zeros_like(adv)), "VERT VACANT : avantages tous nuls"
 

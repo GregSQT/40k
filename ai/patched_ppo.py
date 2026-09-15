@@ -453,13 +453,13 @@ class PatchedMaskablePPO(MaskablePPO):
                     actions = rollout_data.actions.long().flatten()
 
                 adv_q: th.Tensor | None = None
-                adv_q_offset: th.Tensor | None = None
                 if use_q:
                     values, log_prob, entropy, adv_q, adv_q_offset = self.policy.evaluate_actions_q(  # type: ignore[attr-defined]
                         rollout_data.observations,
                         actions,
                         action_masks=rollout_data.action_masks,
                     )
+                    adv_q_offset_abs_t.append(adv_q_offset.abs().mean())
                 else:
                     values, log_prob, entropy = self.policy.evaluate_actions(
                         rollout_data.observations,
@@ -488,11 +488,10 @@ class PatchedMaskablePPO(MaskablePPO):
                 # continue d'apprendre pendant les epochs). La perte Q régresse
                 # `Q = V.detach() + A_c` sur le même retour λ que V : V garde sa cible (S23), et
                 # la tête n'apprend que l'écart attendu de l'action jouée à la moyenne sous π.
-                if adv_q is not None and adv_q_offset is not None:
+                if adv_q is not None:
                     q_loss = F.mse_loss(rollout_data.returns, values.detach() + adv_q)
                     q_losses_t.append(q_loss)
                     adv_q_abs_t.append(adv_q.detach().abs().mean())
-                    adv_q_offset_abs_t.append(adv_q_offset.abs().mean())
                     advantages = adv_q.detach()
                 else:
                     q_loss = None
