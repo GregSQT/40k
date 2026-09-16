@@ -136,6 +136,9 @@ def test_en_echauffement_les_activations_d_un_mini_lot_ne_survivent_pas_au_suiva
     détachement de `log_prob`/`entropy` en tête de boucle, ajouté le 2026-09-16 comme seconde
     couche, a été retiré le même jour : il ne libérait que 7 tenseurs (B,)/(B, A) sur 75 et
     masquait ce verrou (le rouge ne tenait plus qu'au mini-lot du diagnostic, `{2: 72, 3: 0}`).
+    Ce verrou ne voit que les appends dont le graphe atteint la branche politique
+    (`policy_loss`, `entropy_loss`) : le contrôle ligne à ligne de TOUS les appends est
+    `test_les_listes_de_logging_ne_recoivent_que_des_tenseurs_sans_graphe`.
     CONTRÔLE NON VACANT : chaque mini-lot a bien sauvé des activations (`seen > 0`), sinon un
     hook non branché rendrait `alive == 0` sans rien prouver.
     """
@@ -160,6 +163,43 @@ def test_hors_echauffement_le_backward_complet_libere_deja_les_activations() -> 
     assert recorded["train/value_warmup_active"] == pytest.approx(0.0)
     assert all(n > 0 for n in seen.values()), f"aucune activation suivie : {seen}"
     assert alive_two_back == {2: 0, 3: 0}, alive_two_back
+
+
+def test_les_listes_de_logging_ne_recoivent_que_des_tenseurs_sans_graphe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VERROU ligne à ligne des `.detach()` sur les appends des listes de logging (`pg_losses_t`,
+    `value_losses_t`, `entropy_losses_t`, `entropy_losses_normalized_t`) : `_mean_item` reçoit
+    chaque liste en fin de `train()`, aucun élément ne doit porter de `grad_fn`. Retirer UN de ces
+    `.detach()` met ce test au ROUGE (tous les mini-lots pour cette liste), y compris ceux que le
+    verrou par activations ne voit pas : `value_loss` (son graphe est libéré par le backward,
+    mais ses nœuds survivraient dans la liste) et `entropy_loss_normalized` — d'où
+    `entropy_normalize_by_legal=True`, le réglage de `ArmageddonAgent_x1_entnorm` : par défaut
+    ce terme est calculé sous `no_grad` et son `.detach()` ne serait pas éprouvé.
+    CONTRÔLE NON VACANT : au moins 5 listes non vides reçues, chacune avec un élément par
+    mini-lot ; les listes Q sont vides ici (`advantage_source` gae)."""
+    import ai.patched_ppo as patched_ppo_module
+
+    model = _production_model(n_warmup=1)
+    model.entropy_normalize_by_legal = True
+    original_mean_item = patched_ppo_module._mean_item
+    with_graph: List[List[bool]] = []
+
+    def _spy(tensors: List[th.Tensor]) -> float:
+        if tensors:
+            with_graph.append([t.grad_fn is not None for t in tensors])
+        return original_mean_item(tensors)
+
+    monkeypatch.setattr(patched_ppo_module, "_mean_item", _spy)
+    recorded = _run_one_update(model)
+
+    assert recorded["train/value_warmup_active"] == pytest.approx(1.0), "pas en échauffement"
+    assert math.isfinite(recorded["train/entropy_loss_normalized"]), "terme normalisé non calculé"
+    assert len(with_graph) >= 5, f"{len(with_graph)} listes non vides reçues par _mean_item"
+    assert all(len(flags) == _N_STEPS // _BATCH for flags in with_graph), with_graph
+    assert not any(any(flags) for flags in with_graph), (
+        f"tenseur AVEC graphe dans une liste de logging (par liste, par mini-lot) : {with_graph}"
+    )
 
 
 def test_le_diagnostic_de_gradient_du_mini_lot_0_reste_calcule_en_echauffement() -> None:
