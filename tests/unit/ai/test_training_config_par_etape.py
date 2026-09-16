@@ -137,9 +137,19 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     `vf_coef` a été essayé à 0.3 (02:36 → 10:26) : même plateau que la référence, 3 points plus
     lentement — réfuté, 0.17 rétabli (`_doc`). Le run suivant teste S11 (récompense en espérance,
     `rewards_config.squad_shaping.reward_on_expectation`), profil inchangé.
+
+    2026-09-16 : régime d'apprentissage de l'exploiteur S9 transféré dans la lignée
+    (`plafonnement_p1.md` §5.15) — `learning_rate` 0.001 → **0.0005** (valeur finale de la rampe
+    de P0 ; 0.001 reprenait au double du pas où la politique avait convergé) et
+    `logits_temperature` **2.0** (température des logits à la collecte et dans le ratio PPO,
+    T = 1 en évaluation ; régime de run hors zip). Mesure qui l'impose : S9 contre S25, même
+    exploiteur de P0, sondes argmax par fenêtre de six 0,730 / 0,760 / 0,783 / 0,767 contre
+    0,677 / 0,683, holdout bots inchangé. La combinaison T = 2 avec 0.001 n'a jamais été
+    mesurée : les deux clés voyagent ensemble.
     """
     mp = profil_lignee["model_params"]
-    assert mp["learning_rate"] == pytest.approx(0.001)
+    assert mp["learning_rate"] == pytest.approx(0.0005)
+    assert mp["logits_temperature"] == pytest.approx(2.0)
     assert mp["ent_coef"] == pytest.approx(0.01)
     assert mp["n_steps"] == 8160
     # Valeurs RÉSOLUES (profil hérité) : S23 réfuté, retour aux valeurs de x1_long ; l'héritage
