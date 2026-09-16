@@ -165,6 +165,14 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 17:55 — clôture de B et matrice du P1 promu ([dossier §5.15](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Gate final 0,700 (3 × 300), holdout bots final 87,7 % (1 800 parties), archive
+`model_ArmageddonAgent_x1_P1.zip` = poids vifs à 30 000. Matrice : P0 par siège 0,777 / 0,630, P0a
+0,637, S25 0,593, témoin entnorm 0,683 (≈ toute la famille de P0), S9 final **0,307**. Gain
+transitif dans la famille, rien hors famille, battu par l'exploiteur spécialisé. Décision
+utilisateur : aucun run lancé après la matrice (changements livrés pendant l'entraînement :
+`scripts/train.sh` obligatoire, correctif mémoire de l'échauffement) ; GPU libre.
+
 **2026-09-16, 16:25 — B : P1 PROMU à 30 000 ([dossier §5.15](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Sondes de pool 0,653 / 0,647 / **0,697**, moyenne **0,666 ≥ 0,65** ; référence P1 du 12 septembre
 0,547 / 0,533 / 0,560. Premier gate de lignée passé depuis le 10 septembre, avec le régime de

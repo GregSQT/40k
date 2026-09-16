@@ -1655,6 +1655,18 @@ l'utilisateur** (des changements sont intervenus pendant l'entraînement). L'age
 pour C (`config/agents/ArmageddonAgent_x1_p0ctrl/`, P0 seul, graine 54321) existe, non commité, non
 lancé.
 
+**Matrice hors famille du P1 promu (2026-09-16, 17:37 → 17:54 ; 300 parties par case, argmax,
+JSON `logs/matrix_heldout_20260916/matrix_p1promu_*.json`).** Contre P0 par siège (profils
+`x1_seat_p1` / `x1_seat_p2`) : **0,777 / 0,630** (moyenne 0,703 = gate 0,700 ; ancien P1 du 12 :
+0,690 / 0,593 ; miroir P0 vs P0 : 0,610 / 0,403). Contre P0a (qui bat P0 à 0,58) : **0,637**. Contre
+S25 à 30 000 : **0,593**. Contre le témoin entnorm (sans parenté) : **0,683** (S25 0,70, S9 0,68–0,71,
+P0 ≈ 0,72 : aucun gain hors famille, comme pour S9). Contre S9 final (exploiteur 60 000) : **0,307**.
+Lecture : gain réel et transitif dans la famille (P1 > P0a > P0, P1 > S25), porté surtout par le
+premier siège (+9 pts, +4 en second) ; rien contre le style étranger → le juge indépendant reste
+nécessaire (§11, §12) ; un exploiteur spécialisé bat P1 à 0,69 → rôle des exploiteurs dans les pools
+suivants (curriculum : dès P4 ; S9 étant disponible, avancement possible, décision utilisateur).
+GPU libre à 17:54, aucun run lancé.
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
