@@ -346,14 +346,14 @@ log-prob 1,7 × 10⁻⁴).
 | C2 | Récompense façonnée dominante (objectifs 62 %, kills, pénalités −97) : l'agent optimise un proxy | issue = terme parmi d'autres | ◐ composition mesurée ; direction non mesurable | gradient d'issue ±150 : ‖G‖² ∋ 0 ; cosinus (façonné, issue) non mesurable à K = 24 |
 | C3 | Point stationnaire réel : plus rien à gagner contre P0 avec cette récompense | le gradient vrai est nul, pas seulement noyé | ☑ **réfuté à λ ≤ 0,5** | ‖G‖² exclut 0 dès λ = 0,5 sur les mêmes rollouts (λ = 0 : 8,7 × 10⁻⁴ [5,8 × 10⁻⁴, 1,2 × 10⁻³]) ; le contrôle à poids aléatoires est vu à λ = 0,95 (f = 0,43) ; le gradient TD(0) détecté reste biaisé par l'erreur du critic, ce n'est pas la preuve d'une pente utile |
 | C4 | Horizon γ / λ trop long | variance ∝ horizon | ☑ **testé (balayage appairé) → levier insuffisant** | f_8160 : 0,015 (0,95) → 0,007 (0,8) → 0,027 (0,5) → 0,048 (0,2) → **0,053 [0,036, 0,070] (0)** ; Δf(0,95 − 0) = −0,038 [−0,070, −0,005] ; B_noise à λ = 0 : 147 000 pas — l'update reste à 95 % de bruit au λ le plus bas |
-| C5 | Pénalités −97 par épisode, source non ventilée | signal contradictoire ? | ☐ non investigué | `reward/penalties_total` chevauche `base_actions` (wait, charge_fail) ; ventilation absente |
+| C5 | Pénalités −97 à −112 par épisode, source non ventilée | signal contradictoire ? | ☑ **ventilé par lecture le 2026-09-16 → pas contradictoire** | `engine/reward_calculator.py` : le poste est le MIROIR DÉFENSIF du façonnage de combat (`_squad_combat_shaping` sur les tirs/mêlées adverses : dégâts subis, figurines perdues, escouades détruites, mêmes poids que l'offensif) + cohérence (−0,2 / escouade / tour) + wait (−0,1) + charge ratée (−0,01) + réserves refusées puis détruites (−25). Vérification : bonus de combat / pénalités = 198 / 111 = 1,78 sur S9 40 000–50 000, contre un rapport valeur détruite / valeur perdue de 1,77 mesuré dans les parties (S25 : 1,76 / 1,76). C'est le coût de ce que l'agent perd au combat, symétrique et cohérent |
 | C6 | Récompense sur le **jet** de dés plutôt que sur son espérance | variance de r_t | ☐ non testé | modification moteur ; à dimensionner par C1 avant |
 
 ### D. Adversité et environnement
 
 | # | cause | mécanisme | statut | preuve / observation |
 |---|---|---|---|---|
-| D1 | Pool à un seul membre (P0 à 70 %) : surspécialisation | rien d'autre que P0 à battre, style unique | ◐ constat, effet non mesuré | `stages.P1.pool = [P0]` ; la diversité n'arrive qu'en P2 |
+| D1 | Pool à un seul membre (P0 à 70 %) : surspécialisation | rien d'autre que P0 à battre, style unique | ◐ **mesuré le 2026-09-16 (matrice §5.14) : ce n'est PAS la cause du plafond, c'est la cause de la non-généralisation** | S25 et S9 ont joué tous deux à 100 % contre le seul P0 et le plafond a bougé de 0,68 à 0,78 par l'exploration seule ; mais le gain reste dans la famille de P0 (P1 +14, S25 +19) et vaut 0 contre le témoin sans parenté. Ligue déjà dans le design à partir de P2 (champion + ancients + exploiters, poids fixes) ; manquent : membres hors famille pour P1, poids adaptatifs (PFSP), instantanés intermédiaires — voir §11 |
 | D2 | Bots saturés (30 % du budget sans gradient) | avantage quasi constant | ☑ constaté, assumé | 0,86–0,99 en holdout ; raison du 30 % (adversité structurellement différente) |
 | D3 | Siège P2 sur-représenté (0,70) | P2 plus dur (0,627 vs 0,656 en jeu, 85,7 vs 97,7 en holdout) | ◐ décision du 2026-09-11, effet non isolé | l'écart de siège n'a pas bougé depuis le 2026-08-12 (12 points) |
 | D4 | 10 % d'épisodes déployés par le moteur joués à 0,50 | position non choisie par l'agent | ☐ non traité | `s_win_rate_deploy_auto` 0,50 vs 0,69 en actif ; `r_obj_held_diff_deploy_auto` −0,24 |
@@ -2177,6 +2177,45 @@ Sinon **option 2** d'abord (code faible, mécanisme éprouvé, risque borné), e
 lignée reste sous l'objectif après deux graines : c'est la seule qui traite la cause à sa racine,
 mais elle rejoue la dynamique qui a détruit P2 le 4 septembre et exige le gel du tronc. Option 1 en
 dernier : c'est celle dont le risque de destruction est le moins maîtrisé.
+
+## 11. Ligue d'adversaires — état des lieux et minimum viable (2026-09-16, observations utilisateur) {#ligue-2026-09-16}
+
+**Observations utilisateur (16 septembre, matin).** (1) AlphaStar / OpenAI Five n'entraînent jamais
+P(n+1) contre le seul P(n) : ligue d'anciens instantanés, échantillonnage PFSP (poids inversement
+proportionnel au score courant) ; le plateau 0,60–0,68 serait le symptôme classique d'un agent qui
+apprend à battre UNE stratégie. (2) Le crédit noyé (f = 0,005) est le diagnostic documenté avant le
+passage ligue + distillation. (3) Récompense « quasi binaire », façonnage non potentiel (Ng 1999),
+pénalités non ventilées.
+
+**Réponses vérifiées.**
+- *Cause du plafond ?* Non : S25 et S9 partagent le même pool d'un membre et diffèrent de 10 pts
+  par l'exploration (§5.14). *Cause de la non-généralisation ?* Oui : c'est exactement le résultat de
+  la matrice (gain confiné à la famille de P0). Les deux leviers sont complémentaires.
+- *Ce qui existe* : ligue par construction dès P2 (`curriculum.json` : `champion` + `ancients`
+  + `exploiters`, poids fixes 0,25–0,40 ; E1–E3 entrent dans les pools dès P4). *Ce qui manque* :
+  membres hors famille pour P1 (D1 / S16) ; poids adaptatifs (chaque env charge UN adversaire figé
+  une fois pour toutes, `_doc` du curriculum : changement moyen) ; instantanés intermédiaires.
+- *Ce qu'on a sur disque, chargeable (obs 30 557 vérifiée)* : `ArmageddonAgent_x1_12345_robust_0.8314.zip`
+  (première tentative de P0 du 2026-09-10 08:27, à froid, famille indépendante, 0,83 bots) et le
+  témoin entnorm `20260913-040721` (0,86 bots). Avec P0, S9 final et S25 : trois familles pour
+  juger dès maintenant. *Ce qu'on n'a pas* : les instantanés intermédiaires de P0 (rotation à 3,
+  six runs depuis) → un P0 rejoué (option C) avec copie manuelle des checkpoints tous les 10 000.
+- *Récompense* : les chiffres 587 / 52 ne correspondent pas à la table courante. Mesuré (S9, S25,
+  10 000–20 000) : victoire +376, défaite −256 ; ±150 pèse 40 % d'une victoire, 59 % d'une défaite ;
+  le façonnage domine (C2), la récompense n'est pas quasi binaire. Marge de VP : télescopique
+  (6 × marge finale), ne déplace pas l'optimum ; bonus de dégâts / destruction, cohérence, attente :
+  non potentiels, peuvent le déplacer. Pénalités : ventilées par lecture, C5 fermé (§3).
+- *Crédit* : tableau exact ; AlphaStar donnait aussi l'information des deux camps au critique (peu
+  de gain ici : plateau visible, seuls les dés sont cachés) ; f = 0,005 décrit le bruit d'un pas, pas
+  une impossibilité — S9 a monté de 10 pts malgré lui.
+
+**Minimum viable, par ordre de coût (chantier de code à ouvrir APRÈS le gate de B, rien à lancer
+pendant qu'il tourne).** (a) Sans code, tout de suite : les deux champions indépendants en cases
+fixes de la matrice à chaque gate. (b) Petit : type de membre de pool « archive externe » pour que
+P1 s'entraîne contre P0 + les deux indépendants (adversité de lignée modifiée : décision
+utilisateur) ; conservation des checkpoints tous les 10 000 (clé de rétention). (c) Moyen : poids
+adaptatifs par score courant (ré-affectation des adversaires par environnement). La ligue traite la
+généralisation et le cycle P2 > P1 > P0 > P2 ; elle ne vise pas le score contre P0.
 
 ## 8. Références
 

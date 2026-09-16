@@ -165,6 +165,17 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 10:15 — pénalités ventilées (C5 fermé) et ligue d'adversaires ([dossier §11](../Chantiers/backlog/plafonnement_p1.md#ligue-2026-09-16)).**
+Le poste `reward/penalties_total` (−112 / épisode) est le miroir défensif du façonnage de combat
+(dégâts subis, figurines perdues, escouades détruites) + cohérence, attente, charge ratée, réserves
+perdues : bonus / pénalités = 198 / 111 = 1,78 contre un rapport valeur détruite / perdue de 1,77
+dans les parties — symétrique, pas contradictoire. Ligue : déjà dans le design dès P2 (champion +
+ancients + exploiters, poids fixes) ; le pool d'un membre de P1 n'est pas la cause du plafond (S25
+et S9 : même pool, +10 pts par l'exploration) mais celle de la non-généralisation (matrice) ; deux
+champions indépendants chargeables sur disque (`robust_0.8314`, témoin entnorm), pas d'instantanés
+intermédiaires de P0 (rotation 3). Minimum viable à ouvrir après B : membres externes dans le pool
+de P1, rétention des checkpoints, poids adaptatifs.
+
 **2026-09-16, 09:45 — B : régime S9 transféré dans la lignée, P1 relancé ([dossier §5.15](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Décision utilisateur « B avec les deux clés » : `x1_lineage` de `ArmageddonAgent_x1` passe à
 `learning_rate` **0,0005** et `logits_temperature` **2,0** (merge `3ef821284`, test épinglé
