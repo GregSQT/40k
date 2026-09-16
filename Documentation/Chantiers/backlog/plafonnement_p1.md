@@ -1696,15 +1696,32 @@ GPU libre à 17:54, aucun run lancé.
 - **Prochaine étape optimale, convergente entre les deux analyses** : (1) décisions ci-dessus ;
   (2) `--test-only` du canonique P1 sur le moteur courant (~30 min, référence datée) ;
   (3) C cette nuit via `bash scripts/train.sh --agent ArmageddonAgent_x1_p0ctrl --training-config
-  x1_long --scenario bot --resolution 1 --etape P0 --total-episodes 50000`, instantanés copiés tous
-  les 10 000, règle : robuste ≥ 0,85 à 50 000 → pipeline intact, ≤ 0,80 → régression à chercher
-  avant tout autre run ; (4) demain, pendant C : membre de pool « archive » (ai/curriculum.py
-  `POOL_KINDS` l. 62, validation l. 725 ; ai/train.py l. 5288 / 5870 / 6058 / 7078 résolvent un
-  membre par nom d'étape), puis P2 sous le régime courant avec pool = P1 champion + P0 ancien + P0a,
-  témoin entnorm `model_ArmageddonAgent_x1_entnorm_20260913-040721.zip` et P0 neuf en anciens + S9
-  final en exploiteur (gate : 0,60 contre chacun ; P1 y est déjà : 0,64 / 0,68) ; (5) test
-  d'acceptation démo à écrire avant : ≥ 0,90 bots, ≥ 0,60 contre chaque champion indépendant aux
-  deux sièges, verdict humain sur cinq parties.
+  x1_long --scenario bot --resolution 1 --etape P0 --total-episodes 50000` — **rampes vérifiées le
+  16 à 21:40** : elles reçoivent le total de la ligne de commande (`total_episodes_override`,
+  ai/train.py ~4113 et ~4642) et le journal de P0 du 10 l'atteste (« 0.002 -> 0.0005 over 45000
+  episodes (decay_fraction 0.9 of 50000) », « 0.1 -> 0.01 over 20000 (0.4 of 50000) ») : même
+  commande = même régime que P0. **Copieur d'instantanés à écrire AVANT le lancement** (aucun
+  outil n'existe au 16 soir ; les checkpoints tournent par trois toutes les ~2 000 parties) :
+  `scripts/snapshot_checkpoints.sh`, nohup, copie chaque nouveau `ppo_checkpoint_*` + pkl dans
+  `logs/p0ctrl_snapshots/` ; sans lui, C sans instantanés. Règle : robuste ≥ 0,85 à 50 000 →
+  pipeline intact, ≤ 0,80 → régression à chercher avant tout autre run ; (4) demain, pendant C :
+  membre de pool « archive » (ai/curriculum.py `POOL_KINDS` l. 62, validation l. 725 ; ai/train.py
+  l. 5288 / 5870 / 6058 / 7078 résolvent un membre par nom d'étape), puis P2 sous le régime courant
+  avec pool = P1 champion + P0 ancien + P0a, témoin entnorm
+  `model_ArmageddonAgent_x1_entnorm_20260913-040721.zip` et P0 neuf en anciens — gate 0,60 contre
+  chacun de ces trois-là, que P1 tient déjà (0,64 contre P0a, 0,68 contre entnorm). **S9 final HORS
+  du pool de P2** (correction du 16 à 21:40 : P1 est à 0,31 contre S9, un gate à 0,60 contre lui
+  rendrait P2 impromouvable) ; S9 reste juge dans la matrice ; le réintroduire comme adversaire
+  d'entraînement sans condition de gate exigerait un type de membre « sparring » (code, décision
+  ultérieure) ; (5) test d'acceptation démo à écrire avant, **seuils dérivés de la re-mesure du
+  canonique sur le moteur courant, jamais posés a priori** (le « ≥ 0,90 bots » du premier jet est
+  retiré : P1 vaut 0,877 en éval finale et le moteur a changé) : bots ≥ niveau re-mesuré du
+  canonique moins le bruit, ≥ 0,60 contre chaque champion indépendant aux deux sièges, verdict
+  humain sur cinq parties.
+- **Gel du moteur — complément** : `Documentation/Roadmap/moteur.md` ne porte aucun chantier
+  ouvert non suspendu qui change les parties jouées (relu par l'autre analyse le 16 soir) ; règle à
+  écrire avec le gel : tout correctif de règle qui change les parties jouées est différé après la
+  démo, ou déclenche un `--new` assumé.
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
