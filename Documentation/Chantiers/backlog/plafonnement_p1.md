@@ -1434,6 +1434,41 @@ ne peut pas défaire (plancher d'entropie ou coefficient d'entropie adaptatif pa
 ε avec ratio corrigé, contrainte sur l'échelle des logits), à arbitrer avec la suite (§9.9 étape 3
 sous T, étape 4 transfert, ou contrôle P0 à froid — arbitrage soumis à l'utilisateur le 2026-09-16).
 
+**Clôture S9 (2026-09-16, processus terminé à 07:54) — mesures des poids finaux.** `curriculum.log`
+ligne 17 : E0, 60 000 épisodes, budget censuré (« > 60000 », seuil 95 % non atteint), pas de gate
+(exploiteur). Holdout bots à 60 000 : **0,902** (pire bot 0,86, siège 1 0,951 / siège 2 0,863) ;
+évaluation finale sur 1 800 parties : **90,3 %** (alpha 89,0 · attrition 89,7 · decapitation 92,0 ·
+endgame 95,7 · racer 86,0 · scorer 89,3 ; écart Space Marines − Orks +10,1 pts). Série holdout
+complète : 0,897 / 0,848 / 0,893 / 0,907 / 0,922 / 0,902 ; canonique = instantané robuste 0,9072 du
+50 000 (S25 : 0,9094).
+
+Matrice hors entraînement des POIDS FINAUX (`ppo_checkpoint_20260915-203439_12247944_steps.zip`,
+copie dans `logs/matrix_heldout_20260916/s9_final_ckpt/` ; même instrument, 300 parties, argmax,
+sièges 50/50, GPU libre : ~200 s par cellule) :
+
+| évalué → archive figée | S9 à 30 000 | **S9 à 60 000** | S25 à 30 000 | P0 |
+|---|---|---|---|---|
+| → P1 de lignée `robust_0.9078` | 0,62 | **0,64** (191/300, 2 nuls) | 0,50 | 0,36 |
+| → S25 (30 000) | 0,68 | **0,69** (208/300) | — | — |
+| → témoin entnorm (sans parenté) | 0,68 | **0,71** (214/300, 1 nul) | 0,70 | ≈ 0,72 |
+| → P0 (sonde, fenêtre de six) | 0,730 | **0,767** | 0,677 | — |
+
+Lecture : de 30 000 à 60 000, +1 à +3 pts sur chaque adversaire tenu hors (dans ±2,6 par cellule)
+pour +4 pts sur P0 ; la conclusion du 30 000 tient : le gain sur S25 est propre à la famille de P0
+(P1 +14, S25 +19 en direct) et **nul contre le style sans parenté** (0,71 contre 0,70 pour S25 et
+≈ 0,72 pour P0). Sonde par famille des poids finaux contre le checkpoint S25 de 40 000 (T = 1, 6
+épisodes, 1 421 décisions, `logs/matrix_heldout_20260916/family_entropy_s9final_vs_s25_40000.txt`) :
+S9 reste plus pointue sur mouvement (1,80 contre 2,16 nat), activation (0,26 / 0,30) et déploiement
+(0,17 / 0,21), mais est désormais plus plate sur cible de tir (0,42 / 0,32), choix d'arme (0,70 /
+0,61), oath (0,30 / 0,05) et wait (0,67 / 0,50) ; charge effondrée des deux côtés (0,010 / 0,023) ;
+argmax différents : mouvement **84 %**, oath 75 %, cible de tir 64 %, activation 52 %, charge 0 %.
+Nuance par rapport au 30 000 (où S9 était plus pointue sur toutes les grandes têtes) : à 60 000,
+l'exploration résiduelle de T (0,03 nat sur π_T) s'est logée dans les têtes de tir et d'oath, pas
+dans le mouvement ni la charge. Les états sont ceux que S9 visite : famille rare = peu de lignes.
+Le GPU est libre depuis 07:54 ; rien n'est lancé sans décision (arbitrage du 2026-09-16 : étape 3
+sous T / étape 4 transfert / contrôle P0 à froid ; mécanisme d'exploration non absorbable à
+arbitrer ensuite).
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin

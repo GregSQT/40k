@@ -165,6 +165,14 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 08:00 — clôture S9, poids finaux mesurés ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Processus terminé à 07:54 (curriculum.log ligne 17 : E0, 60 000, budget censuré) ; évaluation finale
+90,3 % contre les bots, holdout 0,902 à 60 000. Matrice des poids finaux : P1 **0,64**, S25 (30 000)
+**0,69**, témoin entnorm **0,71** (S25 0,70, P0 ≈ 0,72) — conclusion du 30 000 confirmée, gain propre à
+la famille de P0, nul contre le style sans parenté. Sonde par famille à 60 000 : plus pointue sur
+mouvement / activation / déploiement, plus plate sur cible de tir, choix d'arme, oath, wait ;
+charge effondrée des deux côtés. GPU libre, rien lancé sans décision.
+
 **2026-09-16, 07:20 — S9 TERMINÉ à 60 000 : plateau déplacé de ~0,68 à ~0,78, plat depuis 40 000 ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Fenêtres de six sondes 0,730 / 0,760 / **0,783** / **0,767** (S25 : 0,677 / 0,683) ; onze sondes à 0,778
 depuis 40 001. Holdout bots 0,922 à 50 000, instantané robuste 0,9072 (canonique = instantané holdout,
