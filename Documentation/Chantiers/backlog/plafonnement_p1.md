@@ -1412,7 +1412,7 @@ S25 (0,68), +14 pts sur la lignée P1 à sièges égaux (0,642, S27), 12 pts sou
   robuste **0,9072** sauvé à 05:37 (= canonique `model_ArmageddonAgent_x1_expl.zip`, §9.6 R2 : le
   canonique est l'instantané holdout, PAS les poids finaux — les poids finaux sont
   `ppo_checkpoint_20260915-203439_12247944_steps.zip`, copiés dans `logs/matrix_heldout_20260916/s9_final_ckpt/`).
-  S25 : 0,933 maximum, robuste 0,9094. Évaluation finale à 60 000 en cours à l'heure de la lecture.
+  S25 : 0,933 maximum, robuste 0,9094. Évaluation finale à 60 000 en cours à l'heure de la lecture (résultat : 0,902 puis 90,3 % sur 1 800 parties, « Clôture S9 » ci-dessous).
 - **Absorption, achevée lentement** : entropie de π_T par tranche 40 000 → 60 000 : 0,73 / 0,72 / 0,71 /
   0,73 / 0,72 / 0,71 / 0,71 / 0,73 / 0,72 / 0,73 — soit 1,07 → 0,80 (à 14 000) → 0,76 (à 30 000) → 0,72
   (à 60 000), contre 0,69 pour la π de S25 à T = 1 à 40 000 : le surplus d'exploration à la collecte
@@ -1423,7 +1423,7 @@ S25 (0,68), +14 pts sur la lignée P1 à sièges égaux (0,642, S27), 12 pts sou
   `a_vp_diff` échantillonné plat à +12 (S25 +6), `03_selfplay/P0` plat à 0,75, objectifs tenus +0,38.
 - En cours à la lecture : `family_entropy_probe` sur les poids finaux contre le checkpoint S25 de
   40 000, matrice hors entraînement des poids finaux (P1, S25 30 000, témoin entnorm), ligne de
-  clôture E0 dans `curriculum.log` — consignés au réveil suivant.
+  clôture E0 dans `curriculum.log` — consignés dans « Clôture S9 » ci-dessous (08:00).
 
 **Ce que S9 établit et ce qu'il n'établit pas.** Établi : le mécanisme d'apprentissage extrait plus de
 P0 quand la collecte explore (une seule graine, +10 pts, ≈ 4 σ sur une fenêtre de six sondes contre
