@@ -2095,6 +2095,80 @@ Ce qui est CLOS et ne se rouvre pas : gate 0,65 (§9.4), λ court / lot ×4 (S23
 config avant le mécanisme (§9.8, suspendue : elle ne se justifie que si le mécanisme retenu
 remonte le meilleur cas).
 
+## 10. Comparaison écrite — quelle exploration l'optimiseur ne peut pas défaire ? (2026-09-16, rédigée pendant B, AVANT tout code) {#exploration-2026-09-16}
+
+**Pourquoi ce document.** S9 (§5.14) a montré que l'exploration à la collecte déplace le plateau
+(+10 pts), et que la température s'éteint : le réseau affûte ses préférences jusqu'à annuler la
+variété ajoutée (variété de collecte 1,07 → 0,72 nat en 40 000 parties ; à T = 1 la politique de
+S9 est plus pointue que S25), et la montée s'arrête quand le surplus disparaît. La règle 2b
+disait : le levier suivant n'est pas un T plus grand mais un mécanisme non absorbable. Quatre
+options, dont « rien de plus » ; aucune n'est codée ni testée ; les règles du jeu (40k_rules)
+n'interviennent pas. Ce que S9 n'a PAS isolé et qui pèse sur le choix : la température changeait
+AUSSI l'objectif appris (PPO optimisait π_T, une version adoucie de la politique) ; la part du gain
+qui vient des coups variés et celle qui vient de l'adoucissement ne sont pas séparées.
+
+**Option 0 — rien de plus : la température rejouée à chaque étape.** T est un régime de run, pas
+un poids sauvegardé : chaque étape reprise repart avec une fenêtre d'exploration neuve d'environ
+40 000 parties, et le plafond sous T (0,78) dépasse le gate (0,65). *Gain* : zéro code, zéro
+risque nouveau, c'est ce que B mesure. *Coût* : plafonne là où T s'éteint ; ne vise pas 0,90.
+*Critère de choix* : si B et P2 passent leur gate, cette option suffit pour la lignée ; les trois
+autres ne se justifient que pour dépasser ~0,78 ou si le gain se perd en lignée.
+
+**Option 1 — mélange aléatoire à la collecte, ratio corrigé.** Les workers jouent
+μ = (1 − ε)·π + ε·uniforme(légales), ε ≈ 0,05–0,10 ; le ratio PPO et l'avantage sont corrigés par
+π_old(a)/μ(a) (borné par 1/(1 − ε)). Site : `_distribution_from` (`ai/pointer_policy.py`) côté
+collecte, ratio dans `train` (`ai/patched_ppo.py`). *Ce qu'il change* : les coups joués, pas
+l'objectif. *Absorbable* : non (indépendant des logits). *Risque de destruction* : RÉEL — un
+tirage uniforme sur ~200 cases de déplacement joue des coups absurdes là où T explorait les
+seconds choix ; deux leviers ont détruit la politique ce mois-ci (S11, S14c) ; à mesurer par la
+garde à 20 000 et le holdout bots. *Hypothèses non vérifiées* : le gain de S9 vient des coups
+variés (non isolé, voir ci-dessus) ; la correction est simple avec les têtes à pointeur masquées
+(le buffer garde `old_log_prob` de π, il faudrait aussi log μ). *Code* : moyen (workers, buffer,
+ratio) + tests rouge/vert sur la correction.
+
+**Option 2 — température autorégulée sur la variété de collecte.** T ajusté à chaque update
+pour tenir `train/entropy_loss` (entropie de π_T) à une cible, par exemple 1,0 nat (S9 à 2 000) :
+si le réseau affûte, T monte ; si la politique est déjà variée, T redescend vers 1. Site :
+propriété `logits_temperature` déjà existante (`ai/patched_ppo.py`), une boucle de réglage par
+update, transport aux workers déjà en place. *Ce qu'il change* : la distribution de collecte ET
+l'objectif (comme S9), de façon contrôlée. *Absorbable* : non (compensé). *Gain* : garde les
+seconds choix plausibles, réutilise le mécanisme qui a marché, code léger. *Risque* : T sans
+borne si le réseau affûte sans fin (borner T ≤ 4 et journaliser) ; un objectif de plus en plus
+adouci, dont l'effet sur l'argmax évalué n'est pas mesuré au-delà de T = 2. *Hypothèse non
+vérifiée* : que maintenir la variété prolonge la montée au-delà de 40 000 (corrélation d'une
+graine). *Code* : faible.
+
+**Option 3 — remise à neuf partielle des couches de décision (warm-start de la littérature :
+« shrink and perturb », Ash et Adams 2020 ; réinitialisations, Nikishin et coll. 2022).** À la
+reprise, garder le tronc de perception et le critique, rétrécir (× 0,5) et bruiter — ou remettre
+à neuf — les têtes de politique (`PointerHeadNets`, `ai/pointer_policy.py`), rejouer la rampe
+d'exploration du départ à froid (bonus de variété 0,1 → 0,01) et GELER le tronc pendant la phase
+de reconstruction (le gel de l'extracteur existe déjà pour l'échauffement du critique,
+`ai/patched_ppo.py` ~476–486). *Ce qu'il change* : le point de départ, pas le mécanisme
+d'apprentissage ; c'est un départ à froid de la décision sur une perception acquise. *Absorbable* :
+sans objet (la dynamique du départ à froid est celle qui a marché pour P0). *Gain* : répond à la
+cause telle qu'elle est mesurée (reprise trop sûre d'elle) au prix de quelques milliers de parties
+au lieu de 100 000. *Risque* : la dynamique du 4 septembre (P2 détruit quand la rampe a été
+rejouée SANS gel du tronc : 0,118 contre P1, bots 0,91 → 0,69) ; le critique doit réapprendre
+sous une politique redevenue aléatoire (échauffement à rejouer). *Hypothèses non vérifiées* : que
+le tronc porte l'essentiel du savoir ; que la reconstruction des têtes ne redécouvre pas la même
+politique. *Code* : moyen (chirurgie des poids à la reprise + gel + rampe), tests sur l'identité du
+tronc et la remise à neuf des têtes.
+
+**Ce qui départagerait sans coder (mesures, 1 h de CPU).** (i) Sur les checkpoints S9 à 30 000 et
+60 000 : rejouer 300 parties argmax contre P0 avec les logits divisés par 2 et par 4 À
+L'ÉVALUATION (argmax invariant → contrôle nul attendu) puis en échantillonnant à T = 1 et T = 2 :
+dit si la politique apprise sous T « veut » encore explorer ou si tout est dans la collecte.
+(ii) `family_entropy_probe` sur les checkpoints S9 à 10 000 / 20 000 / 40 000 : la trajectoire de
+l'absorption tête par tête (laquelle s'affûte en premier) fixe la cible de l'option 2 et les
+têtes candidates de l'option 3. (iii) Le résultat de B (§5.15) tranche l'option 0.
+
+**Recommandation provisoire, à confirmer par B et par (i)–(ii).** Option 0 si B et P2 passent.
+Sinon **option 2** d'abord (code faible, mécanisme éprouvé, risque borné), et option 3 si la
+lignée reste sous l'objectif après deux graines : c'est la seule qui traite la cause à sa racine,
+mais elle rejoue la dynamique qui a détruit P2 le 4 septembre et exige le gel du tronc. Option 1 en
+dernier : c'est celle dont le risque de destruction est le moins maîtrisé.
+
 ## 8. Références
 
 - Runs : `tensorboard/x1_lineage_ArmageddonAgent_x1/run_20260912-065925` (P1) ;
