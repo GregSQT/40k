@@ -969,6 +969,34 @@ Les runs antérieurs au 2026-09-06 gardent l'escalier, à lire comme une suite d
 
 ---
 
+## ⚠️ Rupture de comparabilité des sondes — sol hex du champ de montée (2026-09-16) {#rupture-sol-hex-2026-09-16}
+
+**Livré le 2026-09-16, entre deux étapes de lignée (aucun run en cours).** En métrique hex (tout
+le gym x1), le SOL d'une montée 13.06 est désormais mesuré comme le move à plat du gym — BFS hex par
+cellule, sans clairance de socle (`ascent_field_for_model`, `engine/phase_handlers/shared_utils.py`)
+— au lieu d'any-angle avec clairance ; la passe d'étage reste any-angle. **Ce que l'agent voit
+changer** : jusqu'à 15 % de portée de montée en plus (√3 / 1,5 vers le sud, 1,0 vers l'est) et des
+couloirs d'une case admis vers un étage. Le masque et la validation lisent le même champ, donc rien
+ne lève ; mais le jeu offert n'est plus le même qu'avant.
+
+**Conséquence sur les sondes** : `03_selfplay/<étape>` et le win-rate HOLDOUT d'un run lancé après
+ce commit ne sont pas comparables point pour point à ceux des runs antérieurs (P0 du 2026-09-10,
+P1 des 2026-09-12/13, S9, S23, essais vf_coef). Les modèles anciens rejoués sur le moteur nouveau
+jouent une partie où leurs adversaires (et eux-mêmes) montent plus loin : une baisse ou une hausse
+de quelques points sur la prochaine mesure holdout n'est attribuable ni à l'entraînement ni au
+modèle sans une re-mesure du canonique sur le moteur nouveau. **À faire au prochain `--test-only`** :
+poser un nouveau point holdout du canonique et le dater comme référence, comme
+[#holdout-2026-09-13](#holdout-2026-09-13) l'a fait après les 35 commits moteur.
+
+Motif de la livraison : perf. Sur 200 pas du banc `scripts/bench_env_step.py` (x1_long bots, graine
+42), le champ de montée pesait 10,4 s sur 39,8 s de wall, dont 8,8 s de passes any-angle au sol
+(126 passes de ~4 900 cases à 70 ms) ; après, 2,4 s, 0 passe au sol. Banc 3 répétitions :
+155,6 / 175,0 / 173,4 ms/step avant, 136,0 / 135,4 / 136,0 après (−19 % sur la moyenne,
+machine partagée, `wall total` 32,9–37,2 s → 29,1–29,3 s). Détail perf dans `infra.md`
+[#perf-entrainement](infra.md#perf-entrainement).
+
+---
+
 ## Win-rate HOLDOUT de la lignée du 2026-09-11 {#holdout-2026-09-11}
 
 **Point de départ d'une nouvelle lignée, PAS une comparaison.** Quatre correctifs mergés le

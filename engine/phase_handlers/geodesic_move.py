@@ -12,9 +12,9 @@ import threading
 from typing import AbstractSet, Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from engine.hex_utils import (
-    _SEG_TOL, geodesic_field, geodesic_field_multi_source, get_neighbors, round_base_radius_norm,
-    _hex_center, inflate_obstacles_by_footprint as _inflate_obstacles_by_footprint,
-    obstacles_touching_disc,
+    _SEG_TOL, ENGAGEMENT_NORM_HEX_WIDTH, geodesic_field, geodesic_field_multi_source,
+    get_neighbors, hex_distance, round_base_radius_norm, _hex_center,
+    inflate_obstacles_by_footprint as _inflate_obstacles_by_footprint, obstacles_touching_disc,
 )
 
 
@@ -91,6 +91,7 @@ def multilevel_target_within_straight_bound(
     floor_hexes_by_level: Mapping[int, AbstractSet[Tuple[int, int]]],
     height_by_level: Mapping[int, float],
     budget_norm: float,
+    ground_is_hex: bool = False,
 ) -> bool:
     """Un niveau cible peut-il porter AU MOINS une cellule dans ``budget_norm`` ? Borne INFÉRIEURE,
     sans Dijkstra — sert de pré-check aux champs multi-niveaux par-figurine.
@@ -104,10 +105,27 @@ def multilevel_target_within_straight_bound(
     peut donc PAS figurer dans le champ ; si aucune cellule d'aucun niveau cible ne passe, le
     champ rendu serait vide sur ces niveaux — et le calcul peut être sauté sans rien changer.
 
+    ``ground_is_hex`` : la passe de DÉPART est un champ hex par cellule injecté en
+    ``precomputed_start_field`` (métrique hex du gym, ``ascent_field_for_model``), coûtée
+    ``ENGAGEMENT_NORM_HEX_WIDTH × pas``. La ligne droite n'en est PLUS une borne inférieure :
+    ``1,5 × pas`` vaut au plus la distance euclidienne, et jusqu'à 15 % de moins en colonne
+    (√3 par pas vers le sud). La borne devient ``1,5 × hex_distance(départ, cellule)`` : chaque
+    segment any-angle ou portail vaut au moins ``1,5 × hex_distance`` de ses extrémités (le pas
+    le plus court du repère ``_hex_center`` est 1,5, minimum atteint sur une ligne est-ouest), la
+    passe hex exactement ``1,5 × pas`` avec ``pas >= hex_distance``, et ``hex_distance`` est une
+    métrique — l'inégalité triangulaire enchaîne les segments comme pour la ligne droite. Cette
+    borne est plus lâche que la ligne droite (elle écarte moins de champs), pas moins sûre. La
+    tolérance ``_SEG_TOL`` reste : la passe d'ÉTAGE est toujours any-angle et admet à
+    ``budget_norm + _SEG_TOL``.
+
     Le SOL (niveau 0) parmi les cibles vaut toujours True : il n'a pas d'empreinte finie à
     borner, on ne cherche pas à le prouver inatteignable. Une cible sans plancher n'apporte
-    aucune cellule. Mesure (HEAD daf17143b, ``refactor_fingerprint.py --episodes 8``) : 305 des
-    675 champs de montée n'atteignaient aucune cible, pour 34 % du temps de ces champs.
+    aucune cellule. Mesures : sous la borne LIGNE DROITE (sol any-angle, HEAD daf17143b,
+    ``refactor_fingerprint.py --episodes 8``), 305 des 675 champs de montée n'atteignaient aucune
+    cible, pour 34 % du temps de ces champs ; sous la borne HEX (2026-09-16, chemin de
+    ``scripts/bench_env_step.py``, 200 pas, x1_long bots, graine 42, les deux bornes évaluées
+    sur les MÊMES 191 appels), 54 champs sortent tôt contre 65 sous la ligne droite — 11 champs
+    de plus calculés, chacun une passe d'étage de ~7 ms, contre 0 passe any-angle au sol.
     """
     if any(int(lv) == 0 for lv in target_levels):
         return True
@@ -122,8 +140,14 @@ def multilevel_target_within_straight_bound(
         if vc > limit:
             continue
         for c, r in cells:
-            hx, hy = _hex_center(c, r)
-            if math.hypot(hx - sx, hy - sy) + vc <= limit:
+            if ground_is_hex:
+                horizontal = ENGAGEMENT_NORM_HEX_WIDTH * hex_distance(
+                    start_pos[0], start_pos[1], c, r
+                )
+            else:
+                hx, hy = _hex_center(c, r)
+                horizontal = math.hypot(hx - sx, hy - sy)
+            if horizontal + vc <= limit:
                 return True
     return False
 

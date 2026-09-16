@@ -55,7 +55,7 @@ from engine.constants import (
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
 # `hex_utils` est une FEUILLE (heapq/math/numpy) : import au niveau module, pas dans chaque appel.
-from engine.hex_utils import dilate_hex_set
+from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, dilate_hex_set
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
 from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED, decision_option_cont_row
@@ -5649,12 +5649,22 @@ def ascent_field_for_model(
     la declaration de montee n'est jamais armee pour une unite qui vole
     (`_ascent_declaration_due_unit`).
 
-    GEOMETRIE — a savoir, pas a decouvrir : `reachable_multilevel_field` developpe chaque niveau
-    par le champ ANY-ANGLE, quand le move de plain-pied du gym est mesure en PAS d'hexagone. Le
-    pas any-angle vaut 1,0 sous-hexe vers l'est mais ~1,155 vers le sud, donc la montee est mesuree
-    un peu PLUS CHER que le sol, jamais moins : l'ecart retire a l'agent quelques montees que la
-    regle autoriserait, il n'en fabrique aucune d'illegale. C'est le sens acceptable de
-    l'inegalite, et les deux cotes de l'invariant lisent de toute facon CE champ.
+    GEOMETRIE — a savoir, pas a decouvrir. En metrique HEX (gym), le SOL d'une montee est mesure
+    comme le move a plat du gym : BFS hex par cellule, sans clairance de socle
+    (`geodesic_move_reach`, meme bitmap de niveau 0 que le champ a plat), converti en unites-norme
+    (pas × `ENGAGEMENT_NORM_HEX_WIDTH`) et injecte en `precomputed_start_field` ; seule la passe
+    d'ETAGE reste any-angle avec clairance (13.06 « no part of its base overhangs »), reliee au sol
+    par les portails (`hypot` centre a centre + distance verticale). Avant le 2026-09-16 le sol
+    etait lui aussi any-angle avec clairance : un pas any-angle vaut 1,0 sous-hexe vers l'est mais
+    ~1,155 vers le sud, et la clairance fermait les passages d'une case, donc la montee coutait
+    jusqu'a 15 % de plus que le move a plat (sqrt(3)/1,5) et refusait des couloirs que le sol
+    admettait. Ce n'etait pas une regle mais une inegalite tolérée ; la metrique du sol est
+    desormais la meme des deux cotes du portail, ce qui ELARGIT l'atteignable (verrou
+    `test_ascent_field_hex_ground.py` : champ injecte ⊇ champ any-angle a budget egal), et
+    c'est le gain de perf : la passe any-angle au sol pesait 8,8 s sur 39,8 s de 200 pas du banc
+    x1 (`scripts/bench_env_step.py`, 126 passes de ~4 900 cases a 70 ms). En metrique EUCLIDIENNE
+    rien ne change : le sol est le champ any-angle de la figurine, relu du cache (ci-dessous).
+    Les deux cotes de l'invariant lisent de toute facon CE champ.
 
     UNITE : le cout rendu est en SOUS-HEXES (la source divise par `ENGAGEMENT_NORM_HEX_WIDTH`),
     directement comparable au budget de move — jamais a un budget deja mis a l'echelle
@@ -5683,41 +5693,61 @@ def ascent_field_for_model(
         return cached[1]
     unit = require_unit_by_id(game_state, str(squad_id))
     start = (int(model["col"]), int(model["row"]))
-    # PASSE DE NIVEAU 0 DEJA PAYEE. En metrique euclidienne, l'erosion construit le champ de
-    # plain-pied de la figurine (`_euclidean_move_field_for_model`, memoise sous `eucl`) AVANT
-    # son champ de montee ; or la premiere passe du champ multi-niveaux, depuis le sol, est
-    # exactement ce Dijkstra : memes obstacles (`build_move_transit_blocked` niveau 0, case de
-    # depart retiree), meme socle, meme budget — `geodesic_field` et
-    # `geodesic_field_multi_source` rendent le meme champ pour une source unique (verrou
-    # `test_ascent_field_reuses_euclidean_field.py`). Il est donc injecte en
-    # `precomputed_start_field`, et SEULEMENT s'il est deja en cache : le calculer ici court-
-    # circuiterait le pre-check de portee de `_model_multilevel_reachable_field`, qui rend un
-    # champ vide sans aucun Dijkstra aux figurines loin de tout etage. Mesure (1 episode x5
-    # euclidien, `refactor_fingerprint.py`) : champ en cache pour 93 appels sur 93, passe de
-    # niveau 0 = 9,4 % du temps de l'episode. Depart en hauteur : le champ de plain-pied ne
-    # decrit pas ce trajet (descente facturee), pas de reutilisation. Vol declare : jamais ici
-    # (cf. HORS VOL DECLARE ci-dessus), et le champ `eucl` d'une unite qui vole n'a pas
-    # d'obstacle — il ne serait pas substituable.
-    _ground_field = None
-    if start_level == 0 and move_plan_distance_mode(game_state, str(squad_id)) == "euclidean":
-        _ground_field = _spatial["eucl"].get(  # get allowed (lecture sans calcul : absent = passe calculee)
-            _euclidean_move_field_cache_key(str(squad_id), int(player), start, 0, budget, model)
-        )
     # Obstacles de SOL = la definition PARTAGEE du trajet legal, la meme que celle du champ
     # geodesique de plain-pied : les deux doivent contourner exactement les memes cases. La case
     # de DEPART en est retiree comme partout ailleurs (`_euclidean_move_field_for_model`, pool
     # par-figurine) : le Dijkstra multi-source IGNORE une source qui est un obstacle, donc une
     # figurine dont la case est dans la bande d'engagement ennemie (bande infranchissable par
     # config) n'avait aucun champ de montee alors que son champ de plain-pied sortait de sa case.
+    # Le BFS hex ci-dessous n'a pas ce probleme : sa case de depart est a distance 0 par
+    # construction, quel que soit le bitmap.
     _pairs, _bm = move_transit_blocked_forms(game_state, str(squad_id), int(player), 0)
     _ground = set(_pairs)
     _ground.discard(start)
+    # PASSE DE NIVEAU 0 : fournie par l'appelant, dans les deux metriques, depuis le SOL seulement.
+    # Depart en hauteur : aucun champ de plain-pied ne decrit ce trajet (descente facturee), la
+    # passe de depart est calculee par le champ multi-niveaux. Vol declare : jamais ici (cf. HORS
+    # VOL DECLARE ci-dessus), et le champ a plat d'une unite qui vole n'a pas d'obstacle — il ne
+    # serait pas substituable.
+    #
+    # - EUCLIDIEN : l'erosion construit le champ de plain-pied de la figurine
+    #   (`_euclidean_move_field_for_model`, memoise sous `eucl`) AVANT son champ de montee ; or la
+    #   premiere passe du champ multi-niveaux, depuis le sol, est exactement ce Dijkstra : memes
+    #   obstacles (`build_move_transit_blocked` niveau 0, case de depart retiree), meme socle,
+    #   meme budget — `geodesic_field` et `geodesic_field_multi_source` rendent le meme champ
+    #   pour une source unique (verrou `test_ascent_field_reuses_euclidean_field.py`). Il est
+    #   relu SEULEMENT s'il est deja en cache : le calculer ici court-circuiterait le pre-check
+    #   de portee de `_model_multilevel_reachable_field`, qui rend un champ vide sans aucun
+    #   Dijkstra aux figurines loin de tout etage — et ce Dijkstra-la coute ~70 ms. Mesure (1
+    #   episode x5 euclidien, `refactor_fingerprint.py`) : champ en cache pour 93 appels sur 93,
+    #   passe de niveau 0 = 9,4 % du temps de l'episode.
+    # - HEX : le BFS de plain-pied (`geodesic_move_reach`, ~1 ms) est CALCULE ici, sur le bitmap
+    #   de niveau 0 deja en main, et converti en unites-norme — cf. GEOMETRIE ci-dessus pour ce
+    #   que cela change. Il precede donc le pre-check, a l'inverse de la regle euclidienne : sur
+    #   200 pas du banc x1 (2026-09-16), 191 BFS = 0,23 s, dont 54 pour des appels que le
+    #   pre-check fait sortir tot — ~65 ms evitables contre 8,8 s de passes any-angle
+    #   supprimees. Le pre-check est averti (`precomputed_start_is_hex`) : la ligne droite ne
+    #   minore plus ce sol.
+    _ground_field: Optional[Dict[Tuple[int, int], float]] = None
+    _ground_is_hex = False
+    if start_level == 0:
+        if move_plan_distance_mode(game_state, str(squad_id)) == "euclidean":
+            _ground_field = _spatial["eucl"].get(  # get allowed (lecture sans calcul : absent = passe calculee)
+                _euclidean_move_field_cache_key(str(squad_id), int(player), start, 0, budget, model)
+            )
+        else:
+            _ground_field = {
+                _cell: _steps * ENGAGEMENT_NORM_HEX_WIDTH
+                for _cell, _steps in geodesic_move_reach(start[0], start[1], budget, _bm).items()
+            }
+            _ground_is_hex = True
     field = _model_multilevel_reachable_field(
         game_state, unit, str(squad_id), model,
         start, budget, {int(level)},
         _ground, game_state.get("terrain_areas", []),  # get allowed (scenario sans terrain)
         start_level=start_level,
         precomputed_start_field=_ground_field,
+        precomputed_start_is_hex=_ground_is_hex,
     ).get(int(level), {})  # get allowed (niveau inatteignable = aucune case)
     fields[fkey] = (budget, field)
     return field

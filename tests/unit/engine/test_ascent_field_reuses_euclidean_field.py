@@ -8,6 +8,10 @@ est le MÊME Dijkstra. ``ascent_field_for_model`` injecte donc le champ mémoïs
 cache, jamais calculé pour l'occasion (le pré-check de portée doit continuer d'éviter le calcul
 aux figurines loin de tout étage).
 
+Jumeau HEX : ``test_ascent_field_hex_ground.py`` — en métrique hex le sol injecté est le BFS hex
+du gym, CALCULÉ sur place (~1 ms) et pas relu d'un cache, et le pré-check change de borne. Ce
+fichier ne couvre que la métrique euclidienne.
+
 Trois invariants verrouillés ici :
 
 - ``geodesic_field`` (single-source, index d'obstacles élagué) et ``geodesic_field_multi_source``

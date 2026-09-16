@@ -3999,6 +3999,7 @@ def _model_multilevel_reachable_field(
     terrain_areas: List[Dict[str, Any]],
     start_level: int = 0,
     precomputed_start_field: Optional[Dict[Tuple[int, int], float]] = None,
+    precomputed_start_is_hex: bool = False,
 ) -> Dict[int, Dict[Tuple[int, int], int]]:
     """Cases atteignables AVEC LEUR COÛT, avec le coût de montée/descente §13.06, pour CHAQUE niveau
     de ``target_levels`` (0 = sol/descente inclus). Le champ géodésique multi-niveaux
@@ -4013,12 +4014,18 @@ def _model_multilevel_reachable_field(
 
     ``start_level`` : niveau EFFECTIF de départ du mover (0 = sol). Une fig déjà en hauteur qui finit
     au sol paie la descente ; qui reste sur son étage ne repaie pas de montée (§13.06).
-    À n'appeler que pour une unité capable de finir en hauteur, métrique euclidienne, hors FLY.
+    À n'appeler que pour une unité capable de finir en hauteur, hors FLY. Le pool PvP n'y passe
+    qu'en métrique euclidienne ; le gym y passe dans les deux métriques via
+    ``ascent_field_for_model``, qui fournit alors la passe de départ.
 
-    ``precomputed_start_field`` : champ any-angle du niveau de départ DÉJÀ calculé par l'appelant
-    — mêmes obstacles que ``ground_obstacles``, même socle, même budget — transmis tel quel à
+    ``precomputed_start_field`` : champ du niveau de départ DÉJÀ calculé par l'appelant — mêmes
+    obstacles que ``ground_obstacles``, même budget, en unités-norme — transmis tel quel à
     ``reachable_multilevel_field`` qui l'amorce au lieu de relancer la passe de départ. Le pré-check
     de portée ci-dessous s'applique AVANT : un champ fourni n'oblige à aucun calcul.
+    ``precomputed_start_is_hex`` : ce champ est un BFS hex par cellule (``geodesic_move_reach``
+    × ``ENGAGEMENT_NORM_HEX_WIDTH``) et non le champ any-angle du socle ; le pré-check borne alors
+    par ``1,5 × hex_distance`` et non par la ligne droite, qui ne minore plus le sol (cf.
+    ``multilevel_target_within_straight_bound``). Faux sans ``precomputed_start_field``.
     """
     from engine.terrain_utils import (
         floor_hexes_at_level, floor_levels_present, validate_floor_placement,
@@ -4046,9 +4053,14 @@ def _model_multilevel_reachable_field(
     # PRÉ-CHECK de portée (perf, résultat identique) : si aucune cellule d'aucun niveau cible ne
     # tient dans le budget même en ligne droite + dénivelé, le champ serait vide sur ces niveaux —
     # on le rend sans construire obstacles ni lancer le Dijkstra (jumeau : pool d'ancre et charge).
+    if precomputed_start_is_hex and precomputed_start_field is None:
+        raise ValueError(
+            "_model_multilevel_reachable_field: precomputed_start_is_hex sans "
+            "precomputed_start_field — la passe de départ serait any-angle, bornée en hex"
+        )
     if not multilevel_target_within_straight_bound(
         start_pos, start_level, target_levels, floor_hexes_by_level, height_by_level,
-        budget * ENGAGEMENT_NORM_HEX_WIDTH,
+        budget * ENGAGEMENT_NORM_HEX_WIDTH, ground_is_hex=precomputed_start_is_hex,
     ):
         return {lv: {} for lv in target_levels}
 
