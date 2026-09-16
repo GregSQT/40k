@@ -2242,6 +2242,30 @@ réelle des poids : le pool est réalisé par environnement (24 envs × 0,7 ≈ 
 par env). Toutes les variantes exigent le même ajout : un type de membre de pool « archive ». À
 ouvrir après le gate de B ; ne change pas le score contre P0 à court terme.
 
+**Mesure du 2026-09-16 (10:38 → 11:18) — les trois champions à froid entre eux** (`scripts/seat_matrix_probe.py`,
+300 parties par case, argmax des deux côtés, sièges 50/50, graine tirée au sort, 6 workers sous `nice`
+pendant B ; JSON `logs/matrix_heldout_20260916/matrix_cold_*.json`). P0 = `model_ArmageddonAgent_x1_P0.zip`
+(0,868 bots) ; P0a = `ArmageddonAgent_x1_12345_robust_0.8314.zip` (première tentative de P0, 10 septembre
+08:35, moteur d'AVANT les correctifs 11:00–11:30 : 57 armes à dégât nul, dégâts espérés sur cible
+effective ; 0,831 bots) ; ENT = témoin entnorm `20260913-040721` (0,856 bots).
+
+| duel (score du premier) | résultat |
+|---|---|
+| **P0 → P0a** | **0,423** (127 / 300, 4 nuls) → P0a bat P0 à 0,577, ≈ 2,7 σ |
+| P0 → ENT | 0,573 (172 / 300) |
+| P0a → ENT | 0,550 (165 / 300, 3 nuls) |
+
+Lecture. (1) **Trois départs à froid du même pipeline (même graine 12345, runs et moteurs différents)
+sont trois agents distincts** : ordre en duel P0a > P0 > ENT, sans cycle. (2) **Le score contre les
+bots ne classe pas les agents entre eux** : P0a est le plus faible contre les bots et le plus fort en
+duel ; or c'est ce score (instantané robuste) qui a désigné P0 comme champion et racine de toute la
+lignée. Fait nouveau pour la question du juge (D2, §11). (3) La diversité que cherchait l'idée « trois
+P0 » existe déjà sur disque ; trois graines neuves apporteraient un moteur homogène et la variance
+entre graines, pas la diversité. (4) Réserve : §5.5 donnait ENT à 0,28 contre P0 le 13 septembre
+(protocole et moteur d'alors) ; 0,43 aujourd'hui à sièges 50/50 ; non comparables sans ré-mesure.
+Effet sur les pistes : la ligue (P0 champion + P0a et ENT en anciens pour P1) a désormais un appui
+mesuré ; un P1 devra battre P0a à 0,60, plus dur que P0.
+
 ## 8. Références
 
 - Runs : `tensorboard/x1_lineage_ArmageddonAgent_x1/run_20260912-065925` (P1) ;

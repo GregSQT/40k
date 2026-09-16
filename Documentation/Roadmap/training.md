@@ -165,6 +165,13 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 11:20 — trois champions à froid en duel ([dossier §11](../Chantiers/backlog/plafonnement_p1.md#ligue-2026-09-16)).**
+300 parties par case, argmax, sièges 50/50 : **P0 → P0a 0,42** (la première tentative de P0, 0,83
+contre les bots, bat le champion retenu à 0,58, ≈ 2,7 σ), P0 → témoin entnorm 0,57, P0a → entnorm
+0,55 ; ordre P0a > P0 > entnorm sans cycle. Le score contre les bots, qui désigne le champion, ne
+classe pas les agents entre eux ; trois départs à froid du même pipeline sont trois agents
+distincts, la diversité pour un pool de P1 existe déjà sur disque.
+
 **2026-09-16, 10:15 — pénalités ventilées (C5 fermé) et ligue d'adversaires ([dossier §11](../Chantiers/backlog/plafonnement_p1.md#ligue-2026-09-16)).**
 Le poste `reward/penalties_total` (−112 / épisode) est le miroir défensif du façonnage de combat
 (dégâts subis, figurines perdues, escouades détruites) + cohérence, attente, charge ratée, réserves
