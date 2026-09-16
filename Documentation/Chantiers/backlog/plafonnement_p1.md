@@ -1331,6 +1331,36 @@ SOUS T) puis étape 4 (transfert, relecture lr / `target_kl` / `ent_coef` sous T
 du 2026-09-16 lisait « étape 4 directement » ; la lecture de la montée à 60 000 précède ce choix,
 qui appartient à l'utilisateur.
 
+**Matrice d'adversaires tenus hors entraînement (2026-09-16, 02:25 → 03:20) — « à 70 %, l'agent
+apprend-il encore à jouer ou se spécialise-t-il contre le champion ? » (question utilisateur).**
+Instrument : `scripts/seat_matrix_probe.py` (celui de S27), lecture seule, 300 parties par cellule,
+argmax des deux côtés, sièges 50/50 (`x1_lineage`), graine tirée au hasard, 8 workers sous `nice`
+pendant que S9 tourne (≈ 10 min par cellule). Évalués : les checkpoints 30 000 de S9 et de S25 (ceux
+de la sonde par famille). Adversaires que NI S9 NI S25 n'ont jamais affrontés (100 % P0 à
+l'entraînement) : P1 de lignée `robust_0.9078` (entraîné contre P0 à 70 % + bots), témoin entnorm
+`20260913-040721` (à froid contre les bots seuls, 22–28 % contre P0), et l'autre exploiteur.
+**Règle posée au lancement (02:25), avant les données** : S9 ≥ S25 + 5 pts sur les adversaires
+tenus hors → le gain contre P0 GÉNÉRALISE ; S9 ≈ S25 hors de P0 avec +5 sur P0 → spécialisation.
+Le holdout bots ne peut plus trancher cette question : bots saturés (D2), il ne voit qu'une chute.
+
+| évalué → archive figée | score (n = 300) |
+|---|---|
+| P0 → P1 (S27, déduit de P1 → P0 = 0,642) | 0,36 |
+| **S25 (30 000) → P1** | **0,50** (150/300) |
+| **S9 (30 000) → P1** | **0,62** (186/300) |
+| S9 → S25, S9 → entnorm, S25 → entnorm | en cours, JSON dans `logs/matrix_heldout_20260916/` |
+
+Lecture (deux cellules) : S9 gagne **+12 pts** sur S25 contre un adversaire tenu hors (erreur-type
+d'une cellule 2,8 pts, de l'écart ≈ 4 pts → ≈ 3 σ) contre **+5 pts** sur P0 (sondes) : le gain
+n'est pas confiné à P0, il est même plus grand hors de P0. Au même instrument, S25 (0,50) avait déjà
+généralisé une partie de ses +9 pts sur la lignée (P0 : 0,36). À 30 000, S9 apprend à jouer contre
+cette famille de politiques ; « spécialisation contre le champion » est réfutée sur P1. Réserve :
+P1 descend de P0 (même lignée, même observation) ; les cellules entnorm (autre origine, aucune
+parenté) complètent la réponse. Ce que la matrice ne dit pas : si S9 est lui-même exploitable
+(cycle pierre-feuille-ciseaux) — cela se mesure en entraînant un exploiteur CONTRE S9 (~5,5 h), et
+c'est ce que le gate de lignée (battre le champion ET chaque membre du pool, `evaluate_pool_decision`)
+protège à partir de P2 ; en P1, pool à un membre (D1), rien ne le protège.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
