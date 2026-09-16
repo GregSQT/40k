@@ -128,10 +128,16 @@ def _warmup_update_tracking_saved_activations(
 
 
 def test_en_echauffement_les_activations_d_un_mini_lot_ne_survivent_pas_au_suivant() -> None:
-    """VERROU. Réintroduire `pg_losses_t.append(policy_loss)` (sans `detach`) avec le graphe de
-    la politique attaché — c'est-à-dire retirer le détachement de `log_prob`/`entropy` en tête
-    de boucle dans `PatchedMaskablePPO.train` — fait passer ce test au ROUGE : les activations
-    du mini-lot 0 sont encore vivantes à l'entrée du mini-lot 2, celles du 1 à l'entrée du 3.
+    """VERROU (régression jointe uniquement). Ce test passe au ROUGE si et seulement si LES DEUX
+    protections sont retirées SIMULTANÉMENT : (1) les `.detach()` sur les appends des listes de
+    logging (`pg_losses_t.append(policy_loss.detach())` etc., lignes ~580, ~590, ~621-622, ~562)
+    ET (2) le détachement de `log_prob`/`entropy` en tête de boucle (ligne ~534). Retirer l'une
+    seule laisse le test VERT : chaque protection est individuellement suffisante pour briser la
+    chaîne de rétention (mesuré le 2026-09-16, alive_two_back {2: 72, 3: 72} quand les deux sont
+    retirées). Site (1) est la correction de la root cause (listes de logging retenant des graphes
+    d'un mini-lot à l'autre) ; site (2) est une couche défensive supplémentaire (évite de construire
+    le graphe de la politique pendant l'échauffement). COUVERTURE PARTIELLE : une régression isolée
+    sur l'un des deux sites passe ce test inaperçue.
     CONTRÔLE NON VACANT : chaque mini-lot a bien sauvé des activations (`seen > 0`), sinon un
     hook non branché rendrait `alive == 0` sans rien prouver.
     """
