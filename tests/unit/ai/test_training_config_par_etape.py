@@ -158,8 +158,9 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     assert mp["gae_lambda"] == pytest.approx(0.95)
     assert profil_lignee["n_envs"] == 24, "les 24 envs hérités ont tenu 15 h sur le run de référence"
     assert mp["vf_coef"] == pytest.approx(0.17)
-    # 0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11), réglage posé par l'utilisateur.
-    assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.7)
+    # 0.75 depuis le 2026-09-16 (0.70 du 2026-09-11 au 2026-09-16, 0.6 du 2026-09-07 au 2026-09-11),
+    # réglage posé par l'utilisateur.
+    assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.75)
 
 
 def test_the_lineage_profile_carries_scalars_never_ramps(profil_lignee) -> None:

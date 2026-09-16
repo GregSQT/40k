@@ -41,6 +41,8 @@ from typing import Any, Dict
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+from shared.json_atomic import json_draft  # noqa: E402  (dépend du sys.path ci-dessus)
+
 
 def apply_training_env(config_path: str) -> Dict[str, str]:
     """Pose le bloc `training_env` de `config/config.json` dans `os.environ` ; rend ce qui est posé.
@@ -137,7 +139,9 @@ def main() -> None:
         "summary": summarize(result, args.label),
         "result": result,
     }
-    with open(args.out, "w", encoding="utf-8") as handle:
+    # `default=str` et `indent=1` sont la forme de CE fichier : `json_draft`, pas `write_json_atomic`
+    # — le brouillon est publié d'un seul `os.replace`, une interruption laisse le JSON précédent.
+    with json_draft(args.out) as handle:
         json.dump(payload, handle, indent=1, ensure_ascii=False, default=str)
     print(json.dumps(payload["summary"], indent=1, ensure_ascii=False, default=str))
     print(f"durée {payload['duration_s']} s — JSON : {args.out}")
