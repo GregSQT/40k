@@ -1626,7 +1626,18 @@ famille de P0, pas mesurablement à mieux jouer. GPU libre depuis 07:54, rien la
 
 **Décisions ouvertes (utilisateur), avec ce que chaque option cherche à savoir.**
 - **GPU.** A : exploiteur sous T + poids de la victoire changé (C2 ; aucune valeur écrite, effet
-  inconnu ; T s'éteint après ~20 000, on retesterait surtout dans le régime S25). B : T dans le profil
+  inconnu ; T s'éteint après ~20 000, on retesterait surtout dans le régime S25). **Complément du 16
+  (proposition d'un autre agent, évaluée 10:50)** : BAISSER l'issue (±150 → ±30 ou 0) parce que le
+  signe de la marge est déjà payé par 6 × marge finale et que le pas de ±300 au voisinage de
+  l'équilibre est un bruit que le critique ne peut pas prédire. Exact sur le fait ; direction
+  OPPOSÉE à la lecture C2 du dossier (façonnage dominant → renforcer l'issue). Aucune des deux
+  n'est mesurée. Risque principal de la baisse : désalignement avec le gate (taux de victoire) —
+  un objectif de marge récompense l'appétit pour le risque (S9 perd déjà 31 % de figurines contre
+  26 % pour S25) ; à 0 l'objectif devient purement « marge ». Le risque « critique » annoncé est
+  traité : l'empreinte de la table inclut les valeurs, l'échauffement se rejoue. Dessin retenu pour
+  l'étape 3 : exploiteur sous T, UN changement, trois bras ±30 / ±150 (S9) / ±300 (deux runs), juge =
+  sonde argmax (pas `03_selfplay`), deux graines sous 10 pts, lire aussi valeur perdue et parties au
+  départage. Après le gate de B et le run de nuit ; derrière D s'il faut choisir. B : T dans le profil
   de lignée + P1 relancé depuis P0 vers le gate 0,65 — c'est le but du chantier. **Risque de
   transfert, vérifié dans `config/agents/ArmageddonAgent_x1/` le 16** : la lignée joue 70 % en second
   (exploiteur 50 %), 30 % contre les bots (0 %), lr 0,001 (0,0005), P0 échantillonné (déterministe) ;
