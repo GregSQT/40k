@@ -1619,6 +1619,14 @@ S9 et la référence P1 avaient des updates de 3–6 s sur toute leur durée (B 
 11:20–14:00). Cause hors de portée depuis WSL (pas de ventilation mémoire par processus). Décision
 de 30 000 attendue vers 16:40.
 
+**Lecture à 20 000 (2026-09-16, 14:40).** Sonde de pool `P0=0.647`, moyenne des deux sondes **0,650**
+(référence P1 du 12 septembre à 20 000 : 0,533 ; moyennes de trois de la référence : 0,54 → 0,61
+jusqu'à 50 000). Promotion à 30 000 si la troisième sonde ≥ 0,650 ; sinon décision rejouée à chaque
+sonde sur les trois dernières. Mécanisme par cinquième : entropie de collecte 1,10 / 0,95 / 0,88 /
+0,86 / 0,87 (S9 à 20 000 : 0,80) ; mini-lots appris 31 / 22 / 18 / 19 / 17 ; EV 0,84–0,86 ;
+`time_update` 22 / 5 / 41 / 51 / 10 s puis 3–5 s sur les cinq dernières updates (fenêtre lente ≈
+épisodes 8 000–16 000). Holdout bots de 20 000 non publié à l'heure de la lecture.
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
