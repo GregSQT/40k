@@ -517,26 +517,6 @@ class PatchedMaskablePPO(MaskablePPO):
                     )
                 values = values.flatten()
 
-                # ÉCHAUFFEMENT : la branche politique ne contribue pas à la loss (plus bas,
-                # `loss = vf_coef × value_loss`), donc aucun backward ne libère jamais son
-                # graphe. Empilés avec ce graphe dans les listes de logging, `policy_loss` et
-                # `entropy_loss` retenaient les activations de CHAQUE mini-lot jusqu'à la fin de
-                # `train()` — mesuré le 2026-09-16 sur `x1_lineage` (340 × 24, lot 1020,
-                # 4 epochs) : 9,69 Gio alloués / 12,11 réservés par update d'échauffement contre
-                # 1,79 / 2,08 en régime normal. Sous WSL2 l'allocateur n'est jamais mis en OOM
-                # (débordement silencieux en RAM hôte) et ne rend jamais cette réservation :
-                # 12 Gio à vie sur une carte de 8, chaque update paginée ensuite
-                # (`train/time_update` 5 s → 20-345 s sur `run_20260916-092441`). Détaché ici,
-                # sauf pour le mini-lot du diagnostic de gradient (`_diag_grad_norms_mb0`), qui
-                # a besoin du graphe de la politique ; ses références tombent au mini-lot
-                # suivant, sans coût mesurable (pic 1,90 Gio avec le fix, 1,79 hors échauffement).
-                # Les valeurs loguées sont les mêmes : un forward identique, sans gradient.
-                _diag_minibatch = epoch == 0 and _diag_grad_norms_mb0 is None
-                if _in_warmup and not _diag_minibatch:
-                    log_prob = log_prob.detach()
-                    if entropy is not None:
-                        entropy = entropy.detach()
-
                 # Diagnostic minibatch 0/epoch 0 : seul point vraiment pré-update.
                 if epoch == 0 and _diag_drift_norm_mb0 is None:
                     with th.no_grad():
@@ -577,6 +557,20 @@ class PatchedMaskablePPO(MaskablePPO):
 
                 # Accumulation GPU — pas de .item() ici, et DÉTACHÉS : ces listes ne servent
                 # qu'au logging, un graphe retenu ici survivrait jusqu'à la fin de `train()`.
+                # Hors échauffement le backward réel libère ce graphe ; en ÉCHAUFFEMENT
+                # (`loss = vf_coef × value_loss`, plus bas) rien ne traverse la branche
+                # politique, et `policy_loss`/`entropy_loss` empilés AVEC leur graphe retenaient
+                # les activations de CHAQUE mini-lot jusqu'à la fin de `train()` — mesuré le
+                # 2026-09-16 sur `x1_lineage` (340 × 24, lot 1020, 4 epochs) : 9,69 Gio alloués /
+                # 12,11 réservés par update d'échauffement contre 1,79 / 2,08 en régime normal.
+                # Sous WSL2 l'allocateur n'est jamais mis en OOM (débordement silencieux en RAM
+                # hôte) et ne rend jamais cette réservation : 12 Gio à vie sur une carte de 8,
+                # chaque update paginée ensuite (`train/time_update` 5 s → 20-345 s sur
+                # `run_20260916-092441`). Détachées, plus `_terms` consommée (diagnostic plus
+                # bas) : 1,79 / 2,29. Ne PAS détacher `log_prob`/`entropy` en tête de boucle
+                # pour « aider » : le graphe de la tête vit un mini-lot quoi qu'il arrive, tenu
+                # par `policy.action_dist.distribution` (logits), et ce détachement ne libérait
+                # que 7 tenseurs (B,)/(B, A) sur 75 (mesuré le 2026-09-16, retiré le même jour).
                 pg_losses_t.append(policy_loss.detach())
                 clip_fractions_t.append(th.mean((th.abs(ratio - 1) > clip_range).float()))
 
