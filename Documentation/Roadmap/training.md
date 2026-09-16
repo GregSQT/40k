@@ -165,6 +165,15 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 08:45 — point de reprise ([dossier ÉTAT AU 2026-09-16](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-16)).**
+Réponses consignées aux questions du 16 (P0 ne plafonne pas contre les bots : 0,695 → 0,779 → 0,868 ;
+l'hypothèse « plafond introduit par les commits » est affaiblie par le 0,78 de S9 sur le code actuel ;
+cause mesurée = exploration absente en reprise). Décisions ouvertes : GPU (A poids de la victoire sous
+T / B transfert lignée, risque : siège 0,7, bots 30 %, lr 0,001, P0 échantillonné / C P0 neuf à froid /
+D seconde graine de S9) ; mécanisme d'exploration non absorbable : mélange aléatoire à la collecte
+contre température autorégulée, à comparer par écrit avant code. Liste datée de ce qui est sain et de
+ce qui ne l'est pas.
+
 **2026-09-16, 08:30 — S9, manière de gagner ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Blocs 40 000–50 000, S9 / S25 : VP de l'agent 48,7 / 47,8 mais VP de P0 **36,4 / 41,3** — la marge vient
 du déni des points adverses ; victoires en déploiement actif 0,78 / 0,68, en déploiement moteur 0,49 /

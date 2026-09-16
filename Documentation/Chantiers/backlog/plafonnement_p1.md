@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-16) : [ÉTAT AU 2026-09-16](#etat-2026-09-16) — S9 terminé, décisions ouvertes, état de santé.** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1486,6 +1486,85 @@ marge de VP 73 / 32, issue ±150 → +76 / +44, bonus de combat 198 / 197, péna
 par épisode 256 / 180. Réserves détruites au tour 3 : 0,009 / 0,000 par épisode (effet mineur de
 l'échantillonnage à T = 2 sur les refus d'arrivée). Aucune action invalide. Durée : 20:34 → 07:09
 pour 60 000 épisodes (10 h 34, ~5 700 épisodes/h), évaluation finale jusqu'à 07:54.
+
+## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
+
+**Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
+plateau contre P0 déplacé de ~0,68 (S25) à ~0,78, plat depuis 40 000 ; la température a été absorbée
+(variété de collecte 1,07 → 0,72 nat, S25 à 0,69) et la montée s'est arrêtée quand le surplus a
+disparu (coïncidence sur une graine, pas une preuve). Contre les bots : 0,90 (P0 0,91), aucune perte.
+Matrice hors entraînement : S9 bat tout ce qui descend de P0 (P1 0,64, S25 0,69) et ne gagne rien
+contre le témoin sans parenté entnorm (0,71, comme S25 0,70 et P0 ≈ 0,72) → il apprend à battre la
+famille de P0, pas mesurablement à mieux jouer. GPU libre depuis 07:54, rien lancé.
+
+**Réponses aux trois questions de l'utilisateur du 2026-09-16 (00:10).**
+1. *Refaire un P0 pour voir s'il plafonne ?* P0 ne plafonne pas contre les bots : score robuste
+   0,695 → 0,779 → 0,868 à 30 000 / 40 000 / 50 000 (`training_x1_01-p00.log`), encore en montée au
+   bout du budget (7 h 54). Pas la même échelle que 0,70 contre une copie de soi. Un P0 neuf répond
+   à une autre question — le pipeline actuel (obs 18 204, récompense marge, moteur du 16) apprend-il
+   encore à froid ? aucun run `--new` depuis le témoin entnorm du 13, jamais sous la récompense marge —
+   et fournit le juge indépendant qui manque (voir ci-dessous).
+2. *Le plafond vient des commits entre le 0,713 et le 0,563 ?* Trois changements simultanés entre le
+   8 et le 11 septembre (§9.1) : observation 17 091 → 18 204, P0 réentraîné (75 001 → 50 000 épisodes),
+   moteur corrigé (57 armes à zéro dégât, OC par figurine). Bissection : un P0 (8 h) + un P1 (5 h 30)
+   par point, une graine, anciens zips inchargeables. **S9 affaiblit l'hypothèse** : sur le code et le
+   P0 actuels, un agent atteint 0,78 > 0,713 ; le jeu permet de dépasser 0,70, ce qui manquait était
+   l'exploration en reprise. Aucune action code.
+3. *Les améliorations vont dans le bon sens, le plafond a une autre cause ?* Oui, avec mesure : rien
+   n'indique qu'une amélioration ait nui ; la cause mesurée est l'absence d'exploration d'une politique
+   reprise à p ≈ 0,99 (charge 0,01 nat de variété : plus aucune donnée, plus aucun apprentissage sur
+   cette tête). Tous les autres suspects ont été testés et écartés (§4) ; seul le levier touchant la
+   collecte a bougé le plateau.
+
+**Décisions ouvertes (utilisateur), avec ce que chaque option cherche à savoir.**
+- **GPU.** A : exploiteur sous T + poids de la victoire changé (C2 ; aucune valeur écrite, effet
+  inconnu ; T s'éteint après ~20 000, on retesterait surtout dans le régime S25). B : T dans le profil
+  de lignée + P1 relancé depuis P0 vers le gate 0,65 — c'est le but du chantier. **Risque de
+  transfert, vérifié dans `config/agents/ArmageddonAgent_x1/` le 16** : la lignée joue 70 % en second
+  (exploiteur 50 %), 30 % contre les bots (0 %), lr 0,001 (0,0005), P0 échantillonné (déterministe) ;
+  or S9 gagne surtout en premier (0,72 / 0,59 cumulés). Le 0,78 est un meilleur cas ; ce que la lignée
+  en garde n'est pas mesuré. C : P0 neuf à froid (8 h, aucun code, agent dédié à créer par copie
+  comme `ArmageddonAgent_x1_expl`) : régression du pipeline + second champion sans parenté. D :
+  seconde graine de S9 (5 h 30 jusqu'à 30 000) — la règle §9.3 exige deux graines sous 10 pts d'effet,
+  l'effet vaut 10 pts, à la limite ; c'est ce qui rendrait le transfert solide. L'agent a recommandé
+  C puis B ; c'est un jugement de valeur d'information, pas une mesure ; B ou D d'abord se défendent
+  autant par les faits. Risque métier commun : promouvoir un P1 qui bat la famille de P0 sans mieux
+  jouer (lignée qui tourne en rond) — mesurable par la matrice, contenu par un juge indépendant, pas
+  éliminé.
+- **Mécanisme d'exploration non absorbable** (règle 2b : pas un T plus grand). Deux candidats, à
+  comparer PAR ÉCRIT avant tout code. (i) Mélange à la collecte : une fois sur 10–20 un coup légal
+  uniforme, ratio corrigé par la distribution de collecte. Hypothèses non vérifiées : le gain de S9
+  vient des coups variés et non de l'objectif adouci (PPO optimisait π_T : les deux ne sont pas
+  isolés) ; un tirage uniforme sur ~200 cases de déplacement joue des coups absurdes là où T
+  explorait les seconds choix (deux leviers ont détruit la politique ce mois-ci) ; correction simple
+  avec les têtes à pointeur masquées. (ii) Température autorégulée : T ajusté à chaque update pour
+  tenir la variété de collecte à une cible (ex. 1,0 nat) ; garde les seconds choix, compense
+  l'affûtage du réseau ; risque : T sans borne, objectif de plus en plus adouci. Aucun des deux n'est
+  testé ni codé ; les règles 40k n'interviennent pas dans ce choix.
+
+**Ce qui est sain (mesuré).** Zéro action invalide, zéro troncature, contrats vérifiés, gardes
+d'arrêt opérantes, règle-avant-lecture tenue, critic à 0,88, holdout bots stable.
+
+**Ce qui ne l'est pas (mesuré, avec renvoi).** Exploration absente en reprise (§5.14, sonde par
+famille) ; une graine contre une graine sur tous les verdicts (§9.3 ; S9 ≈ 4 σ, les réfutations à
+5 pts ne valent rien) ; plus de juge de progrès général (bots saturés D2, lignée auto-référente ; la
+matrice du 16 est le premier instrument) ; moitié de chaque rollout jetée par la coupure KL
+(15–16 / 32, §5.4, tous les runs) ; récompense à ~70 % de substitut (objectifs 64 %, pénalités −112
+non ventilées, C5 ouvert) ; gate de lignée jamais passé depuis le 10 septembre (six relances).
+
+**Estimation honnête.** Cause cernée, un levier à +10 pts ; pas de lignée qui progresse. Chemin :
+mécanisme non absorbable conçu, codé, testé (1–2 j) → deux graines (1 j) → transfert lignée (1 j)
+→ juge indépendant (8 h). Si tout marche : 4–5 jours pour savoir si la lignée passe 0,65 de façon
+reproductible. 0,78 est le meilleur cas mesuré ; 0,90 : aucune mesure ne dit s'il est atteignable.
+
+**Artefacts.** Logs : `training_x1_expl_05-e00-s9.log` ; TensorBoard `run_20260915-203437` ;
+poids finaux `ppo_checkpoint_20260915-203439_12247944_steps.zip` (copie dans
+`logs/matrix_heldout_20260916/s9_final_ckpt/`) ; canonique expl = instantané holdout 0,9072 (50 000) ;
+`curriculum.log` ligne 17 ; matrice et sondes par famille : `logs/matrix_heldout_20260916/*.json`,
+`family_entropy_s9_vs_s25_30000.txt`, `family_entropy_s9final_vs_s25_40000.txt` ; instruments :
+`scripts/seat_matrix_probe.py`, `scripts/family_entropy_probe.py`. Config inchangée : le profil
+`x1_lineage` de l'agent expl porte toujours `logits_temperature: 2.0` et `advantage_source: gae`.
+Commits du 16 : `975ebc91c` → `8ba5473dc` (lectures 18 000 → clôture, une par lecture).
 
 ## 6. Ce qui n'a pas été fait
 
