@@ -125,11 +125,22 @@ def multilevel_target_within_straight_bound(
     cible, pour 34 % du temps de ces champs ; sous la borne HEX (2026-09-16, chemin de
     ``scripts/bench_env_step.py``, 200 pas, x1_long bots, graine 42, les deux bornes évaluées
     sur les MÊMES 191 appels), 54 champs sortent tôt contre 65 sous la ligne droite — 11 champs
-    de plus calculés, chacun une passe d'étage de ~7 ms, contre 0 passe any-angle au sol.
+    de plus entrent dans la construction (obstacles, portails, amorçage du sol), contre 0 passe
+    any-angle au sol ; la passe d'étage elle-même ne tourne que si un portail tient dans le
+    budget (``reachable_multilevel_field`` n'ouvre aucun round sans seed).
     """
     if any(int(lv) == 0 for lv in target_levels):
         return True
-    sx, sy = _hex_center(start_pos[0], start_pos[1])
+    sc, sr = int(start_pos[0]), int(start_pos[1])
+    if ground_is_hex:
+        def horizontal(c: int, r: int) -> float:
+            return ENGAGEMENT_NORM_HEX_WIDTH * hex_distance(sc, sr, c, r)
+    else:
+        sx, sy = _hex_center(sc, sr)
+
+        def horizontal(c: int, r: int) -> float:
+            hx, hy = _hex_center(c, r)
+            return math.hypot(hx - sx, hy - sy)
     h_start = float(height_by_level[int(start_level)])
     limit = budget_norm + _SEG_TOL
     for lv in target_levels:
@@ -140,14 +151,7 @@ def multilevel_target_within_straight_bound(
         if vc > limit:
             continue
         for c, r in cells:
-            if ground_is_hex:
-                horizontal = ENGAGEMENT_NORM_HEX_WIDTH * hex_distance(
-                    start_pos[0], start_pos[1], c, r
-                )
-            else:
-                hx, hy = _hex_center(c, r)
-                horizontal = math.hypot(hx - sx, hy - sy)
-            if horizontal + vc <= limit:
+            if horizontal(c, r) + vc <= limit:
                 return True
     return False
 

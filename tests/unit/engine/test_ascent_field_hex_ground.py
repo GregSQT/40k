@@ -3,8 +3,8 @@
 Jumeau hex de ``test_ascent_field_reuses_euclidean_field.py``. En métrique hex (gym x1, ou x5
 sous ``gym_distance_metric: hex``), ``ascent_field_for_model`` injecte comme passe de départ le
 BFS hex de plain-pied (``geodesic_move_reach`` sur le bitmap de niveau 0, coût × 1,5) au lieu de
-laisser ``reachable_multilevel_field`` relancer la passe any-angle avec clairance au sol — la
-passe la plus chère du step d'entraînement (8,8 s sur 39,8 s de 200 pas du banc x1).
+laisser ``reachable_multilevel_field`` relancer la passe any-angle avec clairance au sol (mesure
+et raisons : ``ascent_field_for_model``).
 
 Ce que cela CHANGE, et que ce fichier verrouille : le sol d'une montée est mesuré comme le move
 à plat du gym (pas hex par cellule, sans clairance de socle) — jusqu'à 15 % de portée en plus
@@ -30,43 +30,40 @@ from typing import Any, Dict, List, Sequence, Tuple
 import pytest
 
 from engine.combat_utils import GYM_DISTANCE_METRIC_KEY
-from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, get_neighbors, hex_distance
+from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, _SEG_TOL, get_neighbors, hex_distance
 from engine.phase_handlers import geodesic_move as gm
 from engine.phase_handlers import movement_handlers as mh
 from engine.phase_handlers import shared_utils as su
 from engine.phase_handlers.movement_handlers import ASCENT_DECLARED_KEY
-from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
-from tests._state_invariants import turn_state_invariants, unit_invariants
+from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes
+from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+# Scène partagée avec le jumeau euclidien : mêmes constantes, même spy de passe de départ.
+from tests.unit.engine.test_ascent_field_reuses_euclidean_field import (
+    _BUDGET, _FLOOR_HEXES, _FLOOR_POLYGON, _INCHES_TO_SUBHEX, _START, _WALLS,
+    _count_start_passes, _model,
+)
 
-_FLOOR_HEXES = [(c, r) for c in range(24, 30) for r in range(16, 26)]
-_FLOOR_POLYGON = [[0.0, 0.0], [200.0, 0.0], [200.0, 200.0], [0.0, 200.0]]
-#: x5 : 5 sous-hexes par pouce ; étage à 1" → 5 sous-hexes de montée (7,5 unités-norme).
-_INCHES_TO_SUBHEX = 5
+#: Étage à 1" → 5 sous-hexes de montée (7,5 unités-norme) à x5.
 _CLIMB_SUBHEX = 5
-_BUDGET = 30  # sous-hexes (6" à x5)
-_START = (18, 20)  # 6 colonnes du plancher
-#: Mur en travers du chemin direct vers l'étage (colonne 21, lignes 17..23), contourné par le haut/bas.
-_WALLS = {(21, r) for r in range(17, 24)}
 #: Muraille d'un bord à l'autre du budget (colonne 21, lignes 5..35) percée d'UNE case en (21,20) :
 #: le BFS hex passe par la brèche, le socle any-angle (rayon 2,25 pour BASE_SIZE 3) ne peut ni
 #: la franchir ni contourner la muraille dans le budget.
 _LONG_WALL = {(21, r) for r in range(5, 36)} - {(21, 20)}
+#: Plancher 3 × 3 dont la première ligne est 10 lignes PLEIN SUD du départ (même colonne) :
+#: 10 pas hex = 15 unités-norme, mais 17,32 en ligne droite (√3 par pas vers le sud).
+_SOUTH_START = (20, 5)
+_SOUTH_FLOOR = frozenset((c, r) for c in range(19, 22) for r in range(15, 18))
+_SOUTH_RING = {nb for cell in _SOUTH_FLOOR for nb in get_neighbors(cell[0], cell[1]) if nb not in _SOUTH_FLOOR}
+_SOUTH_HEIGHT = {0: 0.0, 1: _CLIMB_SUBHEX * ENGAGEMENT_NORM_HEX_WIDTH}
 
 
-def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]],
-          shape: str = "round", size: Any = 3, move: int = _BUDGET) -> Dict[str, Any]:
-    col, row = models[0]
-    return {**unit_invariants(),
-        "id": uid, "player": player, "col": col, "row": row,
-        "HP_CUR": len(models), "HP_MAX": len(models), "VALUE": 100, "OC": 1, "T": 4,
-        "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
-        "RNG_WEAPONS": [], "CC_WEAPONS": [], "BASE_SIZE": size, "MODEL_HEIGHT": 2.5,
-        # MOVE est en SOUS-HEXES dans le moteur (`game_state.py`, `config["MOVE"] * scale`) :
-        # l'érosion en dérive son budget (`get_squad_move_budget`), pas d'un paramètre.
-        "BASE_SHAPE": shape, "MOVE": int(move), "UNIT_RULES": [],
-        "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}],
-        "models": [{"col": c, "row": r, "VALUE": 10, "orientation": 0} for c, r in models],
-    }
+def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]], move: int = _BUDGET) -> Dict[str, Any]:
+    # MOVE est en SOUS-HEXES dans le moteur (`game_state.py`, `config["MOVE"] * scale`) :
+    # l'érosion en dérive son budget (`get_squad_move_budget`), pas d'un paramètre.
+    return synthetic_unit(
+        uid, player, [{"col": c, "row": r, "orientation": 0} for c, r in models],
+        BASE_SIZE=3, MOVE=int(move), UNIT_KEYWORDS=[{"keywordId": "INFANTRY"}],
+    )
 
 
 def _make_gs(units: List[Dict[str, Any]], *, walls: Any = _WALLS,
@@ -74,47 +71,36 @@ def _make_gs(units: List[Dict[str, Any]], *, walls: Any = _WALLS,
     """État x5 en métrique HEX : ``gym_training_mode`` + ``gym_distance_metric: hex`` posés ICI,
     pour que le test ne dépende pas de la valeur ``move_gym`` de ``game_config.json``."""
     floor = list(floor_hexes)
-    gs: Dict[str, Any] = {**turn_state_invariants(),
-        "config": {
-            "game_rules": {
-                "engagement_zone": 5, "engagement_zone_vertical": 5,
-                "max_base_size_hex": 35, "unit_model_cohesion_range": 10,
-                "unit_global_cohesion_range": 45, "squad_min_neighbors": 1,
-                "cohesion_distance_mode": "euclidean",
-            },
-            "move": {"can_move_through_enemy_engagement_zone": True,
-                     "can_move_through_enemy_model": False,
-                     "can_move_through_friendly_model": True},
-            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+    gs = synthetic_state(
+        units, phase="move",
+        game_rules={
+            "engagement_zone": 5, "engagement_zone_vertical": 5,
+            "max_base_size_hex": 35, "unit_model_cohesion_range": 10,
+            "unit_global_cohesion_range": 45, "squad_min_neighbors": 1,
+            "cohesion_distance_mode": "euclidean",
         },
-        "board_cols": 60, "board_rows": 60,
-        "current_player": 1,
-        "phase": "move",
-        "gym_training_mode": True,
-        GYM_DISTANCE_METRIC_KEY: "hex",
-        "wall_hexes": set(walls),
-        "terrain_areas": [{
+        move_rules={"can_move_through_enemy_engagement_zone": True,
+                    "can_move_through_enemy_model": False,
+                    "can_move_through_friendly_model": True},
+        inches_to_subhex=_INCHES_TO_SUBHEX,
+        terrain_areas=[{
             "id": "ruin", "polygon_vertices": _FLOOR_POLYGON, "hexes": floor,
             "floors": [{"level": 1, "height_inches": 1.0, "hexes": floor,
                         "polygon_vertices": _FLOOR_POLYGON}],
         }],
-        "units": units,
-        "unit_by_id": {str(u["id"]): u for u in units},
-        "units_charged": set(), "units_fled": set(), "units_advanced": set(),
-        "units_moved": set(),
-        "_unit_move_version": 0,
-        "inches_to_subhex": _INCHES_TO_SUBHEX,
-        "action_logs": [], "action_log_seq": 0, "current_turn": 1,
-    }
-    build_units_cache(gs)
+        wall_hexes=set(walls),
+        gym_training_mode=True,
+    )
+    gs[GYM_DISTANCE_METRIC_KEY] = "hex"
     build_enemy_adjacent_hexes(gs, 1)
     build_enemy_adjacent_hexes(gs, 2)
     assert su.move_plan_distance_mode(gs, "1") == "geodesic", "prémisse : métrique hex au sol"
     return gs
 
 
-def _model(gs: Dict[str, Any]) -> Dict[str, Any]:
-    return gs["models_cache"]["1#0"]
+def _default_gs() -> Dict[str, Any]:
+    """Scène de référence : départ à 6 colonnes du plancher, mur court, ennemi au pied de l'étage."""
+    return _make_gs([_unit("1", 1, [_START]), _unit("2", 2, [(23, 20)])])
 
 
 def _ascent(gs: Dict[str, Any], budget: int = _BUDGET) -> Dict[Tuple[int, int], int]:
@@ -134,21 +120,6 @@ def _any_angle_reference(gs: Dict[str, Any], budget: int = _BUDGET) -> Dict[Tupl
     ).get(1, {}))
 
 
-def _count_start_passes(monkeypatch: pytest.MonkeyPatch) -> List[int]:
-    """Passes multi-source SEEDÉES DEPUIS LE DÉPART (une source, distance 0) — la passe any-angle
-    au sol que l'injection supprime. Les passes d'étage (seeds de portail) ne comptent pas."""
-    calls = [0]
-    real = gm._euclidean_move_field_multi
-
-    def counted(starts: Dict[Tuple[int, int], float], *args: Any, **kwargs: Any) -> Any:
-        if len(starts) == 1 and next(iter(starts.values())) == 0.0:
-            calls[0] += 1
-        return real(starts, *args, **kwargs)
-
-    monkeypatch.setattr(gm, "_euclidean_move_field_multi", counted)
-    return calls
-
-
 def _count_hex_bfs(monkeypatch: pytest.MonkeyPatch) -> List[int]:
     calls = [0]
     real = su.geodesic_move_reach
@@ -164,7 +135,7 @@ def _count_hex_bfs(monkeypatch: pytest.MonkeyPatch) -> List[int]:
 # ─────────────────── (1) la passe de départ est le BFS hex, jamais l'any-angle ───────────────────
 
 def test_hex_ground_pass_is_the_hex_bfs_not_the_any_angle_field(monkeypatch: pytest.MonkeyPatch):
-    gs = _make_gs([_unit("1", 1, [_START]), _unit("2", 2, [(23, 20)])])
+    gs = _default_gs()
     starts = _count_start_passes(monkeypatch)
     bfs = _count_hex_bfs(monkeypatch)
     field = _ascent(gs)
@@ -178,7 +149,7 @@ def test_hex_ground_pass_is_the_hex_bfs_not_the_any_angle_field(monkeypatch: pyt
 
 
 def test_hex_ascent_field_is_a_superset_of_the_any_angle_one_and_stays_in_budget():
-    gs = _make_gs([_unit("1", 1, [_START]), _unit("2", 2, [(23, 20)])])
+    gs = _default_gs()
     reference = _any_angle_reference(gs)
     assert reference, "prémisse : le champ any-angle atteint l'étage (mur contourné)"
     field = _ascent(gs)
@@ -193,7 +164,7 @@ def test_hex_ascent_field_is_a_superset_of_the_any_angle_one_and_stays_in_budget
     # (13 à 16), et le fond de l'étage reste hors de portée. État NEUF : le champ est mémoïsé sans
     # le budget dans sa clé (un champ large répond pour tout budget inférieur, l'appelant compare
     # le COÛT), donc relire `gs` rendrait le champ à 30.
-    narrow = _ascent(_make_gs([_unit("1", 1, [_START]), _unit("2", 2, [(23, 20)])]), 16)
+    narrow = _ascent(_default_gs(), 16)
     assert narrow and set(narrow) < set(field), sorted(narrow)
     assert (29, 25) not in narrow and all(cost <= 16 for cost in narrow.values())
 
@@ -211,20 +182,9 @@ def test_one_cell_corridor_is_open_to_the_hex_ground_and_closed_to_the_any_angle
 
 # ─────────────────── (2) le pré-check de portée connaît la métrique du sol ───────────────────
 
-def _south_floor_scene() -> Tuple[Dict[str, Any], ...]:
-    """Plancher 3 × 3 dont la première ligne est 10 lignes PLEIN SUD du départ (même colonne) :
-    10 pas hex = 15 unités-norme, mais 17,32 en ligne droite (√3 par pas vers le sud)."""
-    start = (20, 5)
-    floor = frozenset((c, r) for c in range(19, 22) for r in range(15, 18))
-    ring = {nb for cell in floor for nb in get_neighbors(cell[0], cell[1]) if nb not in floor}
-    height = {0: 0.0, 1: _CLIMB_SUBHEX * ENGAGEMENT_NORM_HEX_WIDTH}
-    return {"start": start, "floor": floor, "ring": ring, "height": height},
-
-
 @pytest.mark.parametrize("budget_subhex, expected_cells", [(15, 1), (16, 4)])
 def test_precheck_hex_bound_admits_a_floor_the_straight_line_rejects(budget_subhex: int, expected_cells: int):
-    (scene,) = _south_floor_scene()
-    start, floor, ring, height = scene["start"], scene["floor"], scene["ring"], scene["height"]
+    start, floor, ring, height = _SOUTH_START, _SOUTH_FLOOR, _SOUTH_RING, _SOUTH_HEIGHT
     budget_norm = budget_subhex * ENGAGEMENT_NORM_HEX_WIDTH
     table = su.hex_index_table(40, 40)
     hex_ground = {
@@ -248,9 +208,7 @@ def test_precheck_hex_bound_admits_a_floor_the_straight_line_rejects(budget_subh
 def test_precheck_hex_bound_keeps_the_dijkstra_tolerance():
     """La passe d'étage reste any-angle et admet à ``budget + _SEG_TOL`` : la borne hex garde la
     même tolérance, sinon une case rendue par le champ serait déclarée hors de portée."""
-    from engine.hex_utils import _SEG_TOL
-    (scene,) = _south_floor_scene()
-    start, floor, height = scene["start"], scene["floor"], scene["height"]
+    start, floor, height = _SOUTH_START, _SOUTH_FLOOR, _SOUTH_HEIGHT
     exact = 10 * ENGAGEMENT_NORM_HEX_WIDTH + height[1]  # 22,5 : la case (20, 15) au budget exact
     assert gm.multilevel_target_within_straight_bound(
         start, 0, {1}, {1: floor}, height, exact - _SEG_TOL / 2, ground_is_hex=True
@@ -275,9 +233,8 @@ def test_precheck_hex_bound_is_never_tighter_than_the_straight_line():
 def test_precheck_runs_on_the_production_path_with_the_hex_bound(monkeypatch: pytest.MonkeyPatch):
     """Preuve que ``ascent_field_for_model`` transmet l'aiguillage : sur la scène plein sud, le
     champ de PRODUCTION rend la case d'étage — sans ``ground_is_hex`` il rendait ``{}``."""
-    start = (20, 5)
-    floor = [(c, r) for c in range(19, 22) for r in range(15, 18)]
-    gs = _make_gs([_unit("1", 1, [start]), _unit("2", 2, [(50, 50)])], walls=set(), floor_hexes=floor)
+    gs = _make_gs([_unit("1", 1, [_SOUTH_START]), _unit("2", 2, [(50, 50)])],
+                  walls=set(), floor_hexes=sorted(_SOUTH_FLOOR))
     seen: List[bool] = []
     real = gm.multilevel_target_within_straight_bound
 
@@ -288,11 +245,11 @@ def test_precheck_runs_on_the_production_path_with_the_hex_bound(monkeypatch: py
     monkeypatch.setattr(mh, "multilevel_target_within_straight_bound", spy)
     field = dict(su.ascent_field_for_model(gs, "1", 1, _model(gs), 1, 15))
     assert seen == [True], "le pré-check a été appelé une fois, en borne hex"
-    assert field == {(20, 15): 15}
+    assert field == {(_SOUTH_START[0], 15): 15}
 
 
 def test_multilevel_field_refuses_hex_flag_without_a_field():
-    gs = _make_gs([_unit("1", 1, [_START]), _unit("2", 2, [(23, 20)])])
+    gs = _default_gs()
     with pytest.raises(ValueError, match="precomputed_start_is_hex"):
         mh._model_multilevel_reachable_field(
             gs, gs["unit_by_id"]["1"], "1", _model(gs), _START, _BUDGET, {1},
