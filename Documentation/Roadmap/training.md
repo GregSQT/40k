@@ -165,6 +165,13 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 16:25 — B : P1 PROMU à 30 000 ([dossier §5.15](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Sondes de pool 0,653 / 0,647 / **0,697**, moyenne **0,666 ≥ 0,65** ; référence P1 du 12 septembre
+0,547 / 0,533 / 0,560. Premier gate de lignée passé depuis le 10 septembre, avec le régime de
+l'exploiteur S9 transféré (température 2, pas 0,0005) et le protocole de lignée inchangé. Clôture
+en cours (gate final, holdout, archive P1) ; matrice hors famille et score par siège à suivre ;
+run de nuit C ensuite.
+
 **2026-09-16, 11:40 — ordre des pistes après B tranché ([dossier §12](../Chantiers/backlog/plafonnement_p1.md#pistes-2026-09-16)).**
 Décision utilisateur : garder les pistes et les explorer par gain potentiel. Rang 1 ex æquo :
 exploration non absorbable (§10) et ligue d'adversaires (§11, première version sans GPU : pool de

@@ -1627,6 +1627,17 @@ sonde sur les trois dernières. Mécanisme par cinquième : entropie de collecte
 `time_update` 22 / 5 / 41 / 51 / 10 s puis 3–5 s sur les cinq dernières updates (fenêtre lente ≈
 épisodes 8 000–16 000). Holdout bots de 20 000 non publié à l'heure de la lecture.
 
+**VERDICT À 30 000 (2026-09-16, 16:25) — P1 PROMU.** Troisième sonde de pool `P0=0.697`, moyenne des
+trois **0,666 ≥ 0,65** : « tous les seuils de promotion tenus à 30 000 épisodes d'étape (P0=0.666).
+Le budget restant serait payé pour rien. Run ARRÊTÉ » (décision automatique `evaluate_pool_decision`).
+Référence P1 du 12 septembre aux mêmes points : 0,547 / 0,533 / 0,560 (moyenne 0,547) → **+12 pts**
+sur le juge officiel de la lignée, protocole de lignée inchangé (siège 0,7, bots 30 %, P0
+échantillonné). **Premier gate de lignée passé depuis le 10 septembre** (six relances refusées ou
+détruites avant). Une graine. Clôture en cours à 16:25 : mesure finale du gate (3 × 300), holdout
+bots final, archive `model_ArmageddonAgent_x1_P1.zip`, ligne `curriculum.log` — à consigner ; puis
+matrice hors famille sur le P1 promu (P0a, témoin entnorm, S9 final, S25) et score par siège (§5.15,
+lectures obligatoires au gate) ; puis run de nuit C (§12 rang 3, cas « B passe »).
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
