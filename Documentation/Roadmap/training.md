@@ -165,6 +165,20 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 02:25 — S9 : VERDICT À 30 000 = OUI, le plateau est déplacé ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Sondes exploiteur 20 000 → 30 000 : 0,80 / 0,72 / 0,69 / 0,68 / 0,71 / 0,78 → moyenne **0,730** contre
+0,677 (S25, même fenêtre ; règle 2b ≥ 0,72). +5,3 pts ≈ 2 σ (erreur-type d'un écart de fenêtres
+≈ 2,7 pts) : deux graines exigées au transfert (§9.3), pas à la lecture. **Holdout bots 0,893 à
+30 000** (P0 0,910, S25 0,923) : pas de spécialisation visible, pas de progrès contre des bots
+saturés. Mécanisme : entropie de π_T 0,80 → 0,76 (pente −0,04 nat / 10 000, 0,68 non atteint),
+coupure KL revenue à 15–16 mini-lots comme S25, `a_vp_diff` +10,5 (S25 +4). **Sonde par famille
+à T = 1 (checkpoints 30 000 de S9 et S25)** : S9 est PLUS pointue que S25 sur toutes les grandes
+têtes (move 1,47 contre 2,23 nat, charge 0,07 / 0,14) avec des argmax différents dans 72 % des
+états de mouvement — le réseau a absorbé T en affûtant ses logits, l'exploration qui a fait le
+résultat vit dans la collecte π_T, pas dans π. Le run continue à 60 000 (`budget_cap` E0) ;
+règle de lecture à 40 000 / 60 000 écrite dans le dossier avant les données (≥ 0,76 montée ;
+0,70–0,76 tenu ; < 0,70 bruit → seconde graine).
+
 **2026-09-16, 00:45 — S9 lecture à 20 000 ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Sondes exploiteur 2 000 → 20 000 : 0,53 / 0,59 / 0,56 / 0,66 / 0,68 / 0,62 / 0,67 / 0,76 / 0,67 /
 **0,80** (S25 à 20 000 : 0,68) ; garde passée à 10 000 (0,604 contre 0,536). Entropie de π_T
