@@ -1612,7 +1612,12 @@ mémoire GPU affichée 7,9 / 8,2 Go. Cause non établie : évaluateurs bots et p
 (`bot_eval_worker_device: cpu`, `checkpoint_device: cpu`), l'outil système ne ventile pas la mémoire
 par processus sous WSL ; contribution avérée mais partielle des lectures TensorBoard de l'agent et de
 la matrice des champions à froid (10:38–11:18) pendant le run. Décision de 30 000 repoussée vers
-18:00 ; run non touché.
+18:00 ; run non touché. **14:22 : ralentissement TRANSITOIRE** — vitesse revenue à 5 600 épisodes/h
+(1 940 épisodes entre 14:01 et 14:22) avec la mémoire GPU toujours affichée à 7,9 / 8,2 Go : la
+saturation n'est pas (ou plus) la cause ; GPU à 67 °C, aucun drapeau thermique ni de puissance ;
+S9 et la référence P1 avaient des updates de 3–6 s sur toute leur durée (B : 45–67 s dans la fenêtre
+11:20–14:00). Cause hors de portée depuis WSL (pas de ventilation mémoire par processus). Décision
+de 30 000 attendue vers 16:40.
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
