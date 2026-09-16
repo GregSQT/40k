@@ -47,8 +47,8 @@ obligatoires : la matrice contre les adversaires jamais affrontés et le score p
 
 **Ce qui n'est pas sain, au-delà de la reprise.** Chaque verdict des dix derniers jours repose sur
 une graine contre une graine ; il n'y a plus de juge de progrès général (les bots sont battus à
-90 % par tout le monde, la lignée se mesure contre son propre ancêtre) ; la moitié de chaque paquet
-d'expérience est jetée à chaque mise à jour ; la récompense est un substitut à 70 % (objectifs
+90 % par tout le monde, la lignée se mesure contre son propre ancêtre) ; la coupure KL saute les
+3ᵉ et 4ᵉ relectures de chaque paquet d'expérience (aucune donnée jetée, corrigé le 16 au soir) ; la récompense est un substitut à 70 % (objectifs
 64 %, pénalités non ventilées) ; le gate de lignée n'a plus été passé depuis le 10 septembre.
 
 **Ce qui vient ensuite.** Le run de nuit se décide au résultat de B : P0 neuf à froid (le juge
@@ -1603,8 +1603,16 @@ KL 0,010 partout ; EV 0,86 / 0,86 / 0,89. Courbes échantillonnées (B à T = 2)
 (référence 0,55, S9 0,58), `a_vp_diff` +6,7 (référence +6,4), VP de P0 40,2 (référence 40,6 : pas
 encore de déni), déploiement actif 0,66 (0,65). Sièges cumulés : premier 0,556 / second 0,590 (S9 :
 0,52 / 0,48 ; référence : 0,63 / 0,59) — B gagne un peu plus en second, où il s'entraîne à 70 %.
-Holdout bots à 10 000 : non encore publié à l'heure de la lecture. Aucune décision avant trois
-sondes après 30 000 (règle).
+Aucune décision avant trois sondes après 30 000 (règle).
+
+**Complément 14:10 — holdout bots à 10 000 : 0,917** (pire bot 0,87, siège 1 0,981 / siège 2 0,866 ;
+P0 0,910, S9 0,897, référence 0,905). **Ralentissement du run depuis 10 000** : 5 500–6 700 épisodes/h
+jusqu'à 9 000, puis 1 700–3 500 ; `train/time_update` 5–20 s → 45–67 s (×4), `time/fps` 216 → 145 ;
+mémoire GPU affichée 7,9 / 8,2 Go. Cause non établie : évaluateurs bots et pool sur CPU
+(`bot_eval_worker_device: cpu`, `checkpoint_device: cpu`), l'outil système ne ventile pas la mémoire
+par processus sous WSL ; contribution avérée mais partielle des lectures TensorBoard de l'agent et de
+la matrice des champions à froid (10:38–11:18) pendant le run. Décision de 30 000 repoussée vers
+18:00 ; run non touché.
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
@@ -2186,6 +2194,12 @@ le tronc porte l'essentiel du savoir ; que la reconstruction des têtes ne redé
 politique. *Code* : moyen (chirurgie des poids à la reprise + gel + rampe), tests sur l'identité du
 tronc et la remise à neuf des têtes.
 
+**Critère de déclenchement (formel).** Deux graines consécutives de la lignée dont la moyenne des
+trois dernières sondes stagne sous 0,65 à 30 000 épisodes d'étape (règle §7 : fenêtre
+20 000–30 000 ; « stagne » = montée < 1 point entre les deux graines). Le risque de la dynamique
+du 4 septembre (P2 détruit, rampe sans gel du tronc) exige que le gel de l'extracteur soit armé
+**AVANT** la remise à neuf des têtes.
+
 **Ce qui départagerait sans coder (mesures, 1 h de CPU).** (i) Sur les checkpoints S9 à 30 000 et
 60 000 : rejouer 300 parties argmax contre P0 avec les logits divisés par 2 et par 4 À
 L'ÉVALUATION (argmax invariant → contrôle nul attendu) puis en échantillonnant à T = 1 et T = 2 :
@@ -2292,7 +2306,8 @@ famille de P0 ; le score contre les bots ne classe pas les agents entre eux, P0a
 | 3 | **Hygiène de mesure** : seconde graine de S9 ; P0 neuf à froid avec instantanés conservés ; un P0 par nuit ensuite | verdicts fiables ; variance entre graines (jamais mesurée) ; juge hors famille | ne change pas l'agent, change la confiance dans tout le reste | aucun code ; 5 h 30 à 8 h, la nuit | en continu à partir du soir du 16 (C si B passe, D si B échoue) |
 | 4 | **Poids de l'issue contre le façonnage** — trois bras ±30 / ±150 (S9) / ±300 | alignement de l'objectif appris sur le gate, ou bruit de fin de partie | inconnu : deux hypothèses opposées, aucune mesure ; attendu < 10 pts | configuration seule (copie expl) ; 2 runs × 5 h 30, deux graines | après les rangs 1 et 3 |
 | 5 | **P1 parti de zéro** contre le P0 actuel, 100 000 parties | régime alternatif sans le problème de reprise | vu une fois sur l'ancien jeu (0,74) ; 16 h par étape | aucun code ; 16 h | seulement si la reprise échoue deux fois |
-| 6 | **Recherche à l'entraînement** (S15) | crédit noyé résolu par simulation | remède de principe ; semaines | gros code | dernier recours, par décision |
+| 6 | **V-trace (remplacement de PPO)** | données périmées d'une collecte asynchrone (acteurs/apprenant découplés) — architecture que le pipeline n'a pas | **nul sur f, corrigé le 2026-09-16 au soir** : 8 160 transitions = 8 mini-lots × 4 passes ; une coupure à 15–16/32 (761/761 sur P1, 15–16/32 sur S25) = 1ʳᵉ passe complète + 7/8 de la 2ᵉ, **aucune donnée jetée**, seules les relectures 3–4 sautent (`ai/train.py:978` n_steps total, `ai/patched_ppo.py:653` break) ; relire le même bruit ne fait pas un lot plus grand (f = 0,005 porte sur le rollout entier, B_noise ≈ 147 000) ; l'ancien « ×2 effectif : 15/32 → 32/32 » était un contresens ; sans région de confiance, la même update bruitée passerait sans frein (cf. S11, S14c) ; ne se justifie qu'avec une collecte asynchrone où l'apprenant attend les acteurs (aujourd'hui update = 3–25 % du cycle de 51 s) | code significatif (remplacer SB3 PPO + buffer, conserver les diagnostics) ; 2–4 semaines | si ligue + exploration non-absorbable (rangs 1–1) plafonnent sous 0,85 après deux graines |
+| 7 | **Recherche à l'entraînement** (S15) | crédit noyé résolu par simulation | remède de principe ; semaines | gros code | dernier recours, par décision |
 
 **Règles transversales.** Règle de lecture écrite avant chaque run ; juge = sonde argmax et matrice
 hors famille (P0a, témoin entnorm en cases fixes), jamais la courbe échantillonnée ; deux graines
