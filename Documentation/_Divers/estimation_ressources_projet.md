@@ -14,7 +14,7 @@
 | `engine/` | 48 | 76 358 | Moteur de règles complet 40K 10e éd. |
 | `ai/` | 42 | 42 760 | Pipeline RL : entraînement, policy, curriculum, analyzer |
 | `frontend/src/` | 351 | 75 210 | Interface React/TypeScript : board, PvP, replay |
-| `tests/` | 553 | 150 473 | Suite automatisée : 5 850+ fonctions de test |
+| `tests/` | 662 | 186 402 | Suite automatisée : 7 113+ fonctions de test |
 | `services/` + `scripts/` | 58 | 28 392 | API Flask, outils, benchmarks |
 | **Total code productif** | **1 052** | **~373 000** | |
 
@@ -41,7 +41,7 @@ Estimation par module avec vitesse différenciée selon la complexité réelle, 
 | Moteur de règles (`engine/`) | 76 358 | **Très haute** | 7 lig/h | 10 900 h |
 | RL/IA (`ai/`) | 42 760 | **Très haute** | 12 lig/h | 3 600 h |
 | Frontend (`frontend/src/`) | 75 210 | Haute | 18 lig/h | 4 200 h |
-| Tests (553 fichiers, 5 850 fonctions) | 150 473 | Moyenne | 35 lig/h | 4 300 h |
+| Tests (662 fichiers, 7 113 fonctions) | 186 402 | Moyenne | 35 lig/h | 4 300 h |
 | API + scripts | 28 392 | Moyenne | 18 lig/h | 1 600 h |
 | **Sous-total implémentation** | | | | **24 600 h** |
 
@@ -53,7 +53,7 @@ Estimation par module avec vitesse différenciée selon la complexité réelle, 
 
 - **18 lig/h pour le frontend** : React/TypeScript sur une grille hexagonale avec SVG, gestion d'état PvP multi-phases, replay step-by-step et roster builder 6 factions. La complexité est réelle mais le domaine (web) est plus standardisé.
 
-- **35 lig/h pour les tests** : écrire un test est plus rapide qu'écrire le code testé, mais 5 850 fonctions représentent un effort de conception non négligeable — définir les fixtures, les cas limites, les invariants à vérifier.
+- **35 lig/h pour les tests** : écrire un test est plus rapide qu'écrire le code testé, mais 7 113 fonctions représentent un effort de conception non négligeable — définir les fixtures, les cas limites, les invariants à vérifier.
 
 ### Overhead à ajouter
 
@@ -96,7 +96,7 @@ Coûts en chargé employeur (brut × ~1,42 pour les charges patronales France).
 | ML/RL Engineer | Senior 5+ ans | 95 000 € | 135 000 € | Policy network, espace d'observation, curriculum, débogage training |
 | Backend Engineer | Senior 6+ ans | 78 000 € | 111 000 € | Phase handlers, LoS 3D, API Flask |
 | Frontend Engineer | Mid-Senior 5+ ans | 68 000 € | 97 000 € | Board hexagonal, PvP, replay |
-| QA / Test Engineer | Mid 3+ ans | 50 000 € | 71 000 € | Conception et maintenance des 5 850 tests automatisés |
+| QA / Test Engineer | Mid 3+ ans | 50 000 € | 71 000 € | Conception et maintenance des 7 113 tests automatisés |
 | PM / Tech Lead | Confirmé 5+ ans | 68 000 € | 97 000 € | Planning, coordination, gestion des risques, domaine 40K |
 | **Coût moyen pondéré** | | | **~106 000 €/an** | |
 
@@ -143,4 +143,4 @@ Le scénario normal (6 FTE, ~32 mois) reste le plus efficace : durée raisonnabl
 
 3. **Le ML/RL senior est structurellement rare** — la combinaison "comprend profondément PPO + peut concevoir une architecture pointer-head + peut déboguer un curriculum qui ne converge pas" est activement recherchée par les meilleurs employeurs mondiaux.
 
-4. **Les 5 850 tests automatisés sont un actif, pas une dépense** — ils représentent ~4 300 heures de travail d'ingénierie et garantissent que les 26 chapitres de règles restent corrects à chaque modification. Un projet sans cette couverture accumulerait une dette de qualité équivalente.
+4. **Les 7 113 tests automatisés sont un actif, pas une dépense** — ils représentent ~4 300 heures de travail d'ingénierie et garantissent que les 26 chapitres de règles restent corrects à chaque modification. Un projet sans cette couverture accumulerait une dette de qualité équivalente.
