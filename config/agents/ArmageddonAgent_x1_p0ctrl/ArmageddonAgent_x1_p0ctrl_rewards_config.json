@@ -1,0 +1,58 @@
+{
+  "description": "COPIE de ArmageddonAgent_x1 (2026-09-16, plafonnement_p1.md §12 rang 3, run C) : table identique, seule la cle racine change. Agent dedie au CONTROLE A FROID du pipeline actuel (P0 neuf, graine 54321) et champion independant pour la ligue ; ne pas faire diverger de la table x1 sans le noter dans le dossier.",
+  "ArmageddonAgent_x1_p0ctrl": {
+    "Unit": "######################### CoreAgent ######################################################",
+    "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
+    "squad_shaping": {
+      "_comment": "PR4 squad pipeline reward shaping (squad.md §Reward function). Calibrate after first runs.",
+      "hp_damage_weight": 0.35,
+      "model_kill_bonus_factor": 0.1,
+      "squad_kill_bonus_factor": 0.15,
+      "incoherent_weight": 0.2,
+      "reward_on_expectation": false,
+      "reward_on_expectation_normal": "DESACTIVE le 2026-09-14 14:xx apres le run S11 (training_x1_05-p01-s11.log, run_20260914-103745, arrete par la garde de destruction a 20 000 : argmax 0,47 contre P0, agent echantillonne 0,55, entropie +0,08 nat ; dossier plafonnement_p1.md §5.11). S11 (2026-09-14) : true = la recompense de tir et de melee (degats + figurines tuees) se calcule sur l ESPERANCE de degats du choix arme x cible, telle que le moteur la jouera (engine/phase_handlers/shared_utils.py::intent_expected_damage), et non sur le jet ; les des restent joues pour la partie, le bonus de wipe reste sur le resultat reel. Motivation mesuree : 95,5 % de la variance du signal d un tir est l ecart jet/esperance (scripts/grad_signal_probe.py, 2026-09-13, Documentation/Chantiers/backlog/plafonnement_p1.md §5.11). false = comportement historique (run de reference run_20260912-065925 rejouable). Cle OBLIGATOIRE, booleen."
+    },
+    "base_actions": {
+      "ranged_attack": 0.3,
+      "melee_attack": 0.3,
+      "charge_success": 0.05,
+      "charge_fail": -0.01,
+      "wait": -0.1
+    },
+    "result_bonuses": {
+      "damage_target": 0.2,
+      "kill_target": 2.0,
+      "target_lowest_hp": 0.3
+    },
+    "target_type_bonuses": {},
+    "situational_modifiers": {
+      "win": 150,
+      "lose": -150,
+      "draw": 0.0
+    },
+    "objective_rewards": {
+      "vp_margin_factor": 6.0,
+      "vp_margin_factor_normal": "B6 (2026-09-14) : remplace objective_reward_factor × VP_propres par vp_margin_factor × Δ(VP_moi − VP_lui) ledger. Facteur 6 inchange — marginal +6 par VP propre, −6 par VP cede. Corr(ΔVP_moi, Δmarge)=0,82 (colinearite mesurée 2026-09-14 sur 40 parties) : additionner les deux revenait à +11/−5, option A rejetée. Somme téléscopique = 6 × marge finale, y compris élimination.",
+      "on_objective_bonus": 5.0
+    },
+    "system_penalties": {
+      "forbidden_action": -1.0,
+      "invalid_action": -0.5,
+      "system_response": 0.0,
+      "generic_error": -0.1
+    },
+    "reserves_shaping": {
+      "enabled": true,
+      "declined_arrival_lost_penalty": -25.0,
+      "declined_arrival_lost_penalty_comment": "COUT PAR ESCOUADE detruite par 20.04 APRES avoir refuse au moins une arrivee possible. Facture uniquement ce qui est une DECISION : une escouade qui n'a jamais eu de destination legale (pool d'ingress vide) n'entre pas dans le compte, la punir reviendrait a punir un choix qui n'a pas existe. MESURE QUI MOTIVE LE TERME, run x1_long du 2026-08-11 : la part des reserves de l'agent detruites sans etre arrivees monte de 0 % a 14 % en fin d'entrainement, en hausse monotone, pendant qu'il en place de plus en plus (0,81 -> 1,33 par episode, a mesure que la part d'episodes en deploiement actif passe de 0,31 a 0,80). Rien dans le bareme ne s'y opposait. CALIBRAGE DE -25 : a comparer aux 150 de la victoire et aux 269 de la moyenne d'objectifs par episode, soit un sixieme du gain de victoire pour une escouade entiere perdue sans avoir combattu. Au taux de gaspillage mesure (0,19 escouade par episode), le cout attendu est de ~4,7 par episode sur un retour moyen de ~485 : assez pour etre appris, trop peu pour dominer le jeu d'objectifs. Le signe est VERIFIE au chargement (un montant positif leve) : il recompenserait la perte d'une unite hors table. `enabled` est lu par require_key, sans defaut."
+    },
+    "shoot_priority_1": 0.0,
+    "shoot_priority_2": 0.0,
+    "shoot_priority_3": 0.0,
+    "charge_priority_1": 0.0,
+    "charge_priority_2": 0.0,
+    "charge_priority_3": 0.0,
+    "attack_priority_1": 0.0,
+    "attack_priority_2": 0.0
+  }
+}
