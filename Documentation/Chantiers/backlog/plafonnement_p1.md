@@ -1595,6 +1595,17 @@ active** : entropie de la politique de collecte **1,21 nat à la première updat
 S25 sans température : 0,78 ; la clé s'applique en silence, c'est ce point qui le prouve).
 Première sonde de pool attendue à 10 000 parties d'étape (~11:15), décision à 30 000 (~15:00).
 
+**Lecture à 10 000 (2026-09-16, 11:22).** Sonde de pool `P0=0.653` (300 parties argmax, sièges 50/50) ;
+référence P1 du 12 septembre au même point : 0,547 (`pool_eval/vs_p0`, `run_20260912-065925`) ;
+S9 : 0,68. Une sonde, ±2,7 pts. Mécanisme (tranches 2 000–12 000, B / S9 / référence) : entropie de
+collecte 1,05 → 0,89 / 1,07 → 0,85 / 0,77–0,79 ; mini-lots appris 30 → 17 / 31 → 19 / 11–16 (§9.2) ;
+KL 0,010 partout ; EV 0,86 / 0,86 / 0,89. Courbes échantillonnées (B à T = 2) : `03_selfplay/P0` 0,56
+(référence 0,55, S9 0,58), `a_vp_diff` +6,7 (référence +6,4), VP de P0 40,2 (référence 40,6 : pas
+encore de déni), déploiement actif 0,66 (0,65). Sièges cumulés : premier 0,556 / second 0,590 (S9 :
+0,52 / 0,48 ; référence : 0,63 / 0,59) — B gagne un peu plus en second, où il s'entraîne à 70 %.
+Holdout bots à 10 000 : non encore publié à l'heure de la lecture. Aucune décision avant trois
+sondes après 30 000 (règle).
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
