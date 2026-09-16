@@ -1399,6 +1399,41 @@ politique de collecte à T = 2 et la politique apprise (sonde par famille du 30 
 `family_entropy_probe` sur le DERNIER `ppo_checkpoint` (le canonique de fin de run est l'instantané
 holdout, pas les poids finaux — §9.6 R2).
 
+**Lecture finale à 60 000 (2026-09-16, sonde à 07:11, budget E0 atteint : « plafond 60000 episodes
+atteint sans franchir 95% ») — LE PLATEAU EST DÉPLACÉ DE ~0,68 À ~0,78, ET IL EST PLAT DEPUIS 40 000.**
+Sondes 40 000 → 60 000 : 0,79 / 0,79 / 0,81 / 0,80 / 0,77 / 0,74 / 0,73 / 0,78 / 0,78 / 0,80 / 0,77.
+Fenêtres de six : 20 000–30 000 **0,730** · 30 000–40 000 **0,760** · 40 000–50 000 **0,783** ·
+50 000–60 000 **0,767** (S25 : 0,677 puis 0,683, arrêté à 40 084). Règle du 02:30 sur 50 000–60 000 :
+0,767 ≥ 0,76 → « la montée continue » par la lettre ; lecture de fond : −1,6 pt sur la fenêtre
+précédente, onze sondes à 0,778 de moyenne depuis 40 001 — **un plateau à 0,77–0,78**, +10 pts sur
+S25 (0,68), +14 pts sur la lignée P1 à sièges égaux (0,642, S27), 12 pts sous l'objectif de §9.4
+(~0,90). Moyenne des trois dernières 0,783.
+- **Holdout bots : 0,897 → 0,848 → 0,893 → 0,907 → 0,922 à 50 000** (pire bot 0,86) ; instantané
+  robuste **0,9072** sauvé à 05:37 (= canonique `model_ArmageddonAgent_x1_expl.zip`, §9.6 R2 : le
+  canonique est l'instantané holdout, PAS les poids finaux — les poids finaux sont
+  `ppo_checkpoint_20260915-203439_12247944_steps.zip`, copiés dans `logs/matrix_heldout_20260916/s9_final_ckpt/`).
+  S25 : 0,933 maximum, robuste 0,9094. Évaluation finale à 60 000 en cours à l'heure de la lecture.
+- **Absorption, achevée lentement** : entropie de π_T par tranche 40 000 → 60 000 : 0,73 / 0,72 / 0,71 /
+  0,73 / 0,72 / 0,71 / 0,71 / 0,73 / 0,72 / 0,73 — soit 1,07 → 0,80 (à 14 000) → 0,76 (à 30 000) → 0,72
+  (à 60 000), contre 0,69 pour la π de S25 à T = 1 à 40 000 : le surplus d'exploration à la collecte
+  est passé de 0,29 nat à ~0,03 nat. La sonde a cessé de monter à 40 000, quand ce surplus était à
+  ~0,05 nat. Corrélation consignée, pas causalité prouvée ; elle est cohérente avec la limite écrite
+  avant le run (« rien n'empêche le réseau d'absorber T ») et avec la sonde par famille du 30 000
+  (π à T = 1 déjà plus pointue que S25). Coupure KL 14–16 mini-lots (S25 15–16), EV 0,87–0,89,
+  `a_vp_diff` échantillonné plat à +12 (S25 +6), `03_selfplay/P0` plat à 0,75, objectifs tenus +0,38.
+- En cours à la lecture : `family_entropy_probe` sur les poids finaux contre le checkpoint S25 de
+  40 000, matrice hors entraînement des poids finaux (P1, S25 30 000, témoin entnorm), ligne de
+  clôture E0 dans `curriculum.log` — consignés au réveil suivant.
+
+**Ce que S9 établit et ce qu'il n'établit pas.** Établi : le mécanisme d'apprentissage extrait plus de
+P0 quand la collecte explore (une seule graine, +10 pts, ≈ 4 σ sur une fenêtre de six sondes contre
+S25) ; le gain se transfère à la famille de P0 (matrice du 30 000) et ne coûte rien contre les bots.
+Non établi : que 0,90 soit atteignable par ce levier — l'effet s'éteint avec l'absorption de T, et un
+T plus grand n'est pas le levier suivant (règle 2b) : c'est un mécanisme d'exploration que l'optimiseur
+ne peut pas défaire (plancher d'entropie ou coefficient d'entropie adaptatif par famille, mélange
+ε avec ratio corrigé, contrainte sur l'échelle des logits), à arbitrer avec la suite (§9.9 étape 3
+sous T, étape 4 transfert, ou contrôle P0 à froid — arbitrage soumis à l'utilisateur le 2026-09-16).
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin
@@ -1412,7 +1447,7 @@ holdout, pas les poids finaux — §9.6 R2).
 - [x] **`vf_coef` 0,3** — run du 2026-09-14 02:36 → 10:26, réfuté (§5.10).
 - [x] **S11** — code livré et mergé ; run du 2026-09-14 10:37 → 14:05 arrêté par la garde (moyenne des sondes 0,473 < 0,50) ; entropie montante, argmax perd, échantillonné tient (§5.11).
 - [ ] **B6 / S24** — code livré et mergé, contrat P0 réécrit, `value_warmup_updates: 20` posé (§5.12) ; reste : lancer le run « marge » et le juger.
-- [x] Température d'exploration (S9) — jouée les 2026-09-15/16 : **OUI à 30 000** (0,730 contre 0,677, §5.14) ; lecture à 40 000 / 60 000 en cours.
+- [x] Température d'exploration (S9) — jouée les 2026-09-15/16 : **OUI** (fenêtres 0,730 / 0,760 / 0,783 / 0,767 contre 0,677 ; plateau déplacé à ~0,78, plat depuis 40 000 ; §5.14).
 - [ ] Tête Q / avantage moyenné (S14) ; distillation par recherche (S15, gelée).
 - [ ] Ventilation des pénalités −97 (C5) ; déploiement auto à 0,50 (D4).
 - [ ] Pool élargi dès P1 (S16) ; second scénario (S17).
@@ -1819,7 +1854,7 @@ midi (§5.13).
 | étape | levier | dispositif | règle de lecture | si oui | si non |
 |---|---|---|---|---|---|
 | 1 | ~~S14 tête Q centrée sous π~~ — **RÉFUTÉ le 2026-09-15 (§5.13.1)** : garde déclenchée (0,362 à 10 000), `q_loss_mb0 − value_loss_mb0` ≥ 0 partout, entropie 0,71 → 0,28 : la tête n'a pas de données contrefactuelles (politique à p_max 0,66–0,99). Variante S14c écartée sans run (aucune ne crée ces données). | — | — | — | → étape 2 sous **GAE** |
-| 2 | **S9 exploration structurée** — **OUI À 30 000 le 2026-09-16** (`run_20260915-203437` : moyenne 20 000–30 000 = **0,730** contre 0,677, holdout bots 0,893 ; continue à 60 000, règle de suite en §5.14) ; **mesure 2a NÉGATIVE** (+0,0025 ± 0,001 : S14 mort, ni seul ni sur S9) (§5.14 : règle complète, absorption, juge = sonde argmax, pas `03_selfplay`) : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
+| 2 | **S9 exploration structurée** — **OUI, TERMINÉ À 60 000 le 2026-09-16** (`run_20260915-203437` : fenêtres 0,730 / 0,760 / 0,783 / 0,767 contre 0,677 pour S25 ; plateau déplacé de ~0,68 à ~0,78, plat depuis 40 000, T absorbé à 60 000 ; holdout bots 0,922 ; §5.14) ; **mesure 2a NÉGATIVE** (+0,0025 ± 0,001 : S14 mort, ni seul ni sur S9) (§5.14 : règle complète, absorption, juge = sonde argmax, pas `03_selfplay`) : température T = 2 des logits à la collecte ET dans le ratio (`_distribution_from`, attribut de régime hors zip, transporté aux workers), T = 1 en évaluation (les sondes sont argmax : invariantes à T, l'effet ne passe que par l'apprentissage) | S25 sous **GAE** (`advantage_source: gae`), depuis P0, E0 | **2a — mesure préalable (~30 min, §5.13.1)** : checkpoint S25 40 000 + `q_head` + T = 2 + échauffement 40, politique figée, lire `q_loss_mb0 − value_loss_mb0` sur les 20 dernières updates : < −0,002 → S14-SUR-S9 rejouable plus tard ; sinon S14 mort. **2b — run S9** : garde 10 000 (≤ 0,45), verdict 30 000 sur la moyenne 20 000–30 000 contre 0,677 ; ≥ 0,72 oui ; 0,64–0,72 réfuté ; ≤ 0,63 régression ; lecture mécanisme : `train/entropy_loss` (entropie de π_T, attendue plus haute), `family_entropy_probe` sur le checkpoint 30 000, coupure KL | garder T ; si 2a positif, S14 SUR S9 (un run, règle §5.13.1) ; sinon étape 3 | réfuté ; étape 3 |
 | 3 | **C2 issue vs façonnage** : poids de l'issue ±150 contre les 62 % d'objectifs (config seule) puis **B6 seconde graine** | S25 | idem, un run par variable, deux graines si effet < 10 pts | garder | — |
 | 4 | **Transfert** du régime gagnant dans `x1_lineage` de `ArmageddonAgent_x1` : relire lr / `target_kl` / `ent_coef` / `vf_coef` sur `n_minibatches_done` et `grad_share_policy` SOUS le nouvel estimateur (réglages mesurés sous GAE, §5.4, non transférables), puis reprise de la lignée P1 → gate 0,65 | lignée | règle §7 | lignée relancée | — |
 | 5 | **S11b** (espérance sur les dégâts seuls, kills au jet) seulement si les sondes de §5.11 désignent le proxy des kills ; **S15** recherche en dernier recours | — | — | — | — |

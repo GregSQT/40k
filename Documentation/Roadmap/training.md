@@ -165,6 +165,17 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 07:20 — S9 TERMINÉ à 60 000 : plateau déplacé de ~0,68 à ~0,78, plat depuis 40 000 ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Fenêtres de six sondes 0,730 / 0,760 / **0,783** / **0,767** (S25 : 0,677 / 0,683) ; onze sondes à 0,778
+depuis 40 001. Holdout bots 0,922 à 50 000, instantané robuste 0,9072 (canonique = instantané holdout,
+poids finaux = dernier `ppo_checkpoint`, copiés dans `logs/matrix_heldout_20260916/s9_final_ckpt/`).
+Entropie de π_T 1,07 → 0,80 → 0,76 → **0,72** à 60 000 (S25 à T = 1 : 0,69) : T est absorbé, et la sonde a
+cessé de monter quand le surplus d'exploration est passé sous ~0,05 nat. Établi : la collecte
+exploratoire extrait +10 pts de P0 (une graine) ; non établi : que 0,90 soit atteignable par T — le
+levier suivant est un mécanisme d'exploration que l'optimiseur ne peut pas défaire, à arbitrer
+avec la suite (étape 3 sous T / étape 4 transfert / contrôle P0 à froid). Sonde par famille et
+matrice hors entraînement des poids finaux en cours.
+
 **2026-09-16, 04:05 — S9 lecture à 40 000 : la montée continue ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Sondes 30 000 → 40 000 : 0,78 / 0,73 / 0,75 / 0,75 / 0,76 / 0,79 → moyenne **0,760** (règle du 02:30 :
 ≥ 0,76 → montée, à la borne exacte ; fenêtre précédente 0,730 ; S25 même fenêtre 0,683). Holdout bots
