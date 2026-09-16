@@ -488,6 +488,13 @@ class PatchedMaskablePPO(MaskablePPO):
                 _module.train()
 
         _t0_update = time.perf_counter()
+        _on_cuda = self.device.type == "cuda"
+        if _on_cuda:
+            # Pic d'allocation de CETTE update (remis à zéro ici), réservation de l'allocateur
+            # en fin d'update : c'est la courbe qui manquait le 2026-09-16 pour voir en une
+            # minute la fuite de l'échauffement (12 Gio réservés, lue sur les compteurs Windows
+            # après une après-midi).
+            th.cuda.reset_peak_memory_stats(self.device)
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
                 actions = rollout_data.actions
@@ -509,6 +516,26 @@ class PatchedMaskablePPO(MaskablePPO):
                         action_masks=rollout_data.action_masks,
                     )
                 values = values.flatten()
+
+                # ÉCHAUFFEMENT : la branche politique ne contribue pas à la loss (plus bas,
+                # `loss = vf_coef × value_loss`), donc aucun backward ne libère jamais son
+                # graphe. Empilés avec ce graphe dans les listes de logging, `policy_loss` et
+                # `entropy_loss` retenaient les activations de CHAQUE mini-lot jusqu'à la fin de
+                # `train()` — mesuré le 2026-09-16 sur `x1_lineage` (340 × 24, lot 1020,
+                # 4 epochs) : 9,69 Gio alloués / 12,11 réservés par update d'échauffement contre
+                # 1,79 / 2,08 en régime normal. Sous WSL2 l'allocateur n'est jamais mis en OOM
+                # (débordement silencieux en RAM hôte) et ne rend jamais cette réservation :
+                # 12 Gio à vie sur une carte de 8, chaque update paginée ensuite
+                # (`train/time_update` 5 s → 20-345 s sur `run_20260916-092441`). Détaché ici,
+                # sauf pour le mini-lot du diagnostic de gradient (`_diag_grad_norms_mb0`), qui
+                # a besoin du graphe de la politique ; ses références tombent au mini-lot
+                # suivant, sans coût mesurable (pic 1,90 Gio avec le fix, 1,79 hors échauffement).
+                # Les valeurs loguées sont les mêmes : un forward identique, sans gradient.
+                _diag_minibatch = epoch == 0 and _diag_grad_norms_mb0 is None
+                if _in_warmup and not _diag_minibatch:
+                    log_prob = log_prob.detach()
+                    if entropy is not None:
+                        entropy = entropy.detach()
 
                 # Diagnostic minibatch 0/epoch 0 : seul point vraiment pré-update.
                 if epoch == 0 and _diag_drift_norm_mb0 is None:
@@ -532,7 +559,7 @@ class PatchedMaskablePPO(MaskablePPO):
                 # la tête n'apprend que l'écart attendu de l'action jouée à la moyenne sous π.
                 if adv_q is not None:
                     q_loss = F.mse_loss(rollout_data.returns, values.detach() + adv_q)
-                    q_losses_t.append(q_loss)
+                    q_losses_t.append(q_loss.detach())
                     adv_q_abs_t.append(adv_q.detach().abs().mean())
                     advantages = adv_q.detach()
                 else:
@@ -548,8 +575,9 @@ class PatchedMaskablePPO(MaskablePPO):
                 policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
                 policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
 
-                # Accumulation GPU — pas de .item() ici.
-                pg_losses_t.append(policy_loss)
+                # Accumulation GPU — pas de .item() ici, et DÉTACHÉS : ces listes ne servent
+                # qu'au logging, un graphe retenu ici survivrait jusqu'à la fin de `train()`.
+                pg_losses_t.append(policy_loss.detach())
                 clip_fractions_t.append(th.mean((th.abs(ratio - 1) > clip_range).float()))
 
                 if clip_range_vf is None:
@@ -559,7 +587,7 @@ class PatchedMaskablePPO(MaskablePPO):
                         values - rollout_data.old_values, -clip_range_vf, clip_range_vf
                     )
                 value_loss = F.mse_loss(rollout_data.returns, values_pred)
-                value_losses_t.append(value_loss)
+                value_losses_t.append(value_loss.detach())
                 if epoch == 0 and _diag_value_loss_mb0 is None:
                     # V BRUTE (pas `values_pred` clippée) : la même que dans `q_loss`, sinon la
                     # différence des deux mesurerait le clip et non la tête.
@@ -590,8 +618,8 @@ class PatchedMaskablePPO(MaskablePPO):
                             )
                 # `train/entropy_loss` reste la moyenne BRUTE quel que soit le terme optimise : ses
                 # lecteurs (metrics_tracker, training_callbacks, metriques.md) la lisent en nats.
-                entropy_losses_t.append(entropy_loss)
-                entropy_losses_normalized_t.append(entropy_loss_normalized)
+                entropy_losses_t.append(entropy_loss.detach())
+                entropy_losses_normalized_t.append(entropy_loss_normalized.detach())
                 entropy_term = (
                     entropy_loss_normalized if self.entropy_normalize_by_legal else entropy_loss
                 )
@@ -631,9 +659,17 @@ class PatchedMaskablePPO(MaskablePPO):
                     ]
                     if q_loss is not None:
                         _terms.append(("q", float(self.q_coef or 0.0) * q_loss))
-                    for _term_name, _term in _terms:
+                    while _terms:
+                        # Consommée terme par terme, puis vide : cette liste tient les pertes
+                        # AVEC leur graphe, et une variable qui y survivrait le garderait
+                        # jusqu'à la fin de `train()` — hors échauffement le backward réel
+                        # libère ce que ce graphe sauve, en échauffement rien ne traverse la
+                        # branche politique et ses activations resteraient allouées toute
+                        # l'update (75 tenseurs mesurés au test `test_value_warmup_memory.py`).
+                        _term_name, _term = _terms.pop(0)
                         self.policy.optimizer.zero_grad()
                         _term.backward(retain_graph=True)
+                        del _term
                         _diag_grad_norms_mb0[_term_name] = float(
                             th.nn.utils.clip_grad_norm_(
                                 self.policy.parameters(), float("inf")
@@ -705,6 +741,13 @@ class PatchedMaskablePPO(MaskablePPO):
         )
 
         self.logger.record("train/time_update", time.perf_counter() - _t0_update)
+        if _on_cuda:
+            self.logger.record(
+                "train/cuda_peak_allocated_gib", th.cuda.max_memory_allocated(self.device) / 2**30
+            )
+            self.logger.record(
+                "train/cuda_reserved_gib", th.cuda.memory_reserved(self.device) / 2**30
+            )
         self.logger.record("train/entropy_loss", entropy_loss_mean)
         self.logger.record("train/entropy_loss_normalized", entropy_loss_normalized_mean)
         self.logger.record("train/policy_gradient_loss", pg_loss_mean)

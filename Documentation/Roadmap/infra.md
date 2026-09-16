@@ -42,6 +42,14 @@ buffer **3,437 → 0,275 Gio**, contre **+3,24 s par update** de transferts, don
 d'indexation numpy qu'un tampon *pinned* ne rend pas (mesuré). Verrou
 `test_observations_are_never_uploaded_in_bulk` (rouge constaté sur réintroduction de l'upload).
 Goulots restants : aucun identifié de cette ampleur.
+**Fuite d'activations de l'échauffement critic corrigée (2026-09-16)** : en échauffement B6, les
+pertes de la branche politique empilées avec leur graphe retenaient les activations de chaque
+mini-lot jusqu'à la fin de l'update — **9,69 Gio alloués / 12,11 réservés par update** contre
+1,79 / 2,08 en régime normal (réplique de `train()` sur le zip réel), réservation jamais rendue
+sous WSL2 → 12 Gio à vie sur 8 Go de VRAM, `train/time_update` 5 s → 20-345 s dès que la
+résidence est perturbée (run `run_20260916-092441`). Après correctif : **1,79 / 2,29**. Courbes
+`train/cuda_peak_allocated_gib` et `train/cuda_reserved_gib` ajoutées. Verrou
+`test_value_warmup_memory.py`. Journal §6 de `perf_entrainement.md`.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`
 

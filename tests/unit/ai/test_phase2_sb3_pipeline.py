@@ -353,6 +353,7 @@ class TestPatchedTrainNumericalParity:
 
         # Configurer le model minimal.
         model.policy = policy_mock
+        model.device = torch.device("cpu")  # lu par train() pour les metriques CUDA
         model.rollout_buffer = buf  # type: ignore[assignment]
         model.n_epochs = 1
         model.batch_size = 8  # batch complet (4 steps × 2 envs)
@@ -442,6 +443,7 @@ class TestPatchedTrainNumericalParity:
         buf.compute_returns_and_advantage(torch.zeros(2), np.zeros(2, dtype=bool))
 
         model.policy = policy_mock
+        model.device = torch.device("cpu")  # lu par train() pour les metriques CUDA
         model.rollout_buffer = buf  # type: ignore[assignment]
         model.n_epochs = 4  # clé du test : > 1
         model.batch_size = 8
@@ -683,6 +685,7 @@ class TestPatchedVsReferenceParity:
         policy_mock.optimizer = MagicMock()
 
         model.policy = policy_mock
+        model.device = torch.device("cpu")  # lu par train() pour les metriques CUDA
         model.rollout_buffer = rollout_buffer
         model.n_epochs = self.N_EPOCHS
         model.batch_size = self.N_STEPS * self.N_ENVS  # 1 seul minibatch par epoch
@@ -833,6 +836,7 @@ class TestPatchedVsReferenceParity:
             pm.set_training_mode = MagicMock()
             pm.optimizer = MagicMock()
             model.policy = pm
+            model.device = torch.device("cpu")  # lu par train() pour les metriques CUDA
             model.rollout_buffer = buf  # type: ignore[assignment]
             model.n_epochs = 2
             model.batch_size = batch_size
