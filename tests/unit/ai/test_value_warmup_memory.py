@@ -128,16 +128,14 @@ def _warmup_update_tracking_saved_activations(
 
 
 def test_en_echauffement_les_activations_d_un_mini_lot_ne_survivent_pas_au_suivant() -> None:
-    """VERROU (régression jointe uniquement). Ce test passe au ROUGE si et seulement si LES DEUX
-    protections sont retirées SIMULTANÉMENT : (1) les `.detach()` sur les appends des listes de
-    logging (`pg_losses_t.append(policy_loss.detach())` etc., lignes ~580, ~590, ~621-622, ~562)
-    ET (2) le détachement de `log_prob`/`entropy` en tête de boucle (ligne ~534). Retirer l'une
-    seule laisse le test VERT : chaque protection est individuellement suffisante pour briser la
-    chaîne de rétention (mesuré le 2026-09-16, alive_two_back {2: 72, 3: 72} quand les deux sont
-    retirées). Site (1) est la correction de la root cause (listes de logging retenant des graphes
-    d'un mini-lot à l'autre) ; site (2) est une couche défensive supplémentaire (évite de construire
-    le graphe de la politique pendant l'échauffement). COUVERTURE PARTIELLE : une régression isolée
-    sur l'un des deux sites passe ce test inaperçue.
+    """VERROU. Réintroduire `pg_losses_t.append(policy_loss)` (sans `detach`) dans
+    `PatchedMaskablePPO.train` fait passer ce test au ROUGE : les activations du mini-lot 0 sont
+    encore vivantes à l'entrée du mini-lot 2, celles du 1 à l'entrée du 3 (`{2: 72, 3: 72}`
+    constaté le 2026-09-16). Le graphe de la tête vit UN mini-lot quoi qu'il arrive, tenu par
+    `policy.action_dist.distribution` (logits) — d'où la lecture à `k - 2` et non `k - 1`. Un
+    détachement de `log_prob`/`entropy` en tête de boucle, ajouté le 2026-09-16 comme seconde
+    couche, a été retiré le même jour : il ne libérait que 7 tenseurs (B,)/(B, A) sur 75 et
+    masquait ce verrou (le rouge ne tenait plus qu'au mini-lot du diagnostic, `{2: 72, 3: 0}`).
     CONTRÔLE NON VACANT : chaque mini-lot a bien sauvé des activations (`seen > 0`), sinon un
     hook non branché rendrait `alive == 0` sans rien prouver.
     """
@@ -164,11 +162,12 @@ def test_hors_echauffement_le_backward_complet_libere_deja_les_activations() -> 
     assert alive_two_back == {2: 0, 3: 0}, alive_two_back
 
 
-def test_le_diagnostic_de_gradient_du_mini_lot_0_survit_au_detachement() -> None:
-    """Le détachement épargne le mini-lot du diagnostic : `diag/grad_norm_policy_mb0` reste
-    calculé en échauffement (fini, non nul). Détacher aussi ce mini-lot casserait le backward
-    du diagnostic (« does not require grad ») ou rendrait NaN — et la lecture d'acceptation
-    du premier rollout (`plafonnement_p1.md`) lit précisément cette courbe."""
+def test_le_diagnostic_de_gradient_du_mini_lot_0_reste_calcule_en_echauffement() -> None:
+    """`diag/grad_norm_policy_mb0` reste calculé en échauffement (fini, non nul) : la branche
+    politique garde son graphe jusqu'au diagnostic du mini-lot 0. Un détachement de
+    `log_prob`/`entropy` en tête de boucle casserait ce backward (« does not require grad ») ou
+    rendrait NaN — et la lecture d'acceptation du premier rollout (`plafonnement_p1.md`) lit
+    précisément cette courbe."""
     model = _production_model(n_warmup=1)
     recorded = _run_one_update(model)
 

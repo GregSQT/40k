@@ -49,7 +49,11 @@ mini-lot jusqu'à la fin de l'update — **9,69 Gio alloués / 12,11 réservés 
 sous WSL2 → 12 Gio à vie sur 8 Go de VRAM, `train/time_update` 5 s → 20-345 s dès que la
 résidence est perturbée (run `run_20260916-092441`). Après correctif : **1,79 / 2,29**. Courbes
 `train/cuda_peak_allocated_gib` et `train/cuda_reserved_gib` ajoutées. Verrou
-`test_value_warmup_memory.py`. Journal §6 de `perf_entrainement.md`.
+`test_value_warmup_memory.py`. Le détachement de `log_prob`/`entropy` en tête de boucle livré
+le même matin a été retiré le soir : redondant (mutation → tests verts), il ne libérait que
+7 tenseurs (B,)/(B, A) sur 75 — le graphe de la tête vit un mini-lot quoi qu'il arrive, tenu par
+`policy.action_dist.distribution` — et affaiblissait le verrou. Journal §6 de
+`perf_entrainement.md`.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`
 
