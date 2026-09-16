@@ -165,6 +165,15 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 09:45 — B : régime S9 transféré dans la lignée, P1 relancé ([dossier §5.15](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Décision utilisateur « B avec les deux clés » : `x1_lineage` de `ArmageddonAgent_x1` passe à
+`learning_rate` **0,0005** et `logits_temperature` **2,0** (merge `3ef821284`, test épinglé
+rouge/vert), adversité de lignée inchangée (siège 0,7, bots 30 %, P0 échantillonné). Règle écrite
+avant : promotion automatique à 30 000 (trois sondes ≥ 0,65) → P2 enchaîne ; 0,60–0,65 → courir,
+arrêt manuel à 60 000 ; < 0,55 → arrêt, « le protocole perd le gain » → D puis bissection. Au gate :
+matrice hors entraînement et score par siège obligatoires. Run de nuit choisi au gate (C si B
+passe, D sinon). Log `training_x1_06-p01-s9.log`. En tête du dossier, « En clair » réécrit au 16.
+
 **2026-09-16, 08:45 — point de reprise ([dossier ÉTAT AU 2026-09-16](../Chantiers/backlog/plafonnement_p1.md#etat-2026-09-16)).**
 Réponses consignées aux questions du 16 (P0 ne plafonne pas contre les bots : 0,695 → 0,779 → 0,868 ;
 l'hypothèse « plafond introduit par les commits » est affaiblie par le 0,78 de S9 sur le code actuel ;

@@ -13,7 +13,53 @@
 
 ---
 
-## En clair — ce qu'on sait, ce qu'on propose (lecture non technique, 2026-09-13 soir)
+## En clair — où on en est (lecture non technique, 2026-09-16 matin) {#en-clair-2026-09-16}
+
+**Les mots.** *P0* : le premier champion, entraîné à partir de rien contre six programmes scriptés
+(les « bots ») ; il les bat à 91 %. *P1* : l'étape suivante, qui repart des poids de P0 et doit le
+battre 65 fois sur 100 pour être promue ; elle stagnait vers 60 %. *L'exploiteur* : un agent de
+mesure qui repart de P0 et ne joue que contre P0, pour savoir jusqu'où on peut le battre. *S25* :
+l'exploiteur de référence (14–15 septembre), plafonné à 68 %. *S9* : le même exploiteur avec la
+**température**, un réglage qui rend ses choix plus variés pendant l'entraînement (il essaie son
+second choix une fois sur onze au lieu d'une sur cent) et qui n'a aucun effet à l'évaluation.
+
+**Ce que S9 a montré (15–16 septembre, 60 000 parties, §5.14).** Le score contre P0 est monté de
+68 % à **78 %**, plat depuis 40 000 parties. Rien perdu contre les bots (90 %). Contre des
+adversaires jamais affrontés, le gain se transfère à tout ce qui descend de P0 (P1 : 64 % contre
+50 % pour S25) mais pas à un style étranger (71 %, comme S25 et P0) : l'agent apprend à battre la
+famille de P0, pas mesurablement à mieux jouer. La température s'est éteinte d'elle-même : le
+réseau a affûté ses préférences jusqu'à annuler la variété ajoutée, et la montée s'est arrêtée au
+même moment. Une graine, un dispositif.
+
+**La cause du plateau, telle qu'elle est mesurée aujourd'hui.** Un agent qui repart de son
+champion est sûr de lui à 99 % : il ne tente plus rien d'autre et ne peut pas découvrir ce qui bat
+P0. Sur la décision de charge il ne varie presque jamais (0,01 de variété) : il n'y apprend plus.
+C'est un problème de **reprise**, pas du jeu ni des correctifs du moteur : sur le code actuel un
+agent atteint 78 %, au-dessus du 71 % d'avant les correctifs. Tous les autres suspects (taille des
+lots, vitesse d'apprentissage, poids du critique, horizon du crédit, récompense en espérance,
+bonus de variété, tête de prédiction par action) ont été testés et écartés (§4).
+
+**Ce qui est lancé le 16 au matin (§5.15).** Le régime d'apprentissage de S9 (température 2 et pas
+d'apprentissage 0,0005, celui de la fin de P0) est transféré dans la lignée, et P1 est relancé
+depuis P0. Règle écrite avant : promotion automatique à 30 000 parties si la moyenne de trois
+sondes de 300 parties atteint 0,65 ; arrêt manuel à 60 000 sinon ; au gate, deux lectures
+obligatoires : la matrice contre les adversaires jamais affrontés et le score par siège.
+
+**Ce qui n'est pas sain, au-delà de la reprise.** Chaque verdict des dix derniers jours repose sur
+une graine contre une graine ; il n'y a plus de juge de progrès général (les bots sont battus à
+90 % par tout le monde, la lignée se mesure contre son propre ancêtre) ; la moitié de chaque paquet
+d'expérience est jetée à chaque mise à jour ; la récompense est un substitut à 70 % (objectifs
+64 %, pénalités non ventilées) ; le gate de lignée n'a plus été passé depuis le 10 septembre.
+
+**Ce qui vient ensuite.** Le run de nuit se décide au résultat de B : P0 neuf à froid (le juge
+indépendant qui manque) si B passe, seconde graine de S9 si B échoue. Puis, seulement si la
+lignée plafonne sous l'objectif, un mécanisme d'exploration que l'optimiseur ne peut pas défaire,
+comparé par écrit avant tout code (§10). Le P1 parti de zéro (100 000 parties, 16 h) reste en
+réserve si la reprise échoue deux fois. Point de reprise détaillé : [ÉTAT AU 2026-09-16](#etat-2026-09-16).
+
+---
+
+## En clair — lecture non technique du 2026-09-13 soir (archive datée, dépassée par ce qui précède)
 
 **Le problème.** P1, c'est P0 réentraîné contre lui-même. Il gagne 6 parties sur 10 contre P0
 depuis 40 000 parties et n'avance plus ; le seuil pour passer à l'étape suivante demande 6,5 sur
@@ -84,7 +130,7 @@ l'adversaire, pas du manque d'exploration. Pas nécessaire pour lancer le run.
 
 ---
 
-## 0. Résumé au 2026-09-13
+## 0. Résumé au 2026-09-13 (archive datée ; l'état courant est dans « En clair » ci-dessus et dans [ÉTAT AU 2026-09-16](#etat-2026-09-16))
 
 **Symptôme.** P1 (reprise des poids de P0, profil `x1_lineage`) plafonne contre P0 : sondes
 déterministes 0,547 → 0,623 → 0,601 (moyennes de 3 sondes) entre 60 000 et 120 000 épisodes
@@ -1486,6 +1532,59 @@ marge de VP 73 / 32, issue ±150 → +76 / +44, bonus de combat 198 / 197, péna
 par épisode 256 / 180. Réserves détruites au tour 3 : 0,009 / 0,000 par épisode (effet mineur de
 l'échantillonnage à T = 2 sur les refus d'arrivée). Aucune action invalide. Durée : 20:34 → 07:09
 pour 60 000 épisodes (10 h 34, ~5 700 épisodes/h), évaluation finale jusqu'à 07:54.
+
+### 5.15 B — transfert du régime S9 dans la lignée : P1 depuis P0 sous température (2026-09-16, décision utilisateur) — RÈGLE ÉCRITE, RUN LANCÉ {#b-2026-09-16}
+
+**Décision (2026-09-16, 09:30).** « OK pour B avec les deux clés. » Le profil `x1_lineage` de
+`ArmageddonAgent_x1` reçoit le régime d'apprentissage mesuré sur S9 — `learning_rate` 0,001 →
+**0,0005** (valeur finale de la rampe de P0 ; §9.2 : 0,001 reprenait au double du pas où la
+politique avait convergé) et **`logits_temperature` 2,0** — et rien d'autre : le dessin d'adversité
+de la lignée est conservé (70 % des parties en second, 30 % de bots, P0 tirant ses coups au sort,
+gate sur trois sondes de 300 parties). Pourquoi les deux clés et non la seule température : la
+combinaison T = 2 avec 0,001 n'a jamais été mesurée (la température adoucit les mises à jour, le pas
+doublé les durcit, effet net inconnu) ; on transfère la configuration qui a produit 0,78, on n'en
+invente pas une troisième. Coût assumé : si ça passe, l'attribution entre les deux clés n'est pas
+faite dans la lignée (S9 contre S25 l'a faite chez l'exploiteur ; la lignée à 0,001 sans
+température a échoué six fois). Livré : `config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json`
+(clés + `_normal` + `_doc`), `tests/unit/ai/test_training_config_par_etape.py` (valeurs épinglées,
+rouge sur l'ancien profil / vert sur le nouveau, 172 tests verts sur les quatre fichiers touchés),
+merge `3ef821284`. Vérifié avant : la clé s'applique à toute étape reprise par `_PLAIN_CURRICULUM_KEYS`
+(`ai/train.py`), la source d'avantage vaut « gae » par défaut.
+
+**Ce que B cherche à savoir.** Le gain de l'exploiteur passe-t-il en lignée ? Quatre différences
+avec S9 peuvent le manger : siège 0,7 (S9 gagne surtout en premier : 0,72 / 0,59 cumulés), bots
+30 %, P0 échantillonné, gate à 50/50 sur trois sondes. Le plafond de S9 (0,78) laisse 13 points au
+gate (0,65) : c'est la marge mesurable.
+
+**Règle de lecture, écrite AVANT le lancement.**
+- Juge : les sondes de pool de la lignée (`pool_eval/vs_P0_3ep`, argmax, 300 parties, sièges
+  50/50) et la décision automatique `evaluate_pool_decision`. `03_selfplay/P0` n'est PAS un juge
+  (échantillonné à T = 2, abaissé de ~2 pts par construction).
+- Verrou de parité à l'ouverture (argmax, insensible à T) : hors [0,40, 0,60] le run se refuse
+  seul ; rien à lire.
+- Garde de destruction automatique : moyenne < 0,50 après 20 000.
+- **Promotion automatique à 30 000** si la moyenne de trois sondes ≥ 0,65 → transfert CONFIRMÉ,
+  P2 enchaîne sous le même régime. Entre 0,60 et 0,65 à 30 000 → laisser courir ; **arrêt manuel à
+  60 000** si toujours sous 0,65 (budget d'étape 200 000 = 33 h, sans cette borne le run tourne pour
+  rien) → verdict « le protocole de lignée perd le gain », suite : D (seconde graine de S9) puis
+  bissection siège → bots → P0 échantillonné, un run par variable. Sous 0,55 à 30 000 → arrêt,
+  même verdict.
+- Au gate, deux lectures obligatoires (20 min, lecture seule) sur le P1 promu :
+  `scripts/seat_matrix_probe.py` contre le témoin entnorm `20260913-040721`, S9 final
+  (`logs/matrix_heldout_20260916/s9_final_ckpt/`) et S25 30 000 (« bat la famille » ou « joue
+  mieux » : S9 valait 0,64 / 0,69 / 0,71 sur P1 / S25 / entnorm) ; score par siège avec les profils
+  `x1_seat_p1` / `x1_seat_p2` de l'agent expl (tables identiques).
+- Mécanisme à consigner à 20 000 et au gate : `train/entropy_loss` (entropie de π_T ; S9 : 1,07 →
+  0,80 à 14 000 → 0,72 à 60 000), `train/n_minibatches_done` (S9 : 30 → 16 ; P1 à 0,001 : 11–16),
+  `01_VP/a_vp_diff` et `01_VP/c_vp_bot` (S9 gagnait par le déni des points de P0).
+- Le run de nuit se décide au gate : B passe → C (P0 neuf à froid, juge indépendant) ; B échoue →
+  D (seconde graine de S9).
+
+**Lancement** : `python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x1_lineage
+--scenario bot --etape P1`, log `training_x1_06-p01-s9.log`, canonique précédent archivé
+automatiquement en `_pre_resume_<horodatage>`. Prologue à vérifier dans le log : « continuité :
+… (learning_rate 0.0005 -> 0.0005) » ou absence de la ligne de changement de pas, température
+appliquée, échauffement critic 20 (zip P0 sans marqueur), parité d'ouverture dans [0,40, 0,60].
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
