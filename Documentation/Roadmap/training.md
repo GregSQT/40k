@@ -169,7 +169,7 @@ graines sous 10 points d'effet ; B6 après, sur deux graines.
 Matrice d'adversaires jamais affrontés (`scripts/seat_matrix_probe.py`, 300 parties, argmax, sièges
 50/50) sur les checkpoints 30 000 : contre P1 de lignée `robust_0.9078`, P0 fait 0,36, S25 **0,50**,
 S9 **0,62** — +12 pts pour S9 hors de P0 contre +5 pts sur P0 : le gain n'est pas une spécialisation
-contre le champion. Cellules entnorm et S9 → S25 en cours (`logs/matrix_heldout_20260916/`).
+contre le champion. Matrice complète à 03:10 : S9 → S25 **0,68** ; contre le témoin entnorm sans parenté avec P0, S9 0,68, S25 0,70, P0 ≈ 0,72 (bruit) — le gain est réel mais **propre à la famille de P0**, nul contre un style étranger : ni spécialisation contre le seul champion, ni progrès général mesurable ; il manque un juge de progrès général (second champion sans parenté, témoin entnorm en cellule fixe).
 
 **2026-09-16, 02:25 — S9 : VERDICT À 30 000 = OUI, le plateau est déplacé ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Sondes exploiteur 20 000 → 30 000 : 0,80 / 0,72 / 0,69 / 0,68 / 0,71 / 0,78 → moyenne **0,730** contre

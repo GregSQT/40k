@@ -1348,7 +1348,12 @@ Le holdout bots ne peut plus trancher cette question : bots saturés (D2), il ne
 | P0 → P1 (S27, déduit de P1 → P0 = 0,642) | 0,36 |
 | **S25 (30 000) → P1** | **0,50** (150/300) |
 | **S9 (30 000) → P1** | **0,62** (186/300) |
-| S9 → S25, S9 → entnorm, S25 → entnorm | en cours, JSON dans `logs/matrix_heldout_20260916/` |
+| **S9 (30 000) → S25 (30 000)** | **0,68** (204/300, 1 nul) |
+| P0 → témoin entnorm (§5.5, complément du 0,28 mesuré le 2026-09-13) | ≈ 0,72 |
+| **S25 (30 000) → témoin entnorm** | **0,70** (211/300, 1 nul) |
+| **S9 (30 000) → témoin entnorm** | **0,68** (205/300, 1 nul) |
+
+JSON et journal : `logs/matrix_heldout_20260916/` (ignoré par git).
 
 Lecture (deux cellules) : S9 gagne **+12 pts** sur S25 contre un adversaire tenu hors (erreur-type
 d'une cellule 2,8 pts, de l'écart ≈ 4 pts → ≈ 3 σ) contre **+5 pts** sur P0 (sondes) : le gain
@@ -1360,6 +1365,22 @@ parenté) complètent la réponse. Ce que la matrice ne dit pas : si S9 est lui-
 (cycle pierre-feuille-ciseaux) — cela se mesure en entraînant un exploiteur CONTRE S9 (~5,5 h), et
 c'est ce que le gate de lignée (battre le champion ET chaque membre du pool, `evaluate_pool_decision`)
 protège à partir de P2 ; en P1, pool à un membre (D1), rien ne le protège.
+
+**Lecture complète (03:10, cinq cellules).** S9 bat directement l'autre exploiteur de P0 : S9 → S25
+**0,68**. Contre le témoin entnorm (aucune parenté avec P0 : à froid contre les bots seuls, 40 000
+épisodes) : S9 0,683, S25 0,703, écart −2 pts dans le bruit (±3,7 sur un écart de cellules) ; P0
+lui-même fait ≈ 0,72 contre ce témoin. Lecture : le gain de S9 est réel et transférable, mais **à
+l'intérieur de la famille de P0** — +5 sur P0, +12 sur P1 (élève de P0), 0,68 sur S25 (exploiteur de
+P0) — et **nul hors de cette famille** : contre un style sans parenté, S25, S9 et P0 sont à 0,70 /
+0,68 / ≈ 0,72, tout dans ±3 pts, aucun gain ni aucune perte après 30 000 épisodes joués à 100 %
+contre P0. Ce n'est donc ni une spécialisation contre le seul champion (réfutée sur P1 et S25) ni
+un progrès général au jeu mesurable (rien contre un style étranger, rien contre des bots saturés) :
+à 30 000, l'exploiteur a appris à battre ce que P0 a façonné. Règle posée au lancement (S9 ≥ S25 + 5
+hors de P0) : tenue sur P1, non tenue sur entnorm, consigné tel quel. Conséquence pour la lignée : le
+juge de progrès GÉNÉRAL manque — holdout bots saturé, P1 et tout futur membre descendent de P0 ;
+un second champion sans parenté (contrôle P0 à froid, option C de l'arbitrage du 2026-09-16) et le
+témoin entnorm gardé comme cellule fixe de toute matrice future sont les seuls instruments qui
+distingueront « apprend le jeu » de « apprend la famille ».
 
 ## 6. Ce qui n'a pas été fait
 
