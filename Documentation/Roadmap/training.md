@@ -165,6 +165,13 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 11:40 — ordre des pistes après B tranché ([dossier §12](../Chantiers/backlog/plafonnement_p1.md#pistes-2026-09-16)).**
+Décision utilisateur : garder les pistes et les explorer par gain potentiel. Rang 1 ex æquo :
+exploration non absorbable (§10) et ligue d'adversaires (§11, première version sans GPU : pool de
+P1 = P0 + P0a + témoin entnorm) ; 3 : hygiène de mesure (seconde graine, P0 neuf par nuit) ; 4 :
+poids de l'issue à trois bras ; 5 : P1 à froid si la reprise échoue deux fois ; 6 : recherche (S15).
+Les étapes 3–5 de §9.9 sont remplacées pour l'après-B. B à 10 000 : sonde 0,653 (référence 0,547).
+
 **2026-09-16, 11:20 — trois champions à froid en duel ([dossier §11](../Chantiers/backlog/plafonnement_p1.md#ligue-2026-09-16)).**
 300 parties par case, argmax, sièges 50/50 : **P0 → P0a 0,42** (la première tentative de P0, 0,83
 contre les bots, bat le champion retenu à 0,58, ≈ 2,7 σ), P0 → témoin entnorm 0,57, P0a → entnorm

@@ -1635,7 +1635,7 @@ famille de P0, pas mesurablement à mieux jouer. GPU libre depuis 07:54, rien la
    cette tête). Tous les autres suspects ont été testés et écartés (§4) ; seul le levier touchant la
    collecte a bougé le plateau.
 
-**Décisions ouvertes (utilisateur), avec ce que chaque option cherche à savoir.**
+**Décisions ouvertes (utilisateur), avec ce que chaque option cherche à savoir.** *(11:40 : l'ordre des pistes après B est tranché en [§12](#pistes-2026-09-16) ; les options GPU ci-dessous restent le choix du run de nuit.)*
 - **GPU.** A : exploiteur sous T + poids de la victoire changé (C2 ; aucune valeur écrite, effet
   inconnu ; T s'éteint après ~20 000, on retesterait surtout dans le régime S25). **Complément du 16
   (proposition d'un autre agent, évaluée 10:50)** : BAISSER l'issue (±150 → ±30 ou 0) parce que le
@@ -2111,7 +2111,7 @@ midi (§5.13).
    confirmée), S9 seulement si S14 est réfuté.
 3. Le dossier fixe l'ORDRE DE LA SUITE ci-dessous pour ne plus retrancher.
 
-**ORDRE DE LA SUITE — figé le 2026-09-15, à ne rouvrir que sur un fait nouveau mesuré.**
+**ORDRE DE LA SUITE — figé le 2026-09-15, à ne rouvrir que sur un fait nouveau mesuré.** **Rouvert le 2026-09-16 sur deux faits mesurés (S9, matrices) : les étapes 3 à 5 ci-dessous sont REMPLACÉES pour l'après-B par l'ordre de [§12](#pistes-2026-09-16) ; l'étape 4 (transfert) est B, en cours (§5.15).**
 
 | étape | levier | dispositif | règle de lecture | si oui | si non |
 |---|---|---|---|---|---|
@@ -2276,6 +2276,31 @@ entre graines, pas la diversité. (4) Réserve : §5.5 donnait ENT à 0,28 contr
 (protocole et moteur d'alors) ; 0,43 aujourd'hui à sièges 50/50 ; non comparables sans ré-mesure.
 Effet sur les pistes : la ligue (P0 champion + P0a et ENT en anciens pour P1) a désormais un appui
 mesuré ; un P1 devra battre P0a à 0,60, plus dur que P0.
+
+## 12. Pistes d'amélioration — ordre d'exploration par gain potentiel (décision utilisateur du 2026-09-16, 11:40) {#pistes-2026-09-16}
+
+**Décision.** « Garder ces pistes d'amélioration et prévoir de les explorer par ordre de gain
+potentiel. » Cet ordre remplace les étapes 3 à 5 de §9.9 pour la suite APRÈS B (étape 4 de §9.9,
+en cours) ; il a été rouvert sur deux faits nouveaux mesurés : S9 (§5.14 : l'exploration à la
+collecte déplace le plateau puis s'éteint) et les matrices du 16 (§5.14, §11 : gain confiné à la
+famille de P0 ; le score contre les bots ne classe pas les agents entre eux, P0a bat P0).
+
+| rang | piste | vise | gain potentiel et ce qui l'appuie | coût | déclencheur |
+|---|---|---|---|---|---|
+| 1 | **Exploration non absorbable** (§10 : température autorégulée, puis remise à neuf partielle des têtes de décision, mélange aléatoire en dernier) | dépasser 0,78 contre P0 | le plus fort : seul levier ayant bougé le plateau (+10 pts), montée arrêtée quand l'exploration s'éteint ; au-delà de 0,78 non mesuré | code faible → moyen ; 2 graines × 5 h 30 | B passe → après le redémarrage de la lignée, pour viser 0,90 ; B échoue → immédiatement |
+| 1 (ex æquo) | **Ligue d'adversaires** (§11 : pool de P1 = P0 champion + P0a et témoin entnorm en anciens ; puis sauvegardes espacées 25/50/75/100 % ; puis poids adaptatifs) | apprendre le jeu, pas la famille ; éviter le cycle ; juge indépendant à chaque gate | problème mesuré (matrice) et remède documenté ; P0a > P0 en duel : un adversaire plus fort est disponible ; ne monte pas le score contre P0, relève la barre du gate (0,60 contre chaque ancien) | petit code (membre de pool par archive), 0 h de GPU pour la première version ; moyen pour les poids adaptatifs | dès le gate de B, avant P2 |
+| 3 | **Hygiène de mesure** : seconde graine de S9 ; P0 neuf à froid avec instantanés conservés ; un P0 par nuit ensuite | verdicts fiables ; variance entre graines (jamais mesurée) ; juge hors famille | ne change pas l'agent, change la confiance dans tout le reste | aucun code ; 5 h 30 à 8 h, la nuit | en continu à partir du soir du 16 (C si B passe, D si B échoue) |
+| 4 | **Poids de l'issue contre le façonnage** — trois bras ±30 / ±150 (S9) / ±300 | alignement de l'objectif appris sur le gate, ou bruit de fin de partie | inconnu : deux hypothèses opposées, aucune mesure ; attendu < 10 pts | configuration seule (copie expl) ; 2 runs × 5 h 30, deux graines | après les rangs 1 et 3 |
+| 5 | **P1 parti de zéro** contre le P0 actuel, 100 000 parties | régime alternatif sans le problème de reprise | vu une fois sur l'ancien jeu (0,74) ; 16 h par étape | aucun code ; 16 h | seulement si la reprise échoue deux fois |
+| 6 | **Recherche à l'entraînement** (S15) | crédit noyé résolu par simulation | remède de principe ; semaines | gros code | dernier recours, par décision |
+
+**Règles transversales.** Règle de lecture écrite avant chaque run ; juge = sonde argmax et matrice
+hors famille (P0a, témoin entnorm en cases fixes), jamais la courbe échantillonnée ; deux graines
+avant toute conclusion sous 10 pts ; un seul changement par run ; chaque champion promu est mesuré
+hors famille avant d'entrer dans un pool.
+
+**Ce qui reste clos** (inchangé) : gate 0,65, λ court / lot ×4 (S23), `vf_coef`, S11 tel que codé,
+entnorm, S14 tête Q, « plateau normal », bissection de config avant le mécanisme.
 
 ## 8. Références
 
