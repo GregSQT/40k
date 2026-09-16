@@ -1382,6 +1382,23 @@ un second champion sans parenté (contrôle P0 à froid, option C de l'arbitrage
 témoin entnorm gardé comme cellule fixe de toute matrice future sont les seuls instruments qui
 distingueront « apprend le jeu » de « apprend la famille ».
 
+**Lecture à 40 000 (2026-09-16, sonde à 03:47, lecture 04:05) — LA MONTÉE CONTINUE, à la borne exacte
+de la règle.** Sondes 30 000 → 40 000 (six, bornes incluses) : 0,78 / 0,73 / 0,75 / 0,75 / 0,76 / **0,79**
+→ moyenne **0,760** (4,56 / 6, exactement le seuil « ≥ 0,76 → la montée continue » écrit à 02:30 ;
+appliqué tel quel, l'écart au seuil est nul et l'erreur-type de la moyenne 1,9 pt). Fenêtre précédente
+0,730 (+3,0 pts) ; S25 sur la même fenêtre : 0,683 (+7,7 pts pour S9) ; moyenne des trois dernières
+0,767. **Holdout bots à 40 000 : 0,907** (0,897 → 0,848 → 0,893 → 0,907), pire bot 0,86, siège 1 0,977 /
+siège 2 0,851 ; P0 : 0,910 — aucune dégradation contre les bots pendant que la sonde monte.
+Mécanisme 30 000–40 000 : entropie de π_T 0,76 / 0,75 / 0,76 / 0,76 / 0,73 (S25 : 0,71 / 0,70 / 0,68 /
+0,69 / 0,70) — plate puis un cran plus bas sur la dernière tranche, 0,68 non atteint ; coupure KL
+15,5–17 mini-lots (S25 15,5–16,4, identique) ; EV 0,87–0,89 ; courbes échantillonnées `a_vp_diff` +11,6
+→ +11,9 (S25 +4,6 → +5,9), `03_selfplay/P0` 0,727 → 0,735 (S25 0,634 → 0,654), objectifs tenus +0,36 /
++0,37 (S25 +0,04 → +0,10). La signature d'update est celle de S25 depuis 20 000 ; ce qui diffère est la
+politique de collecte à T = 2 et la politique apprise (sonde par famille du 30 000). Lecture suivante à
+60 000 (fin de budget E0, vers 07:30) par la règle du 02:30 : moyenne 50 000–60 000, holdout ≥ 0,88,
+`family_entropy_probe` sur le DERNIER `ppo_checkpoint` (le canonique de fin de run est l'instantané
+holdout, pas les poids finaux — §9.6 R2).
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin

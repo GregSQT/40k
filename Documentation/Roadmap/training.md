@@ -165,6 +165,12 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 04:05 — S9 lecture à 40 000 : la montée continue ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Sondes 30 000 → 40 000 : 0,78 / 0,73 / 0,75 / 0,75 / 0,76 / 0,79 → moyenne **0,760** (règle du 02:30 :
+≥ 0,76 → montée, à la borne exacte ; fenêtre précédente 0,730 ; S25 même fenêtre 0,683). Holdout bots
+**0,907** (P0 0,910), pire bot 0,86 : aucune dégradation. Mécanisme inchangé depuis 20 000 (coupure KL
+15–17 comme S25, EV 0,88, entropie de π_T 0,76 → 0,73). Prochaine lecture à 60 000, fin de budget E0.
+
 **2026-09-16, 02:46 — S9 généralise hors de P0 ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Matrice d'adversaires jamais affrontés (`scripts/seat_matrix_probe.py`, 300 parties, argmax, sièges
 50/50) sur les checkpoints 30 000 : contre P1 de lignée `robust_0.9078`, P0 fait 0,36, S25 **0,50**,
