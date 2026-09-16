@@ -1,5 +1,10 @@
 # Moteur — Tâches ouvertes
 
+> **⛔ Moteur FIGÉ pour la démo (décision utilisateur, 2026-09-16 soir)** — moteur de référence
+> `b2e8e241f`. Aucun chantier ci-dessous qui change les parties jouées ne démarre avant la démo
+> sans décision explicite et `--new` assumé de la lignée ; règle complète dans
+> [ROADMAP_INDEX.md — Direction](ROADMAP_INDEX.md#direction).
+
 ---
 
 ## P3-0 — Retrait pour cohérence 03.03 {#p3-0}

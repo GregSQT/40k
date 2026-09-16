@@ -165,6 +165,15 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 23:05 — moteur figé, canonique re-mesuré, C lancé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Décisions utilisateur : moteur FIGÉ pour la démo (`b2e8e241f`, règle dans `ROADMAP_INDEX.md`
+Direction et en tête de `moteur.md`) ; siège 0,75 délibéré (baisser l'écart de siège) ; re-mesure
+puis C. Canonique P1 sur le moteur figé : **89,3 %** ([#holdout-2026-09-16](#holdout-2026-09-16)),
+même niveau qu'avant le sol hex. C lancé 22:55 (`ArmageddonAgent_x1_p0ctrl`, P0 neuf, graine 54321,
+50 000 parties, `run_20260916-225505`) ; le copieur d'instantanés est remplacé par la rétention des
+checkpoints (`max_checkpoints` 64 sur ce seul agent). Règle de lecture du siège pour P2 écrite
+(référence = écart du miroir, pas zéro).
+
 **2026-09-16, 21:15 — objectif démo rappelé, prochaine étape ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16), [§12](../Chantiers/backlog/plafonnement_p1.md#pistes-2026-09-16)).**
 Objectif : agent crédible à affronter en démo ; un humain est hors famille, les gains contre la famille
 de P0 ne comptent pas → ligue au rang 1, exploration non absorbable derrière (confirmation attendue).
@@ -975,6 +984,43 @@ inopérant et les runs de cadences d'update différentes n'étaient pas comparab
 Ces treize tags portent désormais un point par update. Verrou :
 `tests/unit/ai/test_metrics_tracker_utils.py::test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update`.
 Les runs antérieurs au 2026-09-06 gardent l'escalier, à lire comme une suite de paliers.
+
+---
+
+## Win-rate HOLDOUT du 2026-09-16 — canonique P1 sur le moteur FIGÉ {#holdout-2026-09-16}
+
+**Référence datée du canonique sur le moteur de la démo** (`b2e8e241f`, sol hex du champ de
+montée), demandée par [#rupture-sol-hex-2026-09-16](#rupture-sol-hex-2026-09-16). Modèle :
+`model_ArmageddonAgent_x1.zip` = `model_ArmageddonAgent_x1_P1.zip` (P1 promu le 16 à 16:29,
+poids vifs à 30 000 d'étape, `robust_0.8819`). Même protocole que
+[#holdout-2026-09-13](#holdout-2026-09-13) : `bash scripts/train.sh --agent ArmageddonAgent_x1
+--training-config x1 --resolution 1 --test-only --step`, 22:39 → 22:47, 300 épisodes, 6 bots × 50,
+deux rosters holdout, siège alterné (132 en P1, 168 en P2), 0 troncature, 0 nul. Log
+`logs/holdout_x1_20260916_solhex.log`, dépouillement `logs/analyzer_holdout_20260916_solhex.log`,
+comptage siège/roster sur `step.log`.
+
+**WIN-RATE HOLDOUT : 268/300 = 89,3 %** (σ 1,8 pt, IC95 ≈ ±3,5). 261 victoires aux objectifs,
+7 au départage de valeur, zéro par élimination.
+
+| dimension | résultat | référence 2026-09-13 (ancien P1 robuste, moteur du 13) | clôture de B (P1, 1 800 parties, moteur du 16 matin) |
+|---|---|---|---|
+| EndgameBot | 49/50 = 98,0 % | 96,0 % | 96,3 % |
+| RacerBot | 49/50 = 98,0 % | 94,0 % | 89,0 % |
+| DecapitationBot | 44/50 = 88,0 % | 90,0 % | 92,3 % |
+| ScorerBot | 43/50 = 86,0 % | 90,0 % | 82,3 % |
+| AlphaStrikeBot | 42/50 = 84,0 % | 90,0 % | 82,7 % |
+| AttritionBot | 41/50 = 82,0 % | 86,0 % | 83,3 % |
+| roster Space Marines | 144/156 = 92,3 % | 96,8 % | — |
+| roster Orks | 124/144 = 86,1 % | 84,7 % | — |
+| siège P1 (joue premier) | 127/132 = 96,2 % | 97,7 % | — |
+| siège P2 | 141/168 = 83,9 % | 85,7 % | — |
+| pire scénario | holdout_regular_bot-03 = 83,3 % | — | 79,1 % |
+
+Lecture : 89,3 % contre 87,7 % (clôture de B, moteur d'avant le sol hex) et 91,0 % (référence du
+13) — dans le bruit ; **le sol hex n'a pas changé ce que vaut P1 contre les bots**. Écart de siège
+12,3 points (12,0 le 13), écart de roster 6,2 (6,0 à la clôture de B, 12,1 le 13). C'est le point
+de départ du test d'acceptation démo (plancher bots = ce niveau moins le bruit) et la référence
+de toute mesure holdout ultérieure sur le moteur figé.
 
 ---
 

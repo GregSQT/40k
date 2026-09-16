@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-16 soir) : [§5.15 fin](#b-2026-09-16) — P1 PROMU (0,700), objectif démo rappelé, moteur changé à 20:27, décisions attendues (gel du moteur, siège 0,75, lancement de C) ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-16 nuit) : [§5.15 fin](#b-2026-09-16) — P1 PROMU (0,700), moteur FIGÉ (`b2e8e241f`), canonique re-mesuré 89,3 %, C (P0 neuf) lancé 22:55 avec rétention des checkpoints, règle de lecture du siège écrite ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1722,6 +1722,56 @@ GPU libre à 17:54, aucun run lancé.
   ouvert non suspendu qui change les parties jouées (relu par l'autre analyse le 16 soir) ; règle à
   écrire avec le gel : tout correctif de règle qui change les parties jouées est différé après la
   démo, ou déclenche un `--new` assumé.
+
+**Soir du 16, suite (22:20 → 23:05) — décisions prises, canonique re-mesuré, C lancé.**
+- **Décisions utilisateur (22:20)** : (1) **moteur figé pour la démo, maintenant** — moteur de
+  référence `b2e8e241f` ; règle écrite dans `ROADMAP_INDEX.md` (Direction) et en tête de
+  `Roadmap/moteur.md` : tout correctif changeant les parties jouées est différé après la démo ou
+  déclenche un `--new` assumé de la lignée ; (2) **siège 0,75 délibéré** : « on est toujours à
+  +15 % de win-rate pour P1 [le premier siège], j'ai monté à 75 % pour faire baisser ce ratio » —
+  tests et `_doc` déjà alignés par `1fd0be4d7` ; (3) re-mesure puis C ce soir.
+- **Règle de lecture du siège pour P2, écrite AVANT le lancement de P2.** L'écart de siège ne peut
+  pas tomber à zéro : dans le miroir P0 contre P0 (§9.7, argmax des deux côtés, dés seuls) le
+  premier joueur gagne 0,61 contre 0,40 — ~21 points sont le jeu, pas l'agent. Et `x1_long` était
+  déjà à 0,75 en août avec un écart holdout de 12 points. Juge : l'écart par siège de P2 contre P1
+  (profils `x1_seat_p1` / `x1_seat_p2`, 300 parties par siège) comparé à l'écart de P1 contre P0
+  (0,777 − 0,630 = 14,7 pts) ET à l'écart du miroir P1 contre P1 (à mesurer au même instant, même
+  outil). Succès du levier : écart de P2 < 14,7 pts ; plancher atteignable : l'écart du miroir. Si
+  P2 reste à ≥ 14,7 alors que le miroir en montre ~10 de moins, le levier siège est épuisé et le
+  reste n'est pas une question d'exposition. Le holdout bots (écart 12,3 ci-dessous) reste un
+  second instrument, sans miroir possible (les bots ne jouent pas les deux sièges).
+- **Copieur d'instantanés : REMPLACÉ par la rétention des checkpoints** (config seule, aucun code).
+  `max_checkpoints` 3 → **64** dans le profil `x1_long` de `ArmageddonAgent_x1_p0ctrl` (clé
+  `_normal` écrite ; `_doc_p0ctrl` du curriculum mis à jour). Un checkpoint toutes les
+  ~1 700–2 000 parties, ~25–30 sur 50 000, ~50 Mo chacun, tous conservés dans
+  `ai/models/ArmageddonAgent_x1_p0ctrl/`. Pourquoi pas le copieur `nohup` prévu : la rotation
+  supprime l'ancien avant qu'un copieur en retard ne le voie, un processus externe meurt avec la
+  session (reboot du 15), et le levier existait déjà — c'est exactement ainsi que les instantanés
+  du P0 du 10 ont été perdus. Rien à tester : `RotatingCheckpointCallback` lit un compte.
+- **Re-mesure du canonique P1 sur le moteur courant** (`bash scripts/train.sh --agent
+  ArmageddonAgent_x1 --training-config x1 --resolution 1 --test-only --step`, 22:39 → 22:47,
+  protocole de [training.md#holdout-2026-09-13](../../Roadmap/training.md#holdout-2026-09-13),
+  log `logs/holdout_x1_20260916_solhex.log`, dépouillement `logs/analyzer_holdout_20260916_solhex.log`) :
+  **268/300 = 89,3 %** (σ 1,8 pt), 0 nul, 0 troncature, 261 victoires aux objectifs, 7 au
+  départage, 0 par élimination. Bots : endgame 0,98 · racer 0,98 · decapitation 0,88 · scorer 0,86 ·
+  alpha 0,84 · attrition 0,82 (pire) ; scénarios 0,987 / 0,889 / 0,859 / 0,833 ; **siège 1 : 127/132 =
+  96,2 % · siège 2 : 141/168 = 83,9 % (écart 12,3)** ; SM 92,3 % · Orks 86,1 % (écart 6,2).
+  Lecture : identique au holdout final de la clôture de B (87,7 % sur 1 800 parties, moteur d'avant
+  le sol hex) et à la référence du 13 (91,0 %) au bruit près — **P1 joue aussi bien sur le moteur
+  figé ; c'est la RÉFÉRENCE DATÉE du canonique sur le moteur de la démo**, consignée dans
+  [training.md#holdout-2026-09-16](../../Roadmap/training.md#holdout-2026-09-16). Le test
+  d'acceptation démo prend son plancher bots ici : 0,893 − bruit.
+- **C LANCÉ à 22:55** : `bash scripts/train.sh --agent ArmageddonAgent_x1_p0ctrl --training-config
+  x1_long --scenario bot --resolution 1 --etape P0 --total-episodes 50000`, log
+  `training_x1_p0ctrl_01-p00.log`, TensorBoard `x1_long_ArmageddonAgent_x1_p0ctrl/run_20260916-225505`.
+  Prologue vérifié : « Etape P0 — init 'new' », total 50 000 depuis la ligne de commande, rampes
+  « 0.002 -> 0.0005 over 45000 (0.9 of 50000) » et « 0.1 -> 0.01 over 20000 (0.4 of 50000) » —
+  identiques mot pour mot à `training_x1_01-p00.log` (P0 du 10) ; graine 54321 (profil `x1_long`
+  de l'agent, ligne 195) ; siège 0,75 ; 24 envs, 8 160 pas par update ; GPU 4,6 Go au démarrage.
+  Fin attendue vers 07:00 (P0 du 10 : 7 h 54). Règle (inchangée) : robuste ≥ 0,85 à 50 000 →
+  pipeline intact sur le moteur figé ; 0,80–0,85 → deuxième graine ; ≤ 0,80 → régression à chercher
+  avant tout autre run. Au réveil : holdout, matrice à froid P0ctrl contre P0 / P0a / entnorm / P1
+  (`scripts/seat_matrix_probe.py`), puis membre de pool « archive » et P2.
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 

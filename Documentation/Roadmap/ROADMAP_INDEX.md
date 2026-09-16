@@ -33,11 +33,20 @@
 
 ---
 
-## Direction — le fil
+## Direction — le fil {#direction}
 
 **CAP : la démo de financement** — un agent RL crédible sur les deux rosters retenus (Space
 Marines / Orks, décision 2026-07-19), prouvé par une mesure quantitative (win-rate `x1_long`
 contre le panel) et une validation qualitative par un joueur externe.
+
+**Moteur FIGÉ pour la démo — décision utilisateur du 2026-09-16 (soir).** Le moteur de la démo
+est celui de `b2e8e241f` (sol hex du champ de montée, 20:27) ; la lignée de démo (C = P0 neuf,
+puis P2 et suivants) s'entraîne dessus. Règle : tout correctif qui change les parties jouées
+(règle, géométrie, portée, dégâts, OC, masque) est différé après la démo, ou déclenche un `--new`
+assumé de toute la lignée. Bugs sans effet sur le jeu joué (perf, log, front, API) : libres.
+Motif : P0 (moteur du 10), P1 (moteur du 16 à 09:24) et le moteur courant sont trois jeux ;
+un agent de démo doit avoir appris le jeu qu'il jouera
+([training.md#rupture-sol-hex-2026-09-16](training.md#rupture-sol-hex-2026-09-16)).
 
 Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels ; le soutien
 (analyzer, security, infra, hygiène doc) avance en parallèle quand un jalon le réclame.
