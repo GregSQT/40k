@@ -87,10 +87,12 @@ ENTRAÎNEMENT IA
 
 <X> = résolution 1 ou 5.
 Entraîner :
-python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x<X> --scenario bot --resolution <X> --new
+bash scripts/train.sh --agent ArmageddonAgent_x1 --training-config x<X> --scenario bot --resolution <X> --new
 
 Évaluer le modèle existant sur HOLDOUT :
-python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x<X> --resolution <X> --test-only --step
+bash scripts/train.sh --agent ArmageddonAgent_x1 --training-config x<X> --resolution <X> --test-only --step
+
+scripts/train.sh = nice -n 15 python3 ai/train.py — toujours utiliser ce wrapper pour laisser le serveur de jeu réactif en parallèle.
 
 --test-only n'entraîne RIEN et laisse le modèle intact.
 --step écrit step.log.
