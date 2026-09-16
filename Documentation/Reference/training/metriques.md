@@ -354,6 +354,27 @@ là-dessus.
 - Ne décroît pas : la fonction de valeur n'apprend pas
 - Augmente : la fonction de valeur se dégrade (politique changeant trop vite)
 
+#### `train/cuda_peak_allocated_gib` (+ `train/cuda_reserved_gib`)
+**Ce que c'est :** Mémoire GPU du learner, publiée par `PatchedMaskablePPO.train` à chaque
+update, seulement sur CUDA (aucun tag sur CPU). `cuda_peak_allocated_gib` = pic d'allocation de
+CETTE update (`torch.cuda.max_memory_allocated`, remis à zéro en tête d'update) ;
+`cuda_reserved_gib` = ce que l'allocateur PyTorch détient en fin d'update
+(`torch.cuda.memory_reserved`), qui ne redescend jamais de lui-même — sous WSL2 il n'est jamais
+mis en OOM, la carte déborde en RAM hôte sans erreur.
+
+**Repères mesurés (2026-09-16, `x1_lineage`, 340 × 24, lot 1020, 4 epochs) :** pic **1,79 Gio**,
+réservé **2,08–2,29 Gio**. La fuite de l'échauffement critic corrigée ce jour donnait 9,69 / 12,11
+sur une carte de 8 Go — `train/time_update` passait de 5 s à 20-345 s dès que la résidence VRAM
+était perturbée, et rien ne le montrait.
+
+**Interprétation :**
+- `cuda_reserved_gib` proche de la VRAM de la carte (8,19 Go sur la machine de référence, dont
+  ~1 Go à l'hôte) : chaque update pagine — lire `train/time_update`, qui suit
+- `cuda_peak_allocated_gib` qui monte d'une update à l'autre à dimensions constantes : une
+  rétention de graphe ou de tenseurs, à chercher dans `train()` avant tout autre réglage
+- Un saut de `cuda_reserved_gib` sans saut du pic : fragmentation de l'allocateur, bénin tant
+  que la somme reste loin de la VRAM
+
 ---
 
 ### VP / score (`01_VP/`)
