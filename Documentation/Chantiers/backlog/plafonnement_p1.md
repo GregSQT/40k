@@ -2217,6 +2217,20 @@ utilisateur) ; conservation des checkpoints tous les 10 000 (clé de rétention)
 adaptatifs par score courant (ré-affectation des adversaires par environnement). La ligue traite la
 généralisation et le cycle P2 > P1 > P0 > P2 ; elle ne vise pas le score contre P0.
 
+**Idée utilisateur (16 septembre, 10:30) : pool = champion + les trois sauvegardes PPO conservées,
+pondérées par ancienneté (50 / 30 / 15 / 5 %).** Évaluation : les sauvegardes sont écrites tous les
+10 000 pas par environnement (≈ 2 000 parties) et tournent par trois → elles couvrent les 6 000
+dernières parties d'un run (S9 : sondes 0,78 / 0,80 / 0,77 à 56 000 / 58 000 / 60 000, même
+politique). Quatre quasi-copies d'un même individu = une seule famille : aucune diversité, aucun
+effet attendu ni sur le plafond ni sur la généralisation. **Version utile** : (1) conserver des
+sauvegardes ESPACÉES sur tout le run (25 / 50 / 75 / 100 % de l'étape) → gradation de difficulté et
+contrainte de transitivité (battre ses anciennes versions) ; (2) pondérer par le score mesuré (PFSP,
+les sondes de pool le mesurent déjà) plutôt que par l'ancienneté, l'ancienneté restant une
+approximation acceptable ; (3) la diversité vient des membres hors famille (§11). Granularité
+réelle des poids : le pool est réalisé par environnement (24 envs × 0,7 ≈ 17 sur le pool → ~6 %
+par env). Toutes les variantes exigent le même ajout : un type de membre de pool « archive ». À
+ouvrir après le gate de B ; ne change pas le score contre P0 à court terme.
+
 ## 8. Références
 
 - Runs : `tensorboard/x1_lineage_ArmageddonAgent_x1/run_20260912-065925` (P1) ;
