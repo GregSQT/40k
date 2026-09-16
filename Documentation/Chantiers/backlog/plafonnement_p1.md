@@ -1469,6 +1469,24 @@ Le GPU est libre depuis 07:54 ; rien n'est lancé sans décision (arbitrage du 2
 sous T / étape 4 transfert / contrôle P0 à froid ; mécanisme d'exploration non absorbable à
 arbitrer ensuite).
 
+**Bilan complet S9 (2026-09-16, 08:30) — mesures de jeu par bloc de 10 000 épisodes, courbes
+échantillonnées (S9 joue à T = 2 pendant l'entraînement : les valeurs absolues sont abaissées de ~2 pts
+par rapport à la sonde argmax ; les écarts S9 − S25 sur la MANIÈRE de gagner restent lisibles).**
+Blocs 40 000–50 000, S9 / S25 : VP de l'agent **48,7 / 47,8**, VP de P0 **36,4 / 41,3** — la marge
+(+12 contre +6,5) vient du DÉNI des points de P0, pas d'un gain propre ; objectifs tenus 2,52 / 2,42 ;
+victoires quand l'agent se déploie lui-même (90 % des épisodes) **0,78 / 0,68**, quand le moteur le
+déploie (10 %) 0,49 / 0,45 → l'avantage se construit au déploiement et à la tenue d'objectifs. Combat
+identique : ratio de valeur détruite / perdue 1,77 / 1,76, figurines tuées 0,53 / 0,50, figurines
+perdues **0,31 / 0,26** (S9 échange plus), charges 4,8 / 4,9 par partie à 0,36 / 0,38 de réussite, tir
+0,53 / 0,50 de participation à 0,63 / 0,62 de précision, avance 0,28 / 0,21, fuite 0,016 / 0,016, durée
+116 / 121 pas. Siège (cumul depuis le départ, échantillonné) : S9 premier joueur 0,72 / second 0,59
+(20 000–30 000 : 0,64 / 0,54) contre S25 0,66 / 0,66 (0,59 / 0,58) — S9 gagne surtout en jouant
+premier ; holdout bots par siège à 60 000 : 0,951 / 0,863 (S25 à 10 000 : 0,947 / 0,839). Récompense :
+marge de VP 73 / 32, issue ±150 → +76 / +44, bonus de combat 198 / 197, pénalités −111 / −112, total
+par épisode 256 / 180. Réserves détruites au tour 3 : 0,009 / 0,000 par épisode (effet mineur de
+l'échantillonnage à T = 2 sur les refus d'arrivée). Aucune action invalide. Durée : 20:34 → 07:09
+pour 60 000 épisodes (10 h 34, ~5 700 épisodes/h), évaluation finale jusqu'à 07:54.
+
 ## 6. Ce qui n'a pas été fait
 
 - [x] **Contrôle positif** de la sonde sur le chemin policy — fait le 2026-09-13 : le témoin

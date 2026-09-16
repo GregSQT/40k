@@ -165,6 +165,12 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 08:30 — S9, manière de gagner ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
+Blocs 40 000–50 000, S9 / S25 : VP de l'agent 48,7 / 47,8 mais VP de P0 **36,4 / 41,3** — la marge vient
+du déni des points adverses ; victoires en déploiement actif 0,78 / 0,68, en déploiement moteur 0,49 /
+0,45 ; combat identique (ratio de valeur 1,77 / 1,76, S9 perd un peu plus de figurines 0,31 / 0,26) ;
+S9 gagne surtout en premier joueur (0,72 / 0,59 cumulés, S25 0,66 / 0,66).
+
 **2026-09-16, 08:00 — clôture S9, poids finaux mesurés ([dossier §5.14](../Chantiers/backlog/plafonnement_p1.md#s9-2026-09-15)).**
 Processus terminé à 07:54 (curriculum.log ligne 17 : E0, 60 000, budget censuré) ; évaluation finale
 90,3 % contre les bots, holdout 0,902 à 60 000. Matrice des poids finaux : P1 **0,64**, S25 (30 000)
