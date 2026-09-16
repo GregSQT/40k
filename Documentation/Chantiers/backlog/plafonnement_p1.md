@@ -1638,6 +1638,23 @@ bots final, archive `model_ArmageddonAgent_x1_P1.zip`, ligne `curriculum.log` �
 matrice hors famille sur le P1 promu (P0a, témoin entnorm, S9 final, S25) et score par siège (§5.15,
 lectures obligatoires au gate) ; puis run de nuit C (§12 rang 3, cas « B passe »).
 
+**Clôture de B (2026-09-16, 16:29 → 17:36).** Gate final contre P0 : **0,700** (3 × 300 parties,
+graines tirées : 0,697 / 0,703 / 0,700) ; `curriculum.log` ligne 18 : `gate_accepted: true`,
+`pool_stop_verdict: promote`, « P1 : P0=0.700 — planchers tenus ». Holdout bots final (1 800
+parties) : **87,7 %** — alpha 82,7 · attrition 83,3 · decapitation 92,3 · endgame 96,3 · racer 89,0 ·
+scorer 82,3 ; scénarios 0,987 / 0,902 / 0,827 / 0,791 ; écart de siège 0,156, SM − Orks +6,0 ; le
+holdout intermédiaire à 10 000 valait 0,917 (P0 final : 0,910, S9 : 0,903). Archive
+`model_ArmageddonAgent_x1_P1.zip` = poids vifs à 30 000 (promotion → publication des poids vifs,
+`final_save_publishes_live_weights`), devenue le canonique de l'agent. Le run a tourné sur le code
+chargé à 09:24 ; pendant ce temps une autre session a livré `scripts/train.sh` (nice 15, obligatoire
+désormais, CLAUDE.md 12:07), le correctif mémoire de l'échauffement critic (`b3dc6cc70`, 12 Gio
+réservés sur 8 Go — la mémoire GPU pleine observée sur B) et son retrait partiel (`4a0bd42ec`) ;
+le ralentissement 11:20–14:00 coïncide avec ce travail parallèle sur la machine. **Décision
+utilisateur (16:30) : aucun run lancé après la matrice hors famille, la main revient à
+l'utilisateur** (des changements sont intervenus pendant l'entraînement). L'agent dédié préparé
+pour C (`config/agents/ArmageddonAgent_x1_p0ctrl/`, P0 seul, graine 54321) existe, non commité, non
+lancé.
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
