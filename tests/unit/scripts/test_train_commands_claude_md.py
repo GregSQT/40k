@@ -32,7 +32,10 @@ _LABEL_HEADERS: dict[str, str] = {
     "Entraîner": "Lancer",
     "Évaluer le modèle existant sur HOLDOUT": "Valider",
 }
-_TRAIN_CMD_PREFIX = "python3 ai/train.py"
+# CLAUDE.md documente les commandes via le wrapper `scripts/train.sh` (2026-09-16), qui ne fait
+# que `exec nice -n 15 python3 ai/train.py "$@"` : les arguments qui suivent le préfixe sont
+# EXACTEMENT ceux que `train.main()` reçoit, donc ils s'exercent ici tels quels.
+_TRAIN_CMD_PREFIX = "bash scripts/train.sh"
 
 # Module factice pour engine.w40k_core (import lourd, évité dans les tests)
 _FAKE_ENGINE_MODULE = MagicMock()
@@ -59,7 +62,7 @@ def _extract_train_commands() -> list[tuple[str, list[str]]]:
 
     Format attendu dans §ENTRAÎNEMENT IA :
       <Header> :
-      python3 ai/train.py <args…>
+      bash scripts/train.sh <args…>
     """
     commands: list[tuple[str, list[str]]] = []
     lines = CLAUDE_MD.read_text().splitlines()
@@ -158,6 +161,17 @@ def test_claude_md_contient_commandes_train() -> None:
             f"Label '{expected}' doit apparaître exactement une fois dans CLAUDE.md §ENTRAÎNEMENT IA "
             f"(trouvé {n} fois)"
         )
+
+
+def test_le_wrapper_transmet_les_arguments_tels_quels_a_train_py() -> None:
+    """Le préfixe `bash scripts/train.sh` ne vaut que si le wrapper passe `"$@"` à `ai/train.py`.
+
+    Les tests ci-dessous exercent `train.main()` avec les arguments lus APRÈS ce préfixe : si
+    le wrapper en ajoutait, en retirait ou en réordonnait, ils vérifieraient une commande que
+    personne ne lance. Le verrou lit le script lui-même — pas de shell dans un test unitaire.
+    """
+    script = (RACINE / "scripts" / "train.sh").read_text(encoding="utf-8")
+    assert 'python3 "$PROJECT_ROOT/ai/train.py" "$@"' in script, script
 
 
 def test_lancer_command_passes_guards() -> None:
