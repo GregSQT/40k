@@ -1586,6 +1586,15 @@ automatiquement en `_pre_resume_<horodatage>`. Prologue à vérifier dans le log
 … (learning_rate 0.0005 -> 0.0005) » ou absence de la ligne de changement de pas, température
 appliquée, échauffement critic 20 (zip P0 sans marqueur), parité d'ouverture dans [0,40, 0,60].
 
+**Lancé à 09:24, prologue vérifié (09:29)** : `run_20260916-092441`, reprise de
+`model_ArmageddonAgent_x1_P0.zip`, canonique précédent archivé en `_pre_resume_20260916-092417`,
+« continuité : le modèle repris porte déjà learning_rate 0.0005, identique au régime de lignée »
+(plus de doublement du pas à la reprise), échauffement critic 20 updates actif (`value_warmup_active`
+= 1, KL = 0), **parité d'ouverture 0,490 contre P0** (fenêtre [0,40, 0,60]), et **température
+active** : entropie de la politique de collecte **1,21 nat à la première update** (S9 : 1,17 ;
+S25 sans température : 0,78 ; la clé s'applique en silence, c'est ce point qui le prouve).
+Première sonde de pool attendue à 10 000 parties d'étape (~11:15), décision à 30 000 (~15:00).
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
