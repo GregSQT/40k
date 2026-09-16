@@ -165,6 +165,15 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-16, 21:15 — objectif démo rappelé, prochaine étape ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16), [§12](../Chantiers/backlog/plafonnement_p1.md#pistes-2026-09-16)).**
+Objectif : agent crédible à affronter en démo ; un humain est hors famille, les gains contre la famille
+de P0 ne comptent pas → ligue au rang 1, exploration non absorbable derrière (confirmation attendue).
+Faits du soir : moteur changé à 20:27 (comparabilité rompue, gel du moteur à décider), siège 0,75 dans
+`x1_lineage` avec deux tests rouges sur main (délibéré ou revert : décision attendue), agent P0 neuf
+commité. Plan : `--test-only` du canonique, C cette nuit, membre de pool « archive » demain, P2 sur
+plusieurs familles, test d'acceptation démo écrit avant. Partie humaine contre le canonique = seul
+juge direct.
+
 **2026-09-16, 17:55 — clôture de B et matrice du P1 promu ([dossier §5.15](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Gate final 0,700 (3 × 300), holdout bots final 87,7 % (1 800 parties), archive
 `model_ArmageddonAgent_x1_P1.zip` = poids vifs à 30 000. Matrice : P0 par siège 0,777 / 0,630, P0a

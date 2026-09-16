@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-16) : [ÉTAT AU 2026-09-16](#etat-2026-09-16) — S9 terminé, décisions ouvertes, état de santé.** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-16 soir) : [§5.15 fin](#b-2026-09-16) — P1 PROMU (0,700), objectif démo rappelé, moteur changé à 20:27, décisions attendues (gel du moteur, siège 0,75, lancement de C) ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1667,6 +1667,45 @@ nécessaire (§11, §12) ; un exploiteur spécialisé bat P1 à 0,69 → rôle d
 suivants (curriculum : dès P4 ; S9 étant disponible, avancement possible, décision utilisateur).
 GPU libre à 17:54, aucun run lancé.
 
+**Soir du 16 (20:27 → 21:15) — objectif rappelé, changements livrés, décisions en attente.**
+- **Objectif rappelé par l'utilisateur (20:50) : « avoir un agent crédible à affronter lors d'une
+  démonstration »** (démo joueur contre IA, PvE, armées de la boîte de base). Conséquence tirée par
+  deux analyses indépendantes (cette session et un autre agent) : un humain est hors de la famille
+  de P0 ; les matrices du 16 montrent que les gains de S9 et de P1 ne sortent pas de cette famille
+  (0,68 contre le témoin sans parenté, comme P0) → la métrique de la démo est la force générale, pas
+  le score contre P0. **Ordre recommandé (confirmation utilisateur attendue)** : ligue (§11) au rang 1
+  seul ; exploration non absorbable (§10) derrière, seulement si la ligue plafonne ; hygiène de mesure
+  inchangée ; **partie humaine contre le canonique = seul juge direct de « crédible »**, à jouer sans
+  attendre (cinq parties, deux factions, deux sièges, relevé des coups absurdes).
+- **Moteur changé à 20:27** (`b2e8e241f`, sol hex du champ de montée : jusqu'à +15 % de portée de
+  montée, [training.md#rupture-sol-hex-2026-09-16](../../Roadmap/training.md#rupture-sol-hex-2026-09-16)) :
+  P0 (moteur du 10), P1 (moteur du 16 à 09:24) et le moteur courant sont trois jeux différents ; les
+  sondes ne sont plus comparables point à point ; training.md demande un nouveau point holdout du
+  canonique au prochain `--test-only`. **Prérequis démo non écrit jusqu'ici : figer le moteur** avant
+  d'entraîner la lignée de démo — décision utilisateur attendue (le moteur du 16 soir est-il celui de
+  la démo ?).
+- **Configuration changée à 20:48** (`9dd6cc04d`, « conf ») : `agent_seat_p2_ratio` 0,70 → **0,75**
+  dans `x1_lineage` de l'agent x1 (retour à la valeur de x1_long ; cohérent avec l'écart de siège
+  0,156 du holdout de P1 et 0,777 / 0,630 contre P0) ; **deux tests rouges sur main** :
+  `tests/unit/ai/test_training_config_par_etape.py::test_the_lineage_profile_pins_the_values_of_the_regime`
+  (l. 162) et `tests/unit/ai/test_agent_seat_ratio.py::test_a_lineage_profile_pins_its_own_seat_ratio`
+  (l. 292), obtenu 0,75 attendu 0,70, exécutés le 16 à 21:05 ; la phrase du `_doc` du profil dit
+  encore « 0.70 depuis le 2026-09-11 ». Délibéré → aligner tests et `_doc` ; erreur → revert.
+  Décision utilisateur attendue. Même commit : agent `ArmageddonAgent_x1_p0ctrl` (P0 seul, graine
+  54321) commité, prêt pour C, non lancé.
+- **Prochaine étape optimale, convergente entre les deux analyses** : (1) décisions ci-dessus ;
+  (2) `--test-only` du canonique P1 sur le moteur courant (~30 min, référence datée) ;
+  (3) C cette nuit via `bash scripts/train.sh --agent ArmageddonAgent_x1_p0ctrl --training-config
+  x1_long --scenario bot --resolution 1 --etape P0 --total-episodes 50000`, instantanés copiés tous
+  les 10 000, règle : robuste ≥ 0,85 à 50 000 → pipeline intact, ≤ 0,80 → régression à chercher
+  avant tout autre run ; (4) demain, pendant C : membre de pool « archive » (ai/curriculum.py
+  `POOL_KINDS` l. 62, validation l. 725 ; ai/train.py l. 5288 / 5870 / 6058 / 7078 résolvent un
+  membre par nom d'étape), puis P2 sous le régime courant avec pool = P1 champion + P0 ancien + P0a,
+  témoin entnorm `model_ArmageddonAgent_x1_entnorm_20260913-040721.zip` et P0 neuf en anciens + S9
+  final en exploiteur (gate : 0,60 contre chacun ; P1 y est déjà : 0,64 / 0,68) ; (5) test
+  d'acceptation démo à écrire avant : ≥ 0,90 bots, ≥ 0,60 contre chaque champion indépendant aux
+  deux sièges, verdict humain sur cinq parties.
+
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
 **Où on en est.** S9 (exploiteur de P0 sous température T = 2 à la collecte, §5.14) est terminé :
@@ -2361,6 +2400,13 @@ famille de P0 ; le score contre les bots ne classe pas les agents entre eux, P0a
 | 5 | **P1 parti de zéro** contre le P0 actuel, 100 000 parties | régime alternatif sans le problème de reprise | vu une fois sur l'ancien jeu (0,74) ; 16 h par étape | aucun code ; 16 h | seulement si la reprise échoue deux fois |
 | 6 | **V-trace (remplacement de PPO)** | données périmées d'une collecte asynchrone (acteurs/apprenant découplés) — architecture que le pipeline n'a pas | **nul sur f, corrigé le 2026-09-16 au soir** : 8 160 transitions = 8 mini-lots × 4 passes ; une coupure à 15–16/32 (761/761 sur P1, 15–16/32 sur S25) = 1ʳᵉ passe complète + 7/8 de la 2ᵉ, **aucune donnée jetée**, seules les relectures 3–4 sautent (`ai/train.py:978` n_steps total, `ai/patched_ppo.py:653` break) ; relire le même bruit ne fait pas un lot plus grand (f = 0,005 porte sur le rollout entier, B_noise ≈ 147 000) ; l'ancien « ×2 effectif : 15/32 → 32/32 » était un contresens ; sans région de confiance, la même update bruitée passerait sans frein (cf. S11, S14c) ; ne se justifie qu'avec une collecte asynchrone où l'apprenant attend les acteurs (aujourd'hui update = 3–25 % du cycle de 51 s) | code significatif (remplacer SB3 PPO + buffer, conserver les diagnostics) ; 2–4 semaines | si ligue + exploration non-absorbable (rangs 1–1) plafonnent sous 0,85 après deux graines |
 | 7 | **Recherche à l'entraînement** (S15) | crédit noyé résolu par simulation | remède de principe ; semaines | gros code | dernier recours, par décision |
+
+**Amendement du 16 soir (objectif démo rappelé : « agent crédible à affronter en démonstration »,
+confirmation utilisateur attendue).** Un humain est hors famille ; les gains mesurés contre la famille
+de P0 ne sont pas la métrique de la démo. Ordre recommandé : **1. ligue** (§11, membre de pool par
+archive, P2 sur plusieurs familles) ; **2. hygiène de mesure** (C, juge indépendant) ; **3.
+exploration non absorbable** (§10), seulement si la ligue plafonne ; 4–6 inchangés. Juge direct de
+l'objectif : partie humaine contre le canonique. Prérequis : moteur figé (voir §5.15, soir du 16).
 
 **Règles transversales.** Règle de lecture écrite avant chaque run ; juge = sonde argmax et matrice
 hors famille (P0a, témoin entnorm en cases fixes), jamais la courbe échantillonnée ; deux graines
