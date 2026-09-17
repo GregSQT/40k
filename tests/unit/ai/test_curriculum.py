@@ -33,6 +33,7 @@ from ai.curriculum import (
     evaluate_stage_gate,
     exploiter_stage_names,
     load_curriculum,
+    require_archive_members_on_disk,
     required_training_config,
     load_parity_check,
     pool_monotonicity_diagnostic,
@@ -69,7 +70,8 @@ from ai.curriculum import (
 #: test_shipped_stage_matches_the_specification[P2] ROUGE.
 EXPECTED_STAGES = {
     "P0":  (0, 0.00, None, {}),
-    "P1":  (0, 0.70, "P0", {"P0": 0.70}),
+    # Nouveau cycle du 2026-09-17 : P0 neuf champion, trois archives de l'ancien cycle.
+    "P1":  (0, 0.70, "P0", {"P0": 0.40, "P1a": 0.15, "P0a": 0.075, "P0b": 0.075}),
     "P2":  (0, 0.80, "P1", {"P1": 0.50, "P0": 0.30}),
     "P3":  (0, 0.85, "P2", {"P2": 0.50, "P0": 0.175, "P1": 0.175}),
     "E1":  (0, 1.00, "P3", {"P3": 1.00}),
@@ -328,6 +330,63 @@ def test_an_init_from_a_later_stage_is_refused() -> None:
     broken["stages"]["P0"]["init"] = "from:P1"
     with pytest.raises(ValueError, match="ANTERIEURE"):
         validate_curriculum(broken)
+
+
+def _minimal_curriculum_with_archive() -> dict:
+    """P1 joue P0 (champion) et une archive 'X' qui n'est le produit d'aucune etape."""
+    cur = _minimal_curriculum()
+    cur["stages"]["P1"]["pool"] = [
+        {"kind": "champion", "members": ["P0"], "weight": 0.3},
+        {"kind": "archive", "members": ["X"], "weight": 0.1},
+    ]
+    return cur
+
+
+def test_an_archive_member_needs_no_earlier_stage() -> None:
+    """Un membre 'archive' n'est pas une etape : la validation ne le cherche pas dans l'ordre."""
+    cur = _minimal_curriculum_with_archive()
+    validate_curriculum(cur)
+    members = stage_pool_members(cur["stages"]["P1"])
+    assert [(m["label"], m["kind"], m["weight"]) for m in members] == [
+        ("P0", "champion", 0.3), ("X", "archive", 0.1),
+    ]
+
+
+def test_an_archive_named_like_a_stage_is_refused() -> None:
+    """La cloture de l'etape homonyme ecraserait model_<agent>_<label>.zip."""
+    cur = _minimal_curriculum_with_archive()
+    cur["order"].append("P2")
+    cur["stages"]["P2"] = dict(cur["stages"]["P1"], init="from:P1")
+    cur["stages"]["P2"]["pool"] = [
+        {"kind": "champion", "members": ["P1"], "weight": 0.3},
+        {"kind": "archive", "members": ["P0"], "weight": 0.1},
+    ]
+    with pytest.raises(ValueError, match="nom d'une etape"):
+        validate_curriculum(cur)
+
+
+def test_a_non_archive_member_outside_the_order_is_still_refused() -> None:
+    """Le relachement ne vaut que pour 'archive' : un 'ancients' inconnu reste refuse."""
+    cur = _minimal_curriculum_with_archive()
+    cur["stages"]["P1"]["pool"][1]["kind"] = "ancients"
+    with pytest.raises(ValueError, match="ANTERIEURE"):
+        validate_curriculum(cur)
+
+
+def test_archive_members_must_exist_on_disk_with_their_pkl(tmp_path) -> None:
+    """Zip ET pkl exiges ; le message nomme le fichier manquant."""
+    canonical = str(tmp_path / "model_A.zip")
+    stage = _minimal_curriculum_with_archive()["stages"]["P1"]
+    with pytest.raises(FileNotFoundError, match="model_A_X.zip"):
+        require_archive_members_on_disk(canonical, stage)
+    (tmp_path / "model_A_X.zip").write_bytes(b"zip")
+    with pytest.raises(FileNotFoundError, match="model_A_X_vec_normalize.pkl"):
+        require_archive_members_on_disk(canonical, stage)
+    (tmp_path / "model_A_X_vec_normalize.pkl").write_bytes(b"pkl")
+    assert require_archive_members_on_disk(canonical, stage) == [str(tmp_path / "model_A_X.zip")]
+    # Le champion n'est pas une archive : rien n'est exige de lui ici.
+    stage_no_archive = _minimal_curriculum()["stages"]["P1"]
+    assert require_archive_members_on_disk(canonical, stage_no_archive) == []
 
 
 def test_a_pool_without_champion_is_refused() -> None:

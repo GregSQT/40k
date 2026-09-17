@@ -2030,6 +2030,7 @@ from ai.curriculum import (
     get_stage_hp_overrides,
     is_exploiter_stage,
     load_curriculum,
+    require_archive_members_on_disk,
     load_exploiter_config,
     required_training_config,
     load_parity_check,
@@ -3536,7 +3537,7 @@ def build_training_opponents(
             raise FileNotFoundError(
                 f"opponent_mix.pool[{position}] ({member['label']}) : adversaire fige absent — "
                 f"{member_path}. Un membre du pool doit avoir ete produit par une etape "
-                "anterieure avant d'etre joue."
+                "anterieure, ou depose comme archive, avant d'etre joue."
             )
     if snapshot_device not in {"cpu", "auto"}:
         raise ValueError(
@@ -5747,6 +5748,11 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
             args.resume_from = source_model
             args.append = True
             print(f"🎓 Etape {args.etape} — init 'from:{source_stage}' : reprise de {source_model}")
+
+    # Archives du pool (modeles etrangers au curriculum, kind 'archive') : presentes sur disque,
+    # zip et pkl, AVANT tout effet de bord — rien ne les produit, rien d'autre ne les verifie.
+    for _archive_path in require_archive_members_on_disk(canonical_model_path, stage):
+        print(f"🎓 Etape {args.etape} — archive hors curriculum dans le pool : {_archive_path}")
 
     if is_exploiter_stage(stage):
         # Verification du protocole gele AVANT tout effet de bord : si la config diverge,
