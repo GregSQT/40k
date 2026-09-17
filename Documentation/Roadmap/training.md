@@ -165,6 +165,60 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-17, 23:40 — P1 (check) au plateau à 0,667 contre P0 ; clôture plantée (bug moteur) ; le cycle repartira de P0 après l'ajout d'une action ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Plateau à 55 000 (moyenne de 3 : 0,613 → 0,658 → 0,642 → 0,651 → 0,637 → 0,667 ; brutes ±5), planchers
+tenus à la même sonde (P0a 0,717, P0b 0,737, P1a 0,601), bots 94,1 %. Même niveau que B (0,666) pour
+la même exposition à P0 (~22 000 parties) ; entropie de collecte 0,87 → 0,69 (T absorbée, signature
+de S9) ; VP diff et scores contre les trois archives montaient encore. Gate bloc 1 : 0,670 / 0,767 /
+0,783 / 0,717 ; bloc 2 : `ValueError execute_squad_move fall_back (34,44)→(37,44) … collision
+intra-plan (38,47)` sur le moteur figé (code de 11:35, gate en processus), graine 114179327 → pas de
+`_P1.zip`, pas de ligne `curriculum.log`. Dix commits moteur mergés pendant le run (16:18 → 22:42) :
+sondes et gate sains (workers persistants), évals bots possiblement mixtes. Décision utilisateur :
+une action est ajoutée au moteur → `--new`, tout le stock d'archives devient inchargeable.
+
+**PROMPT DE REPRISE (agent suivant) :**
+```
+Contexte : Warhammer 40K RL, lignée de champions, objectif = agent crédible face à un humain en démo.
+Lis d'abord Documentation/Chantiers/backlog/plafonnement_p1.md (point de reprise en tête + §5.15 fin,
+§10, §12) et Documentation/Roadmap/training.md (entrées du 2026-09-17). État : P0 = P0 neuf (robuste
+0,903, bat toute l'ancienne famille) ; P1 (run de check, run_20260917-113528) a plafonné à 0,667 contre
+P0 à 55 000 parties avec T absorbée (entropie 0,87 → 0,69), exactement le niveau de l'ancienne B :
+le mécanisme « une étape reprise gagne ~15 pts puis s'arrête quand l'exploration s'éteint » est intact
+(3 runs : B, S9, P1). Sa clôture a planté au bloc 2/3 du gate sur un bug MOTEUR (moteur figé de 11:35) :
+ValueError execute_squad_move fall_back squad=1 (34,44)→(37,44), « collision intra-plan : deux
+figurines en (38,47) niveau 0 » — masque BFS dit atteignable, exécution refuse ; reproduction :
+evaluate_against_checkpoints(canonique ArmageddonAgent_x1 = poids vifs de P1, archives P0/P0a/P0b/P1a,
+holdout, base_seed 114179327). Le canonique = P1 vive (run_state 105 000), pool_stop.json = promote,
+pas de model_ArmageddonAgent_x1_P1.zip. Une ACTION va être ajoutée au moteur (décision utilisateur) :
+--new obligatoire, filter_compatible_archives écartera tout le stock (P0, P0a, P0b, P1a, entnorm, S9,
+instantanés _vsP0_050/_060) : plus aucun adversaire hors bots avant de nouveaux P0.
+
+À faire, dans cet ordre, un seul run à la fois, règle de lecture écrite AVANT chaque run :
+1. Corriger le bug fall_back (engine/w40k_core.py::_process_squad_action ← movement_handlers, pool BFS
+   du masque vs collision de formation à l'exécution) : root cause, test rouge/vert, relire 09 Movement
+   phase.pdf (fall back) avant. Bloquant : il tue n'importe quel gate au hasard.
+2. Ne pas relancer P2. Ne pas rejouer --close-stage de P1 avant 1 (il replanterait) ; après 1, le
+   rejouer une fois pour la ligne curriculum.log, puis matrice P1 vs entnorm et P0a et écart de siège
+   contre le miroir P0/P0 (scripts/seat_matrix_probe.py, profils x1_seat_p1/p2 de l'agent expl) : c'est
+   la ligne « P0 → P1 » du tableau de progrès hors famille pour la démo.
+3. Exploration non absorbable, option 2 (dossier §10) : température autorégulée — à chaque update,
+   ajuster logits_temperature (ai/patched_ppo.py, propriété existante, transport aux workers en place)
+   pour tenir train/entropy_loss (entropie de π_T) à une cible (1,0 nat), T borné [1, 4], journalisé ;
+   un run par graine sur l'agent exploiteur ArmageddonAgent_x1_expl (protocole S9 : 100 % P0 courant,
+   siège 0,5, 60 000 parties, sondes argmax) contre le 0,78 de S9 ; deux graines ; règle : ≥ 0,83 sur
+   la moyenne de 3 à 60 000 = le levier tient, 0,78–0,83 = nul, < 0,78 = nuit. Ça se teste sur le
+   moteur courant pendant que l'action est codée : le mécanisme ne dépend pas de l'action.
+4. Après l'action (moteur re-figé, plus AUCUN merge moteur dans main pendant un run — 10 commits
+   moteur ont été mergés pendant P1 le 17/09) : deux P0 à froid (graines différentes, 50 000, x1_long,
+   --etape P0 --total-episodes 50000, max_checkpoints 64 pour garder les instantanés) : l'un racine,
+   l'autre membre archive hors famille + juge ; puis P1 en run de check (run_to_plateau, patience 6
+   au lieu de 4 pour un check) sous l'option 2 si 3 a tenu, pool = P0 champion + P0bis archive + bots.
+5. Suivre à chaque étape : episodes_to_gate (curriculum.log), score contre les juges fixes (P0bis,
+   bots), instantanés _vs<champion>_050/060/070. Deux graines avant toute conclusion sous 10 pts.
+Ne pas faire : relancer P1 à l'identique ; remise à neuf des têtes (§10 option 3) avant que
+l'option 2 soit mesurée ; toucher config/**/*.json pendant un run.
+```
+
 **2026-09-17, 11:40 — plateau, instantanés à seuils, runs de check livrés ; P1 relancée en run de check ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Décision utilisateur : ne plus s'arrêter à 0,65 sans connaître le plafond. Livré (`f5ebdf678`) :
 sondes de pool tous les 5 000 (découplées de `bot_eval_freq`), instantané du modèle au premier

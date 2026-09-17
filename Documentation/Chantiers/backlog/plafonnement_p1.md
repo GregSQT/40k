@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-17, 09:46) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; membre « archive » livré ; PLATEAU / instantanés à seuils / runs de check livrés (`f5ebdf678`) ; **P1 relancée 11:35 en run de check** (sondes 5 000, arrêt au plateau, plafond attendu) ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-17, 09:46) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; membre « archive » livré ; PLATEAU / instantanés à seuils / runs de check livrés (`f5ebdf678`) ; **P1 (check) arrêtée au plateau à 55 000 : 0,667 contre P0 = niveau de B, T absorbée ; clôture plantée sur un bug fall_back du moteur figé ; 10 commits moteur mergés pendant le run ; une action va être ajoutée → tout le stock devient inchargeable, cycle à repartir de P0** ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1940,6 +1940,58 @@ refus sinon. Le plafond de P1 est le chiffre attendu de ce run — il se compare
 l'ancien P0, exploiteur) et fixera le seuil bots du test d'acceptation. Au gate : matrice hors
 famille (entnorm juge) et écart de siège contre P0 comparé au miroir. Coût attendu : 40 000 à
 100 000 parties (6 à 16 h).
+
+**P1 (check) — ARRÊTÉE AU PLATEAU à 55 000 (21:4x), PROMUE PAR LE VERDICT, CLÔTURE PLANTÉE (23:2x).**
+Sondes (argmax, moyenne de 3) contre P0 : 0,527 · 0,512 · 0,526 · 0,530 · 0,578 · **0,613** (30 000)
+· **0,658** (35 000) · 0,642 · 0,651 · 0,637 · **0,667** (55 000) ; brutes 0,53 / 0,50 / 0,55 / 0,54 /
+0,64 / 0,66 / 0,67 / 0,59 / 0,69 / 0,63 / 0,68. Instantanés : `_vsP0_050` à 5 000 (0,527),
+`_vsP0_060` à 25 000 (0,640). **Planchers tenus pour la première fois à 55 000** (`episodes_to_gate`
+= 55 000 ; P1a 0,601 était le dernier à passer) — à la MÊME sonde le verdict plateau a tiré
+(meilleur lissé 0,658 à 35 000, non dépassé de 2 pts par 0,642 / 0,651 / 0,637 / 0,667). Bots :
+0,937 / 0,893 / 0,913 / 0,947 / 0,940 (final 94,1 % sur 1 800). Lecture honnête : (1) la règle a
+tiré au premier instant où elle le pouvait, sur un gain de +1 pt en 20 000 parties — le
+faux-plateau-possible annoncé ; (2) mais la courbe argmax contre P0 est bien plate à ±1,5 pt depuis
+35 000, à **0,66–0,67 = le niveau de B** (0,666 à 30 000) : même exposition à P0 (≈ 22 000 parties
+contre P0 ici à 40 % du pool, ≈ 21 000 pour B à 70 %), même gain ; S9 (100 % P0, 60 000) : 0,78 ;
+(3) tout le reste montait encore au dernier cinquième : parties d'entraînement contre P0 0,46 →
+0,63, contre P1a → 0,60, P0a → 0,745, P0b → 0,73 ; VP diff +5,4 → +10,2 ; sièges 0,57 / 0,59 →
+0,69 / 0,65 ; (4) mécanisme, signature de S9 : entropie de collecte sous T **0,87 → 0,69** (S9 :
+1,07 → 0,72), coupure KL 23 → 16 / 32, KL 0,009, EV 0,86, part policy 0,53 → 0,63 — la politique
+bouge encore, plus dans la direction qui bat P0 ; la réserve d'exploration est consommée avant
+30 000. « N'apprenait plus » est trop fort ; « n'apprenait plus à battre P0 » est juste.
+
+**Clôture : gate bloc 1/3 = P0 0,670 · P0a 0,767 · P0b 0,783 · P1a 0,717** (tous planchers tenus),
+puis **crash au bloc 2/3** (graine 114179327) : `ValueError: execute_squad_move a échoué : squad=1
+type=fall_back dest=(37,44) depuis (34,44) — la destination vient du pool BFS du masque, elle DOIT
+être exécutable (incohérence masque/exécution). Contrainte violée : collision intra-plan : deux
+figurines en (38,47) niveau 0 (dont 1#r0)` (`engine/w40k_core.py::_process_squad_action`, via
+`env_wrappers._run_bot_until_not_bot_turn` : c'est l'ADVERSAIRE figé qui joue le fall back).
+Le gate s'exécute EN PROCESSUS (`bot_eval_n_workers_gate` 1) avec le code chargé à 11:35 = moteur
+figé : **bug du moteur figé, pas des commits du soir**. Conséquence : pas de ligne `curriculum.log`,
+pas de `model_ArmageddonAgent_x1_P1.zip` ; le canonique porte les poids vifs de P1 (publiés au
+verdict, `run_state` 105 000), `pool_stop.json` = promote. `--close-stage` rejouerait le gate —
+et le même bug, aléatoirement. Reproduction : `evaluate_against_checkpoints` du canonique contre
+les 4 archives, holdout, `base_seed` 114179327.
+
+**Contamination à consigner : 10 commits moteur mergés dans `main` PENDANT le run** (16:18 → 22:42 :
+mode de fall-back 09.07, fantômes de bloc, sept écarts de la checklist mouvement, hazard 09.07,
+fin de tir, budget du move_after_shooting — `engine/w40k_core.py`, `movement_handlers.py`,
+`shared_utils.py`, `shooting_handlers.py`, `charge_handlers.py`, `ai/env_wrappers.py`), malgré le gel
+écrit le matin dans ROADMAP_INDEX. Ce qui est sain : les sondes de pool (pool de workers persistant
+créé à 11:49, `create_checkpoint_eval_pool`) et le gate (en processus) ont joué le code de 11:35 ;
+les envs d'entraînement aussi. Ce qui ne l'est pas : les évaluations bots (`bot_eval_use_subprocess`,
+spawn par éval) après 16:18 ont pu jouer un moteur différent — les 0,89 → 0,94 et le 94,1 % final
+ne sont pas strictement comparables à P0 (92,3 %). **Décision utilisateur (23:30) : une ACTION va
+être ajoutée au moteur → `--new` obligatoire, et `filter_compatible_archives` écartera TOUT le stock
+(P0, P0a, P0b, P1, P1a, entnorm, S9, instantanés) : plus aucun adversaire ni juge chargeable hors
+bots.** Le gel du moteur est donc levé de fait ; le cycle repart de P0 après l'action.
+
+**Ce que je propose (23:40, avant passage de main)** : voir le prompt de reprise dans training.md
+(entrée 23:40). En deux lignes : corriger le bug fall_back (bloquant, il tue tout gate) ; tester
+l'exploration non absorbable option 2 (température autorégulée) en exploiteur de P0 sur le moteur
+courant, deux graines, pendant que l'action est codée — le mécanisme ne dépend pas de l'action ;
+après l'action, deux P0 à froid (racine + hors famille), puis P1 en check (patience 6) sous
+l'option 2 si elle a bougé le plafond de S9 (0,78). P2 n'a pas de sens avant.
 
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
