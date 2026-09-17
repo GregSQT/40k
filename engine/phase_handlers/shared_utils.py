@@ -107,26 +107,24 @@ FLED = "FLED"
 ADVANCE = "ADVANCE"
 NOT_REMOVED = "NOT_REMOVED"
 
-#: SET des escouades dont le fall-back en cours a retenu le mode Desperate Escape (09.07). Écrit
-#: par ``select_desperate_escape_mode`` — depuis le point de choix de l'agent (``apply_fall_back_
-#: mode_decision``), depuis la confirmation humaine du danger (``_handle_hazard_confirm``) ou, pour
-#: une escouade battle-shocked à qui 09.07 impose le mode, depuis ``desperate_escape_pre_move`` —
-#: et libéré escouade par escouade à la fin de son activation (``end_activation``,
-#: ``clear_desperate_escape_state``) ; la clé disparaît avec la dernière. Un SET et non un scalaire :
-#: 09.02 fait bouger une escouade à la fois, mais le REPORT d'activation PvP (`postpone`) laisse
-#: une escouade aux hazards déjà roulés dans le pool, et une autre peut retenir le mode avant
-#: qu'elle ne reprenne — un scalaire écrasait la première, qui rejouait ses hazards ou perdait
-#: son marquage de fuite. Voir ``squad_is_battle_shocked_in_enemy_er`` pour ce que le verrou décide.
-DESPERATE_ESCAPE_MODE_KEY = "_desperate_escape_mode_squads"
-
-#: Escouade à qui le point de choix du mode de fall-back (``fall_back_mode``) a DÉJÀ été posé pour
-#: l'activation en cours. Distinct du verrou ci-dessus pour la même raison que les deux sets de
-#: 21.03 : « Ordered Retreat » ne pose pas le verrou, et sans cette trace la question se reposerait
-#: à chaque construction de masque — l'escouade ne bougerait jamais. Un scalaire suffit ici, à la
-#: différence du verrou : seul le siège piloté par le modèle est interrogé, et il ne reporte
-#: jamais une activation. Purgé par ``end_activation`` et par ``clear_desperate_escape_state``.
-#: L'humain choisit par le bouton de l'UI, et ne laisse aucune trace de « non ».
-FALL_BACK_MODE_RESOLVED_KEY = "_fall_back_mode_resolved_squad"
+#: Dict ``{squad_id: mode}`` des fall-backs EN COURS dont le mode (09.07) est ARRÊTÉ —
+#: ``FALL_BACK_MODE_DESPERATE_ESCAPE`` ou ``FALL_BACK_MODE_ORDERED_RETREAT``. Une seule clé porte
+#: les deux faits que le moteur doit distinguer : « Desperate Escape retenu » (valeur) et « la
+#: question a été posée » (entrée présente) — sans la seconde, un « Ordered Retreat » répondu par
+#: le siège modèle serait indiscernable d'une question jamais posée, et le point de choix se
+#: reposerait à chaque construction de masque. Écrit par ``select_desperate_escape_mode`` (point de
+#: choix de l'agent, confirmation humaine du danger, mode IMPOSÉ à une escouade battle-shocked
+#: dans ``desperate_escape_pre_move``) et ``select_ordered_retreat_mode`` (réponse du siège
+#: modèle) ; libéré escouade par escouade à la fin de son activation (``release_fall_back_mode``,
+#: depuis ``end_activation`` et ``clear_desperate_escape_state``) ; la clé disparaît avec la
+#: dernière entrée. PAR ESCOUADE et non scalaire : 09.02 fait bouger une escouade à la fois, mais
+#: le REPORT d'activation PvP (`postpone`) laisse une escouade aux hazards déjà roulés dans le
+#: pool, et une autre peut retenir le mode avant qu'elle ne reprenne — un scalaire écrasait la
+#: première, qui rejouait ses hazards ou perdait son marquage de fuite. Voir
+#: ``squad_is_battle_shocked_in_enemy_er`` pour ce que le mode retenu décide.
+FALL_BACK_MODES_KEY = "_fall_back_modes"
+FALL_BACK_MODE_DESPERATE_ESCAPE = "desperate_escape"
+FALL_BACK_MODE_ORDERED_RETREAT = "ordered_retreat"
 
 
 def plan_entry_level(entry: Sequence[Any]) -> int:
@@ -4737,7 +4735,7 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
         (`force_battle_shock`, test de commandement 01.07). Sans lui, le transit memoise restait
         celui d'avant le test pendant que le pool par-figurine, lui, recalcule — soit exactement
         la divergence masque/execution que ce cache existe pour ne pas creer ;
-      - verrou de mode `DESPERATE_ESCAPE_MODE_KEY` : la meme exemption, retenue par CHOIX du
+      - mode Desperate Escape retenu (`FALL_BACK_MODES_KEY`) : la meme exemption, retenue par CHOIX du
         joueur actif sur une escouade saine. Elle bascule sans qu'une figurine bouge, entre le
         pool bati a l'activation et celui rebati apres le choix.
     Les murs et les toggles de traversee sont statiques : hors fingerprint.
@@ -4782,11 +4780,14 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
             for _u in game_state.get("units", [])  # get allowed (etat non initialise = pas d'unite)
             if _u.get("battle_shocked", False)  # get allowed
         )),
-        # Verrou de mode 09.07 : la MEME exemption de transit que le drapeau ci-dessus, mais
-        # retenue par CHOIX du joueur actif sur une escouade saine (encart SELECTING MODES). Elle
-        # aussi bascule sans qu'une figurine bouge — entre le pool bati a l'activation (Ordered
-        # Retreat) et celui rebati apres le choix (Desperate Escape).
-        tuple(sorted(game_state.get(DESPERATE_ESCAPE_MODE_KEY, ()))),  # get allowed (absent = aucun mode retenu)
+        # Mode Desperate Escape retenu (09.07) : la MEME exemption de transit que le drapeau
+        # ci-dessus, mais retenue par CHOIX du joueur actif sur une escouade saine (encart
+        # SELECTING MODES). Elle aussi bascule sans qu'une figurine bouge — entre le pool bati a
+        # l'activation (Ordered Retreat) et celui rebati apres le choix (Desperate Escape).
+        frozenset(
+            sid for sid, mode in game_state.get(FALL_BACK_MODES_KEY, {}).items()  # get allowed (absent = aucun mode retenu)
+            if mode == FALL_BACK_MODE_DESPERATE_ESCAPE
+        ),
     )
     holder = game_state.get("_move_spatial_cache")  # get allowed (absent au 1er appel)
     if holder is None or holder["fp"] != fp:
@@ -5092,11 +5093,7 @@ def build_move_traversal_blocked(
     from engine.phase_handlers.movement_handlers import _get_move_traversal_rules
 
     _thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
-    # Desperate Escape : cf. `build_move_transit_blocked` pour la garde de phase.
-    desperate_escape = (
-        str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
-        and squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id))
-    )
+    desperate_escape = desperate_escape_transit_exempt(game_state, str(squad_id))
     mv_traversal = squad_traverses_models_17_01(game_state, str(squad_id), model)
 
     enemy_all = build_enemy_occupied_positions_set(
@@ -5203,10 +5200,7 @@ def build_move_transit_blocked(
     # La bande d'EZ, elle, reste ici : elle ne dépend d'aucune figurine bloquante mais du cache
     # d'adjacence ennemie, et 17.01 ne la concerne pas — traverser une figurine n'autorise pas à
     # traverser une zone d'engagement.
-    desperate_escape = (
-        str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
-        and squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id))
-    )
+    desperate_escape = desperate_escape_transit_exempt(game_state, str(squad_id))
     if not (desperate_escape or thru_ez):
         transit |= require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
     _cache[_ck] = transit
@@ -6722,31 +6716,44 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
 def select_desperate_escape_mode(game_state: Dict[str, Any], squad_id: str) -> None:
     """Retient le mode Desperate Escape (09.07) pour le fall-back en cours de ``squad_id``.
 
-    ÉCRIVAIN UNIQUE du verrou ``DESPERATE_ESCAPE_MODE_KEY``, pour ses trois sélectionneurs :
-    le point de choix de l'agent (``apply_fall_back_mode_decision``), la confirmation humaine du
-    danger (``_handle_hazard_confirm``) et le mode IMPOSÉ à une escouade battle-shocked
-    (``desperate_escape_pre_move``). 09.07 « BEFORE MOVING: Select fall-back mode » — le mode est
-    arrêté ICI, avant le hazard et avant le pool. Tout ce que 09.07 étiquette « Desperate Escape »
-    (la traversée des figurines ennemies en WHILE MOVING, le jet de battle-shock d'AFTER MOVING)
-    découle du mode SÉLECTIONNÉ, jamais de l'état d'engagement ou du drapeau `battle_shocked`
-    relus plus tard : « Those that are labelled with a mode name only apply if you selected that
-    mode » (encart SELECTING MODES).
+    ÉCRIVAIN UNIQUE de la valeur ``FALL_BACK_MODE_DESPERATE_ESCAPE``, pour ses trois
+    sélectionneurs : le point de choix de l'agent (``apply_fall_back_mode_decision``), la
+    confirmation humaine du danger (``_handle_hazard_confirm``) et le mode IMPOSÉ à une escouade
+    battle-shocked (``desperate_escape_pre_move``). 09.07 « BEFORE MOVING: Select fall-back
+    mode » — le mode est arrêté ICI, avant le hazard et avant le pool. Tout ce que 09.07
+    étiquette « Desperate Escape » (la traversée des figurines ennemies en WHILE MOVING, le jet
+    de battle-shock d'AFTER MOVING) découle du mode SÉLECTIONNÉ, jamais de l'état d'engagement ou
+    du drapeau `battle_shocked` relus plus tard : « Those that are labelled with a mode name only
+    apply if you selected that mode » (encart SELECTING MODES).
 
-    Le verrou est LU par le fingerprint de ``_move_spatial_cache`` : le poser change la traversée
-    sans qu'une figurine bouge, donc tout ensemble mémoïsé avant lui est périmé.
+    Le mode retenu est LU par le fingerprint de ``_move_spatial_cache`` : le poser change la
+    traversée sans qu'une figurine bouge, donc tout ensemble mémoïsé avant lui est périmé.
     """
-    game_state.setdefault(DESPERATE_ESCAPE_MODE_KEY, set()).add(str(squad_id))
+    game_state.setdefault(FALL_BACK_MODES_KEY, {})[str(squad_id)] = FALL_BACK_MODE_DESPERATE_ESCAPE
 
 
-def release_desperate_escape_mode(game_state: Dict[str, Any], squad_id: str) -> None:
-    """Libère le verrou de ``squad_id`` seul (fin de son activation) ; la clé disparaît avec le
-    dernier verrou, pour que « aucun mode retenu » reste lisible par l'absence de la clé."""
-    locked = game_state.get(DESPERATE_ESCAPE_MODE_KEY)  # get allowed : absent = aucun verrou
-    if locked is None:
+def select_ordered_retreat_mode(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Retient Ordered Retreat (09.07) pour le fall-back en cours de ``squad_id`` — la réponse
+    « non » du siège modèle. Elle n'ouvre aucune traversée, mais elle DOIT laisser une trace :
+    sans elle la question se reposerait à chaque construction de masque."""
+    game_state.setdefault(FALL_BACK_MODES_KEY, {})[str(squad_id)] = FALL_BACK_MODE_ORDERED_RETREAT
+
+
+def release_fall_back_mode(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Oublie le mode de ``squad_id`` seul (fin de son activation) ; la clé disparaît avec la
+    dernière entrée, pour que « aucun mode retenu » reste lisible par l'absence de la clé."""
+    modes = game_state.get(FALL_BACK_MODES_KEY)  # get allowed : absent = aucun mode retenu
+    if modes is None:
         return
-    locked.discard(str(squad_id))
-    if not locked:
-        game_state.pop(DESPERATE_ESCAPE_MODE_KEY, None)
+    modes.pop(str(squad_id), None)
+    if not modes:
+        game_state.pop(FALL_BACK_MODES_KEY, None)
+
+
+def fall_back_mode_resolved(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Le mode de fall-back de ``squad_id`` est-il DÉJÀ arrêté pour l'activation en cours (09.07),
+    quel qu'il soit ? Lu par l'armement du point de choix : arrêté = ne pas reposer la question."""
+    return str(squad_id) in game_state.get(FALL_BACK_MODES_KEY, {})  # get allowed : absent = jamais posée
 
 
 def fall_back_mode_of(game_state: Dict[str, Any], squad_id: str) -> Optional[str]:
@@ -6754,19 +6761,22 @@ def fall_back_mode_of(game_state: Dict[str, Any], squad_id: str) -> Optional[str
     ou None si le mouvement en cours n'est pas un fall-back (09.07).
 
     Lecture publiée au siège humain (activation, reprise après hazard, toggle de vol) : c'est elle
-    qui pilote le bouton de mode enfoncé. Même source que le commit (``squad_move_is_fall_back``
-    + verrou), donc jamais un mode affiché que le commit n'appliquerait pas.
+    qui pilote le bouton de mode enfoncé. Même source que le commit (mode retenu, sinon
+    ``_squad_is_in_enemy_er`` comme ``squad_move_is_fall_back``), donc jamais un mode affiché que
+    le commit n'appliquerait pas. L'humain ne retient jamais Ordered Retreat explicitement (il
+    n'a de bouton que pour Desperate Escape) : engagée sans mode retenu = Ordered Retreat.
     """
     sid = str(squad_id)
-    if desperate_escape_mode_selected(game_state, sid):
-        return "desperate_escape"
-    if squad_move_is_fall_back(game_state, sid):
-        return "ordered_retreat"
+    mode = game_state.get(FALL_BACK_MODES_KEY, {}).get(sid)  # get allowed : absent = aucun mode retenu
+    if mode is not None:
+        return str(mode)
+    if _squad_is_in_enemy_er(game_state, sid):
+        return FALL_BACK_MODE_ORDERED_RETREAT
     return None
 
 
 def desperate_escape_pre_move(
-    squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+    squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
 ) -> Tuple[bool, bool, int]:
     """Desperate Escape (09.07) — phase AVANT le mouvement.
 
@@ -6775,27 +6785,27 @@ def desperate_escape_pre_move(
         de l'agent, ou confirmation humaine du danger) — « ordered retreat is not mandatory, so
         you could select desperate escape instead » (encart SELECTING MODES) ;
       - il est IMPOSÉ : escouade engagée ET battle-shocked (« Otherwise, you must select this
-        mode »). Le verrou est alors posé ici, puisque c'est ici que le mode est arrêté.
+        mode »). Le mode est alors retenu ici, puisque c'est ici qu'il est arrêté.
+    Les deux régimes sont ceux de ``squad_is_battle_shocked_in_enemy_er`` (mode retenu, sinon
+    prédiction du mode imposé), lu tel quel — l'engagement n'est pas passé par l'appelant, il
+    est relu ici AVANT le hazard, donc avant que les jets ne tuent les figurines engagées.
     Dans les deux cas un hazard roll (06.03) par figurine est résolu AVANT de bouger.
     ``auto_resolve`` pilote l'attribution 06.02 (IA/gym déterministe ; humain → prompt étape 3).
 
-    Sans le verrou, les consommateurs re-dérivaient le mode de `squad_is_battle_shocked_in_enemy_er`
-    APRÈS que le hazard a tué les figurines engagées — le prédicat basculait à False et l'exemption
-    disparaissait au milieu de son propre mouvement. Deux conséquences mesurées : le masque offrait
-    des destinations que `validate_move_plan` refusait ensuite (« incohérence masque/exécution »,
-    ValueError qui tue les workers du training), et le commit PvP reclassait le fall-back en
-    `normal`, donc sans `units_fled` — l'unité gardait tir et charge après sa retraite.
+    Sans le mode retenu, les consommateurs re-dérivaient le mode de
+    `squad_is_battle_shocked_in_enemy_er` APRÈS que le hazard a tué les figurines engagées — le
+    prédicat basculait à False et l'exemption disparaissait au milieu de son propre mouvement.
+    Deux conséquences mesurées : le masque offrait des destinations que `validate_move_plan`
+    refusait ensuite (« incohérence masque/exécution », ValueError qui tue les workers du
+    training), et le commit PvP reclassait le fall-back en `normal`, donc sans `units_fled` —
+    l'unité gardait tir et charge après sa retraite.
 
     Retourne ``(is_desperate, is_alive, hazard_wounds)`` :
     - ``is_desperate`` : True si l'unité fait un Desperate Escape (sélectionné ou imposé).
     - ``is_alive`` : False si le hazard a détruit l'unité (le move ne doit alors PAS avoir lieu).
     - ``hazard_wounds`` : total de mortal wounds infligés par le hazard (0 si non-desperate).
     """
-    unit = require_unit_by_id(game_state, str(squad_id))
-    is_desperate = desperate_escape_mode_selected(game_state, str(squad_id)) or (
-        bool(was_engaged) and bool(require_key(unit, "battle_shocked"))
-    )
-    if not is_desperate:
+    if not squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id)):
         return False, True, 0
     # L11 — mode enregistré pour le formateur step.log (consommé à l'émission action_log flee).
     game_state["_flee_mode"] = "desperate_escape"
@@ -6827,12 +6837,10 @@ def desperate_escape_post_move(squad_id: str, game_state: Dict[str, Any]) -> Non
 
 def clear_desperate_escape_state(game_state: Dict[str, Any], squad_id: str) -> None:
     """Purge les clés transitoires du fall-back en cours de ``squad_id`` (chemins de mort et
-    d'abandon) : jets, mode, son verrou et la trace de son point de choix."""
+    d'abandon) : jets, mode du formateur et mode retenu."""
     game_state.pop("_flee_mode", None)
     game_state.pop("_desperate_escape_rolls", None)
-    release_desperate_escape_mode(game_state, str(squad_id))
-    if str(game_state.get(FALL_BACK_MODE_RESOLVED_KEY)) == str(squad_id):  # get allowed
-        game_state.pop(FALL_BACK_MODE_RESOLVED_KEY, None)
+    release_fall_back_mode(game_state, str(squad_id))
 
 
 def roll_advance_for_squad(squad_id: str, game_state: Dict[str, Any]) -> int:
@@ -14509,11 +14517,14 @@ def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
 def desperate_escape_mode_selected(game_state: Dict[str, Any], squad_id: str) -> bool:
     """Le mode Desperate Escape (09.07) a-t-il déjà été retenu pour le fall-back en cours ?
 
-    Lecture du verrou posé par ``select_desperate_escape_mode``. Écrite ici une seule fois : ses
-    lecteurs (les deux prédicats ci-dessous, ``fall_back_mode_of``, ``desperate_escape_post_move``
-    et la purge de ``end_activation``) comparent sinon le même littéral chacun de leur côté.
+    Lecture du mode posé par ``select_desperate_escape_mode``. Écrite ici une seule fois : ses
+    lecteurs (les deux prédicats ci-dessous, ``desperate_escape_post_move``, les clés de cache)
+    comparent sinon le même littéral chacun de leur côté.
     """
-    return str(squad_id) in game_state.get(DESPERATE_ESCAPE_MODE_KEY, ())  # get allowed : absent = aucun verrou
+    return (
+        game_state.get(FALL_BACK_MODES_KEY, {}).get(str(squad_id))  # get allowed : absent = aucun mode retenu
+        == FALL_BACK_MODE_DESPERATE_ESCAPE
+    )
 
 
 def squad_move_is_fall_back(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -14553,16 +14564,16 @@ def squad_is_battle_shocked_in_enemy_er(game_state: Dict[str, Any], squad_id: st
 
     DEUX RÉGIMES, et c'est la règle qui les impose. 09.07 fait sélectionner le mode « BEFORE
     MOVING », et le hazard fait partie de la résolution de ce mode :
-      - mode DÉJÀ retenu (``DESPERATE_ESCAPE_MODE_KEY`` posé) → il fait foi, quoi qu'aient tué
+      - mode DÉJÀ retenu (``FALL_BACK_MODES_KEY``) → il fait foi, quoi qu'aient tué
         les jets. Sans lui, une escouade dont le hazard vient de tuer les seules figurines
         engagées perdait son exemption de traversée AU MILIEU de son propre mouvement ;
       - mode pas encore retenu (masque, éligibilité) → on PRÉDIT celui que 09.07 IMPOSE,
         c'est-à-dire les deux conditions ci-dessous. Une escouade saine, elle, PEUT retenir
         Desperate Escape (encart SELECTING MODES : « ordered retreat is not mandatory ») — mais
-        ce choix pose le verrou AVANT que le pool ne soit bâti (point de choix de l'agent,
+        ce choix retient le mode AVANT que le pool ne soit bâti (point de choix de l'agent,
         confirmation humaine du danger), donc il est lu par le premier régime, jamais prédit.
 
-    Le verrou ENTRE dans le fingerprint de ``_move_spatial_cache``. Il fut écrit ici le
+    Le mode retenu ENTRE dans le fingerprint de ``_move_spatial_cache``. Il fut écrit ici le
     contraire — « il ne diverge de la prédiction que lorsque des figurines sont MORTES » — et
     c'était vrai tant que seule une escouade battle-shocked pouvait le porter. Depuis que le
     mode est un choix, une escouade saine le pose sans qu'aucune figurine ne bouge, entre un
@@ -14574,6 +14585,21 @@ def squad_is_battle_shocked_in_enemy_er(game_state: Dict[str, Any], squad_id: st
     return (
         bool(require_key(unit, "battle_shocked"))
         and _squad_is_in_enemy_er(game_state, str(squad_id))
+    )
+
+
+def desperate_escape_transit_exempt(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Le TRANSIT de ``squad_id`` est-il exempté des figurines ennemies et de la bande d'EZ par
+    Desperate Escape (09.07 WHILE MOVING) ? C'est ``squad_is_battle_shocked_in_enemy_er`` GARDÉ
+    par la phase : 09.07 ne parle que du fall-back move, et le pile-in/consolidation (12.03)
+    passe par les mêmes bornes de trajet. Écrit une fois pour ses trois lecteurs — les figurines
+    bloquantes (``build_move_traversal_blocked``), la borne de trajet de la validation
+    (``build_move_transit_blocked``) et le pool d'ancre (``movement_build_valid_destinations_pool``)
+    — qui recopiaient chacun la garde ; le pool d'ancre l'avait oubliée pour la bande d'EZ.
+    """
+    return (
+        str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
+        and squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id))
     )
 
 

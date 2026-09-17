@@ -65,6 +65,7 @@ from engine.phase_handlers.shared_utils import (
     rebuild_choice_timing_index,
     recompute_unit_rules_in_effect,
     is_unit_alive,
+    desperate_escape_post_move,
     get_unit_position,
     require_unit_position,
     unit_has_rule_effect,
@@ -5572,8 +5573,7 @@ class W40KEngine(gym.Env):
         if unit is None:
             return False, {"error": f"hazard_confirm: unit {uid} not found"}
 
-        was_engaged = _squad_is_in_enemy_er(self.game_state, str(uid))
-        if not was_engaged:
+        if not _squad_is_in_enemy_er(self.game_state, str(uid)):
             return False, {
                 "error": f"hazard_confirm: unit {uid} is not engaged — no fall-back mode to select"
             }
@@ -5585,7 +5585,7 @@ class W40KEngine(gym.Env):
         select_desperate_escape_mode(self.game_state, str(uid))
 
         auto_resolve = bool(self.game_state.get("gym_training_mode", False))
-        desperate_escape_pre_move(str(uid), self.game_state, was_engaged, auto_resolve)
+        desperate_escape_pre_move(str(uid), self.game_state, auto_resolve)
 
         # Un choix d'attribution joueur est-il en attente ? → prompt (declaration d'ordre des
         # groupes puis/ou clic figurine), calque sur l'allocation des pertes au tir.
@@ -8646,14 +8646,12 @@ class W40KEngine(gym.Env):
             _is_desp = False
             if move_type == "fall_back":
                 from engine.phase_handlers.shared_utils import (
-                    desperate_escape_pre_move, _squad_is_in_enemy_er,
-                    clear_desperate_escape_state,
+                    desperate_escape_pre_move, clear_desperate_escape_state,
                 )
                 from engine.phase_handlers import movement_handlers as _mh_de
-                _was_engaged = _squad_is_in_enemy_er(self.game_state, str(squad_id))
                 _anchor_before_de = (_move_from_col, _move_from_row)
                 _is_desp, _is_alive, _ = desperate_escape_pre_move(
-                    str(squad_id), self.game_state, _was_engaged, auto_resolve=True
+                    str(squad_id), self.game_state, auto_resolve=True
                 )
                 if _is_desp and not _is_alive:
                     # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
@@ -8831,8 +8829,6 @@ class W40KEngine(gym.Env):
                 # n'est pas battle-shocked. APRES la ligne de mouvement (le jet la suit dans
                 # step.log), AVANT `end_activation`, qui purge le verrou de mode que ce jet lit.
                 # Miroir des deux commits PvP de `movement_handlers`.
-                from engine.phase_handlers.shared_utils import desperate_escape_post_move
-
                 desperate_escape_post_move(str(squad_id), self.game_state)
             # Emission AVANT end_activation(ACTION) : c'est l'ordre qu'impose le contrat
             # (« action already logged by handlers »).

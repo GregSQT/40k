@@ -103,7 +103,7 @@ def test_desperate_escape_pre_move_absent_unit_by_id():
     from engine.phase_handlers.shared_utils import desperate_escape_pre_move
     gs = _base_gs(unit_by_id={})
     with pytest.raises(ConfigurationError, match="u1"):
-        desperate_escape_pre_move("u1", gs, was_engaged=True, auto_resolve=True)
+        desperate_escape_pre_move("u1", gs, auto_resolve=True)
 
 
 # ---------------------------------------------------------------------------

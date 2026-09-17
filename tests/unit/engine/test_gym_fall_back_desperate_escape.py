@@ -24,7 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from engine.phase_handlers.shared_utils import (
-    DESPERATE_ESCAPE_MODE_KEY,
+    FALL_BACK_MODES_KEY,
     MOVE_CELL_MAP_CACHE_KEY,
 )
 from engine.w40k_core import W40KEngine
@@ -116,7 +116,7 @@ def test_gym_desperate_escape_died_clears_game_state_keys() -> None:
 
     # Simuler desperate_escape_pre_move qui pose les clés PUIS retourne is_alive=False.
     def _fake_pre_move(
-        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+        squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
     ) -> tuple:
         game_state["_flee_mode"] = "desperate_escape"
         game_state["_desperate_escape_rolls"] = [1, 2]
@@ -201,7 +201,7 @@ def test_gym_desperate_escape_bridge_death_keeps_the_unit_stationary() -> None:
     bridge_mid = "1#1"
 
     def _kill_bridge(
-        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+        squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
     ) -> tuple:
         """Simule la mort de B (pont) par le Desperate Escape."""
         game_state["models_cache"].pop(bridge_mid, None)
@@ -248,7 +248,7 @@ def test_gym_fall_back_anchor_shifted_skips_move() -> None:
     eng, gs = _engine_battle_shocked()
 
     def _fake_pre_move(
-        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+        squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
     ) -> tuple:
         # Simuler la mort de la figurine d'ancre : units_cache se décale.
         # units_cache est keyé par str → utiliser squad_id directement (déjà str).
@@ -418,8 +418,8 @@ def test_desperate_escape_keeps_enemy_traversal_after_hazard_losses() -> None:
     assert "1" in gs["units_fled"], "fall back exécuté mais units_fled absent (09.07)"
     # LE MODE MEURT AVEC L'ACTIVATION : sinon l'escouade garderait la traversée des figurines
     # ennemies pour tous ses mouvements suivants.
-    assert DESPERATE_ESCAPE_MODE_KEY not in gs, (
-        f"verrou de mode non purgé en fin d'activation : {gs.get(DESPERATE_ESCAPE_MODE_KEY)!r}"
+    assert FALL_BACK_MODES_KEY not in gs, (
+        f"mode non purgé en fin d'activation : {gs.get(FALL_BACK_MODES_KEY)!r}"
     )
 
 
@@ -442,7 +442,7 @@ def test_desperate_escape_model_pool_keeps_enemy_traversal_after_hazard_losses()
         "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
         side_effect=_hazard_kills_engaged_model,
     ):
-        is_desperate, is_alive, _ = desperate_escape_pre_move("1", gs, True, True)
+        is_desperate, is_alive, _ = desperate_escape_pre_move("1", gs, True)
     assert is_desperate and is_alive, "fixture caduque : Desperate Escape non déclenché"
 
     pool = movement_build_model_destinations_pool(gs, "1#0")
@@ -462,8 +462,9 @@ def test_desperate_escape_commits_as_fall_back_after_hazard_losses() -> None:
     charge intacts, contre 09.07 AFTER MOVING (« not eligible to shoot, declare a charge or start
     an action »).
 
-    Cycle rouge→vert : retirer le terme `DESPERATE_ESCAPE_MODE_KEY` de `was_engaged` dans
-    `movement_commit_move_plan_handler` fait tomber l'assertion `units_fled`.
+    Cycle rouge→vert : retirer la lecture du mode retenu (`desperate_escape_mode_selected`) de
+    `squad_move_is_fall_back`, que `movement_commit_move_plan_handler` lit, fait tomber
+    l'assertion `units_fled`.
     """
     from engine.phase_handlers.movement_handlers import (
         movement_commit_move_plan_handler,
@@ -477,7 +478,7 @@ def test_desperate_escape_commits_as_fall_back_after_hazard_losses() -> None:
         "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
         side_effect=_hazard_kills_engaged_model,
     ):
-        desperate_escape_pre_move("1", gs, True, True)
+        desperate_escape_pre_move("1", gs, True)
 
     # Repli d'UN hexe vers l'arrière : le type de move est ce qui est testé, pas le trajet.
     ok, result = movement_commit_move_plan_handler(
@@ -508,7 +509,7 @@ def test_desperate_escape_preview_badge_matches_commit_after_hazard_losses() -> 
         "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
         side_effect=_hazard_kills_engaged_model,
     ):
-        desperate_escape_pre_move("1", gs, True, True)
+        desperate_escape_pre_move("1", gs, True)
 
     preview = movement_preview_move_plan(
         gs, "1", [("1#0", _DE_ANCHOR[0] - 1, _DE_ANCHOR[1], 0)]
@@ -538,7 +539,7 @@ def test_desperate_escape_quick_move_marks_flee_after_hazard_losses() -> None:
         "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
         side_effect=_hazard_kills_engaged_model,
     ):
-        desperate_escape_pre_move("1", gs, True, True)
+        desperate_escape_pre_move("1", gs, True)
 
     gs["active_movement_unit"] = "1"
     movement_build_valid_destinations_pool(gs, "1")
@@ -583,7 +584,7 @@ def test_desperate_escape_mode_survives_activation_postpone() -> None:
         "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
         side_effect=_hazard_kills_engaged_model,
     ):
-        desperate_escape_pre_move("1", gs, True, True)
+        desperate_escape_pre_move("1", gs, True)
     gs["active_movement_unit"] = "1"
 
     ok, _ = _handle_movement_postpone(gs, unit)

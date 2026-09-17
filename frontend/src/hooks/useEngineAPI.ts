@@ -988,6 +988,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    *  enfoncé ; null = Ordered Retreat, Desperate Escape encore sélectionnable. Effacé avec
    *  l'engagement. */
   const [desperateEscapeUnitId, setDesperateEscapeUnitId] = useState<number | null>(null);
+  /** Oublie l'état d'activation move de l'UI (bouton Advance et son jet, engagement, mode de
+   *  fall-back retenu) : fin d'activation, annulation, changement de phase. Un seul endroit pour
+   *  qu'un état de plus ne soit jamais oublié à l'un des sites. */
+  const clearMoveModeUi = useCallback(() => {
+    setAdvancingUnitId(null);
+    setAdvanceRoll(null);
+    setActiveUnitEngaged(null);
+    setDesperateEscapeUnitId(null);
+  }, []);
   const moveDestPoolRef = useRef<Set<string>>(new Set());
   const footprintZoneRef = useRef<Set<string>>(new Set());
   /** Boucles masque monde (API) — hit-test quand ``move_preview_footprint_zone`` est absent du JSON. */
@@ -1680,11 +1689,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setChargePreviewTargetId(null);
     setAdvanceDestinations([]);
     setPostShootMoveDestinations([]);
-    setAdvancingUnitId(null);
-    setAdvanceRoll(null);
-    setActiveUnitEngaged(null);
-    setDesperateEscapeUnitId(null);
-  }, [clearChargePoolRefs]);
+    clearMoveModeUi();
+  }, [clearChargePoolRefs, clearMoveModeUi]);
 
   // Effet de phase ORIGINAL (inchangé) : reset au CHANGEMENT de phase uniquement.
   // biome-ignore lint/correctness/useExhaustiveDependencies: targetPreview?.blinkTimer intentionnellement absent — l'ajouter re-déclenche l'effet à l'entrée en advancePreview et efface le mode orange
@@ -1707,12 +1713,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setChargePreviewTargetId(null);
       setAdvanceDestinations([]);
       setPostShootMoveDestinations([]);
-      setAdvancingUnitId(null);
-      setAdvanceRoll(null);
-      setActiveUnitEngaged(null);
-      setDesperateEscapeUnitId(null);
+      clearMoveModeUi();
     }
-  }, [gameState?.phase, clearChargePoolRefs]);
+  }, [gameState?.phase, clearChargePoolRefs, clearMoveModeUi]);
 
   // Libération du verrou « sortie de move » après commit du render : dès que la phase affichée
   // n'est plus move, onEntryPointerDown est démonté → plus aucun clic figurine ne peut émettre un
@@ -4768,15 +4771,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSquadMovePlan(null);
       setMode("select");
       setSelectedUnitId(null);
-      setAdvancingUnitId(null);
-      setAdvanceRoll(null);
-      setActiveUnitEngaged(null);
-      setDesperateEscapeUnitId(null);
+      clearMoveModeUi();
     } catch (e) {
       console.error("[SQUAD-MOVE] commit FAILED", e);
       setError(`Squad move failed: ${formatApiConnectionError(e)}`);
     }
-  }, [squadMovePlan, executeAction, noteActionOutcome]);
+  }, [squadMovePlan, executeAction, noteActionOutcome, clearMoveModeUi]);
 
   /** Annule le plan provisoire (aucune ecriture backend). */
   const handleCancelSquadMove = useCallback(async () => {
@@ -4798,11 +4798,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSquadMovePlan(null);
     setMode("select");
     setSelectedUnitId(null);
-    setAdvancingUnitId(null);
-    setAdvanceRoll(null);
-    setActiveUnitEngaged(null);
-    setDesperateEscapeUnitId(null);
-  }, [executeAction, noteActionOutcome]);
+    clearMoveModeUi();
+  }, [executeAction, noteActionOutcome, clearMoveModeUi]);
 
   /** Bouton Advance (phase move) : bascule l'activation squad en mode Advance (jet D6 backend). */
   const handleSetAdvanceMode = useCallback(
@@ -4844,13 +4841,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setSquadMovePlan(null);
       setMode("select");
       setSelectedUnitId(null);
-      setAdvancingUnitId(null);
-      setAdvanceRoll(null);
-      setActiveUnitEngaged(null);
-      setDesperateEscapeUnitId(null);
+      clearMoveModeUi();
       noteActionOutcome(await executeAction({ action: "wait", unitId: String(uid) }), "Stationary");
     },
-    [executeAction, noteActionOutcome]
+    [executeAction, noteActionOutcome, clearMoveModeUi]
   );
 
   /** TEST/DEBUG : force un battle-shock roll (01.07) sur l'unité — pour tester le Desperate Escape. */

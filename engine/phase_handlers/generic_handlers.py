@@ -226,16 +226,13 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         # Le REPORT (`postpone`), lui, ne passe pas par `end_activation` et c'est VOULU : il
         # laisse l'escouade dans le pool, ses jets de hazard sont faits et ne se rejoueront pas,
         # donc le mode reste retenu jusqu'à la fin réelle de son activation.
-        from engine.phase_handlers.shared_utils import (
-            FALL_BACK_MODE_RESOLVED_KEY, release_desperate_escape_mode,
-        )
-        # Le verrou de CETTE escouade seulement : une autre, reportée après ses hazards, garde le
-        # sien jusqu'à la fin réelle de son activation.
-        release_desperate_escape_mode(game_state, str(unit_id))
-        # La trace du point de choix `fall_back_mode` a le même cycle de vie : la question vaut
-        # pour CETTE activation, et se repose à la suivante.
-        if str(game_state.get(FALL_BACK_MODE_RESOLVED_KEY)) == str(unit_id):  # get allowed
-            game_state.pop(FALL_BACK_MODE_RESOLVED_KEY, None)
+        from engine.phase_handlers.shared_utils import release_fall_back_mode
+
+        # Le mode de CETTE escouade seulement : une autre, reportée après ses hazards, garde le
+        # sien jusqu'à la fin réelle de son activation. « Ordered Retreat » répondu par le siège
+        # modèle s'oublie de même : la question vaut pour CETTE activation, et se repose à la
+        # suivante.
+        release_fall_back_mode(game_state, str(unit_id))
     elif arg4 == "SHOOTING":
         if "shoot_activation_pool" in game_state:
             # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches

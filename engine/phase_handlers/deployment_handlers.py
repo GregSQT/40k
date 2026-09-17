@@ -2152,30 +2152,14 @@ def reserves_declaration_decline_slot(
     référence se mettrait à réserver dans l'un des deux régimes seulement, ce qui déplacerait la
     baseline de win-rate sans que rien ne le signale.
 
-    Le candidat est retrouvé par son drapeau `declines`, jamais par son index : c'est lui qui
-    porte « ne rien faire » (`DECISION_OPTION_BIN_FIELDS`), et un index en dur deviendrait faux le
-    jour où l'ordre des candidats changerait.
+    Le candidat est retrouvé par son drapeau `declines`, jamais par son index
+    (`engine.agent_decision.pending_decision_decline_slot`, mécanisme partagé avec l'Ordered
+    Retreat des bots) : c'est lui qui porte « ne rien faire » (`DECISION_OPTION_BIN_FIELDS`), et
+    un index en dur deviendrait faux le jour où l'ordre des candidats changerait.
     """
-    from engine.agent_decision import read_pending_agent_decision
-    from engine.macro_intents import CHOICE_BASE
+    from engine.agent_decision import pending_decision_decline_slot
 
-    decision = read_pending_agent_decision(game_state)
-    if decision is None or str(require_key(decision, "type")) != "reserves_declaration":
-        return None
-    options = require_key(decision, "options")
-    declining = [i for i, option in enumerate(options) if require_key(option, "declines")]
-    if len(declining) != 1:
-        raise RuntimeError(
-            f"reserves_declaration_decline_slot: {len(declining)} candidats `declines` — il en "
-            "faut exactement un pour que le refus soit sans ambiguite."
-        )
-    slot = int(CHOICE_BASE + declining[0])
-    if not bool(action_mask[slot]):
-        raise RuntimeError(
-            f"reserves_declaration_decline_slot: CHOICE_{declining[0]} ferme alors qu'une "
-            "declaration 20.01 est en attente — masque incoherent."
-        )
-    return slot
+    return pending_decision_decline_slot(game_state, action_mask, "reserves_declaration")
 
 
 def close_reserves_declaration_step_if_done(game_state: Dict[str, Any]) -> bool:

@@ -38,17 +38,19 @@ from engine.observation_entities import (
     AGENT_DECISION_TYPE_SLOTS,
 )
 from engine.phase_handlers.movement_handlers import (
-    FALL_BACK_MODE_ORDERED_RETREAT_INDEX,
     apply_fall_back_mode_decision,
     arm_fall_back_mode_decision,
     fall_back_mode_decision_is_due,
     movement_unit_execution_loop,
 )
 from engine.phase_handlers.shared_utils import (
-    FALL_BACK_MODE_RESOLVED_KEY,
+    FALL_BACK_MODES_KEY,
     _move_spatial_cache,
+    build_enemy_adjacent_hexes,
+    build_units_cache,
     desperate_escape_mode_selected,
     fall_back_mode_of,
+    fall_back_mode_resolved,
 )
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import (
@@ -67,19 +69,65 @@ def _no_wounds(squad_id: str, game_state: Dict[str, Any], auto_resolve: bool) ->
     return 0
 
 
-def _engine_encircled(*, gym: bool = True) -> W40KEngine:
-    """Escouade 1 (J1, saine) en (20,20), un ennemi J2 sur chacun de ses six voisins."""
-    units = [_unit_cfg(1, 1, *_CENTER)]
-    for i, (c, r) in enumerate(get_hex_neighbors(*_CENTER)):
-        units.append(_unit_cfg(10 + i, 2, c, r))
+def _engine_encircled(*, gym: bool = True, centers=(_CENTER,)) -> W40KEngine:
+    """Une escouade J1 saine par centre (ids 1, 2, …), six ennemis J2 sur ses six voisins (ids
+    10+, 30+, …). Le pool d'activation contient les escouades J1 dans l'ordre des centres."""
+    units: List[Dict[str, Any]] = []
+    for k, center in enumerate(centers):
+        units.append(_unit_cfg(1 + k, 1, *center))
+        for i, (c, r) in enumerate(get_hex_neighbors(*center)):
+            units.append(_unit_cfg(10 + 20 * k + i, 2, c, r))
     eng = _make_engine(_base_config(units))
     gs = eng.game_state
     gs["phase"] = "move"
     gs["current_player"] = 1
-    gs["move_activation_pool"] = ["1"]
+    gs["move_activation_pool"] = [str(1 + k) for k in range(len(centers))]
     gs["gym_training_mode"] = gym
     gs["pve_mode"] = False
     return eng
+
+
+def _rebuild_caches(gs: Dict[str, Any]) -> None:
+    build_units_cache(gs)
+    build_enemy_adjacent_hexes(gs, 1)
+    build_enemy_adjacent_hexes(gs, 2)
+
+
+def _disengage(gs: Dict[str, Any]) -> None:
+    """Recule les six ennemis hors de l'ER de l'escouade 1 : elle n'est plus engagée."""
+    for i in range(6):
+        u = _unit(gs, str(10 + i))
+        u["col"], u["row"] = 40 + i, 40
+    _rebuild_caches(gs)
+
+
+def _open_exit(gs: Dict[str, Any]) -> None:
+    """Une issue : l'ennemi 10 recule, un couloir s'ouvre — un Ordered Retreat devient possible."""
+    exit_enemy = _unit(gs, "10")
+    exit_enemy["col"], exit_enemy["row"] = 30, 30
+    _rebuild_caches(gs)
+
+
+def _pvp_select_desperate_escape(eng: W40KEngine, sid: str = "1") -> Dict[str, Any]:
+    """Active `sid` puis SÉLECTIONNE Desperate Escape par `hazard_confirm` (hazard sans blessure).
+    Rend le payload de reprise (pool de Desperate Escape)."""
+    gs = eng.game_state
+    gs["active_movement_unit"] = sid
+    movement_unit_execution_loop(gs, sid)
+    with patch(_HAZARD, side_effect=_no_wounds):
+        ok, payload = eng._process_semantic_action({"action": "hazard_confirm", "unitId": sid})
+    assert ok, payload
+    return payload
+
+
+def _plan_to(sid: str, dest) -> List[List[Any]]:
+    return [[f"{sid}#0", dest[0], dest[1], 0]]
+
+
+def _gym_answer(eng: W40KEngine, desperate_escape: bool) -> None:
+    """Fait poser la question par le masque, puis y répond pour l'escouade 1."""
+    eng.action_decoder.get_squad_action_mask_and_eligible_units(eng.game_state)
+    apply_fall_back_mode_decision(eng.game_state, "1", desperate_escape=desperate_escape)
 
 
 def _unit(gs: Dict[str, Any], uid: str) -> Dict[str, Any]:
@@ -100,7 +148,6 @@ def _logs_of_type(gs: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
 
 
 def test_the_type_consumes_a_reserved_slot_and_leaves_obs_size_untouched():
-    assert "fall_back_mode" in AGENT_DECISION_TYPE_IDS
     assert AGENT_DECISION_TYPE_IDS[-1] == "fall_back_mode", "ajouté en FIN, jamais inséré"
     assert len(AGENT_DECISION_TYPE_IDS) <= AGENT_DECISION_TYPE_SLOTS
 
@@ -133,13 +180,7 @@ def test_pvp_unengaged_squad_with_no_destination_is_still_skipped():
     eng = _engine_encircled(gym=False)
     gs = eng.game_state
     # Ennemis reculés hors ER : l'escouade n'est plus engagée, et les murs l'enferment.
-    for i in range(6):
-        u = _unit(gs, str(10 + i))
-        u["col"], u["row"] = 40 + i, 40
-    from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
-    build_units_cache(gs)
-    build_enemy_adjacent_hexes(gs, 1)
-    build_enemy_adjacent_hexes(gs, 2)
+    _disengage(gs)
     gs["wall_hexes"] = set(get_hex_neighbors(*_CENTER))
     gs["active_movement_unit"] = "1"
 
@@ -192,15 +233,13 @@ def test_pvp_hazard_confirm_refuses_a_second_confirmation():
     refusé sans rejouer le hazard."""
     eng = _engine_encircled(gym=False)
     gs = eng.game_state
-    gs["active_movement_unit"] = "1"
-    movement_unit_execution_loop(gs, "1")
+    _pvp_select_desperate_escape(eng)
     with patch(_HAZARD, side_effect=_no_wounds) as hazard:
-        assert eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})[0]
         ok, payload = eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})
 
     assert ok is False
     assert payload["error"] == "hazard_already_resolved"
-    assert hazard.call_count == 1
+    assert hazard.call_count == 0
 
 
 def test_pvp_reactivation_after_hazard_does_not_repose_the_popup():
@@ -211,8 +250,7 @@ def test_pvp_reactivation_after_hazard_does_not_repose_the_popup():
     _unit(gs, "1")["battle_shocked"] = True
     gs["active_movement_unit"] = "1"
     assert movement_unit_execution_loop(gs, "1")[1]["action"] == "requires_hazard"
-    with patch(_HAZARD, side_effect=_no_wounds):
-        assert eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})[0]
+    _pvp_select_desperate_escape(eng)
     from engine.phase_handlers.movement_handlers import _handle_movement_postpone
     gs["active_movement_unit"] = "1"
     assert _handle_movement_postpone(gs, _unit(gs, "1"))[0]
@@ -233,37 +271,19 @@ def test_pvp_lock_of_a_postponed_squad_survives_another_squad_selecting_desperat
     from engine.phase_handlers.movement_handlers import _handle_movement_postpone
 
     # A (1) encerclée en (20,20) et B (2) encerclée en (40,40), toutes deux J1 et saines.
-    units = [_unit_cfg(1, 1, *_CENTER), _unit_cfg(2, 1, 40, 40)]
-    for i, (c, r) in enumerate(get_hex_neighbors(*_CENTER)):
-        units.append(_unit_cfg(10 + i, 2, c, r))
-    for i, (c, r) in enumerate(get_hex_neighbors(40, 40)):
-        units.append(_unit_cfg(30 + i, 2, c, r))
-    eng = _make_engine(_base_config(units))
+    eng = _engine_encircled(gym=False, centers=(_CENTER, (40, 40)))
     gs = eng.game_state
-    gs["phase"] = "move"
-    gs["current_player"] = 1
-    gs["gym_training_mode"] = False
-    gs["pve_mode"] = False
-    gs["move_activation_pool"] = ["1", "2"]
 
     # A retient Desperate Escape, puis reporte.
-    gs["active_movement_unit"] = "1"
-    movement_unit_execution_loop(gs, "1")
-    with patch(_HAZARD, side_effect=_no_wounds) as hazard:
-        assert eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})[0]
+    _pvp_select_desperate_escape(eng, "1")
     gs["active_movement_unit"] = "1"
     assert _handle_movement_postpone(gs, _unit(gs, "1"))[0]
     assert desperate_escape_mode_selected(gs, "1")
 
     # B retient Desperate Escape et bouge : son activation se clôt, la sienne seule.
-    gs["active_movement_unit"] = "2"
-    movement_unit_execution_loop(gs, "2")
-    with patch(_HAZARD, side_effect=_no_wounds):
-        ok, payload = eng._process_semantic_action({"action": "hazard_confirm", "unitId": "2"})
-    assert ok, payload
-    dest = payload["valid_destinations"][0]
+    dest = _pvp_select_desperate_escape(eng, "2")["valid_destinations"][0]
     ok, result = eng._process_semantic_action({
-        "action": "commit_move_plan", "unitId": "2", "plan": [["2#0", dest[0], dest[1], 0]],
+        "action": "commit_move_plan", "unitId": "2", "plan": _plan_to("2", dest),
     })
     assert ok, result
     assert not desperate_escape_mode_selected(gs, "2"), "verrou de B non libéré"
@@ -278,19 +298,13 @@ def test_pvp_lock_of_a_postponed_squad_survives_another_squad_selecting_desperat
     with patch(_HAZARD, side_effect=_no_wounds) as hazard_again:
         ok, refusal = eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})
     assert ok is False and refusal["error"] == "hazard_already_resolved"
-    assert hazard.call_count == 1 and hazard_again.call_count == 0
+    assert hazard_again.call_count == 0
 
 
 def test_pvp_hazard_confirm_refuses_an_unengaged_squad():
     eng = _engine_encircled(gym=False)
     gs = eng.game_state
-    for i in range(6):
-        u = _unit(gs, str(10 + i))
-        u["col"], u["row"] = 40 + i, 40
-    from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
-    build_units_cache(gs)
-    build_enemy_adjacent_hexes(gs, 1)
-    build_enemy_adjacent_hexes(gs, 2)
+    _disengage(gs)
 
     with patch(_HAZARD, side_effect=_no_wounds) as hazard:
         ok, payload = eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})
@@ -303,17 +317,9 @@ def test_pvp_hazard_confirm_refuses_an_unengaged_squad():
 
 def _pvp_desperate_escape_then_commit(eng: W40KEngine) -> Dict[str, Any]:
     """Sélectionne Desperate Escape puis commet un fall-back par le plan par-figurine PvP."""
-    gs = eng.game_state
-    gs["active_movement_unit"] = "1"
-    movement_unit_execution_loop(gs, "1")
-    with patch(_HAZARD, side_effect=_no_wounds):
-        ok, payload = eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})
-    assert ok, payload
-    dest = payload["valid_destinations"][0]
+    dest = _pvp_select_desperate_escape(eng)["valid_destinations"][0]
     ok, result = eng._process_semantic_action({
-        "action": "commit_move_plan",
-        "unitId": "1",
-        "plan": [["1#0", dest[0], dest[1], 0]],
+        "action": "commit_move_plan", "unitId": "1", "plan": _plan_to("1", dest),
     })
     assert ok, f"commit refusé : {result}"
     return result
@@ -343,13 +349,7 @@ def test_pvp_ordered_retreat_commit_rolls_nothing():
     """Témoin : sans sélection, un fall-back reste un Ordered Retreat — ni hazard ni battle-shock."""
     eng = _engine_encircled(gym=False)
     gs = eng.game_state
-    # Une issue : l'ennemi de droite recule de deux cases, le couloir s'ouvre.
-    exit_enemy = _unit(gs, "10")
-    exit_enemy["col"], exit_enemy["row"] = 30, 30
-    from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
-    build_units_cache(gs)
-    build_enemy_adjacent_hexes(gs, 1)
-    build_enemy_adjacent_hexes(gs, 2)
+    _open_exit(gs)
     gs["active_movement_unit"] = "1"
     ok, payload = movement_unit_execution_loop(gs, "1")
     assert ok and payload["fall_back_mode"] == "ordered_retreat"
@@ -358,9 +358,7 @@ def test_pvp_ordered_retreat_commit_rolls_nothing():
 
     with patch(_HAZARD, side_effect=_no_wounds) as hazard:
         ok, result = eng._process_semantic_action({
-            "action": "commit_move_plan",
-            "unitId": "1",
-            "plan": [["1#0", dest[0], dest[1], 0]],
+            "action": "commit_move_plan", "unitId": "1", "plan": _plan_to("1", dest),
         })
 
     assert ok, result
@@ -384,12 +382,7 @@ def test_pvp_quick_move_after_desperate_escape_rolls_battle_shock():
     """Jumeau du commit par-figurine : le commit rapide à l'ancre (action `move`)."""
     eng = _engine_encircled(gym=False)
     gs = eng.game_state
-    gs["active_movement_unit"] = "1"
-    movement_unit_execution_loop(gs, "1")
-    with patch(_HAZARD, side_effect=_no_wounds):
-        ok, payload = eng._process_semantic_action({"action": "hazard_confirm", "unitId": "1"})
-    assert ok, payload
-    dest = payload["valid_destinations"][0]
+    dest = _pvp_select_desperate_escape(eng)["valid_destinations"][0]
 
     ok, result = eng._process_semantic_action({
         "action": "move", "unitId": "1", "destCol": dest[0], "destRow": dest[1],
@@ -417,8 +410,8 @@ def test_gym_mask_arms_the_choice_before_building_the_pool_and_opens_only_it():
     decision = read_pending_agent_decision(gs)
     assert decision is not None and decision["type"] == "fall_back_mode"
     assert decision["unit_id"] == "1"
-    assert decision["options"][0]["declines"] is False
-    assert decision["options"][FALL_BACK_MODE_ORDERED_RETREAT_INDEX]["declines"] is True
+    assert [o["declines"] for o in decision["options"]] == [False, True]
+    assert decision["options"][1]["label"] == "Ordered Retreat", "le refus EST Ordered Retreat"
 
 
 def test_gym_rebuilding_the_mask_does_not_stack_a_second_decision():
@@ -436,15 +429,7 @@ def test_gym_no_question_when_the_mode_is_imposed_or_the_squad_is_unengaged(shoc
     if shocked:
         _unit(gs, "1")["battle_shocked"] = True
     else:
-        for i in range(6):
-            u = _unit(gs, str(10 + i))
-            u["col"], u["row"] = 40 + i, 40
-        from engine.phase_handlers.shared_utils import (
-            build_enemy_adjacent_hexes, build_units_cache,
-        )
-        build_units_cache(gs)
-        build_enemy_adjacent_hexes(gs, 1)
-        build_enemy_adjacent_hexes(gs, 2)
+        _disengage(gs)
 
     assert fall_back_mode_decision_is_due(gs, "1") is False
     assert arm_fall_back_mode_decision(gs, "1") is None
@@ -474,7 +459,7 @@ def test_gym_desperate_escape_answer_opens_cells_through_the_encirclement():
     apply_fall_back_mode_decision(gs, "1", desperate_escape=True)
 
     assert desperate_escape_mode_selected(gs, "1")
-    assert gs[FALL_BACK_MODE_RESOLVED_KEY] == "1"
+    assert fall_back_mode_resolved(gs, "1")
     assert read_pending_agent_decision(gs) is None
     assert _move_spatial_cache(gs)["fp"] != fp_before, "le verrou doit entrer dans le fingerprint"
     mask, eligible = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
@@ -494,11 +479,9 @@ def test_gym_cell_map_cached_before_the_answer_is_not_reused_after_desperate_esc
 
     eng = _engine_encircled()
     gs = eng.game_state
-    gs["_unit_move_version"] = gs.get("_unit_move_version", 0)
     assert build_squad_move_cell_map(gs, "1", None) == {}, "témoin : Ordered Retreat vide"
 
-    eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
-    apply_fall_back_mode_decision(gs, "1", desperate_escape=True)
+    _gym_answer(eng, desperate_escape=True)
 
     assert build_squad_move_cell_map(gs, "1", None), (
         "carte d'Ordered Retreat resservie : le verrou de mode n'entre pas dans la clé du cache"
@@ -516,8 +499,7 @@ def test_anchor_pool_lifts_the_engagement_band_in_desperate_escape_like_the_vali
     gs["config"]["move"]["can_move_through_enemy_engagement_zone"] = False
     assert movement_build_valid_destinations_pool(gs, "1", read_only=True) == []
 
-    eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
-    apply_fall_back_mode_decision(gs, "1", desperate_escape=True)
+    _gym_answer(eng, desperate_escape=True)
 
     pool = movement_build_valid_destinations_pool(gs, "1", read_only=True)
     assert pool, "la bande d'EZ bloque encore le transit du pool d'ancre en Desperate Escape"
@@ -529,12 +511,12 @@ def test_gym_ordered_retreat_answer_leaves_a_trace_and_no_cell():
     et le masque sert le pool d'Ordered Retreat — vide ici, donc WAIT seul."""
     eng = _engine_encircled()
     gs = eng.game_state
-    eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
 
-    apply_fall_back_mode_decision(gs, "1", desperate_escape=False)
+    _gym_answer(eng, desperate_escape=False)
 
     assert not desperate_escape_mode_selected(gs, "1")
-    assert gs[FALL_BACK_MODE_RESOLVED_KEY] == "1"
+    assert fall_back_mode_resolved(gs, "1")
+    assert fall_back_mode_of(gs, "1") == "ordered_retreat"
     assert fall_back_mode_decision_is_due(gs, "1") is False
     mask, eligible = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
     assert [str(u["id"]) for u in eligible] == ["1"]
@@ -566,8 +548,7 @@ def test_gym_commit_after_desperate_escape_rolls_hazard_then_battle_shock():
     la ligne 01.07 après la ligne de mouvement et en phase MOVE ; `fleeMode` = desperate_escape."""
     eng = _engine_encircled()
     gs = eng.game_state
-    eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
-    apply_fall_back_mode_decision(gs, "1", desperate_escape=True)
+    _gym_answer(eng, desperate_escape=True)
     mask, _ = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
     cell = next(a for a in _open_actions(mask) if a in MOVE_CELLS)
     semantic = eng.action_decoder.convert_squad_action(cell, gs)
@@ -584,9 +565,7 @@ def test_gym_commit_after_desperate_escape_rolls_hazard_then_battle_shock():
     assert len(shocks) == 1 and shocks[0]["phase"] == "move"
     logs = gs["action_logs"]
     assert logs.index(moves[0]) < logs.index(shocks[0])
-    assert not desperate_escape_mode_selected(gs, "1") and FALL_BACK_MODE_RESOLVED_KEY not in gs, (
-        "verrou et trace non purgés par end_activation"
-    )
+    assert FALL_BACK_MODES_KEY not in gs, "mode non purgé par end_activation"
 
 
 def test_gym_commit_without_selection_stays_ordered_retreat():
@@ -594,14 +573,8 @@ def test_gym_commit_without_selection_stays_ordered_retreat():
     keeps_ordered_retreat) — aucun hazard, aucun battle-shock."""
     eng = _engine_encircled()
     gs = eng.game_state
-    exit_enemy = _unit(gs, "10")
-    exit_enemy["col"], exit_enemy["row"] = 30, 30
-    from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
-    build_units_cache(gs)
-    build_enemy_adjacent_hexes(gs, 1)
-    build_enemy_adjacent_hexes(gs, 2)
-    eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
-    apply_fall_back_mode_decision(gs, "1", desperate_escape=False)
+    _open_exit(gs)
+    _gym_answer(eng, desperate_escape=False)
     mask, _ = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
     cell = next(a for a in _open_actions(mask) if a in MOVE_CELLS)
 
@@ -624,15 +597,20 @@ def test_gym_bot_seat_always_keeps_ordered_retreat():
 
     action = bot_action_for_pending_choice(gs, mask, "test")
 
-    assert action == CHOICE_BASE + FALL_BACK_MODE_ORDERED_RETREAT_INDEX
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None
+    ordered_retreat = next(i for i, o in enumerate(decision["options"]) if o["declines"])
+    assert action == CHOICE_BASE + ordered_retreat
 
 
 def test_fall_back_mode_of_reads_the_lock_then_the_engagement():
     eng = _engine_encircled()
     gs = eng.game_state
     assert fall_back_mode_of(gs, "1") == "ordered_retreat"
-    apply_ok = arm_fall_back_mode_decision(gs, "1") is not None
-    assert apply_ok
+    assert arm_fall_back_mode_decision(gs, "1") is not None
     apply_fall_back_mode_decision(gs, "1", desperate_escape=True)
     assert fall_back_mode_of(gs, "1") == "desperate_escape"
-    assert fall_back_mode_of(gs, "10") is None or fall_back_mode_of(gs, "10") == "ordered_retreat"
+    # L'ennemi 10 est engagé avec l'escouade 1, sans mode retenu : Ordered Retreat par défaut.
+    assert fall_back_mode_of(gs, "10") == "ordered_retreat"
+    _disengage(gs)
+    assert fall_back_mode_of(gs, "10") is None
