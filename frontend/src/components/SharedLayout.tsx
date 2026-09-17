@@ -361,6 +361,7 @@ const Navigation: React.FC<NavigationProps> = ({
   replayActive = false,
 }) => {
   const measureRulerButtonRef = useRef<HTMLButtonElement>(null);
+  const rectSelectButtonRef = useRef<HTMLButtonElement>(null);
 
   /** Retire le focus du bouton règle quand le mode mesure se termine (évite le cadre :focus-visible). */
   useEffect(() => {
@@ -368,6 +369,14 @@ const Navigation: React.FC<NavigationProps> = ({
       measureRulerButtonRef.current?.blur();
     }
   }, [measureModeActive]);
+
+  /** Même chose pour le bouton sélection rectangle : sans blur, il reste surligné (:focus) après
+   *  la désactivation. */
+  useEffect(() => {
+    if (!rectSelectActive) {
+      rectSelectButtonRef.current?.blur();
+    }
+  }, [rectSelectActive]);
 
   const location = useLocation();
 
@@ -506,6 +515,7 @@ const Navigation: React.FC<NavigationProps> = ({
               }
             >
               <button
+                ref={rectSelectButtonRef}
                 type="button"
                 onClick={onToggleRectSelect}
                 className="settings-button"

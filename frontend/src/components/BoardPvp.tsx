@@ -8489,6 +8489,10 @@ export default function Board({
         overlay.drawCircle(m.cx, m.cy, m.radius);
         overlay.endFill();
       }
+      // Rendu à la demande (ticker arrêté, `autoStart: false`) : dessiner dans le Graphics depuis
+      // un handler DOM ne repeint rien tant qu'aucun cycle React n'appelle `app.render()` — le
+      // glisser ne passe par aucun state. Même geste que l'overlay d'allocation manuelle.
+      app.render();
     };
     /** L'outil ne prend que le clic GAUCHE, et seulement dans les phases où un bloc a un sens
      *  (move / charge) : ailleurs, ou au clic droit (reset per-fig, désassignation tir), le
@@ -8526,6 +8530,7 @@ export default function Board({
       const ids = selected;
       start = null;
       overlay.clear();
+      app.render();
       if (ids.length === 0) return;
       const { col, row } = pixelToHex(
         cur.x,
