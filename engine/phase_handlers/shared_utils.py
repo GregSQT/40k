@@ -6786,6 +6786,32 @@ def fall_back_mode_of(game_state: Dict[str, Any], squad_id: str) -> Optional[str
     return None
 
 
+def fall_back_hazard_pending(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Le hazard IMPOSÉ du Desperate Escape (09.07) reste-t-il à rouler pour ``squad_id`` ?
+
+    Escouade battle-shocked ET engagée (« Otherwise, you must select this mode ») dont le mode
+    n'est PAS encore retenu : ``hazard_confirm`` ne l'a pas résolue. 09.07 BEFORE MOVING — les
+    jets précèdent tout déplacement. SOURCE UNIQUE des trois sites qui doivent répondre la même
+    chose sur une même escouade : l'activation, qui suspend le move et demande le popup
+    (``_handle_unit_activation``) ; le preview du plan par-figurine, qui ne le déclare pas
+    validable (``movement_preview_move_plan``) ; le commit, qui le refuse
+    (``movement_commit_move_plan_handler``, ``hazard_required``). Mesuré avant l'écriture du
+    prédicat : l'activation seule le portait, et un ``commit_move_plan`` posté sans
+    ``hazard_confirm`` était accepté — plan légal, puisque le pool par-figurine PRÉDIT la
+    traversée Desperate Escape (``squad_is_battle_shocked_in_enemy_er``) — commit en ``flee``
+    sans un seul jet. La prédiction du pool est voulue (masque ⊆ exécutable) : c'est le
+    commit qui doit tenir la séquence, pas le pool.
+
+    Mode retenu = ``ordered_retreat`` n'existe pas pour une escouade battle-shocked (le mode lui
+    est imposé), donc « pas encore retenu » se lit par ``fall_back_mode_of`` == ordered_retreat.
+    """
+    unit = require_unit_by_id(game_state, str(squad_id))
+    return (
+        bool(require_key(unit, "battle_shocked"))
+        and fall_back_mode_of(game_state, str(squad_id)) == FALL_BACK_MODE_ORDERED_RETREAT
+    )
+
+
 def desperate_escape_pre_move(
     squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
 ) -> Tuple[bool, bool, int]:

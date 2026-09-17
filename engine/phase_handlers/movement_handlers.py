@@ -45,7 +45,7 @@ from .shared_utils import (
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er, squad_is_battle_shocked_in_enemy_er,
     squad_move_is_fall_back, squad_advance_or_fall_back_allowed,
     FALL_BACK_MODE_ORDERED_RETREAT, desperate_escape_mode_selected, desperate_escape_post_move,
-    desperate_escape_transit_exempt, fall_back_mode_of, fall_back_mode_resolved,
+    desperate_escape_transit_exempt, fall_back_hazard_pending, fall_back_mode_of, fall_back_mode_resolved,
     select_desperate_escape_mode, select_ordered_retreat_mode,
     roll_advance_for_squad, unit_is_in_strategic_reserves,
     MovePlan, parse_model_plan_with_orientation, plan_entry_level, plan_entry_model_orientation,
@@ -1794,9 +1794,11 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     # `fall_back_mode_of` est la MÊME lecture que le commit et que le payload ci-dessous :
     # `ordered_retreat` = engagée sans mode retenu, `desperate_escape` = retenu, None = move normal.
     fall_back_mode = fall_back_mode_of(game_state, str(unit_id))
-    shocked_de = bool(require_key(unit, "battle_shocked"))
+    # Hazard imposé encore à rouler : MÊME prédicat que le preview et le commit du plan
+    # par-figurine (`fall_back_hazard_pending`) — c'est lui qui suspend le move ci-dessous.
+    hazard_pending = fall_back_hazard_pending(game_state, str(unit_id))
     desperate_escape_selectable = (
-        fall_back_mode == FALL_BACK_MODE_ORDERED_RETREAT and not shocked_de
+        fall_back_mode == FALL_BACK_MODE_ORDERED_RETREAT and not hazard_pending
     )
 
     # Check if valid destinations exist
@@ -1833,7 +1835,7 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     # `ordered_retreat` et non « engagée » : après un report d'activation (`postpone`) qui suit
     # le hazard, les jets sont FAITS (le mode retenu en témoigne) ; reposer le popup les ferait
     # rejouer.
-    if fall_back_mode == FALL_BACK_MODE_ORDERED_RETREAT and shocked_de:
+    if hazard_pending:
         # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
         # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool
         # vert, aucun ghost. movement_clear_preview met aussi active_movement_unit=None, et on
@@ -5162,7 +5164,14 @@ def movement_preview_move_plan(
         )
 
     coherency_ok = not any(cohesion_red)
-    all_valid = len(per_model) > 0 and all(per_model.values())
+    # Desperate Escape IMPOSÉ (09.07 BEFORE MOVING) : hazard pas encore roulé → rien n'est
+    # validable, quelle que soit la légalité des poses. Les poses, elles, restent jugées
+    # figurine par figurine : le pool les a offertes en prédisant la traversée du mode imposé,
+    # et le commit refuse le plan par la même lecture (`hazard_required`).
+    all_valid = (
+        len(per_model) > 0 and all(per_model.values())
+        and not fall_back_hazard_pending(game_state, str(squad_id))
+    )
     # would_flee : le mouvement en cours est-il un Fall Back ? Si oui, badge fui sur le ghost de
     # preview. Independant du plan, et MEME source que le commit (`squad_move_is_fall_back`) :
     # sur un Desperate Escape dont le hazard a tue les figurines engagees, relire l'engagement
@@ -5210,6 +5219,13 @@ def movement_commit_move_plan_handler(
             "expected": sorted(alive),
             "got": sorted(plan_ids),
         }
+
+    # Desperate Escape IMPOSÉ (09.07 « Otherwise, you must select this mode ») : les jets de
+    # hazard précèdent le mouvement (BEFORE MOVING). Tant que `hazard_confirm` ne les a pas
+    # résolus, le plan n'est pas commitable — le preview le dit déjà (`can_validate` False),
+    # l'erreur est nommée ici pour que le siège sache CE qui manque, pas une pose.
+    if fall_back_hazard_pending(game_state, str(squad_id)):
+        return False, {"error": "hazard_required", "unitId": squad_id}
 
     # Validation = MEME regle que le voile rouge du preview (placement par-fig +
     # cohesion par composantes connexes). Coherent avec ce que l'UI affiche.
