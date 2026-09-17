@@ -161,6 +161,10 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     # 0.75 depuis le 2026-09-16 (0.70 du 2026-09-11 au 2026-09-16, 0.6 du 2026-09-07 au 2026-09-11),
     # réglage posé par l'utilisateur.
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.75)
+    # 50 par bot depuis le 2026-09-17 : la lignee publie les poids vifs, l'instantane robuste n'y
+    # selectionne rien, la garde anti-regression se contente de 300 parties. Le reste du bloc est
+    # herite (x1_long : 100, profil de mesure a froid).
+    assert profil_lignee["callback_params"]["bot_eval_intermediate"] == 50
 
 
 def test_the_lineage_profile_carries_scalars_never_ramps(profil_lignee) -> None:
@@ -184,7 +188,12 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
     Avant `extends`, deux profils voisins dupliquaient quinze clés — 15,1 Ko — que seul un test
     empêchait de diverger. Un septième profil écrit à plat aurait ajouté une septième copie.
     """
-    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes"}
+    # `callback_params` depuis le 2026-09-17 : la lignee ne redeclare que `bot_eval_intermediate`
+    # (50 par bot au lieu de 100, cf. `test_the_lineage_profile_pins_the_values_of_the_regime`) ;
+    # le reste du bloc est herite cle par cle par `extends`.
+    surcharge = {
+        "model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes", "callback_params",
+    }
     partagees = [
         cle for cle in profil_froid
         if cle not in surcharge and not cle.endswith(("_normal", "_detail"))
@@ -196,6 +205,12 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
         if profil_lignee.get(cle) != profil_froid[cle]
     }
     assert not divergentes, f"clés non héritées : {sorted(divergentes)}"
+    # `callback_params` : une seule cle redeclaree (bot_eval_intermediate 50 contre 100), tout le
+    # reste du bloc herite cle par cle.
+    cb_lignee, cb_froid = profil_lignee["callback_params"], profil_froid["callback_params"]
+    assert cb_lignee["bot_eval_intermediate"] == 50 and cb_froid["bot_eval_intermediate"] == 100
+    assert {k: v for k, v in cb_lignee.items() if k != "bot_eval_intermediate" and not k.endswith("_normal")} == \
+        {k: v for k, v in cb_froid.items() if k != "bot_eval_intermediate" and not k.endswith("_normal")}
 
     # Et dans `model_params`, tout ce que la lignée ne redéclare pas vient aussi du parent.
     for cle in ("n_epochs", "gamma", "gae_lambda", "batch_size", "clip_range", "target_kl", "max_grad_norm"):

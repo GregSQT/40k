@@ -391,6 +391,10 @@
         "total_episodes": 300000,
         "total_episodes_normal": "300000 : minimum pour couvrir le budget_cap de tous les exploiteurs de la lignee (E1/E2 = 200000, E3 = 300000 dans curriculum.json). Les etapes learner surchargent cette valeur via training_config_overrides.total_episodes ; training_config_overrides etant interdit sur les exploiteurs (ai/curriculum.py::_validate_stage_hp_overrides), cette valeur est la seule qu'ils puissent recevoir. Augmenter si un futur budget_cap depasse 300000.",
         "agent_seat_p2_ratio": 0.75,
+        "callback_params": {
+            "bot_eval_intermediate": 50,
+            "bot_eval_intermediate_normal": "50 par bot (300 parties) depuis le 2026-09-17, contre 100 herites de x1_long. La lignee publie les POIDS VIFS a la promotion (final_save_publishes_live_weights) : la selection de l'instantane robuste — la raison du 100 par bot du 2026-09-04 (sigma 5 pts par bot) — n'y sert plus. Il reste la garde anti-regression contre les bots (>= ~0,85, pire bot >= 0,25), que 50 par bot satisfait (sigma 7 par bot, 2,9 sur le combine). Gain : ~3 min par evaluation, soit une eval de 300 parties tous les 10 000 a cote de deux sondes de pool de 300 (probe_every_episodes 5000). L'evaluation FINALE reste a bot_eval_final (300 par bot = 1 800) : c'est le chiffre publie. x1_long garde 100 : profil de mesure a froid, ou l'instantane robuste EST le canonique. Verrou : tests/unit/ai/test_schedule_decay_fraction.py (LINEAGE_BOT_EVAL_INTERMEDIATE)."
+        },
         "model_params": {
             "learning_rate": 0.0005,
             "ent_coef": 0.01,

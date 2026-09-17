@@ -124,6 +124,8 @@ def test_pool_decision_gates_count_episodes_from_the_stage_start():
     callback = _pool_callback(
         episode_origin=P2_EPISODE_OFFSET,
         early_stop_cfg={**POOL_EARLY_STOP_CFG, "promote_min_episodes": 50_000,
+                        "plateau": {**POOL_EARLY_STOP_CFG["plateau"], "min_episodes": 50_000,
+                                    "check_budget_cap": 200_000},
                         "destroy_min_episodes": 20_000},
     )
     tracker = _tracker(P2_EPISODE_OFFSET + 10_000)
@@ -155,6 +157,8 @@ def test_pool_resume_from_crash_does_not_chain_the_missed_probes():
     callback = _pool_callback(
         episode_origin=P2_EPISODE_OFFSET,
         early_stop_cfg={**POOL_EARLY_STOP_CFG, "promote_min_episodes": 50_000,
+                        "plateau": {**POOL_EARLY_STOP_CFG["plateau"], "min_episodes": 50_000,
+                                    "check_budget_cap": 200_000},
                         "destroy_min_episodes": 20_000},
     )
     tracker = _tracker(P2_EPISODE_OFFSET + stage_episode_at_crash)
