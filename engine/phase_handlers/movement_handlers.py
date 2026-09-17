@@ -4742,7 +4742,7 @@ def movement_build_model_destinations_pool(
     # Les cases au SOL (eff 0) sont conservées telles quelles SI le mover part du sol. Si le mover part
     # d'un ÉTAGE (start_level_eff >= 1), le champ planaire sol est FAUX (descente gratuite) : le sol est
     # alors re-dérivé du champ multi-niveaux (descente facturée, §13.06) — indépendant de la vue.
-    # FLY et métrique hex : hors périmètre (fly+étages différé, floors euclidiens) → inchangé.
+    # FLY : hors périmètre (fly+étages différé) → inchangé. Métrique hex : branche `elif` ci-dessous.
     _floor_start = start_level_eff >= 1
     if _mm_use_euclidean and not has_fly and ((view_level >= 1 and floor_hexes_view) or _floor_start):
         from engine.game_state import unit_can_occupy_upper_floor
@@ -4790,6 +4790,40 @@ def movement_build_model_destinations_pool(
         _floor_dests = [_d for _d in _floor_dests if _d not in ez_anchor_forbidden]
         reachable = _ground_dests + _floor_dests
         _floor_set = set(_floor_dests)
+        eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
+    elif not has_fly and view_level >= 1 and floor_hexes_view and view_level > start_level_eff:
+        # MÉTRIQUE HEX (x1) — MONTÉE vers l'étage vu. Le BFS planaire ci-dessus taguait « étage »
+        # toute case dont l'empreinte tient sur le plancher, sans mot-clé ni coût vertical, et
+        # le commit la refusait (masque ⊄ exécutable : 23 cases offertes à un Intercessor avec
+        # M − 3" = 3, 24 cases offertes à un Dreadnought). Les cases d'étage viennent désormais
+        # de `ascent_field_for_model`, la SOURCE que la validation interroge (`model_reach_
+        # predicate`) : mot-clé 13.06 par `unit_can_occupy_upper_floor`, sol en BFS hex, montée
+        # facturée. Les cases au SOL gardent le BFS planaire (même chemin que la validation au
+        # niveau 0). Rester sur son étage (`view_level == start_level_eff`) n'est pas une montée
+        # et reste au BFS planaire, comme la validation à ce niveau.
+        from engine.game_state import unit_can_occupy_upper_floor
+        from .shared_utils import ascent_field_for_model
+        _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
+        _floor_dests = []
+        if _can_climb:
+            _fig_occ_view = fig_occ_by_level.get(view_level, set())
+            for _d, _cost in ascent_field_for_model(
+                game_state, squad_id, player, model, view_level, budget
+            ).items():
+                if _cost > budget or _d in _wall_anchors or _d in ez_anchor_forbidden:
+                    continue
+                # Occupation de CE niveau, sœurs du plan provisoire comprises — le champ de
+                # montée ne connaît que les positions committées.
+                if any(c in _fig_occ_view for c in _mover_cells(_d[0], _d[1])):
+                    continue
+                _floor_dests.append(_d)
+        _floor_set = set(_floor_dests)
+        # Une case d'étage l'est UNE fois : le tag planaire (`_eff_level`, empreinte par offsets)
+        # peut laisser au sol une case de bord que `validate_floor_placement` — le critère du
+        # commit (`resolve_model_effective_level`) — pose à l'étage ; elle serait alors offerte
+        # deux fois, au sol et à l'étage.
+        _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0 and _d not in _floor_set]
+        reachable = _ground_dests + _floor_dests
         eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
 
     # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière AU MÊME NIVEAU EFFECTIF
@@ -5107,8 +5141,10 @@ def movement_commit_move_plan_handler(
     toutes les figurines vivantes de l'escouade (sinon la cohesion est fausse). Move
     normal ou fall_back selon engagement de l'escouade au moment du commit.
 
-    Note brique 1 : aucun reactive move n'est declenche ici (move par-figurine) —
-    a ajouter dans une tranche ulterieure si necessaire.
+    Ouvre la fenêtre réactive (`maybe_resolve_reactive_move`) comme le move rapide à l'ancre :
+    `reactive_move` (config/unit_rules.json) se déclenche « when an enemy unit ends a Normal,
+    Advance or Fall Back move within 9" » — le chemin de commit n'entre pas dans la règle. Ce
+    handler ne l'ouvrait pas, et c'est lui que le front emprunte pour toute escouade.
     """
     if "plan" not in action:
         raise KeyError(f"commit_move_plan action missing required 'plan' field: {action}")
@@ -5253,6 +5289,20 @@ def movement_commit_move_plan_handler(
     _invalidate_all_destination_pools_after_movement(game_state)
     movement_clear_preview(game_state)
 
+    # Fenêtre réactive : APRÈS la ligne de mouvement (la réaction la suit dans le journal) et
+    # AVANT `end_activation`, comme le move rapide à l'ancre. Déclencheur = l'ancre, mesurée par
+    # `maybe_resolve_reactive_move` contre la position de chaque porteur.
+    reactive_result = maybe_resolve_reactive_move(
+        game_state=game_state,
+        moved_unit_id=str(unit["id"]),
+        from_col=orig_anchor_col,
+        from_row=orig_anchor_row,
+        to_col=dest_anchor_col,
+        to_row=dest_anchor_row,
+        move_kind={"advance": "advance", "fall_back": "flee"}.get(move_type, "move"),
+        move_cause="normal",
+    )
+
     # Source unique du marquage de fuite (partagée avec le move rigide à l'ancre) :
     # marque units_fled + libellé "flee" si l'escouade était engagée avant le commit.
     flee_action = finalize_flee_marking(game_state, str(squad_id), was_engaged)
@@ -5267,7 +5317,11 @@ def movement_commit_move_plan_handler(
             "action": flee_action,
             "unitId": unit["id"],
             "activation_complete": True,
-            "waiting_for_player": False,
+            "reactive_moves_applied": reactive_result["reactive_moves_applied"],
+            "reactive_moves_declined": reactive_result["reactive_moves_declined"],
+            # Le mouvement de CETTE escouade est fini, mais la fenêtre réactive qu'il vient
+            # d'ouvrir peut attendre la décision de l'ADVERSAIRE (jumeau du move à l'ancre).
+            "waiting_for_player": bool(reactive_result["waiting_for_player"]),
             "reset_mode": "select",
             "clear_selected_unit": True,
         }

@@ -127,3 +127,45 @@ def test_board_ref_pointing_nowhere_is_an_explicit_error(tmp_path: Path) -> None
         assert "44x60x999" in response.get_json()["error"]
     finally:
         scenario_path.unlink(missing_ok=True)
+
+
+SCENARIO_CHECKLIST = "config/board/44x60x5/scenario/scenario_pvp_checklist.json"
+
+
+@pytest.mark.parametrize("inches_to_subhex", [1, 5])
+def test_terrain_ref_in_a_subfolder_is_served_like_the_engine_loads_it(inches_to_subhex: int) -> None:
+    """`terrain_ref: divers/terrain-checklist.json` — huit scénarios du dépôt référencent un
+    sous-dossier de `terrain/`, que le moteur résout (`GameStateManager._read_terrain_file`).
+    La route exigeait un nom de fichier seul et répondait 400 : le front ne pouvait pas dessiner
+    le plateau d'une partie que le moteur joue."""
+    with open(PROJECT_ROOT / SCENARIO_CHECKLIST, encoding="utf-8") as fh:
+        assert json.load(fh)["terrain_ref"].startswith("divers/"), "prémisse : sous-dossier"
+
+    response = api_server.app.test_client().get(
+        f"/api/config/board?scenario_file={SCENARIO_CHECKLIST}&inches_to_subhex={inches_to_subhex}"
+    )
+
+    assert response.status_code == 200, response.get_json()
+    config = response.get_json()["config"]
+    assert config["inches_to_subhex"] == inches_to_subhex
+    assert config["wall_hexes"], "aucun mur : le terrain n'a pas été lu (vert vacant)"
+    assert config["terrain_zones"], "aucune aire de terrain lue"
+    # Même conversion que le moteur : à x1 les murs tiennent dans le premier 1/5 du plateau x5.
+    assert max(row for _col, row in config["wall_hexes"]) < 60 * inches_to_subhex
+
+
+@pytest.mark.parametrize(
+    "terrain_ref",
+    ["../walls/walls-33.json", "/etc/passwd.json", "divers/../../walls/walls-33.json"],
+)
+def test_terrain_ref_cannot_leave_the_terrain_folder(terrain_ref: str) -> None:
+    """Le sous-dossier est admis, la traversée non : le fichier résolu doit rester sous `terrain/`."""
+    scenario_dir = PROJECT_ROOT / "config" / "board" / "44x60x5" / "scenario"
+    scenario_path = scenario_dir / "_tmp_terrain_ref_traversal_test.json"
+    scenario_path.write_text(json.dumps({"terrain_ref": terrain_ref}), encoding="utf-8")
+    try:
+        response = _request(scenario_path, "x5_44x60")
+        assert response.status_code == 400, response.get_json()
+        assert "terrain_ref" in response.get_json()["error"]
+    finally:
+        scenario_path.unlink(missing_ok=True)

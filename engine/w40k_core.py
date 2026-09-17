@@ -60,6 +60,7 @@ from engine.phase_handlers.shared_utils import (
     mortal_wounds_ability_log_entry,
     model_datasheet_name,
     drive_reactive_move_window,
+    maybe_resolve_reactive_move,
     build_units_cache,
     destroy_model,
     rebuild_choice_timing_index,
@@ -6556,13 +6557,7 @@ class W40KEngine(gym.Env):
                 )
             shoot_result = _shoot_alloc["shoot_result"]
             squad_shooting_type_clear(self.game_state, squad_id)
-            end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
-            if self.game_state.get("active_shooting_unit") == squad_id:
-                del self.game_state["active_shooting_unit"]
-            return True, {
-                **end_result, "action": "squad_shoot", "unitId": squad_id,
-                "shoot_result": shoot_result,
-            }
+            return True, self._end_squad_shoot_activation(squad_id, shoot_result)
 
         if name == "squad_shoot_allocate_model":
             chosen = action.get("modelId")
@@ -6588,16 +6583,50 @@ class W40KEngine(gym.Env):
         self, squad_id: str, alloc_result: Dict[str, Any]
     ) -> Dict[str, Any]:
         """end_activation differe : appele quand l allocation manuelle est terminee (done)."""
-        from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shared_utils import squad_shooting_type_clear
-        unit = require_unit_by_id(self.game_state, squad_id)
         squad_shooting_type_clear(self.game_state, squad_id)
-        end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
-        if self.game_state.get("active_shooting_unit") == squad_id:
-            del self.game_state["active_shooting_unit"]
+        return self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
+
+    def _end_squad_shoot_activation(
+        self, squad_id: str, shoot_result: Any
+    ) -> Dict[str, Any]:
+        """Fin d'activation d'un tir d'escouade résolu par allocation (`squad_shoot_validate`,
+        `squad_shoot_allocate_model`, `squad_shoot_declare_order`, décision `allocation_model`).
+
+        TIREUR HUMAIN : par `_handle_shooting_end_activation`, le SEUL site qui arme le
+        repositionnement post-tir de la datasheet (`move_after_shooting`, Purgation Run /
+        Gargoyle) et qui applique le verrou 20.04 sur ce mouvement. Les deux fins d'activation
+        de `squad_shoot_validate` appelaient le `end_activation` générique : aucune escouade PvP
+        ne se voyait jamais proposer ce mouvement. Quand il est proposé, le résultat porte
+        `move_after_shooting_select_destination` + `waiting_for_player` (c'est ce que le front
+        lit), l'escouade reste active et son activation se termine par l'action
+        `move_after_shooting` (destination ou renoncement).
+
+        TIREUR GYM OU BOT PvE : le générique, comme avant — et comme le chemin direct
+        `squad_shoot` de `_process_squad_action`, qui ne passe pas par ici. Ce site est atteint
+        en gym par la décision `allocation_model` du défenseur (cible d'au moins deux figurines) :
+        y armer la décision `move_after_shooting` ferait dépendre l'offre de l'effectif de la
+        cible, et changerait les parties jouées par la lignée (Land Speeder dans le roster
+        d'entraînement) — décision utilisateur en attente, cf. ROADMAP_INDEX suite 134.
+        """
+        from engine.phase_handlers.generic_handlers import end_activation
+        from engine.phase_handlers.shooting_handlers import _handle_shooting_end_activation
+
+        unit = require_unit_by_id(self.game_state, squad_id)
+        if self._is_player_human(int(require_key(unit, "player"))):
+            _success, end_result = _handle_shooting_end_activation(
+                self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
+            )
+            if end_result.get("action") == "move_after_shooting_select_destination":
+                return {**end_result, "unitId": squad_id, "shoot_result": shoot_result}
+            # `active_shooting_unit` : purgée par `shooting_clear_activation_state` (arg5 = 1).
+        else:
+            end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
+            if self.game_state.get("active_shooting_unit") == squad_id:
+                del self.game_state["active_shooting_unit"]
         return {
             **end_result, "action": "squad_shoot", "unitId": squad_id,
-            "shoot_result": alloc_result.get("shoot_result"),
+            "shoot_result": shoot_result,
         }
 
     def _finish_manual_fight_after_allocation_model(
@@ -8824,6 +8853,23 @@ class W40KEngine(gym.Env):
                     "models_segment": self._models_segment_for_unit(squad_id),
                 },
             )
+            # Fenêtre réactive (`reactive_move`, config/unit_rules.json) : « when an enemy unit
+            # ends a Normal, Advance or Fall Back move within 9" » — le chemin de commit n'entre
+            # pas dans la règle. Ce site ne l'ouvrait pas : seuls le move à l'ancre et le
+            # move_after_shooting le faisaient, donc aucun déplacement de l'agent ni du bot PvE
+            # ne posait la question. Miroir des deux commits PvP de `movement_handlers` : après
+            # la ligne de mouvement, avant `end_activation`. La décision, si elle se pose, est
+            # tranchée par le masque (gym), le siège IA (PvE) ou l'humain, comme partout.
+            reactive_result = maybe_resolve_reactive_move(
+                game_state=self.game_state,
+                moved_unit_id=str(squad_id),
+                from_col=_move_from_col,
+                from_row=_move_from_row,
+                to_col=_move_to_col,
+                to_row=_move_to_row,
+                move_kind={"advance": "advance", "fall_back": "flee"}.get(move_type, "move"),
+                move_cause="normal",
+            )
             if move_type == "fall_back":
                 # 09.07 AFTER MOVING — Desperate Escape : jet de battle-shock (01.07) si l'unite
                 # n'est pas battle-shocked. APRES la ligne de mouvement (le jet la suit dans
@@ -8840,6 +8886,9 @@ class W40KEngine(gym.Env):
                 "move_type": move_type,
                 "toCol": dest_col,
                 "toRow": dest_row,
+                "reactive_moves_applied": reactive_result["reactive_moves_applied"],
+                "reactive_moves_declined": reactive_result["reactive_moves_declined"],
+                "waiting_for_player": bool(reactive_result["waiting_for_player"]),
             }
 
         # ── tir ───────────────────────────────────────────────────────────────

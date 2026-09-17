@@ -2291,11 +2291,14 @@ def _build_enemy_adjacent_structures_from_units_cache(
             raise ValueError(
                 f"Invalid player value in units_cache entry: {unit_player_raw!r}"
             ) from exc
-        by_model = cache_entry.get("occupied_hexes_by_model")
-        if by_model:
-            unit_cells = set(by_model.values())
-        else:
-            unit_cells = {(int(require_key(cache_entry, "col")), int(require_key(cache_entry, "row")))}
+        # EMPREINTE COMPLÈTE des socles (03.04 + 01.04 « closest part of the base »), la MÊME
+        # que celle du recalcul complet et que celle que le delta incrémental soustrait
+        # (`_apply_enemy_adjacent_delta_for_moved_unit`, `old_occupied` = `occupied_hexes`).
+        # Cet instantané dilatait les seuls CENTRES de figurines (`occupied_hexes_by_model`) :
+        # identique à x1 (socle = une case), mais dès qu'un socle couvre plusieurs cases (x5) le
+        # delta retirait des cases que l'instantané n'avait jamais posées — `KeyError: Delta
+        # update missing old zone hex` à la première réaction appliquée, escouade déjà déplacée.
+        unit_cells = set(require_key(cache_entry, "occupied_hexes"))
         # Cases sources comprises — MÊME producteur que le recalcul complet, sinon l'instantané
         # réactif republie sous les mêmes clés une zone trouée (cf. `engagement_zone_from_cells`).
         unit_zone = engagement_zone_from_cells(
@@ -3876,7 +3879,15 @@ def _coherency_flags_euclidean(
     models: List[Dict[str, Any]], coh: int, coh_max: int, min_neighbors: int
 ) -> List[bool]:
     """Distances bord-a-bord EUCLIDIENNES (geometrie de rendu, hexCenter, hex_radius=1) puis
-    `_coherency_verdict` — le verdict est partage avec le mode 'footprint', seule la mesure change."""
+    `_coherency_verdict` — le verdict est partage avec le mode 'footprint', seule la mesure change.
+
+    ECHELLE : un sous-hexe vaut `ENGAGEMENT_NORM_HEX_WIDTH` (1,5) unites de rendu — celle de
+    `_hex_center`, du budget de move (`budget × 1,5`, `_euclidean_move_field`), de la zone
+    d'engagement (`engagement_minimum_clearance_norm`) et des rayons de socle ci-dessous. Les seuils
+    convertissaient en `× √3` (1,732) : 2" et 9" y toleraient ~15 % de plus que le move n'en
+    compte, soit ~10,4" socle a socle pour la 2e puce. Mesure sur la checklist PvP x5 : une ligne
+    de 10 Hormagaunts sur 9" dont le dernier est pousse de 2" restait `coherency_ok`.
+    """
     from math import hypot
     sqrt3 = 3.0 ** 0.5
     n = len(models)
@@ -3891,8 +3902,8 @@ def _coherency_flags_euclidean(
 
     pts = [cart(m) for m in models]
     radii = [base_radius(m) for m in models]
-    model_range = coh * sqrt3      # 2" en unites de rendu (hex_radius=1)
-    global_range = coh_max * sqrt3  # ecart max fig-a-fig (9"), bord a bord
+    model_range = coh * ENGAGEMENT_NORM_HEX_WIDTH      # 2" en unites de rendu (hex_radius=1)
+    global_range = coh_max * ENGAGEMENT_NORM_HEX_WIDTH  # ecart max fig-a-fig (9"), bord a bord
     neighbor = [[False] * n for _ in range(n)]
     too_far = [False] * n
     for i in range(n):

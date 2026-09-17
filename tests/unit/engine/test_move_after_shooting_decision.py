@@ -481,3 +481,129 @@ def test_l_armement_est_le_seul_a_poser_l_etat_d_attente():
     assert unit["_pending_move_after_shooting"] is True
     assert unit["_move_after_shooting_destinations"] == destinations
     assert unit["_move_after_shooting_distance"] == _MOVE_AFTER_SHOOTING_INCHES
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. LE SIÈGE PvP REÇOIT L'OFFRE — ET À LA BONNE DISTANCE
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_la_distance_du_pool_est_convertie_en_sous_hexes():
+    """`_resolve_move_after_shooting_distance` rend des POUCES (D6" de la datasheet) ; `MOVE`,
+    que le pool d'ancre lit, est en SOUS-HEXES. Le pool écrivait les pouces tels quels dans
+    `MOVE` : à x5, un D6" valait D6 cases (1,2" au plus)."""
+    from engine.combat_utils import calculate_hex_distance
+
+    gs = _gs()
+    gs["inches_to_subhex"] = 5
+    build_units_cache(gs)
+    build_enemy_adjacent_hexes(gs, 1)
+    build_enemy_adjacent_hexes(gs, 2)
+    unit = gs["unit_by_id"]["1"]
+    destinations = _build_move_after_shooting_destinations(gs, unit, _MOVE_AFTER_SHOOTING_INCHES)
+    reach = max(calculate_hex_distance(_SHOOTER[0], _SHOOTER[1], c, r) for c, r in destinations)
+    # 3" = 15 cases : le pool dépasse largement les 3 cases qu'écrivait la distance non convertie,
+    # sans jamais dépasser le budget converti.
+    assert _MOVE_AFTER_SHOOTING_INCHES < reach <= _MOVE_AFTER_SHOOTING_INCHES * 5, reach
+    assert unit["MOVE"] == 10, "MOVE restauré après la construction du pool"
+
+
+def _pvp_engine_in_shoot_phase(*, with_rule: bool, gym: bool = False) -> Any:
+    """Moteur PvP humain/humain (ou gym) arrêté en phase de tir, le tireur `1` seul dans le pool,
+    prêt pour la fin d'activation que `squad_shoot_validate` produit (allocation terminée)."""
+    from unittest.mock import patch
+
+    from tests.unit.engine._config_helpers import (
+        _fall_back_base_config,
+        _fall_back_unit_cfg,
+        build_engine_config,
+    )
+
+    shooter = _fall_back_unit_cfg(1, 1, 10, 20)
+    if with_rule:
+        shooter["UNIT_RULES"] = [
+            {
+                "ruleId": "move_after_shooting",
+                "displayName": "Purgation Run (test)",
+                "rule_args": {"distance": _MOVE_AFTER_SHOOTING_INCHES},
+            }
+        ]
+    units = [shooter, _fall_back_unit_cfg(2, 2, 10, 30)]
+    config = build_engine_config(_fall_back_base_config(units))
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), patch.object(
+        W40KEngine, "_build_reward_configs_for_current_units", return_value={}
+    ):
+        engine = W40KEngine(config=config, gym_training_mode=gym)
+    engine.reset()
+    gs = engine.game_state
+    gs["phase"] = "shoot"
+    gs["current_player"] = 1
+    gs["shoot_activation_pool"] = ["1"]
+    engine._shooting_phase_initialized = True
+    gs["_shooting_phase_initialized"] = True
+    gs["active_shooting_unit"] = "1"
+    return engine
+
+
+def test_la_fin_du_tir_d_escouade_pvp_propose_le_repositionnement():
+    """`squad_shoot_validate` terminait l'activation par le `end_activation` GÉNÉRIQUE
+    (`_finish_manual_shoot_after_allocation` et la branche défenseur IA), jamais par
+    `_handle_shooting_end_activation` — seul site qui arme l'offre : aucune escouade PvP ne se
+    voyait proposer le mouvement. Mesuré sur la checklist PvP : `action = squad_shoot`, sans
+    `move_after_shooting_destinations`, en x1 comme en x5."""
+    engine = _pvp_engine_in_shoot_phase(with_rule=True)
+    gs = engine.game_state
+
+    result = engine._finish_manual_shoot_after_allocation("1", {"shoot_result": {"hits": 0}})
+
+    assert result["action"] == "move_after_shooting_select_destination"
+    assert result["waiting_for_player"] is True
+    assert result["unitId"] == "1"
+    assert result["shoot_result"] == {"hits": 0}
+    assert result["move_after_shooting_destinations"], "aucune destination offerte"
+    # L'activation n'est PAS terminée : l'escouade reste active et dans le pool jusqu'à l'action
+    # `move_after_shooting` (destination ou renoncement).
+    assert gs["shoot_activation_pool"] == ["1"]
+    assert gs["active_shooting_unit"] == "1"
+    assert gs["unit_by_id"]["1"]["_pending_move_after_shooting"] is True
+
+    success, done = engine.execute_semantic_action(
+        {"action": "move_after_shooting", "unitId": "1", "skip_move_after_shooting": True}
+    )
+    assert success is True
+    assert done["activation_ended"] is True
+    assert gs["shoot_activation_pool"] == []
+    assert "1" in gs["units_shot"]
+
+
+def test_la_fin_du_tir_d_escouade_pvp_sans_la_regle_se_termine_comme_avant():
+    """Contrôle : sans porteur, la réponse reste `squad_shoot` et l'activation est close."""
+    engine = _pvp_engine_in_shoot_phase(with_rule=False)
+    gs = engine.game_state
+
+    result = engine._finish_manual_shoot_after_allocation("1", {"shoot_result": {"hits": 0}})
+
+    assert result["action"] == "squad_shoot"
+    assert result["activation_ended"] is True
+    assert result["shoot_result"] == {"hits": 0}
+    assert gs["shoot_activation_pool"] == []
+    assert "active_shooting_unit" not in gs
+    assert "1" in gs["units_shot"]
+
+
+def test_en_gym_la_fin_du_tir_par_allocation_reste_le_generique():
+    """Ce site est aussi atteint en gym (décision `allocation_model` du défenseur). Y armer la
+    décision `move_after_shooting` la ferait dépendre de l'effectif de la cible — le chemin
+    direct `squad_shoot` ne l'arme pas — et changerait les parties de la lignée : le tireur gym
+    garde la fin générique tant que la décision utilisateur n'est pas prise."""
+    engine = _pvp_engine_in_shoot_phase(with_rule=True, gym=True)
+    gs = engine.game_state
+
+    result = engine._finish_manual_shoot_after_allocation("1", {"shoot_result": {"hits": 0}})
+
+    assert result["action"] == "squad_shoot"
+    assert result["activation_ended"] is True
+    assert read_pending_agent_decision(gs) is None
+    assert gs["shoot_activation_pool"] == []
+    assert "active_shooting_unit" not in gs
+    assert "_pending_move_after_shooting" not in gs["unit_by_id"]["1"]

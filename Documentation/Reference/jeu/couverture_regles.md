@@ -1,6 +1,6 @@
 # Warhammer 40,000 — Rules Implementation Coverage
 
-*Last updated: 2026-08-24*
+*Last updated: 2026-09-17*
 
 Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 
@@ -33,7 +33,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Fall Back: no shoot/charge/action after | 09.07 | ✅ |
 | Desperate Escape (hazard roll per model) | 09.07 | ✅ |
 | Ordered Retreat (non-battle-shocked only) | 09.07 | ✅ |
-| Cohesion (2" horiz / 9" max / 5" vert) | 03.03 | ✅ |
+| Cohesion (2" horiz / 9" max / 5" vert) | 03.03 | ✅ (échelle euclidienne x5 alignée sur le move le 2026-09-17 ; 5" vertical non mesuré) |
 | Coherency removal at end of turn | 03.03 | ✅ |
 | Engagement zone (2" horiz / 5" vert) | 03.04 | ✅ |
 | FLY keyword: −2", bypass obstacles | 21.03 | ✅ |
@@ -252,7 +252,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Rule | Ref | Status |
 |------|-----|--------|
 | Exposed / Light / Dense terrain categories | 13.02–13.05 | ✅ |
-| Movement through terrain by keyword | 13.06 | ✅ |
+| Movement through terrain by keyword | 13.06 | ⚠️ Étages par mot-clé ✅ ; traversée du terrain DENSE par INFANTRY/BEASTS/SWARM/MOBILE ❌ (tout mur bloque hors vol — `xfail` strict de la checklist mouvement PvP, `Roadmap/moteur.md#dense-traversal-1306`) |
 | Vertical movement cost | 13.06 | ✅ |
 | Benefit of Cover | 13.08 | ✅ |
 | Hidden (INFANTRY/BEASTS/SWARM in dense terrain) | 13.09 | ✅ |
