@@ -28,26 +28,27 @@
  *   `error` top-level.
  * La lecture enchaîne les deux pour afficher le premier message disponible.
  */
-interface EngineActionResult {
+export interface EngineActionResult {
   success?: boolean;
   error?: unknown;
   result?: { error?: unknown };
 }
 
-export type EngineActionOutcome =
-  /** Le moteur a agi : appliquer les effets de bord. */
-  | { kind: "ok" }
+export type EngineActionOutcome<T extends EngineActionResult = EngineActionResult> =
+  /** Le moteur a agi : appliquer les effets de bord. `data` est l'enveloppe rendue, garantie
+   *  présente — la lire ici évite à l'appelant de re-tester un `undefined` déjà écarté. */
+  | { kind: "ok"; data: T }
   /** Le moteur a refusé : afficher `message`, ne rien appliquer. */
   | { kind: "refused"; message: string }
   /** Rien ne s'est passé : ne rien afficher (c'est déjà fait en amont), ne rien appliquer. */
   | { kind: "noop" };
 
-export function readEngineActionOutcome(
-  data: EngineActionResult | undefined | null
-): EngineActionOutcome {
+export function readEngineActionOutcome<T extends EngineActionResult>(
+  data: T | undefined | null
+): EngineActionOutcome<T> {
   if (!data) return { kind: "noop" };
   if (data.success === false) {
     return { kind: "refused", message: String(data.error || data.result?.error || "unknown") };
   }
-  return { kind: "ok" };
+  return { kind: "ok", data };
 }

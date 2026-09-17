@@ -107,8 +107,10 @@ describe("getNonRoundBasePixelLayout — métriques pixel des socles ovale / car
   });
 
   it("null pour un ovale dont une dimension n'est pas numérique", () => {
+    // Le type promet `[number, number]` ; on met en scène un payload API qui le viole.
+    const malformed = ["x", 2] as unknown as [number, number];
     expect(
-      getNonRoundBasePixelLayout(makeUnit({ BASE_SHAPE: "oval", BASE_SIZE: ["x", 2] }), HEX_RADIUS)
+      getNonRoundBasePixelLayout(makeUnit({ BASE_SHAPE: "oval", BASE_SIZE: malformed }), HEX_RADIUS)
     ).toBeNull();
   });
 });

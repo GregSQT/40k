@@ -30,7 +30,11 @@ import {
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
 import { type BlockPool, cubeSub, parseBlockDestinations } from "../utils/blockSelection";
-import { type EngineActionOutcome, readEngineActionOutcome } from "../utils/engineActionOutcome";
+import {
+  type EngineActionOutcome,
+  type EngineActionResult,
+  readEngineActionOutcome,
+} from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
 import { toPlanArray, toPlanArrayWithOrientation } from "../utils/modelPlan";
@@ -3379,10 +3383,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    *  Une NON-ACTION n'affiche rien : ses trois portes parlent déjà ailleurs — popup de
    *  confirmation d'aperçu, bannière réseau, partie terminée. */
   const noteActionOutcome = useCallback(
-    (
-      data: { success?: boolean; error?: unknown; result?: { error?: unknown } } | undefined,
+    <T extends EngineActionResult>(
+      data: T | undefined,
       gesture: string
-    ): EngineActionOutcome => {
+    ): EngineActionOutcome<T> => {
       const outcome = readEngineActionOutcome(data);
       if (outcome.kind === "refused") {
         setActionRefusal(`${gesture} refusé : ${outcome.message}`);
@@ -5392,8 +5396,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       });
       // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
       // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
-      if (noteActionOutcome(data, "Tir").kind !== "ok") return;
-      offersPostShootMove = data.result?.action === "move_after_shooting_select_destination";
+      const outcome = noteActionOutcome(data, "Tir");
+      if (outcome.kind !== "ok") return;
+      offersPostShootMove =
+        outcome.data.result?.action === "move_after_shooting_select_destination";
     } catch (e) {
       console.error("[SQUAD-SHOOT] validate FAILED", e);
       setError(`Squad shoot failed: ${formatApiConnectionError(e)}`);

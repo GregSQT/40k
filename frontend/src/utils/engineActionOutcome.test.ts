@@ -3,9 +3,13 @@ import { readEngineActionOutcome } from "./engineActionOutcome";
 
 describe("readEngineActionOutcome", () => {
   it("un résultat sans refus est un succès", () => {
-    expect(readEngineActionOutcome({ success: true })).toEqual({ kind: "ok" });
+    // `ok` rend l'enveloppe : l'appelant lit `result` sans re-tester un `undefined` déjà écarté.
+    expect(readEngineActionOutcome({ success: true })).toEqual({
+      kind: "ok",
+      data: { success: true },
+    });
     // `executeAction` peut rendre une enveloppe sans `success` (réponse déjà traitée en amont).
-    expect(readEngineActionOutcome({})).toEqual({ kind: "ok" });
+    expect(readEngineActionOutcome({})).toEqual({ kind: "ok", data: {} });
   });
 
   it("un refus serveur (error top-level) porte le message", () => {
