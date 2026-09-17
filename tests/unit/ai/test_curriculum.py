@@ -31,6 +31,10 @@ from ai.curriculum import (
     POOL_VERDICT_PROMOTE,
     evaluate_pool_decision,
     evaluate_stage_gate,
+    plateau_reached,
+    promotion_floors_held,
+    stage_run_to_plateau,
+    POOL_VERDICT_PLATEAU,
     exploiter_stage_names,
     load_curriculum,
     require_archive_members_on_disk,
@@ -509,6 +513,13 @@ def _early_stop_block(**overrides) -> dict:
         "destroy_score_vs_champion": 0.40,
         "destroy_min_episodes": 20000,
         "full_pool_probe_every": 3,
+        "probe_every_episodes": 5000,
+        "snapshot_thresholds": [0.5, 0.6, 0.7],
+        # min_episodes >= promote_min_episodes (50000 ici) : verrou du validateur.
+        "plateau": {
+            "patience_probes": 4, "min_delta": 0.02, "min_episodes": 50000,
+            "check_budget_cap": 100000,
+        },
     }
     block.update(overrides)
     return block
@@ -980,6 +991,11 @@ _ES = {
     "destroy_score_vs_champion": 0.40,
     "destroy_min_episodes": 20000,
     "full_pool_probe_every": 3,
+    "probe_every_episodes": 5000,
+    "snapshot_thresholds": [0.5, 0.6, 0.7],
+    "plateau": {
+        "patience_probes": 4, "min_delta": 0.02, "min_episodes": 40000, "check_budget_cap": 100000,
+    },
 }
 
 
@@ -1019,6 +1035,149 @@ def test_destruction_wins_over_promotion_when_both_gates_are_open() -> None:
     """Les seuils ne peuvent pas se croiser (verrou de validation), l'ORDRE le garantit quand meme."""
     decision = evaluate_pool_decision("P2", "P1", {"P1": 0.30, "P0": 0.99}, 60_000, _ES)
     assert decision.verdict == POOL_VERDICT_DESTROY
+
+
+# ── PLATEAU ET RUNS DE CHECK (2026-09-17) ─────────────────────────────────────────────────
+
+_RISING = [0.50, 0.53, 0.56, 0.59, 0.62, 0.65, 0.68]
+_FLAT = [0.50, 0.55, 0.60, 0.66, 0.67, 0.66, 0.67, 0.665]
+
+
+def test_plateau_is_read_by_patience_on_the_best_smoothed_score() -> None:
+    """Le meilleur d'avant (0.66 a l'indice 3) n'est pas battu de 0.02 par les 4 dernieres."""
+    assert plateau_reached(_RISING, 4, 0.02) is None
+    assert plateau_reached(_FLAT, 4, 0.02) == (0.66, 0.67)
+    # Pas decidable tant que l'historique ne deborde pas la fenetre de patience.
+    assert plateau_reached(_FLAT[:4], 4, 0.02) is None
+    # Une derniere sonde qui bat le meilleur de min_delta remet le compteur : pas de plateau.
+    assert plateau_reached(_FLAT + [0.69], 4, 0.02) is None
+
+
+def test_an_ordinary_stage_still_promotes_as_soon_as_the_floors_hold() -> None:
+    """Sans run_to_plateau, l'historique ne change rien : promotion des les planchers tenus."""
+    decision = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.56, "P0": 0.51}, 50_000, _ES, champion_mean_history=_RISING,
+    )
+    assert decision.verdict == POOL_VERDICT_PROMOTE
+
+
+def test_a_check_stage_keeps_running_past_the_floors_until_the_plateau() -> None:
+    decision = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.68, "P0": 0.60}, 50_000, _ES,
+        champion_mean_history=_RISING, run_to_plateau=True,
+    )
+    assert decision.verdict == POOL_VERDICT_CONTINUE
+    assert "CHECK" in decision.reason
+
+
+def test_a_check_stage_promotes_at_the_plateau_when_the_floors_hold() -> None:
+    decision = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.665, "P0": 0.60}, 60_000, _ES,
+        champion_mean_history=_FLAT, run_to_plateau=True,
+    )
+    assert decision.verdict == POOL_VERDICT_PROMOTE
+    assert "PLATEAU" in decision.reason and "0.660" in decision.reason
+
+
+def test_a_plateau_under_the_floors_refuses_the_stage_in_any_mode() -> None:
+    """Actif partout : une etape ordinaire qui ne monte plus sous 0.55 s'arrete au lieu de bruler son budget."""
+    flat_low = [0.45, 0.50, 0.52, 0.53, 0.52, 0.53, 0.525, 0.53]
+    for run_to_plateau in (False, True):
+        decision = evaluate_pool_decision(
+            "P2", "P1", {"P1": 0.53, "P0": 0.80}, 60_000, _ES,
+            champion_mean_history=flat_low, run_to_plateau=run_to_plateau,
+        )
+        assert decision.verdict == POOL_VERDICT_PLATEAU, run_to_plateau
+        assert "P1=0.530 < 0.55" in decision.reason
+
+
+def test_no_plateau_verdict_before_its_own_episode_floor() -> None:
+    decision = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.53, "P0": 0.80}, 39_999, _ES,
+        champion_mean_history=[0.45, 0.50, 0.52, 0.53, 0.52, 0.53, 0.525, 0.53],
+    )
+    assert decision.verdict == POOL_VERDICT_CONTINUE
+
+
+def test_a_check_stage_stops_at_its_budget_cap_even_without_a_plateau() -> None:
+    promoted = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.70, "P0": 0.60}, 100_000, _ES,
+        champion_mean_history=_RISING, run_to_plateau=True,
+    )
+    assert promoted.verdict == POOL_VERDICT_PROMOTE and "PLAFOND" in promoted.reason
+    refused = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.53, "P0": 0.60}, 100_000, _ES,
+        champion_mean_history=_RISING, run_to_plateau=True,
+    )
+    assert refused.verdict == POOL_VERDICT_PLATEAU
+    # Le plafond n'existe que pour les runs de check.
+    ordinary = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.53, "P0": 0.60}, 100_000, _ES, champion_mean_history=_RISING,
+    )
+    assert ordinary.verdict == POOL_VERDICT_CONTINUE
+
+
+def test_destruction_still_wins_over_everything_in_a_check_stage() -> None:
+    decision = evaluate_pool_decision(
+        "P2", "P1", {"P1": 0.30, "P0": 0.99}, 60_000, _ES,
+        champion_mean_history=_FLAT, run_to_plateau=True,
+    )
+    assert decision.verdict == POOL_VERDICT_DESTROY
+
+
+def test_promotion_floors_held_dates_the_first_promotable_probe() -> None:
+    assert promotion_floors_held("P1", {"P1": 0.56, "P0": 0.51}, 49_999, _ES) is False
+    assert promotion_floors_held("P1", {"P1": 0.56, "P0": 0.51}, 50_000, _ES) is True
+    assert promotion_floors_held("P1", {"P1": 0.56, "P0": 0.49}, 50_000, _ES) is False
+
+
+def test_unsorted_snapshot_thresholds_are_refused() -> None:
+    with pytest.raises(ValueError, match="croissante"):
+        validate_early_stop_block(_early_stop_block(snapshot_thresholds=[0.6, 0.5]), "t")
+    with pytest.raises(ValueError, match="croissante"):
+        validate_early_stop_block(_early_stop_block(snapshot_thresholds=[0.5, 0.5]), "t")
+    validate_early_stop_block(_early_stop_block(snapshot_thresholds=[]), "t")
+
+
+def test_a_check_cap_under_the_plateau_floor_is_refused() -> None:
+    bad = _early_stop_block()
+    bad["plateau"] = dict(bad["plateau"], check_budget_cap=40000)
+    with pytest.raises(ValueError, match="check_budget_cap"):
+        validate_early_stop_block(bad, "t")
+    bad["plateau"] = dict(_early_stop_block()["plateau"], patience_probes=1)
+    with pytest.raises(ValueError, match="patience_probes"):
+        validate_early_stop_block(bad, "t")
+
+
+def test_a_plateau_floor_under_the_promotion_floor_is_refused() -> None:
+    """Un plateau au-dessus des planchers promeut : il ne doit pas pouvoir le faire avant 30 000."""
+    bad = _early_stop_block()
+    bad["plateau"] = dict(bad["plateau"], min_episodes=20000, check_budget_cap=100000)
+    with pytest.raises(ValueError, match="promote_min_episodes"):
+        validate_early_stop_block(bad, "t")
+
+
+def test_run_to_plateau_is_refused_on_an_exploiter() -> None:
+    cur = _minimal_curriculum_with_exploiter()
+    cur["stages"]["E1"]["run_to_plateau"] = True
+    with pytest.raises(ValueError, match="run_to_plateau"):
+        validate_curriculum(cur)
+    cur["stages"]["E1"]["run_to_plateau"] = "oui"
+    with pytest.raises(TypeError, match="booleen"):
+        validate_curriculum(cur)
+
+
+def test_the_shipped_check_stages_follow_each_exploiter(curriculum) -> None:
+    """P1 (nouveau cycle) et l'etape qui suit chaque exploiteur ; les autres restent ordinaires."""
+    flagged = [name for name in stage_order(curriculum)
+               if stage_run_to_plateau(require_stage(curriculum, name))]
+    assert flagged == ["P1", "P4", "P6", "P9"]
+    es = curriculum["early_stop"]
+    assert es["probe_every_episodes"] == 5000
+    assert es["snapshot_thresholds"] == [0.5, 0.6, 0.7]
+    assert es["plateau"] == {
+        "patience_probes": 4, "min_delta": 0.02, "min_episodes": 40000, "check_budget_cap": 100000,
+    }
 
 
 def test_decision_is_a_noop_without_a_pool() -> None:

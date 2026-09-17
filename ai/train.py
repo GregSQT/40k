@@ -1547,9 +1547,32 @@ def pool_stop_path(model_path: str) -> str:
     return companion_path(model_path, POOL_STOP_SUFFIX)
 
 
-def save_pool_stop_verdict(model_path: str, verdict: str, reason: Optional[str]) -> None:
-    """Persiste le verdict qui a arrete le run, pour une cloture differee (`--close-stage`)."""
-    write_json_atomic(pool_stop_path(model_path), {"verdict": verdict, "reason": reason})
+def save_pool_stop_verdict(
+    model_path: str, verdict: Optional[str], reason: Optional[str],
+    episodes_to_gate: Optional[int] = None,
+) -> None:
+    """Persiste le verdict qui a arrete le run, pour une cloture differee (`--close-stage`).
+
+    `verdict` None (2026-09-17) : le run est alle au bout de son budget sans verdict — le sidecar
+    est ecrit quand meme, pour `episodes_to_gate` : episode d'etape de la premiere sonde ou les
+    planchers de promotion ont tenu, None s'ils n'ont jamais tenu. Il voyage ici parce que la
+    cloture differee n'a que ce sidecar pour le relire ; un run de check qui a tenu ses planchers
+    puis fini par budget les aurait sinon journalises « jamais tenus ».
+    """
+    write_json_atomic(
+        pool_stop_path(model_path),
+        {"verdict": verdict, "reason": reason, "episodes_to_gate": episodes_to_gate},
+    )
+
+
+def load_pool_stop_episodes_to_gate(model_path: str) -> Optional[int]:
+    """`episodes_to_gate` du sidecar, None sans sidecar ou si les planchers n'ont jamais tenu."""
+    path = pool_stop_path(model_path)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        value = json.load(handle).get("episodes_to_gate")
+    return None if value is None else int(value)
 
 
 def load_pool_stop_verdict(model_path: str) -> Tuple[Optional[str], Optional[str]]:
@@ -2023,6 +2046,7 @@ from ai.curriculum import (
     _validate_early_stop_against_gate,
     validate_early_stop_block,
     POOL_VERDICT_DESTROY,
+    POOL_VERDICT_PLATEAU,
     POOL_VERDICT_PROMOTE,
     append_curriculum_log,
     copy_tensorboard_run,
@@ -2031,6 +2055,7 @@ from ai.curriculum import (
     is_exploiter_stage,
     load_curriculum,
     require_archive_members_on_disk,
+    stage_run_to_plateau,
     load_exploiter_config,
     required_training_config,
     load_parity_check,
@@ -4262,12 +4287,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         pool_stop_verdict = (
             pool_early_stop_callback.stop_verdict if pool_early_stop_callback is not None else None
         )
-        if pool_stop_verdict is not None:
+        if pool_early_stop_callback is not None:
             # Sur DISQUE, parce que `--close-stage` clot l'etape depuis un autre processus et ne
-            # peut pas relire une variable : cf. `pool_stop_path`.
+            # peut pas relire une variable : cf. `pool_stop_path`. Ecrit meme sans verdict (fin
+            # par budget) : `episodes_to_gate` doit survivre a la fin du processus.
             save_pool_stop_verdict(
                 model_path, pool_stop_verdict,
                 require_present(pool_early_stop_callback, "pool_early_stop_callback").stop_reason,
+                episodes_to_gate=require_present(
+                    pool_early_stop_callback, "pool_early_stop_callback"
+                ).first_promotable_episode,
             )
 
         # Final save unless robust mode owns canonical output (cf. la regle, qui dit pourquoi un
@@ -4468,6 +4497,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             run_info.update({
                 "pool_stop_verdict": pool_stop_verdict,
                 "pool_stop_reason": pool_early_stop_callback.stop_reason,
+                "episodes_to_gate": pool_early_stop_callback.first_promotable_episode,
             })
         if bot_eval_callback is not None:
             run_info.update({
@@ -6026,6 +6056,7 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
         "episodes_trained": episode_count_total - episode_offset,
         "pool_stop_verdict": _stop_verdict,
         "pool_stop_reason": _stop_reason,
+        "episodes_to_gate": load_pool_stop_episodes_to_gate(canonical_model_path),
     }
 
 
@@ -6080,11 +6111,16 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     # episodes par membre du pool (des heures), pour un chiffre qui ne peut plus rien changer et
     # qui decrirait un modele que personne n'a decide de promouvoir.
     stop_verdict = run_info.get("pool_stop_verdict")
-    if stop_verdict == POOL_VERDICT_DESTROY:
+    if stop_verdict in (POOL_VERDICT_DESTROY, POOL_VERDICT_PLATEAU):
+        # PLATEAU sous les seuils (2026-09-17) : meme court-circuit que la destruction. Le score
+        # lisse ne monte plus et les planchers ne tiennent pas ; le gate mesurerait pendant des
+        # heures un modele que le run a deja juge — et, sous `save_best_robust`, un AUTRE modele
+        # (le canonique est l'instantane robuste, les poids vifs ne sont pas publies).
         scores_vs_pool: Dict[str, float] = {}
         accepted = False
+        what = "DETRUITE" if stop_verdict == POOL_VERDICT_DESTROY else "EN PLATEAU sous les seuils"
         gate_reason = (
-            f"Etape {args.etape} DETRUITE en cours de run : "
+            f"Etape {args.etape} {what} en cours de run : "
             f"{run_info.get('pool_stop_reason')} — gate non mesure, la decision est prise."
         )
     else:
@@ -6135,6 +6171,10 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         # distinguer « l'etape a fini » de « l'etape s'est arretee, et pourquoi ».
         "pool_stop_verdict": stop_verdict,
         "pool_stop_reason": run_info.get("pool_stop_reason"),
+        # Episode d'etape de la premiere sonde ou les planchers ont tenu (None : jamais). Comparable
+        # d'une etape a l'autre quel que soit le mode du run : s'il grandit, l'apprentissage se
+        # degrade — l'indicateur de plafond le moins cher du curriculum (2026-09-17).
+        "episodes_to_gate": run_info.get("episodes_to_gate"),
         "monotonicity_diagnostic": monotonicity,
     })
     print(f"📝 curriculum.log : {log_path}")
@@ -7105,9 +7145,12 @@ def _run_main():
                             require_key(training_config, "callback_params"),
                             "bot_eval_n_workers_intermediate",
                         )
-                        _pool_eval_freq = int(require_key(
-                            require_key(training_config, "callback_params"), "bot_eval_freq"
-                        ))
+                        # Cadence PROPRE aux sondes de pool (2026-09-17) : elle ne suit plus
+                        # `bot_eval_freq`, la cadence de l'evaluation contre les bots — les deux
+                        # instruments n'ont pas le meme besoin de resolution (verdicts de plateau
+                        # et instantanes a seuils cote sonde, garde anti-regression cote bots).
+                        _pool_eval_freq = int(require_key(_early_stop_cfg, "probe_every_episodes"))
+                        _run_to_plateau = stage_run_to_plateau(_stg)
                         assert _stage_start is not None  # curriculum_stage is not None ici
                         _pool_early_stop = PoolEarlyStoppingCallback(
                             pool_archives=_pool_archives,
@@ -7128,6 +7171,8 @@ def _run_main():
                             intermediate_n_workers=_pool_n_workers,
                             # Origine de l'ÉTAPE (archive source) : cf. la sonde exploiteur.
                             episode_origin=_stage_start,
+                            snapshot_model_path=_canonical,
+                            run_to_plateau=_run_to_plateau,
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
                         # Relu SUR LE CALLBACK, pas rappele a la config : c'est la paire qu'il
@@ -7148,6 +7193,16 @@ def _run_main():
                             f"{[_l for _, _l in _pool_archives]}, n_eval_episodes={_pool_n_episodes}"
                             f" ; champion a chaque sonde, pool entier 1 tour sur "
                             f"{_pool_early_stop.full_pool_probe_every}"
+                            f" ; sonde tous les {_pool_eval_freq} ep. ; instantanes aux seuils "
+                            f"{_pool_early_stop.snapshot_thresholds} ; plateau : patience "
+                            f"{int(_early_stop_cfg['plateau']['patience_probes'])} sondes, "
+                            f"min_delta {float(_early_stop_cfg['plateau']['min_delta']):.2f}, "
+                            f"des {int(_early_stop_cfg['plateau']['min_episodes'])} ep."
+                            + (
+                                f" ; RUN DE CHECK : promotion differee jusqu'au plateau, plafond "
+                                f"{int(_early_stop_cfg['plateau']['check_budget_cap'])} ep."
+                                if _run_to_plateau else ""
+                            )
                         )
                         if _parity_label is not None:
                             print(

@@ -98,7 +98,18 @@ _EARLY_STOP_REQUIRED_KEYS = (
     "destroy_score_vs_champion",
     "destroy_min_episodes",
     "full_pool_probe_every",
+    "probe_every_episodes",
+    "snapshot_thresholds",
+    "plateau",
 )
+
+#: Cles obligatoires du sous-bloc `early_stop.plateau` (2026-09-17). Le plateau est un ARRET par
+#: patience : on retient le meilleur score lisse (moyenne de `probe_window` sondes) atteint contre
+#: le champion, et le run s'arrete quand `patience_probes` sondes consecutives ne l'ont pas
+#: depasse de `min_delta`, jamais avant `min_episodes` d'etape. `check_budget_cap` ne sert qu'aux
+#: etapes `run_to_plateau` (voir `stage_run_to_plateau`) : plafond au-dela duquel le run s'arrete
+#: meme sans plateau declare.
+_PLATEAU_REQUIRED_KEYS = ("patience_probes", "min_delta", "min_episodes", "check_budget_cap")
 
 #: Cles obligatoires du bloc `gate`.
 _GATE_REQUIRED_KEYS = (
@@ -442,6 +453,62 @@ def validate_early_stop_block(block: Any, context: str) -> None:
             f"({scores['promote_score_vs_champion']}) — sinon une meme moyenne declencherait a la "
             "fois la promotion et l'arret pour destruction."
         )
+    require_positive_int(
+        require_key(block, "probe_every_episodes"), f"{context}.probe_every_episodes"
+    )
+    thresholds = require_key(block, "snapshot_thresholds")
+    if not isinstance(thresholds, list):
+        raise TypeError(
+            f"{context}.snapshot_thresholds doit etre une liste de scores ([] = aucun instantane)."
+        )
+    values: List[float] = []
+    for threshold in thresholds:
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            raise TypeError(f"{context}.snapshot_thresholds : {threshold!r} n'est pas un nombre.")
+        if not (0.0 < float(threshold) < 1.0):
+            raise ValueError(f"{context}.snapshot_thresholds : {threshold} doit etre dans ]0,1[.")
+        values.append(float(threshold))
+    if values != sorted(set(values)):
+        raise ValueError(
+            f"{context}.snapshot_thresholds doit etre strictement croissante (got {thresholds})."
+        )
+    plateau = require_key(block, "plateau")
+    if not isinstance(plateau, dict):
+        raise TypeError(f"{context}.plateau doit etre un objet JSON.")
+    for key in _PLATEAU_REQUIRED_KEYS:
+        if key not in plateau:
+            raise ConfigurationError(
+                f"{context}.plateau manque la cle '{key}'. Cles requises : {_PLATEAU_REQUIRED_KEYS}"
+            )
+    patience = require_positive_int(
+        require_key(plateau, "patience_probes"), f"{context}.plateau.patience_probes"
+    )
+    if patience < 2:
+        raise ValueError(
+            f"{context}.plateau.patience_probes doit valoir au moins 2 (got {patience}) : une "
+            "seule sonde sans progres est du bruit, pas un plateau."
+        )
+    min_delta = float(require_key(plateau, "min_delta"))
+    if not (0.0 < min_delta < 1.0):
+        raise ValueError(f"{context}.plateau.min_delta doit etre dans ]0,1[ (got {min_delta})")
+    min_episodes = require_non_negative_int(
+        require_key(plateau, "min_episodes"), f"{context}.plateau.min_episodes"
+    )
+    cap = require_positive_int(
+        require_key(plateau, "check_budget_cap"), f"{context}.plateau.check_budget_cap"
+    )
+    if cap <= min_episodes:
+        raise ValueError(
+            f"{context}.plateau.check_budget_cap ({cap}) doit depasser min_episodes "
+            f"({min_episodes}) : sinon un run de check s'arreterait avant de pouvoir lire un plateau."
+        )
+    promote_after = int(require_key(block, "promote_min_episodes"))
+    if min_episodes < promote_after:
+        raise ValueError(
+            f"{context}.plateau.min_episodes ({min_episodes}) doit valoir au moins "
+            f"promote_min_episodes ({promote_after}) : un plateau au-dessus des planchers promeut "
+            "l'etape, et rien ne doit pouvoir la promouvoir avant le plancher d'episodes."
+        )
 
 
 def _validate_early_stop_against_gate(early_stop: Any, gate: Any, context: str) -> None:
@@ -678,6 +745,11 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
         if role not in STAGE_ROLES:
             raise ValueError(
                 f"{source}: stages[{name}].role doit valoir l'un de {STAGE_ROLES} (got {role!r})"
+            )
+        if stage_run_to_plateau(stage) and role != "learner":
+            raise ValueError(
+                f"{source}: stages[{name}].run_to_plateau n'a de sens que sur un learner : un "
+                "exploiteur n'est pas promu, il n'a pas de plateau a differer."
             )
 
         source_stage = stage_init_source(stage)
@@ -1085,6 +1157,20 @@ def stage_model_path(canonical_model_path: str, stage_name: str) -> str:
     return f"{stem}_{stage_name}{ext}"
 
 
+def stage_run_to_plateau(stage: Dict[str, Any]) -> bool:
+    """Vrai quand l'etape est un run de CHECK : la promotion est differee jusqu'au plateau.
+
+    Cle optionnelle `run_to_plateau` de l'etape ; absente = etape ordinaire (promue des que les
+    planchers tiennent). Decision utilisateur du 2026-09-17 : une etape sur quatre environ (celle
+    qui suit chaque exploiteur) paie le surcout pour mesurer le PLAFOND de la lignee — un
+    curriculum entier a ce regime couterait des jours de GPU pour une information redondante.
+    """
+    value = stage.get("run_to_plateau", False)
+    if not isinstance(value, bool):
+        raise TypeError(f"stage.run_to_plateau doit etre un booleen (got {value!r}).")
+    return value
+
+
 def archive_member_labels(stage: Dict[str, Any]) -> List[str]:
     """Les labels des membres de pool de nature `archive`, dans l'ordre du JSON."""
     return [m["label"] for m in stage_pool_members(stage) if m["kind"] == ARCHIVE_KIND]
@@ -1241,6 +1327,12 @@ def copy_tensorboard_run(run_dir: str, stage_name: str) -> str:
 POOL_VERDICT_CONTINUE = "continue"
 POOL_VERDICT_PROMOTE = "promote"
 POOL_VERDICT_DESTROY = "destroy"
+#: Plateau SOUS les seuils de promotion (2026-09-17) : le score lisse contre le champion ne monte
+#: plus et les planchers ne sont pas tenus. Le run s'arrete et l'etape est REFUSEE sans gate,
+#: comme une destruction : mesurer le gate couterait des heures pour un chiffre deja connu. Un
+#: plateau AU-DESSUS des seuils rend `promote` (le run de check a vu le plafond, l'etape est
+#: promue sur ses poids courants).
+POOL_VERDICT_PLATEAU = "plateau"
 
 
 class PoolDecision(NamedTuple):
@@ -1285,19 +1377,74 @@ def _pool_score_shortfalls(
     return shortfalls
 
 
+def promotion_floors_held(
+    champion_label: str,
+    mean_scores_vs_pool: Dict[str, float],
+    stage_episodes: int,
+    early_stop_cfg: Dict[str, Any],
+) -> bool:
+    """Vrai quand les planchers de promotion tiennent ET que `promote_min_episodes` est passe.
+
+    La meme lecture que la branche PROMOTION d'`evaluate_pool_decision`, exposee seule pour dater
+    la PREMIERE sonde ou l'etape aurait pu etre promue (`episodes_to_gate` dans `curriculum.log`) —
+    un run de check, qui differe la promotion, doit pouvoir la dater comme un run ordinaire.
+    """
+    if stage_episodes < int(require_key(early_stop_cfg, "promote_min_episodes")):
+        return False
+    return not _pool_score_shortfalls(
+        champion_label,
+        mean_scores_vs_pool,
+        float(require_key(early_stop_cfg, "promote_score_vs_champion")),
+        float(require_key(early_stop_cfg, "promote_score_vs_others")),
+    )
+
+
+def plateau_reached(
+    champion_mean_history: Sequence[float], patience_probes: int, min_delta: float
+) -> Optional[Tuple[float, float]]:
+    """(meilleur d'avant, meilleur des `patience_probes` dernieres) si le score lisse a cesse de
+    monter, None sinon.
+
+    Regle de PATIENCE, celle de l'early stopping usuel : le meilleur score lisse atteint AVANT la
+    fenetre de patience n'a pas ete depasse de `min_delta` par aucune des `patience_probes`
+    dernieres sondes. Une comparaison de deux fenetres adjacentes etait sous le bruit (2,4 pts
+    d'ecart-type sur la difference de deux moyennes de trois sondes de 300 parties) ; la patience
+    demande que le meilleur soit battu, pas que la derniere fenetre depasse la precedente.
+    Rien n'est decidable tant que l'historique ne deborde pas la fenetre de patience.
+    """
+    if len(champion_mean_history) <= patience_probes:
+        return None
+    best_before = max(float(v) for v in champion_mean_history[:-patience_probes])
+    best_recent = max(float(v) for v in champion_mean_history[-patience_probes:])
+    # Tolerance flottante : 0.67 + 0.02 vaut 0.6900000000000001, et 0.69 DOIT compter comme battu.
+    if best_recent + 1e-9 >= best_before + min_delta:
+        return None
+    return best_before, best_recent
+
+
 def evaluate_pool_decision(
     stage_name: str,
     champion_label: Optional[str],
     mean_scores_vs_pool: Dict[str, float],
     stage_episodes: int,
     early_stop_cfg: Dict[str, Any],
+    *,
+    champion_mean_history: Sequence[float] = (),
+    run_to_plateau: bool = False,
 ) -> PoolDecision:
     """Verdict d'arret pendant le run, lu sur les MOYENNES glissantes des sondes.
 
-    Deux branches opposees, et la DESTRUCTION est testee la premiere : elle ouvre plus tot
-    (`destroy_min_episodes` < `promote_min_episodes`) et son seuil est sous celui de la promotion
-    (verrou `validate_early_stop_block`), donc les deux ne peuvent pas etre vraies ensemble —
-    l'ordre est la pour que ca reste vrai si un jour les seuils se rapprochent.
+    Trois branches, dans cet ordre : DESTRUCTION (ouvre la premiere, `destroy_min_episodes` <
+    `promote_min_episodes`, seuil sous celui de la promotion — verrou `validate_early_stop_block`),
+    PROMOTION (planchers tenus apres `promote_min_episodes`), PLATEAU (le score lisse contre le
+    champion ne monte plus, `plateau_reached`, jamais avant `plateau.min_episodes`).
+
+    `champion_mean_history` : les moyennes glissantes successives contre le champion, une par
+    sonde de decision, la plus recente en dernier — c'est sur elle que le plateau se lit.
+    `run_to_plateau` (etape de CHECK, 2026-09-17) : la promotion n'arrete plus le run des que les
+    planchers tiennent ; il continue jusqu'au plateau (promotion si les planchers tiennent alors,
+    refus sinon) ou jusqu'a `plateau.check_budget_cap`. C'est ce qui rend le PLAFOND d'une etape
+    visible : promue a 0,65, une etape ordinaire ne dit jamais si elle plafonnait a 0,70.
 
     Une etape sans champion (P0) n'a pas de pool : rien a decider.
     """
@@ -1320,25 +1467,67 @@ def evaluate_pool_decision(
         ))
 
     promote_after = int(require_key(early_stop_cfg, "promote_min_episodes"))
-    if stage_episodes < promote_after:
-        return PoolDecision(POOL_VERDICT_CONTINUE, (
-            f"{stage_name} : {stage_episodes} episodes d'etape, promotion ouverte a "
-            f"{promote_after}."
-        ))
+    scores_str = ", ".join(
+        f"{lbl}={mean_scores_vs_pool[lbl]:.3f}" for lbl in sorted(mean_scores_vs_pool)
+    )
     shortfalls = _pool_score_shortfalls(
         champion_label,
         mean_scores_vs_pool,
         float(require_key(early_stop_cfg, "promote_score_vs_champion")),
         float(require_key(early_stop_cfg, "promote_score_vs_others")),
     )
-    if shortfalls:
+    floors_held = not shortfalls and stage_episodes >= promote_after
+    if floors_held and not run_to_plateau:
+        return PoolDecision(POOL_VERDICT_PROMOTE, (
+            f"{stage_name} : tous les seuils de promotion tenus a {stage_episodes} episodes d'etape "
+            f"({scores_str}). Le budget restant serait paye pour rien. Run ARRETE."
+        ))
+
+    plateau_cfg = require_key(early_stop_cfg, "plateau")
+    plateau_after = int(require_key(plateau_cfg, "min_episodes"))
+    plateau = (
+        plateau_reached(
+            champion_mean_history,
+            int(require_key(plateau_cfg, "patience_probes")),
+            float(require_key(plateau_cfg, "min_delta")),
+        )
+        if stage_episodes >= plateau_after else None
+    )
+    check_cap = int(require_key(plateau_cfg, "check_budget_cap"))
+    capped = run_to_plateau and stage_episodes >= check_cap
+    if plateau is None and not capped:
+        if run_to_plateau and floors_held:
+            return PoolDecision(POOL_VERDICT_CONTINUE, (
+                f"{stage_name} : seuils de promotion tenus a {stage_episodes} episodes d'etape "
+                f"({scores_str}) — run de CHECK, on continue jusqu'au plateau."
+            ))
+        if stage_episodes < promote_after:
+            return PoolDecision(POOL_VERDICT_CONTINUE, (
+                f"{stage_name} : {stage_episodes} episodes d'etape, promotion ouverte a "
+                f"{promote_after}."
+            ))
         return PoolDecision(POOL_VERDICT_CONTINUE, (
             f"{stage_name} : seuils de promotion non atteints — " + " ; ".join(shortfalls)
         ))
-    return PoolDecision(POOL_VERDICT_PROMOTE, (
-        f"{stage_name} : tous les seuils de promotion tenus a {stage_episodes} episodes d'etape "
-        f"({', '.join(f'{lbl}={mean_scores_vs_pool[lbl]:.3f}' for lbl in sorted(mean_scores_vs_pool))}). "
-        "Le budget restant serait paye pour rien. Run ARRETE."
+
+    if plateau is not None:
+        best_before, best_recent = plateau
+        how = (
+            f"PLATEAU contre {champion_label} a {stage_episodes} episodes d'etape : meilleur "
+            f"score lisse {best_before:.3f}, non depasse de {float(plateau_cfg['min_delta']):.2f} "
+            f"sur les {int(plateau_cfg['patience_probes'])} dernieres sondes (meilleur recent "
+            f"{best_recent:.3f})"
+        )
+    else:
+        how = f"PLAFOND du run de check atteint ({check_cap} episodes d'etape) sans plateau declare"
+    if not shortfalls:
+        return PoolDecision(POOL_VERDICT_PROMOTE, (
+            f"{stage_name} : {how} ; planchers de promotion tenus ({scores_str}). Run ARRETE, "
+            "etape promue sur ses poids courants."
+        ))
+    return PoolDecision(POOL_VERDICT_PLATEAU, (
+        f"{stage_name} : {how} ; planchers NON tenus — " + " ; ".join(shortfalls)
+        + ". Le run ne monte plus : etape REFUSEE, run ARRETE."
     ))
 
 

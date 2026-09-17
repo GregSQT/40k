@@ -455,6 +455,14 @@ POOL_EARLY_STOP_CFG: Dict[str, Any] = {
     "destroy_score_vs_champion": 0.40,
     "destroy_min_episodes": 200,
     "full_pool_probe_every": 1,
+    # Cadence, instantanés et plateau (2026-09-17). Pas d'instantané par défaut : le modèle des
+    # fabriques est un MagicMock, dont `get_env()` ferait boucler `save_vec_normalize` ; les
+    # tests d'instantané posent leurs seuils et doublent l'écriture.
+    "probe_every_episodes": 100,
+    "snapshot_thresholds": [],
+    "plateau": {
+        "patience_probes": 2, "min_delta": 0.02, "min_episodes": 500, "check_budget_cap": 2000,
+    },
 }
 
 
@@ -486,6 +494,8 @@ def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4, **over
         parity_label=None,
         parity_range=(0.40, 0.60),
         intermediate_n_workers=n_workers,
+        snapshot_model_path=str(archive).rsplit("_", 1)[0] + ".zip"
+        if str(archive).endswith(".zip") else str(archive) + ".zip",
     )
     params.update(overrides)
     callback = PoolEarlyStoppingCallback(**params)

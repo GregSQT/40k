@@ -132,6 +132,7 @@ def test_multiple_labels_tracked_independently(tmp_path):
         metrics_tracker=tracker,
         parity_label=None,
         parity_range=(0.40, 0.60),
+        snapshot_model_path=str(tmp_path / "model_T.zip"),
     )
     cb.model = MagicMock()
 
@@ -286,6 +287,7 @@ def test_a_partially_complete_probe_stops_the_run_too(tmp_path):
         metrics_tracker=MagicMock(),
         parity_label=None,
         parity_range=(0.40, 0.60),
+        snapshot_model_path=str(tmp_path / "model_T.zip"),
     )
     cb.model = MagicMock()
 
@@ -347,6 +349,7 @@ def _multi_pool_callback(tmp_path, every: int):
         metrics_tracker=None,
         parity_label=None,
         parity_range=(0.40, 0.60),
+        snapshot_model_path=str(tmp_path / "model_T.zip"),
     )
     cb.model = MagicMock()
     return cb
@@ -426,3 +429,144 @@ def test_every_one_keeps_probing_the_whole_pool(tmp_path):
         _step_at(cb, episode)
 
     assert demandes == [["champion", "vieux_a", "vieux_b"]] * 4
+
+
+# ── Instantanés à seuils, historique du champion, runs de check (2026-09-17) ───────────────
+
+
+def _probing(cb, values):
+    """Doublure de `_probe` rendant les scores du champion dans l'ordre donné."""
+    it = iter(values)
+    return patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": next(it)})
+
+
+def test_a_snapshot_is_written_once_per_threshold_on_the_raw_probe(tmp_path):
+    """0.50 au premier franchissement (0.55), 0.60 au sien (0.65) ; jamais deux fois."""
+    archive = tmp_path / "champ.zip"
+    archive.touch()
+    cb, _ = _callback_with_tracker(
+        archive, early_stop_cfg={**POOL_EARLY_STOP_CFG, "snapshot_thresholds": [0.5, 0.6]}
+    )
+    written = []
+    with patch.object(cb, "_write_threshold_snapshot", side_effect=lambda t, raw, ep: written.append((t, raw, ep))), \
+         _probing(cb, [0.45, 0.55, 0.52, 0.65, 0.70]):
+        for episode in (100, 200, 300, 400, 500):
+            _step_at(cb, episode)
+    assert written == [(0.5, 0.55, 200), (0.6, 0.65, 400)]
+
+
+def test_the_champion_mean_history_starts_when_the_window_is_full(tmp_path):
+    archive = tmp_path / "champ.zip"
+    archive.touch()
+    cb, _ = _callback_with_tracker(archive)
+    with _probing(cb, [0.50, 0.56, 0.59, 0.62]):
+        for episode in (100, 200, 300, 400):
+            _step_at(cb, episode)
+    assert cb.champion_mean_history == pytest.approx([0.55, 0.59])
+
+
+def test_run_to_plateau_and_the_history_reach_the_decision(tmp_path):
+    archive = tmp_path / "champ.zip"
+    archive.touch()
+    cb, _ = _callback_with_tracker(archive, run_to_plateau=True)
+    with patch("ai.training_callbacks.evaluate_pool_decision") as fake, _probing(cb, [0.5, 0.5, 0.5]):
+        fake.return_value = MagicMock(verdict=POOL_VERDICT_CONTINUE, reason="r")
+        for episode in (100, 200, 300):
+            _step_at(cb, episode)
+    kwargs = fake.call_args.kwargs
+    assert kwargs["run_to_plateau"] is True
+    assert kwargs["champion_mean_history"] is cb.champion_mean_history
+    assert cb.champion_mean_history == pytest.approx([0.5])
+
+
+def test_the_first_promotable_probe_is_dated_once_and_only_after_the_floor(tmp_path):
+    """Planchers tenus dès 0.65/0.75 (moyenne 0.70) mais avant 500 : pas daté ; à 600 : daté."""
+    archive = tmp_path / "champ.zip"
+    archive.touch()
+    cb, _ = _callback_with_tracker(archive, run_to_plateau=True)
+    with _probing(cb, [0.65, 0.75, 0.80, 0.85]):
+        _step_at(cb, 300)
+        _step_at(cb, 400)
+        assert cb.first_promotable_episode is None
+        _step_at(cb, 600)
+        assert cb.first_promotable_episode == 600
+        _step_at(cb, 700)
+    assert cb.first_promotable_episode == 600
+    assert cb.stop_verdict is None, "run de check : la promotion n'arrête pas le run"
+
+
+def test_a_check_stage_stops_on_a_plateau_and_promotes_on_its_live_weights(tmp_path):
+    """Patience 2 (fabrique), min_delta 0.02, min_episodes 500 : 3 moyennes à 0.70 → plateau."""
+    archive = tmp_path / "champ.zip"
+    archive.touch()
+    cb, _ = _callback_with_tracker(archive, run_to_plateau=True)
+    with _probing(cb, [0.70] * 8):
+        verdicts = [_step_at(cb, ep) for ep in range(100, 900, 100)]
+    # Historique des moyennes : ep300 [0.7], ep400 [0.7, 0.7], ep500 [0.7, 0.7, 0.7] → plateau
+    # décidable (3 > patience 2) à 500 ≥ min_episodes 500, planchers tenus (≥ 500) : promotion.
+    assert verdicts[:4] == [True] * 4 and verdicts[4] is False
+    assert cb.stop_verdict == POOL_VERDICT_PROMOTE
+    assert "PLATEAU" in cb.stop_reason
+
+
+def test_the_snapshot_writer_produces_the_four_files_of_an_archive(tmp_path, monkeypatch):
+    from ai.run_state import load_run_state
+    from ai.training_contract import contract_path
+
+    canonical = tmp_path / "model_T.zip"
+    archive = tmp_path / "model_T_P0.zip"
+    archive.touch()
+    contract_path(str(canonical))  # chemin seulement
+    (tmp_path / "model_T_training_contract.json").write_text("{}", encoding="utf-8")
+    cb = pool_early_stopping_callback(
+        archive, snapshot_model_path=str(canonical), stage_name="P1", champion_label="champion",
+    )
+
+    class _Model:
+        def save(self, path):
+            open(path, "wb").write(b"zip")
+        def get_env(self):
+            return "env"
+
+    cb.model = _Model()
+    monkeypatch.setattr(
+        "ai.vec_normalize_utils.save_vec_normalize",
+        lambda env, path: (open(path[:-4] + "_vec_normalize.pkl", "wb").write(b"pkl"), True)[1],
+    )
+    with patch.object(cb, "_current_episode", return_value=12345):
+        path = cb._write_threshold_snapshot(0.6, 0.63, 4000)
+
+    assert path == str(tmp_path / "model_T_P1_vschampion_060.zip")
+    assert (tmp_path / "model_T_P1_vschampion_060_vec_normalize.pkl").exists()
+    assert (tmp_path / "model_T_P1_vschampion_060_training_contract.json").exists()
+    assert load_run_state(path) == 12345
+
+
+def test_the_snapshot_writer_refuses_a_model_without_normalisation_stats(tmp_path, monkeypatch):
+    canonical = tmp_path / "model_T.zip"
+    archive = tmp_path / "model_T_P0.zip"
+    archive.touch()
+    cb = pool_early_stopping_callback(archive, snapshot_model_path=str(canonical))
+    cb.model = MagicMock()
+    monkeypatch.setattr("ai.vec_normalize_utils.save_vec_normalize", lambda env, path: False)
+    with pytest.raises(RuntimeError, match="VecNormalize"):
+        cb._write_threshold_snapshot(0.5, 0.51, 100)
+
+
+def test_a_snapshot_already_on_disk_is_kept_not_rewritten(tmp_path):
+    """Reprise après crash : le premier franchissement est celui du fichier existant."""
+    archive = tmp_path / "champ.zip"
+    archive.touch()
+    (tmp_path / "model_T_P-test_vschampion_050.zip").write_bytes(b"premier")
+    cb, _ = _callback_with_tracker(
+        archive, early_stop_cfg={**POOL_EARLY_STOP_CFG, "snapshot_thresholds": [0.5]},
+        snapshot_model_path=str(tmp_path / "model_T.zip"),
+    )
+    written = []
+    with patch.object(cb, "_write_threshold_snapshot", side_effect=lambda t, raw, ep: written.append(t)), \
+         _probing(cb, [0.70, 0.71]):
+        _step_at(cb, 100)
+        _step_at(cb, 200)
+    assert written == []
+    assert (tmp_path / "model_T_P-test_vschampion_050.zip").read_bytes() == b"premier"
+    assert cb.snapshots_written == {0.5: str(tmp_path / "model_T_P-test_vschampion_050.zip")}

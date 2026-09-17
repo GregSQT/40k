@@ -16,6 +16,7 @@ import contextlib
 import functools
 import json
 import os
+import shutil
 import time
 import re
 import math
@@ -41,7 +42,10 @@ from shared.progress_writer import ProgressWriter
 from ai.curriculum import (
     POOL_VERDICT_CONTINUE,
     POOL_VERDICT_DESTROY,
+    POOL_VERDICT_PLATEAU,
     evaluate_pool_decision,
+    promotion_floors_held,
+    stage_model_path,
     validate_early_stop_block,
 )
 from ai.model_artifacts import copy_model_with_companions, remove_model_with_companions
@@ -3158,14 +3162,26 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         metrics_tracker: Any,
         parity_label: Optional[str],
         parity_range: Tuple[float, float],
+        snapshot_model_path: str,
         intermediate_n_workers: Optional[int] = None,
         verbose: int = 1,
         episode_origin: int = 0,
+        run_to_plateau: bool = False,
     ) -> None:
         super().__init__(verbose)
         self._set_stage_origin(episode_origin)
         if not pool_archives:
             raise ValueError("PoolEarlyStoppingCallback : pool_archives ne peut pas être vide")
+        if not isinstance(snapshot_model_path, str) or not snapshot_model_path.endswith(".zip"):
+            raise ValueError(
+                "PoolEarlyStoppingCallback : snapshot_model_path doit être le chemin du modèle "
+                f"CANONIQUE (.zip) dont les instantanés à seuils dérivent leur nom (got "
+                f"{snapshot_model_path!r})"
+            )
+        if not isinstance(run_to_plateau, bool):
+            raise TypeError(
+                f"PoolEarlyStoppingCallback : run_to_plateau doit être un booléen (got {run_to_plateau!r})"
+            )
         labels = [label for _, label in pool_archives]
         if champion_label not in labels:
             raise ValueError(
@@ -3220,6 +3236,28 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         self.parity_label = parity_label
         self.parity_range = (parity_min, parity_max)
         self.intermediate_n_workers = intermediate_n_workers
+        self.snapshot_model_path = snapshot_model_path
+        self.run_to_plateau = run_to_plateau
+        # Seuils d'INSTANTANÉ contre le champion (2026-09-17) : au premier franchissement de
+        # chacun par la sonde BRUTE, le modèle courant est copié sous
+        # `model_<agent>_<étape>_vs<champion>_<0XX>.zip` (+ pkl, contrat, run_state) — un niveau
+        # de difficulté daté, utilisable comme membre `archive` d'une étape suivante. La sonde
+        # brute et non la moyenne : le label est le score de CETTE sonde, et une erreur de 2–3
+        # points sur un label se re-mesure en deux minutes ; attendre trois sondes retarderait la
+        # copie de deux cadences sur un modèle qui, lui, a déjà bougé.
+        self.snapshot_thresholds: List[float] = [
+            float(t) for t in early_stop_cfg["snapshot_thresholds"]
+        ]
+        self.snapshots_written: Dict[float, str] = {}
+        # Moyennes glissantes successives contre le champion (une par sonde où la fenêtre est
+        # pleine), la plus récente en dernier : la série que lit le verdict de plateau.
+        self.champion_mean_history: List[float] = []
+        # Épisode d'ÉTAPE de la première sonde où les planchers de promotion ont tenu (après
+        # `promote_min_episodes`). Publié dans `curriculum.log` sous `episodes_to_gate` : le
+        # nombre de parties qu'une étape met à atteindre son gate est l'indicateur le moins cher
+        # d'un apprentissage qui se dégrade d'une étape à l'autre — et il reste comparable qu'un
+        # run soit ordinaire (il s'arrête là) ou de check (il continue).
+        self.first_promotable_episode: Optional[int] = None
 
         # Historique par label des `probe_window` dernières sondes. Il porte la MOYENNE sur
         # laquelle les deux verdicts se prennent : il est donc tenu à jour même sans
@@ -3352,6 +3390,63 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                 )
         return means
 
+    def _threshold_snapshot_path(self, threshold: float) -> str:
+        """`model_<agent>_<étape>_vs<champion>_<0XX>.zip`, dérivé du canonique comme une étape."""
+        label = f"{self.stage_name}_vs{self.champion_label}_{int(round(threshold * 100)):03d}"
+        return stage_model_path(self.snapshot_model_path, label)
+
+    def _write_threshold_snapshot(self, threshold: float, raw_score: float, stage_episode: int) -> str:
+        """Copie le modèle courant (zip + stats + contrat + état de run) au chemin du seuil.
+
+        Même sauvegarde que la sonde (`_run_checkpoint_probe` : `model.save` + stats VecNormalize),
+        plus le contrat du run et le compte d'épisodes — les quatre fichiers qu'une reprise ou un
+        membre `archive` exigent (`require_archive_members_on_disk`). LÈVE si les stats ne sont pas
+        écrites : un instantané sans pkl jouerait sur des observations qu'il n'a jamais vues.
+        """
+        from ai.run_state import save_run_state
+        from ai.training_contract import contract_path
+        from ai.vec_normalize_utils import save_vec_normalize
+
+        path = self._threshold_snapshot_path(threshold)
+        self.model.save(path)
+        if not save_vec_normalize(self.model.get_env(), path):
+            raise RuntimeError(
+                f"Instantané {os.path.basename(path)} : aucune statistique VecNormalize écrite — "
+                "l'environnement d'entraînement n'est pas normalisé, l'instantané serait injouable."
+            )
+        save_run_state(path, int(self._current_episode()))
+        source_contract = contract_path(self.snapshot_model_path)
+        if not os.path.exists(source_contract):
+            raise FileNotFoundError(
+                f"Instantané {os.path.basename(path)} : contrat du run absent ({source_contract}). "
+                "Le prologue l'écrit avant tout entraînement ; sans lui l'instantané n'est pas reprenable."
+            )
+        shutil.copy2(source_contract, contract_path(path))
+        safe_print(
+            f"📸 Instantané : {self.stage_name} bat {self.champion_label} à {raw_score:.3f} "
+            f"(seuil {threshold:.2f}) @ep{stage_episode} d'étape → {os.path.basename(path)}"
+        )
+        return path
+
+    def _snapshot_crossed_thresholds(self, raw_champion_score: float, stage_episode: int) -> None:
+        """Un instantané par seuil, au PREMIER franchissement par la sonde brute."""
+        for threshold in self.snapshot_thresholds:
+            if threshold in self.snapshots_written or raw_champion_score < threshold:
+                continue
+            existing = self._threshold_snapshot_path(threshold)
+            if os.path.exists(existing):
+                # Reprise après crash : le premier franchissement a déjà été copié par le run
+                # précédent, et le nom promet CE franchissement — pas un modèle plus tardif.
+                self.snapshots_written[threshold] = existing
+                safe_print(
+                    f"📸 Instantané au seuil {threshold:.2f} déjà sur disque "
+                    f"({os.path.basename(existing)}) : conservé, non réécrit."
+                )
+                continue
+            self.snapshots_written[threshold] = self._write_threshold_snapshot(
+                threshold, raw_champion_score, stage_episode
+            )
+
     def _on_step(self) -> bool:
         # Épisodes DE L'ÉTAPE : la cadence compte depuis le début du run, pas depuis la naissance
         # de la lignée (cf. `_EvalPoolOwnerMixin._set_stage_origin`).
@@ -3403,6 +3498,10 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         means = {
             lbl: float(np.mean(hist)) for lbl, hist in self._probe_score_history.items()
         }
+        # Le champion est sondé à CHAQUE tour (`_archives_for`), donc son score brut est là.
+        self._snapshot_crossed_thresholds(float(scores[self.champion_label]), stage_episode)
+        if len(self._probe_score_history[self.champion_label]) >= self.probe_window:
+            self.champion_mean_history.append(means[self.champion_label])
         score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}(→{means[lbl]:.3f})" for lbl in labels)
         if not full_pool:
             score_str += f" [champion seul, pool entier toutes les {self.full_pool_probe_every}]"
@@ -3422,8 +3521,18 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
             )
             return True
 
+        if self.first_promotable_episode is None and promotion_floors_held(
+            self.champion_label, means, stage_episode, self.early_stop_cfg
+        ):
+            self.first_promotable_episode = int(stage_episode)
+            safe_print(
+                f"🎯 Planchers de promotion tenus pour la première fois à {stage_episode} "
+                f"épisodes d'étape ({score_str})."
+            )
         decision = evaluate_pool_decision(
-            self.stage_name, self.champion_label, means, stage_episode, self.early_stop_cfg
+            self.stage_name, self.champion_label, means, stage_episode, self.early_stop_cfg,
+            champion_mean_history=self.champion_mean_history,
+            run_to_plateau=self.run_to_plateau,
         )
         if decision.verdict == POOL_VERDICT_CONTINUE:
             safe_print(f"📊 Pool : {score_str} @ep{current} — {decision.reason}")
@@ -3431,7 +3540,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
         self.stop_verdict = decision.verdict
         self.stop_reason = decision.reason
-        marker = "🛑" if decision.verdict == POOL_VERDICT_DESTROY else "✅"
+        marker = "🛑" if decision.verdict in (POOL_VERDICT_DESTROY, POOL_VERDICT_PLATEAU) else "✅"
         safe_print(f"{marker} Pool : {score_str} @ep{current}")
         safe_print(f"{marker} {decision.reason}")
         return False

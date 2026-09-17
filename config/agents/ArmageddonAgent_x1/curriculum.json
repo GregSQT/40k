@@ -49,7 +49,16 @@
     "destroy_score_vs_champion": 0.50,
     "destroy_min_episodes": 20000,
     "_doc_full_pool_probe_every": "CADENCE DE COUT, pas un seuil (2026-09-07). Le champion est sonde a CHAQUE sonde, les autres membres du pool un tour sur trois. Sonder tout le pool a chaque fois fait suivre le cout de la sonde a la TAILLE du pool, qui croit d'une etape a l'autre : a P10 (13 membres, 300 000 episodes, bot_eval_freq 10 000, 300 episodes par membre) cela fait 117 000 episodes d'evaluation BLOQUANTS sur le fil d'entrainement pour 300 000 episodes entraines, la ou la sonde champion seul d'avant le 2026-09-07 en coutait 9 000. A 3, il en reste ~48 600, soit -58 %. POURQUOI CE DECOUPAGE ET PAS UNE CADENCE UNIQUE DEGRADEE : les deux verdicts n'ont pas le meme besoin de fraicheur. La DESTRUCTION ne lit que le champion et doit couper vite — chaque sonde retardee est du budget brule sur une politique deja defaite. La PROMOTION lit tout le pool mais ne s'ouvre qu'a promote_min_episodes, et arreter un run trop tard coute une fraction de ce que coute l'arreter a tort. CE QUI N'EST PAS DEGRADE : le verdict lit toujours le pool ENTIER — les membres non sondes au tour courant gardent leur derniere moyenne connue, au plus trois sondes en arriere. Les DEUX PREMIERS tours restent pleins quelle que soit cette valeur : aucun verdict n'est rendu tant qu'un membre n'a pas deux points, et sans eux la destruction attendrait 40 000 episodes au lieu des 20 000 que son seuil demande. 1 = tout le pool a chaque sonde (comportement d'avant).",
-    "full_pool_probe_every": 3
+    "full_pool_probe_every": 3,
+    "_doc_2026_09_17": "TROIS AJOUTS du 2026-09-17 (decision utilisateur, plafonnement_p1.md section 5.15 fin). (1) probe_every_episodes 5000 : la cadence des sondes de pool ne suit plus bot_eval_freq (10 000, evaluation contre les bots) — une sonde de 300 parties coute ~3 min pour ~40-50 min d'entrainement, et c'est la resolution temporelle des sondes, pas leur taille, qui date un franchissement ou une cassure ; a cout egal, 300 parties tous les 5 000 valent 600 tous les 10 000 sur toute fenetre lissee et voient deux fois mieux. (2) snapshot_thresholds [0.50, 0.60, 0.70] : au PREMIER franchissement de chaque seuil par la sonde BRUTE contre le champion, le modele courant est copie sous model_<agent>_<etape>_vs<champion>_<0XX>.zip (+ pkl, contrat, run_state) — des niveaux de difficulte dates, utilisables comme membres 'archive' d'une etape suivante. Sonde brute et non moyenne : le label est le score de cette sonde, une erreur de 2-3 points se re-mesure en deux minutes (scripts/seat_matrix_probe.py), et des paliers de 5 % seraient sous le bruit (sigma 2,7 pts par sonde). 0.50 tombe souvent des la premiere sonde (parite d'ouverture) : c'est le niveau '= champion', voulu. (3) plateau : ARRET PAR PATIENCE, actif sur TOUTES les etapes a pool. Le meilleur score lisse (moyenne de probe_window sondes) contre le champion est retenu ; le run s'arrete quand patience_probes sondes consecutives ne l'ont pas depasse de min_delta, jamais avant min_episodes d'etape. Sous les seuils de promotion : etape REFUSEE sans gate (verdict 'plateau', meme court-circuit que la destruction) — jusqu'ici une etape non promue brulait son budget entier (200 000-300 000 parties). Au-dessus : promotion. POURQUOI LA PATIENCE et non deux fenetres adjacentes : la difference de deux moyennes de trois sondes a un ecart-type de 2,4 pts, un seuil de 2 pts dessus lisait 'plateau' une fois sur trois pendant une montee de 3 pts par fenetre. Reglage : patience 4 sondes (20 000 parties), min_delta 0.02, min_episodes 40 000 (S9 montait encore a 40 000, B a 30 000), check_budget_cap 100 000. Une conclusion 'probleme d'apprentissage' exige de toute facon une seconde graine. RUN DE CHECK (cle d'etape run_to_plateau: true, sur P1, P4, P6, P9 — l'etape qui suit chaque exploiteur) : la promotion n'arrete plus le run des que les planchers tiennent, il continue jusqu'au plateau ou a check_budget_cap ; c'est ce qui rend le PLAFOND visible — promue a 0,65 (B, 0,666 sur une courbe montante), une etape ordinaire ne dit jamais si elle plafonnait a 0,70. Un curriculum entier a ce regime couterait des jours de GPU pour une information redondante ; l'indicateur bon marche pour les autres etapes est episodes_to_gate dans curriculum.log (premiere sonde ou les planchers ont tenu) : s'il grandit d'une etape a l'autre, c'est le signal.",
+    "probe_every_episodes": 5000,
+    "snapshot_thresholds": [0.50, 0.60, 0.70],
+    "plateau": {
+      "patience_probes": 4,
+      "min_delta": 0.02,
+      "min_episodes": 40000,
+      "check_budget_cap": 100000
+    }
   },
 
   "stages": {
@@ -65,6 +74,7 @@
     "P1": {
       "_doc": "NOUVEAU CYCLE (2026-09-17, decision utilisateur) : P0 est le P0 NEUF entraine a froid sur le moteur fige (ex-ArmageddonAgent_x1_p0ctrl, robuste 0,903), et le pool de P1 contient, outre ce champion, TROIS ARCHIVES de l'ancien cycle (kind 'archive' : modeles etrangers au curriculum, deposes sous model_<agent>_<label>.zip + _vec_normalize.pkl, presence verifiee au lancement) : P1a = ancien P1 promu le 16 (P0 le bat a 0,557 : le sparring le plus dur), P0a = ancienne racine du 10 (0,753), P0b = premiere tentative du 10 (0,720). Quotas 0,40 / 0,15 / 0,075 / 0,075 (somme 0,70 = ratio_end) : le champion porte la plus grosse part parce que c'est lui que le gate exige a 0,65 ; la part des archives suit leur difficulte mesuree (matrice du 17, logs/matrix_heldout_20260917/). Gate : 0,65 contre P0, 0,60 contre chaque archive (plancher others). POURQUOI des archives : la matrice du 16 a montre que la lignee P0 -> P1 apprenait a battre SA famille (0,70 contre P0) sans rien gagner contre un style etranger (0,68 contre le temoin, comme P0) ; un humain est hors famille. Dossier : Documentation/Chantiers/backlog/plafonnement_p1.md section 5.15 fin. ANCIEN TEXTE, conserve pour l'historique : Premier champion issu du self-play : reprend P0 et l'affronte. Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST P0 a l'episode 0, il fait jeu egal par construction et n'a rien a etre protege ; une rampe ne ferait que substituer des parties de bots — gagnees a ~92 % — aux parties de pool, sans signal correctif. 30 % de bots et non 15 % : le pool de P1 n'a qu'UN membre, cf. _doc_part_bots. ⚠️ LE MODELE P1 EN SERVICE N'A PAS ETE ENTRAINE SOUS CE REGLAGE : sa config d'alors annoncait ratio_end 0.50 precede d'une rampe qui le faisait DEMARRER a 100 % de bots. MESURE de ce qu'il a REELLEMENT joue (tensorboard/P1, 80 075 episodes) : 25 063 episodes contre P0, soit 31,3 % — donc pres de 69 % de bots, et non les 50 % annonces. L'ecart n'a PAS ete elucide, le run n'etant pas rejoue. Retenir de ce chiffre qu'un ratio_end n'est pas une mesure : la seule lecture fiable de la part reellement jouee est le rapport entre les points de 03_selfplay/<membre> et ceux de actions/share_deploy_slot, a 500 pres (la fenetre de lissage). La decision du 2026-09-06 est de ne PAS le rejouer — le temps est deja paye — mais d'homogeneiser sa config avec le reste de la lignee. Ne pas lire les valeurs ci-dessous comme une description du modele P1 existant.",
       "role": "learner",
+      "run_to_plateau": true,
       "init": "from:P0",
       "warmup_episodes": 0,
       "ratio_start": 0.70,
@@ -123,6 +133,7 @@
     "P4": {
       "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P3 (init from:P3) et P3 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
+      "run_to_plateau": true,
       "init": "from:P3",
       "warmup_episodes": 0,
       "ratio_start": 0.85,
@@ -167,6 +178,7 @@
     "P6": {
       "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P5 (init from:P5) et P5 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
+      "run_to_plateau": true,
       "init": "from:P5",
       "warmup_episodes": 0,
       "ratio_start": 0.85,
@@ -227,6 +239,7 @@
     "P9": {
       "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P8 (init from:P8) et P8 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
+      "run_to_plateau": true,
       "init": "from:P8",
       "warmup_episodes": 0,
       "ratio_start": 0.85,

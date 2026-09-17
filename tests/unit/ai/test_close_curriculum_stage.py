@@ -308,6 +308,55 @@ def test_un_verdict_destroy_ne_paie_pas_la_mesure_du_gate(tmp_path, monkeypatch)
     assert appels == [], "le gate ne doit rien mesurer apres un verdict de destruction"
 
 
+def test_un_verdict_plateau_refuse_letape_sans_mesurer_le_gate(tmp_path, monkeypatch):
+    """PLATEAU sous les seuils (2026-09-17) : meme court-circuit que la destruction.
+
+    Le score lisse ne monte plus et les planchers ne tiennent pas : mesurer le gate couterait des
+    heures pour un chiffre deja connu — et, sous `save_best_robust`, sur un AUTRE modele que celui
+    que le run a juge. Le journal porte le verdict, sa raison et `episodes_to_gate`.
+    """
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    run_info["pool_stop_verdict"] = curriculum_mod.POOL_VERDICT_PLATEAU
+    run_info["pool_stop_reason"] = "P4 : PLATEAU contre P3 a 60000 ; planchers NON tenus."
+    run_info["episodes_to_gate"] = None
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    appels = []
+    monkeypatch.setattr(
+        train_mod, "_score_stage_against_pool",
+        lambda *a, **kw: appels.append(1) or {"P3": 0.65},
+    )
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    assert train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info) == 1
+    assert appels == [], "le gate ne doit rien mesurer apres un plateau sous les seuils"
+    assert not (tmp_path / "model_Stub_P4.zip").exists()
+    entry = [json.loads(line) for line in log_path.read_text().splitlines()][-1]
+    assert entry["pool_stop_verdict"] == curriculum_mod.POOL_VERDICT_PLATEAU
+    assert "PLATEAU" in entry["gate_reason"] and entry["gate_accepted"] is False
+    assert "episodes_to_gate" in entry and entry["episodes_to_gate"] is None
+
+
+def test_close_stage_relit_episodes_to_gate_dans_le_sidecar(tmp_path, monkeypatch):
+    canonical, args, config, curriculum, _stage, _ = _make_context(tmp_path)
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum)
+    train_mod.save_pool_stop_verdict(
+        canonical, curriculum_mod.POOL_VERDICT_PROMOTE, "promue", episodes_to_gate=35000,
+    )
+    run_info = train_mod._run_info_from_disk(args, config, curriculum)
+    assert run_info["episodes_to_gate"] == 35000
+    assert train_mod.load_pool_stop_verdict(canonical) == (curriculum_mod.POOL_VERDICT_PROMOTE, "promue")
+
+
+def test_un_sidecar_sans_verdict_garde_episodes_to_gate(tmp_path, monkeypatch):
+    """Fin par budget apres des planchers tenus (run de check) : le sidecar existe, verdict None."""
+    canonical, args, config, curriculum, _stage, _ = _make_context(tmp_path)
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum)
+    train_mod.save_pool_stop_verdict(canonical, None, None, episodes_to_gate=42000)
+    run_info = train_mod._run_info_from_disk(args, config, curriculum)
+    assert run_info["pool_stop_verdict"] is None and run_info["pool_stop_reason"] is None
+    assert run_info["episodes_to_gate"] == 42000
+
+
 def test_un_verdict_promote_laisse_le_gate_mesurer_et_promouvoir(tmp_path, monkeypatch):
     """Contre-epreuve : SEUL `destroy` court-circuite.
 
