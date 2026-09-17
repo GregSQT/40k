@@ -16,6 +16,8 @@ import React from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "../auth/authStorage";
 import type { Unit, Weapon } from "../types/game";
+import { cubeSub } from "../utils/blockSelection";
+import { offsetToCube } from "../utils/gameHelpers";
 import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
 import { readManualAllocationPrompt, readManualOrderPrompt, useEngineAPI } from "./useEngineAPI";
@@ -1406,6 +1408,9 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
     ],
   ];
 
+  /** Zone d'atterrissage du bloc (format compact [x0,y0,x1,y1,…], comme move_model_destinations). */
+  const LOOPS = [[0, 0, 10, 0, 10, 10, 0, 10]];
+
   const monteServeur = (bodies: Array<Record<string, unknown>>, pool: unknown[] = POOL) => {
     server.use(
       http.post("/api/game/start", () =>
@@ -1417,7 +1422,11 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
         if (body.action === "move_block_destinations") {
           return HttpResponse.json({
             success: true,
-            result: { action: "move_block_destinations", destinations: pool },
+            result: {
+              action: "move_block_destinations",
+              destinations: pool,
+              footprint_mask_loops: LOOPS,
+            },
           });
         }
         if (body.action === "preview_move_plan") {
@@ -1435,7 +1444,7 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
     );
   };
 
-  it("relâchement → entrée en plan par-fig, pool demandé au moteur avec les figurines du bloc", async () => {
+  it("relâchement → entrée en plan par-fig, pool moteur exposé (snap PIXI côté board), zone posée", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     monteServeur(bodies);
     const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
@@ -1446,31 +1455,41 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
     });
 
     expect(result.current.mode).toBe("perModelMove");
+    // Relâché en (6,12) : grab = origine (5,10) − (6,12) → le bloc garde son décalage au curseur.
     expect(result.current.blockFollow).toMatchObject({
       kind: "move",
       unitId: 10,
       modelIds: ["10#0", "10#1"],
       anchorModelId: "10#0",
+      grab: cubeSub(offsetToCube(5, 10), offsetToCube(6, 12)),
     });
+    expect([...result.current.blockPoolRef.current.keys()]).toEqual(["5,11", "5,12"]);
+    // État « pool + zone » identique à celui d'une figurine sélectionnée → même rendu de zone.
+    expect([...result.current.squadMoveModelPoolRef.current]).toEqual(["5,11", "5,12"]);
+    expect(result.current.squadMoveModelMaskLoopsRef.current).toEqual(LOOPS);
     const req = bodies.find((b) => b.action === "move_block_destinations");
     expect(req).toMatchObject({ model_ids: ["10#0", "10#1"], provisional_plan: {}, level: 0 });
+    // Le suivi n'écrit PAS le plan : les figurines restent à l'origine jusqu'à la pose.
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 10 });
     expect(result.current.actionRefusal).toBeNull();
   });
 
-  it("suivi : l'ancre voulue snappe sur le pool et CHAQUE figurine prend sa destination ; clic = pose", async () => {
+  it("pose à l'ancre snappée : CHAQUE figurine prend sa destination du pool, plan re-jugé, zone effacée", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     monteServeur(bodies);
     const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
     await act(async () => {
-      // Relâché en (6,12) : grab = origine (5,10) − (6,12) → le bloc garde son décalage au curseur.
       await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
     });
 
-    // Curseur en (6,14) → ancre voulue (5,12) : dans le pool, prise telle quelle.
     await act(async () => {
-      result.current.onBlockFollowHex(6, 14);
+      result.current.onFreezeBlock("5,12");
     });
+    expect(result.current.blockFollow).toBeNull();
+    expect(result.current.blockPoolRef.current.size).toBe(0);
+    expect(result.current.squadMoveModelPoolRef.current.size).toBe(0);
+    expect(result.current.squadMoveModelMaskLoopsRef.current).toBeNull();
     expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({
       col: 5,
       row: 12,
@@ -1481,24 +1500,11 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
       row: 12,
       level: 0,
     });
-
-    // Curseur en (6,12) → ancre voulue (5,10) = origine, HORS pool → snap sur (5,11), la plus proche.
-    await act(async () => {
-      result.current.onBlockFollowHex(6, 12);
-    });
-    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 11 });
-    expect(result.current.squadMovePlan?.models["10#1"]).toMatchObject({ col: 6, row: 11 });
-
-    await act(async () => {
-      result.current.onFreezeBlock();
-    });
-    expect(result.current.blockFollow).toBeNull();
-    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 11 });
-    // La pose re-juge le plan par le flux existant.
+    await waitFor(() => expect(result.current.squadMovePlan?.canValidate).toBe(true));
     expect(bodies.filter((b) => b.action === "preview_move_plan").length).toBeGreaterThan(0);
   });
 
-  it("clic droit : abandon → figurines revenues à l'origine", async () => {
+  it("pose à une ancre hors pool → erreur explicite (jamais de pose hors moteur)", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     monteServeur(bodies);
     const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
@@ -1506,15 +1512,24 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
     await act(async () => {
       await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
     });
+    expect(() => result.current.onFreezeBlock("9,9")).toThrow(/absente du pool/);
+  });
+
+  it("clic droit : abandon → plan intact, bloc et zone effacés", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    monteServeur(bodies);
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
     await act(async () => {
-      result.current.onBlockFollowHex(6, 14);
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
     });
-    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 12 });
 
     await act(async () => {
       result.current.onCancelBlock();
     });
     expect(result.current.blockFollow).toBeNull();
+    expect(result.current.blockPoolRef.current.size).toBe(0);
+    expect(result.current.squadMoveModelMaskLoopsRef.current).toBeNull();
     expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 10 });
     expect(result.current.squadMovePlan?.models["10#1"]).toMatchObject({ col: 6, row: 10 });
   });
@@ -1533,8 +1548,8 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
   });
 
   it("une réponse de validité PÉRIMÉE (plan déjà remplacé) n'écrase pas la dernière", async () => {
-    // Le suivi émet un preview_move_plan par hex : la 1re réponse (ancre 5,12) arrive APRÈS la 2e
-    // (ancre 5,11). Sans garde de séquence, la validité affichée serait celle d'un plan disparu.
+    // Deux poses successives : la 1re (ancre 5,12) reçoit sa réponse APRÈS la 2e (ancre 5,11).
+    // Sans garde de séquence, la validité affichée serait celle d'un plan disparu.
     server.use(
       http.post("/api/game/start", () =>
         HttpResponse.json({ success: true, game_state: etatMove() })
@@ -1579,10 +1594,13 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
       await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
     });
     await act(async () => {
-      result.current.onBlockFollowHex(6, 14); // ancre (5,12) → réponse LENTE, can_validate false
+      result.current.onFreezeBlock("5,12"); // réponse LENTE, can_validate false
     });
     await act(async () => {
-      result.current.onBlockFollowHex(6, 12); // ancre (5,11) → réponse immédiate, can_validate true
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
+    });
+    await act(async () => {
+      result.current.onFreezeBlock("5,11"); // réponse immédiate, can_validate true
     });
     await waitFor(() => expect(result.current.squadMovePlan?.canValidate).toBe(true));
     await act(async () => {

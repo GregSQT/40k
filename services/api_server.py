@@ -3699,6 +3699,12 @@ def execute_action():
                     [ac, ar, [[mid, c, r, lv] for mid, (c, r, lv) in placements.items()]]
                     for ac, ar, placements in _anchors
                 ],
+                # Zone d'atterrissage du bloc (même contrat que move_model_destinations).
+                "footprint_mask_loops": _compact_mask_loops_for_api_json(
+                    _mh_block.movement_block_footprint_mask_loops(
+                        engine.game_state, _anchors, orientations=_orients
+                    )
+                ),
             },
         })
 

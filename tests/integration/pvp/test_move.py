@@ -299,11 +299,12 @@ class TestBlockDestinations:
         block = game.models_of(unit_id)[:2]
         origins = {mid: _model_position(game, mid) for mid in block}
 
-        anchors = game.act("move_block_destinations", model_ids=block, provisional_plan={})["result"][
-            "destinations"
-        ]
+        result = game.act("move_block_destinations", model_ids=block, provisional_plan={})["result"]
+        anchors = result["destinations"]
 
         assert anchors, "aucune ancre de bloc"
+        # Zone d'atterrissage (contours compacts [x0,y0,…]) : ce que le board dessine pendant le suivi.
+        assert result["footprint_mask_loops"] and all(len(l) >= 6 for l in result["footprint_mask_loops"])
         for anchor_col, anchor_row, placements in anchors:
             by_model = {p[0]: (p[1], p[2]) for p in placements}
             assert set(by_model) == set(block), f"ancre {(anchor_col, anchor_row)} : figurines {set(by_model)}"

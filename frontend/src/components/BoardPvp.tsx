@@ -38,7 +38,14 @@ import {
   type HpBarHtmlTooltipPayload,
   pixiStagePointToClientScreen,
 } from "../utils/blinkingHPBar";
-import { normalizeRect, type SelectableModel, selectBlockInRect } from "../utils/blockSelection";
+import {
+  type BlockPool,
+  cubeAdd,
+  normalizeRect,
+  type SelectableModel,
+  selectBlockInRect,
+  snapBlockAnchor,
+} from "../utils/blockSelection";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
 import {
@@ -973,15 +980,19 @@ type BoardProps = {
     releaseCol: number,
     releaseRow: number
   ) => void | Promise<void>;
-  /** Bloc en cours de suivi (useEngineAPI) — son pool et son snap vivent dans le hook. */
+  /** Bloc en cours de suivi (useEngineAPI). ``grab`` : vecteur cube « origine de l'ancre − hex de
+   * relâchement » — le bloc garde son décalage au curseur. Le suivi est PIXI pur : fantômes
+   * snappés sur ``blockPoolRef`` à chaque mousemove, aucun state ; ``onFreezeBlock(anchorKey)``
+   * pose le bloc à l'ancre snappée courante. */
   blockFollow?: {
     kind: "move" | "charge";
     unitId: number;
     modelIds: string[];
     anchorModelId: string;
+    grab: { x: number; y: number; z: number };
   } | null;
-  onBlockFollowHex?: (col: number, row: number) => void;
-  onFreezeBlock?: () => void;
+  blockPoolRef?: React.RefObject<BlockPool>;
+  onFreezeBlock?: (anchorKey: string) => void;
   onCancelBlock?: () => void;
   /** true → masque tous les indicateurs autour des icônes (HP, badges, cercle vert, voiles, tooltips). Les icônes restent visibles. */
   hideIndicators?: boolean;
@@ -1438,7 +1449,7 @@ export default function Board({
   rectSelectMode = false,
   onRectSelectionCommit,
   blockFollow = null,
-  onBlockFollowHex,
+  blockPoolRef,
   onFreezeBlock,
   onCancelBlock,
   hideIndicators = false,
@@ -1530,6 +1541,8 @@ export default function Board({
   /** Rectangle de sélection + voile vert (outil sélection rectangle) — persistant à travers la
    *  purge du stage, comme les autres overlays : sinon `redraw` dessine sur un Graphics détruit. */
   const rectSelectOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Fantômes du bloc en suivi (sélection rectangle) — persistant à travers la purge du stage. */
+  const blockGhostLayerRef = useRef<PIXI.Container | null>(null);
   /** Redessine les cercles à l'hex survolé : les cercles suivent le ghost pendant un preview.
    *  ``null`` quand aucune fig n'est activée (ou option désactivée) → les handlers n'ont rien à faire. */
   const rangeRingsFollowRef = useRef<((col: number, row: number) => void) | null>(null);
@@ -8341,7 +8354,6 @@ export default function Board({
     squadMovePlan,
     chargeMovePlan,
     onRectSelectionCommit,
-    onBlockFollowHex,
     onFreezeBlock,
     onCancelBlock,
   });
@@ -8355,7 +8367,6 @@ export default function Board({
     squadMovePlan,
     chargeMovePlan,
     onRectSelectionCommit,
-    onBlockFollowHex,
     onFreezeBlock,
     onCancelBlock,
   };
@@ -8568,15 +8579,118 @@ export default function Board({
     };
   }, [rectSelectMode, blockFollow, boardConfig, collectRectSelectableModels]);
 
-  // Bloc en suivi : le curseur pilote l'ancre (le hook snappe sur le pool moteur et écrit le plan,
-  // dont le rendu suit — miroir du suivi de déploiement). Clic gauche = pose, clic droit /
-  // Échap = abandon. Capture window : rien d'autre ne voit ces clics.
+  // Bloc en suivi — miroir du move preview d'escouade : un FANTÔME par figurine (socle + icône,
+  // alpha 0.65) suit le curseur, snappé à chaque mousemove sur le pool moteur (``blockPoolRef``),
+  // sans aucun state React (c'est ce qui le rend fluide) ; la zone d'atterrissage est dessinée par
+  // le board (mask loops posées par le hook). Clic gauche = pose à l'ancre snappée courante,
+  // clic droit / Échap = abandon. Capture window : rien d'autre ne voit ces clics.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: units_cache ne sert qu'à l'orientation du socle à la construction du fantôme ; en dep, chaque poll d'état détruirait et reconstruirait les fantômes.
   useEffect(() => {
     if (!blockFollow || !boardConfig) return;
     const app = appRef.current;
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     if (!app || !canvas) return;
-    let lastKey = "";
+    const unit = unitsRef.current.find((u) => String(u.id) === String(blockFollow.unitId));
+    if (!unit) {
+      throw new Error(`block follow: unité ${blockFollow.unitId} absente de units`);
+    }
+    const HEX_R = boardConfig.hex_radius;
+    const HEX_W = 1.5 * HEX_R;
+    const HEX_H = Math.sqrt(3) * HEX_R;
+    const MARGIN = boardConfig.margin;
+    const center = (c: number, r: number): [number, number] => [
+      c * HEX_W + HEX_W / 2 + MARGIN,
+      r * HEX_H + ((c % 2) * HEX_H) / 2 + HEX_H / 2 + MARGIN,
+    ];
+    // Un fantôme par figurine, même construction que le move preview d'escouade (~L3916).
+    const layer = new PIXI.Container();
+    layer.zIndex = 2500;
+    layer.eventMode = "none";
+    layer.interactiveChildren = false;
+    layer.alpha = 0.65;
+    app.stage.addChild(layer);
+    blockGhostLayerRef.current = layer;
+    const ghostByModel = new Map<string, PIXI.Container>();
+    const baseColor = unit.player === 1 ? 0x1d4ed8 : 0x882222;
+    const cacheEntry = (
+      gameState?.units_cache as
+        | Record<
+            string,
+            {
+              models_meta_by_model?: Record<string, ModelVisualMeta>;
+              orientation_by_model?: Record<string, number>;
+            }
+          >
+        | undefined
+    )?.[String(unit.id)];
+    const unitOrientation = orientationStepForBoard(unit, gameState?.units_cache);
+    for (const mid of blockFollow.modelIds) {
+      // Escouade hétérogène (personnage attaché, sergent) : visuel COMPLET de LA figurine
+      // (models_meta_by_model), comme le ghost per-fig — sinon le Warboss est dessiné en Boy.
+      const meta = cacheEntry?.models_meta_by_model?.[mid];
+      const effectiveUnit = meta ? { ...unit, ...meta } : unit;
+      const nr = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
+      const bd = resolveBaseSizeForUnitDisplay(effectiveUnit);
+      const defaultIconDiam = bd > 1 ? bd * 1.5 * HEX_R : HEX_R * (effectiveUnit.ICON_SCALE ?? 1.0);
+      const orientation = cacheEntry?.orientation_by_model?.[mid] ?? unitOrientation;
+      const g = new PIXI.Container();
+      const base = new PIXI.Graphics();
+      base.beginFill(baseColor, 0.7);
+      if (nr) {
+        if (nr.kind === "oval") base.drawEllipse(0, 0, nr.outerRx, nr.outerRy);
+        else
+          base.drawRoundedRect(
+            -nr.squareHalf,
+            -nr.squareHalf,
+            nr.squareSide,
+            nr.squareSide,
+            getSquareCornerRadiusPx()
+          );
+        if (orientation !== undefined) base.rotation = orientationStepToRadians(orientation);
+      } else {
+        base.drawCircle(0, 0, defaultIconDiam / 2);
+      }
+      base.endFill();
+      g.addChild(base);
+      if (effectiveUnit.ICON) {
+        const iconPath =
+          unit.player === 2 ? effectiveUnit.ICON.replace(".webp", "_red.webp") : effectiveUnit.ICON;
+        const sprite = new PIXI.Sprite(PIXI.Texture.from(iconPath));
+        sprite.anchor.set(0.5);
+        const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
+        const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
+        sprite.width = iconDiam;
+        sprite.height = iconDiam;
+        if (nonRoundIconR != null) {
+          const maskG = new PIXI.Graphics();
+          maskG.beginFill(0xffffff);
+          maskG.drawCircle(0, 0, nonRoundIconR);
+          maskG.endFill();
+          sprite.mask = maskG;
+          g.addChild(maskG);
+        }
+        g.addChild(sprite);
+      }
+      g.visible = false;
+      layer.addChild(g);
+      ghostByModel.set(mid, g);
+    }
+    let currentKey: string | null = null;
+    const placeAt = (key: string) => {
+      const placements = blockPoolRef?.current.get(key);
+      if (!placements) {
+        throw new Error(`block follow: ancre ${key} absente du pool`);
+      }
+      for (const [mid, [c, r]] of Object.entries(placements)) {
+        const g = ghostByModel.get(mid);
+        if (!g) continue;
+        const [x, y] = center(c, r);
+        g.position.set(x, y);
+        g.visible = true;
+      }
+      currentKey = key;
+      app.render();
+    };
     const hexUnder = (e: MouseEvent): { col: number; row: number } | null => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
@@ -8594,20 +8708,30 @@ export default function Board({
       if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return null;
       return { col, row };
     };
+    let lastHex = "";
     const onMove = (e: MouseEvent) => {
       const h = hexUnder(e);
       if (!h) return;
-      const key = `${h.col},${h.row}`;
-      if (key === lastKey) return;
-      lastKey = key;
-      rectSelectCtxRef.current.onBlockFollowHex?.(h.col, h.row);
+      const hk = `${h.col},${h.row}`;
+      if (hk === lastHex) return;
+      lastHex = hk;
+      const pool = blockPoolRef?.current;
+      if (!pool) return;
+      const key = snapBlockAnchor(pool, cubeAdd(offsetToCube(h.col, h.row), blockFollow.grab));
+      if (key === null || key === currentKey) return;
+      placeAt(key);
     };
     const onDown = (e: PointerEvent) => {
       if (e.target !== canvas) return;
       e.stopImmediatePropagation();
       e.preventDefault();
-      if (e.button === 0) rectSelectCtxRef.current.onFreezeBlock?.();
-      else if (e.button === 2) rectSelectCtxRef.current.onCancelBlock?.();
+      if (e.button === 0) {
+        // Bloc jamais déplacé (aucun mousemove) : rien à poser → abandon.
+        if (currentKey === null) rectSelectCtxRef.current.onCancelBlock?.();
+        else rectSelectCtxRef.current.onFreezeBlock?.(currentKey);
+      } else if (e.button === 2) {
+        rectSelectCtxRef.current.onCancelBlock?.();
+      }
     };
     // Le clic de pose ne doit pas non plus atteindre le dblclick canvas (→ movePreview) : les
     // click/dblclick synthétisés sont avalés tant que le bloc suit.
@@ -8633,8 +8757,14 @@ export default function Board({
       window.removeEventListener("dblclick", onSynthClick, true);
       window.removeEventListener("keydown", onKey);
       canvas.removeEventListener("contextmenu", onContextMenu);
+      if (blockGhostLayerRef.current === layer) blockGhostLayerRef.current = null;
+      if (!layer.destroyed) {
+        app.stage.removeChild(layer);
+        layer.destroy({ children: true });
+        app.render();
+      }
     };
-  }, [blockFollow, boardConfig]);
+  }, [blockFollow, boardConfig, blockPoolRef]);
 
   // L'outil se désactive pendant qu'un bloc suit → abandon du bloc (aucun bloc orphelin).
   useEffect(() => {
@@ -10137,7 +10267,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}#blk:${blockFollow ? blockFollow.modelIds.join(",") : ""}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -10278,7 +10408,11 @@ export default function Board({
         // figurines, et la phase de mouvement ne peint aucune zone de déploiement à la place.
         raw = ingressMaskLoopsRef?.current ?? null;
       } else if (mode === "perModelMove") {
-        raw = squadMovePlan?.activeModelId ? (squadMoveModelMaskLoopsRef?.current ?? null) : null;
+        // Figurine active OU bloc en suivi (sélection rectangle) : même ref, posée par le hook.
+        raw =
+          squadMovePlan?.activeModelId || blockFollow
+            ? (squadMoveModelMaskLoopsRef?.current ?? null)
+            : null;
       } else {
         raw = normalizeMaskLoopsFromApi(
           (gameState as { move_preview_footprint_mask_loops?: unknown })
@@ -10434,6 +10568,7 @@ export default function Board({
       const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
       const savedWaaaghFangsOverlay = waaaghFangsOverlayRef.current;
       const savedRectSelectOverlay = rectSelectOverlayRef.current;
+      const savedBlockGhostLayer = blockGhostLayerRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -10454,6 +10589,7 @@ export default function Board({
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (savedWaaaghFangsOverlay?.parent) app.stage.removeChild(savedWaaaghFangsOverlay);
       if (savedRectSelectOverlay?.parent) app.stage.removeChild(savedRectSelectOverlay);
+      if (savedBlockGhostLayer?.parent) app.stage.removeChild(savedBlockGhostLayer);
       // `keepHighlightLayers` implique déjà « vivant ET attaché au stage » (conjoints de
       // `canReuseExistingHighlightsThroughDestroy`, dont il dérive) : seul le test de non-nullité
       // subsiste, pour le compilateur.
@@ -10588,6 +10724,10 @@ export default function Board({
       if (savedRectSelectOverlay && !savedRectSelectOverlay.destroyed) {
         savedRectSelectOverlay.zIndex = 2800;
         app.stage.addChild(savedRectSelectOverlay);
+      }
+      if (savedBlockGhostLayer && !savedBlockGhostLayer.destroyed) {
+        savedBlockGhostLayer.zIndex = 2500;
+        app.stage.addChild(savedBlockGhostLayer);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.

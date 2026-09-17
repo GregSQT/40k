@@ -29,13 +29,7 @@ import {
   getFightAttackerAttackLeft,
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
-import {
-  type BlockPool,
-  cubeAdd,
-  cubeSub,
-  parseBlockDestinations,
-  snapBlockAnchor,
-} from "../utils/blockSelection";
+import { type BlockPool, cubeSub, parseBlockDestinations } from "../utils/blockSelection";
 import { type EngineActionOutcome, readEngineActionOutcome } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
@@ -7388,8 +7382,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // SÉLECTION RECTANGLE — bloc partiel de figurines (move par-fig / charge par-fig).
   // Le bloc suit le curseur en translation rigide et SNAPPE sur un pool d'ancres calculé par le
   // moteur (move_block_destinations / charge_block_destinations) : comme le squad move rigide,
-  // jamais de pose hors pool. Le clic pose le bloc dans le plan hôte (squadMovePlan /
-  // chargeMovePlan), puis le flux existant (preview_move_plan / charge_plan_state) juge le plan.
+  // jamais de pose hors pool. Le SUIVI est purement PIXI (fantômes déplacés par BoardPvp depuis
+  // ``blockPoolRef``, aucun state React par hex — c'est ce qui le rend fluide, comme le move
+  // preview d'escouade) ; le clic pose le bloc dans le plan hôte (squadMovePlan / chargeMovePlan),
+  // puis le flux existant (preview_move_plan / charge_plan_state) juge le plan.
   // ──────────────────────────────────────────────────────────────────────────
 
   /** Bloc en cours de suivi. ``grab`` : vecteur cube « origine de l'ancre − hex de relâchement du
@@ -7403,10 +7399,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   } | null>(null);
   const blockFollowRef = useRef(blockFollow);
   blockFollowRef.current = blockFollow;
-  /** Pool d'ancres du bloc (clé "col,row" de l'ancre → destination par fig). */
+  /** Pool d'ancres du bloc (clé "col,row" de l'ancre → destination par fig) — lu par BoardPvp
+   * pour snapper les fantômes à chaque mousemove, et par la pose. */
   const blockPoolRef = useRef<BlockPool>(new Map());
-  /** Dernière ancre snappée appliquée au plan (null = le bloc n'a pas encore bougé). */
-  const blockAnchorKeyRef = useRef<string | null>(null);
 
   /** Escouade propriétaire d'une figurine (units_cache.occupied_hexes_by_model). */
   const findSquadOfModel = useCallback((modelId: string): number | null => {
@@ -7511,7 +7506,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       blockPoolRef.current = pool;
-      blockAnchorKeyRef.current = null;
       const origin = readSquadModelPositions(unitId)[anchorModelId];
       if (!origin) {
         throw new Error(`rect selection: origine de ${anchorModelId} absente de units_cache`);
@@ -7520,13 +7514,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         offsetToCube(origin.col, origin.row),
         offsetToCube(releaseCol, releaseRow)
       );
+      // Zone d'atterrissage du bloc : même ref et même rendu lissé que la zone de la figurine
+      // sélectionnée (BoardPvp la dessine tant que ``blockFollow`` est posé).
+      const rawLoops = raw?.footprint_mask_loops;
+      const loops = Array.isArray(rawLoops) ? (rawLoops as number[][]) : null;
+      // Pool d'ancres (clés "col,row") posé dans la ref de pool per-fig : le board ne dessine la
+      // zone de charge que si ce pool est non vide (BoardDisplay `useChargeDestPoolDiskDraw`), et le
+      // move garde ainsi exactement l'état « pool + zone » d'une figurine sélectionnée.
+      const anchorKeys = new Set(pool.keys());
       if (kind === "move") {
         setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
-        squadMoveModelPoolRef.current = new Set();
-        squadMoveModelMaskLoopsRef.current = null;
+        squadMoveModelPoolRef.current = anchorKeys;
+        squadMoveModelMaskLoopsRef.current = loops;
       } else {
-        chargeModelPoolRef.current = new Set();
-        chargeModelMaskLoopsRef.current = null;
+        chargeModelPoolRef.current = anchorKeys;
+        chargeModelMaskLoopsRef.current = loops;
         setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
       }
       setBlockFollow({ kind, unitId, modelIds, anchorModelId, grab });
@@ -7540,23 +7542,31 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ]
   );
 
-  /** Suivi (mousemove, BoardPvp) : hex brut sous le curseur → ancre voulue (curseur + grab) →
-   * snap sur le pool → placements de CHAQUE fig écrits dans le plan hôte. Pas de setState si
-   * l'ancre snappée n'a pas changé. */
-  const handleBlockFollowHex = useCallback(
-    (col: number, row: number) => {
+  /** Sortie du suivi (pose ou abandon) : pool et zone effacés, fantômes retirés par BoardPvp. */
+  const clearBlockFollow = useCallback((kind: "move" | "charge") => {
+    blockPoolRef.current = new Map();
+    if (kind === "move") {
+      squadMoveModelPoolRef.current = new Set();
+      squadMoveModelMaskLoopsRef.current = null;
+    } else {
+      chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
+    }
+    setBlockFollow(null);
+  }, []);
+
+  /** Clic (BoardPvp) : pose le bloc à l'ancre snappée ``anchorKey`` — les placements de CHAQUE
+   * figurine viennent du pool moteur — puis re-juge le plan par le flux existant (voile rouge /
+   * cohésion / cibles). Une seule écriture de state pour tout le suivi. */
+  const handleFreezeBlock = useCallback(
+    (anchorKey: string) => {
       const bf = blockFollowRef.current;
       if (!bf) return;
-      const desired = cubeAdd(offsetToCube(col, row), bf.grab);
-      const key = snapBlockAnchor(blockPoolRef.current, desired);
-      if (key === null || key === blockAnchorKeyRef.current) return;
-      const placements = blockPoolRef.current.get(key);
+      const placements = blockPoolRef.current.get(anchorKey);
       if (!placements) {
-        throw new Error(`block follow: ancre ${key} absente du pool`);
+        throw new Error(`block freeze: ancre ${anchorKey} absente du pool`);
       }
-      blockAnchorKeyRef.current = key;
-      // Le pool garantit la légalité par figurine ; la validité re-jugée ici (miroir du suivi de
-      // déploiement) ne peut ajouter que la COHÉSION / les cibles — l'information qu'il manque au joueur.
+      clearBlockFollow(bf.kind);
       if (bf.kind === "move") {
         setSquadMovePlan((prev) => {
           if (!prev) return prev;
@@ -7579,60 +7589,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
       }
     },
-    [refreshSquadMovePlanValidity, refreshChargePlanState]
+    [clearBlockFollow, refreshSquadMovePlanValidity, refreshChargePlanState]
   );
 
-  /** Clic : pose le bloc à l'ancre snappée courante puis re-juge le plan (voile rouge / cohésion /
-   * cibles) par le flux existant. Bloc jamais déplacé (aucune ancre) → simple sortie du suivi. */
-  const handleFreezeBlock = useCallback(() => {
-    const bf = blockFollowRef.current;
-    if (!bf) return;
-    const moved = blockAnchorKeyRef.current !== null;
-    blockPoolRef.current = new Map();
-    blockAnchorKeyRef.current = null;
-    setBlockFollow(null);
-    if (!moved) return;
-    if (bf.kind === "move") {
-      const plan = squadMovePlanRef.current;
-      if (plan) void refreshSquadMovePlanValidity(plan.unitId, plan.models);
-    } else {
-      const plan = chargeMovePlanRef.current;
-      if (plan) void refreshChargePlanState(plan.unitId, plan.models, null);
-    }
-  }, [refreshSquadMovePlanValidity, refreshChargePlanState]);
-
-  /** Clic droit / sortie du mode : abandonne le bloc → figurines remises à leur état d'avant
-   * (origine en move, non posées en charge), plan re-jugé. */
+  /** Clic droit / Échap / sortie du mode : abandonne le bloc. Le plan n'a pas été touché pendant
+   * le suivi (fantômes seulement) → rien à restaurer. */
   const handleCancelBlock = useCallback(() => {
     const bf = blockFollowRef.current;
     if (!bf) return;
-    const moved = blockAnchorKeyRef.current !== null;
-    blockPoolRef.current = new Map();
-    blockAnchorKeyRef.current = null;
-    setBlockFollow(null);
-    if (!moved) return;
-    if (bf.kind === "move") {
-      setSquadMovePlan((prev) => {
-        if (!prev) return prev;
-        const models = { ...prev.models };
-        // Miroir de handleResetModelInPlan : l'origine porte col/row (+ level/orientation lus à l'entrée).
-        for (const mid of bf.modelIds) {
-          const origin = prev.originModels[mid];
-          if (origin) models[mid] = { ...origin };
-        }
-        void refreshSquadMovePlanValidity(prev.unitId, models);
-        return { ...prev, models };
-      });
-    } else {
-      setChargeMovePlan((prev) => {
-        if (!prev) return prev;
-        const models = { ...prev.models };
-        for (const mid of bf.modelIds) delete models[mid];
-        void refreshChargePlanState(prev.unitId, models, null);
-        return { ...prev, models };
-      });
-    }
-  }, [refreshSquadMovePlanValidity, refreshChargePlanState]);
+    clearBlockFollow(bf.kind);
+  }, [clearBlockFollow]);
 
   // Le plan hôte disparaît (Valider, Annuler, changement de phase) → le bloc n'a plus d'hôte.
   useEffect(() => {
@@ -7641,12 +7607,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blockFollow.kind === "move"
         ? mode === "perModelMove" && squadMovePlan?.unitId === blockFollow.unitId
         : mode === "chargeModelMove" && chargeMovePlan?.unitId === blockFollow.unitId;
-    if (!hostAlive) {
-      blockPoolRef.current = new Map();
-      blockAnchorKeyRef.current = null;
-      setBlockFollow(null);
-    }
-  }, [blockFollow, mode, squadMovePlan?.unitId, chargeMovePlan?.unitId]);
+    if (!hostAlive) clearBlockFollow(blockFollow.kind);
+  }, [blockFollow, mode, squadMovePlan?.unitId, chargeMovePlan?.unitId, clearBlockFollow]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // PILE-IN PAR FIGURINE (V11 12.04, mode fin type charge) — contrat backend
@@ -8687,8 +8649,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onCancelDeploy: () => {},
       // Sélection rectangle (bloc partiel)
       blockFollow: null,
+      blockPoolRef,
       onRectSelectionCommit: async () => {},
-      onBlockFollowHex: () => {},
       onFreezeBlock: () => {},
       onCancelBlock: () => {},
       // Réserves stratégiques (20.01 / 20.04)
@@ -9153,8 +9115,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onCancelDeploy: handleCancelDeploy,
     // Sélection rectangle (bloc partiel)
     blockFollow,
+    blockPoolRef,
     onRectSelectionCommit: handleRectSelectionCommit,
-    onBlockFollowHex: handleBlockFollowHex,
     onFreezeBlock: handleFreezeBlock,
     onCancelBlock: handleCancelBlock,
     // Réserves stratégiques (20.01 / 20.04)
