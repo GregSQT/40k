@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-17, 09:46) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; chantier suivant : membre de pool « archive » puis P1 ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-17, 09:46) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; membre « archive » livré ; PLATEAU / instantanés à seuils / runs de check livrés (`f5ebdf678`) ; **P1 relancée 11:38 en run de check** (sondes 5 000, arrêt au plateau, plafond attendu) ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1873,6 +1873,74 @@ siège 0,75, échauffement critic 20 updates (table jamais échauffée sur ce zi
 contre chacune des trois archives ; destruction < 0,50 après 20 000 ; arrêt manuel à 60 000 sinon.
 Au gate : matrice hors famille (entnorm en juge) et **écart de siège contre P0 comparé au miroir
 P0 contre P0** (règle du 16 soir). Sonde d'ouverture (10:12, 4 × 300 parties, argmax) : **P0 0,483** (parité tenue, fenêtre [0,40, 0,60]), **P1a 0,563 · P0a 0,750 · P0b 0,693** — identique à la matrice du matin (0,557 / 0,753 / 0,720) : les archives sont montées et jouent bien ce qu'elles sont ; la marge à gagner au gate est de 4 pts contre P1a, 17 contre P0.
+**Cette P1 a été ARRÊTÉE à 11:31 (9 180 parties d'étape, aucune sonde de décision rendue) et
+relancée à 11:38 sous la règle « plateau » ci-dessous** ; log archivé
+`logs/training_x1_07-p01-cycle2_avorte_0918.log`, artefacts (3 checkpoints, `_pre_resume_095748`)
+dans la corbeille.
+
+**PLATEAU, INSTANTANÉS À SEUILS, RUNS DE CHECK — LIVRÉ (2026-09-17, 11:35, merge `f5ebdf678`,
+worktree `worktree-plateau-sondes`).** Décision utilisateur (11:00 → 11:20), motif : « en
+s'arrêtant à 65 % on ne verrait pas que l'agent plafonne à 70 %, alors que ce serait un signal de
+problème d'apprentissage » — B a été promue à 0,666 sur une courbe encore montante, personne ne
+sait où elle plafonnait ; S9 (sans gate) est le seul run dont on connaît le plafond.
+- **Cadence des sondes découplée** : `early_stop.probe_every_episodes` 5 000 (jusque-là la sonde
+  suivait `bot_eval_freq` 10 000, la cadence de l'évaluation bots, `ai/train.py`). Une sonde de
+  300 parties ≈ 3 min pour ~45 min d'entraînement ; à coût égal, 300 / 5 000 vaut 600 / 10 000 sur
+  toute fenêtre lissée et date deux fois mieux.
+- **Instantanés à seuils** (`snapshot_thresholds` 0,50 / 0,60 / 0,70, TOUS les runs) : au premier
+  franchissement de chaque seuil par la sonde brute contre le champion, copie du modèle courant
+  sous `model_<agent>_<étape>_vs<champion>_<0XX>.zip` (+ pkl, contrat, run_state) — niveaux de
+  difficulté datés, utilisables comme membres `archive`. Sonde brute et non moyenne (le label se
+  re-mesure en 2 min, attendre trois sondes copierait un modèle qui a déjà bougé) ; pas de paliers
+  de 5 % (sous le bruit, σ 2,7 pts). Un instantané déjà sur disque (reprise après crash) n'est pas
+  réécrit. `PoolEarlyStoppingCallback._write_threshold_snapshot` (`ai/training_callbacks.py`).
+- **Verdict « plateau » par PATIENCE, actif partout** (`early_stop.plateau` : `patience_probes` 4,
+  `min_delta` 0,02, `min_episodes` 40 000, `check_budget_cap` 100 000 ;
+  `ai/curriculum.py::plateau_reached`, troisième branche d'`evaluate_pool_decision`) : le meilleur
+  score lissé (moyenne de 3) contre le champion est retenu ; quand 4 sondes consécutives (20 000
+  parties) ne l'ont pas dépassé de 2 pts, le run s'arrête. Sous les planchers : étape REFUSÉE sans
+  gate (verdict `plateau`, même court-circuit que la destruction — jusqu'ici une étape non promue
+  brûlait 200 000–300 000 parties). Au-dessus : promotion sur les poids vifs. Pourquoi la patience
+  et non deux fenêtres adjacentes à 2 pts (mon premier réglage) : σ de la différence de deux
+  moyennes de 3 = 2,4 pts, le critère lisait « plateau » une fois sur trois pendant une montée de
+  3 pts par fenêtre. Validateur : `plateau.min_episodes ≥ promote_min_episodes` (un plateau
+  au-dessus des planchers promeut, jamais avant le plancher d'épisodes) et `check_budget_cap >
+  min_episodes`.
+- **Runs de check** (`run_to_plateau: true` sur l'étape : **P1, P4, P6, P9** — l'étape qui suit
+  chaque exploiteur) : la promotion n'arrête plus le run dès que les planchers tiennent ; il
+  continue jusqu'au plateau ou au plafond de 100 000 ; promotion alors si les planchers tiennent.
+  Les autres étapes gardent la promotion à 0,65 / 0,60 dès les planchers (plancher 30 000).
+- **`episodes_to_gate` dans `curriculum.log`** (épisode d'étape de la première sonde où les planchers
+  ont tenu, `PoolEarlyStoppingCallback.first_promotable_episode`, sidecar `pool_stop.json` écrit
+  même sans verdict) : l'indicateur bon marché de plafond pour les étapes ordinaires — s'il grandit
+  d'une étape à l'autre, c'est le signal.
+- **`bot_eval_intermediate` 100 → 50 sur `x1_lineage`** (300 parties par éval intermédiaire) : la
+  lignée publie les poids vifs, l'instantané robuste n'y sélectionne rien ; la garde anti-régression
+  se contente de σ 2,9 sur le combiné. `x1_long` garde 100, l'éval finale reste à 1 800.
+- Verrous : `tests/unit/ai/test_curriculum.py` (+ 13 : patience, check, plateau sous / sur les
+  planchers, plafond, destruction prioritaire, `episodes_to_gate`, validateur, étapes de check
+  livrées), `test_pool_probe_rolling_mean.py` (+ 8 : instantanés une fois par seuil sur la brute,
+  déjà sur disque non réécrit, historique des moyennes, `run_to_plateau` transmis, première sonde
+  promouvable datée, arrêt au plateau, écrivain 4 fichiers, refus sans pkl),
+  `test_close_curriculum_stage.py` (+ 3 : plateau = refus sans gate, sidecar avec / sans verdict),
+  `test_training_config_par_etape.py` (50 par bot). Mutations : plateau jamais lu → 4 rouges ;
+  check ignoré → 5 rouges. `/code-review` : 3 findings, tous traités (promotion au plateau sous le
+  plancher d'épisodes → validateur ; instantané réécrit après reprise → garde disque ;
+  `episodes_to_gate` perdu à la fin par budget → sidecar sans verdict).
+  Référence : `Documentation/Reference/training/metriques.md` (sonde de curriculum).
+
+**P1 RELANCÉE à 11:38** (`run_20260917-113822`, `training_x1_07-p01-cycle2.log`), même commande,
+même pool, même régime ; prologue vérifié : « sonde tous les 5000 ep. ; instantanes aux seuils
+[0.5, 0.6, 0.7] ; plateau : patience 4 sondes, min_delta 0.02, des 40000 ep. ; RUN DE CHECK :
+promotion differee jusqu'au plateau, plafond 100000 ep. ». **Règle de lecture** : parité
+d'ouverture dans [0,40, 0,60] ; destruction < 0,50 après 20 000 ; la promotion (≥ 0,65 contre P0,
+≥ 0,60 contre P1a / P0a / P0b, moyenne de 3) est DATÉE (`episodes_to_gate`) mais n'arrête pas le run ;
+arrêt au plateau (dès 40 000 au plus tôt) ou à 100 000 ; promotion alors si les planchers tiennent,
+refus sinon. Le plafond de P1 est le chiffre attendu de ce run — il se compare à S9 (0,78 contre
+l'ancien P0, exploiteur) et fixera le seuil bots du test d'acceptation. Au gate : matrice hors
+famille (entnorm juge) et écart de siège contre P0 comparé au miroir. Coût attendu : 40 000 à
+100 000 parties (6 à 16 h).
+
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 

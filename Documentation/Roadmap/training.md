@@ -165,6 +165,17 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-17, 11:40 — plateau, instantanés à seuils, runs de check livrés ; P1 relancée en run de check ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Décision utilisateur : ne plus s'arrêter à 0,65 sans connaître le plafond. Livré (`f5ebdf678`) :
+sondes de pool tous les 5 000 (découplées de `bot_eval_freq`), instantané du modèle au premier
+franchissement de 0,50 / 0,60 / 0,70 contre le champion (`model_<agent>_<étape>_vs<champion>_<0XX>.zip`,
+membres `archive` possibles), verdict `plateau` par patience (4 sondes sans +2 pts sur le meilleur
+score lissé, dès 40 000 ; sous les planchers = refus sans gate, actif partout), `run_to_plateau` sur
+P1 / P4 / P6 / P9 (promotion différée jusqu'au plateau, plafond 100 000), `episodes_to_gate` dans
+`curriculum.log`, `bot_eval_intermediate` 50 sur `x1_lineage`. P1 arrêtée à 9 180 et relancée 11:38
+(`run_20260917-113822`) sous cette règle ; sortie attendue : le plafond de P1, entre 40 000 et
+100 000 parties. Référence : [metriques.md — sonde de curriculum](../Reference/training/metriques.md).
+
 **2026-09-17, 10:05 — membre de pool « archive » livré, P1 du nouveau cycle lancé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 `kind: "archive"` dans `curriculum.json` (`ai/curriculum.py` `POOL_KINDS`, `require_archive_members_on_disk` ;
 `ai/train.py` `_prepare_curriculum_stage`) : un modèle étranger au curriculum entre au pool et au gate
