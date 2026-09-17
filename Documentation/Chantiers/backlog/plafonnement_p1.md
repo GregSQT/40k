@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-17 matin) : [§5.15 fin](#b-2026-09-16) — moteur FIGÉ (`b2e8e241f`) ; C terminé : P0 neuf `p0ctrl` robuste 0,903, holdout 92,3 %, bat P0 0,75 / P1 0,56 / entnorm 0,77 ; proposition : la lignée de démo repart de P0ctrl, anciens P0 / P1 en archives hors famille ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-17, 10:15) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; chantier suivant : membre de pool « archive » puis P1 ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1814,6 +1814,36 @@ GPU libre à 17:54, aucun run lancé.
   0,72 / 0,77, donc un gate tenable. Le canonique PvE reste l'ancien P1 tant que la nouvelle P1
   n'est pas promue (P0ctrl le bat à 0,56 seulement, pas de quoi changer la démo aujourd'hui).
   Siège : 0,75 conservé (écart 4,8 sur P0ctrl contre 12 sur la lignée à 0,70).
+
+**NOUVEAU CYCLE — décision utilisateur du 2026-09-17 (10:00) : « le dernier run P0 devient LE P0 »,
+anciens renommés, dépôt de modèles nettoyé, canonique = P0.** Exécuté à 10:15 dans `ai/models/`
+(hors git) ; table de correspondance, à lire pour toute référence antérieure de ce dossier :
+
+| nouveau nom (`ai/models/ArmageddonAgent_x1/model_ArmageddonAgent_x1_<X>.zip`) | ce que c'était | rôle dans le cycle |
+|---|---|---|
+| **P0** (= canonique `model_ArmageddonAgent_x1.zip`) | `ArmageddonAgent_x1_p0ctrl` P0, robuste 0,903, 17/09 05:01 (C) | **racine et champion** de la lignée de démo |
+| P0a | ancien `P0` de la lignée, robuste 0,868, 10/09 22:31 (= `robust_0.8683`, `expl_P0`, `P0_pre_b6`) | ancien hors famille (pool + gate 0,60) |
+| P0b | première tentative de P0, robuste 0,831, 10/09 08:35 (= `robust_0.8314`, « P0a » dans §11 et les matrices `matrix_*_p0a`) | ancien hors famille (pool + gate 0,60) |
+| P1a | ancien `P1` promu le 16, robuste 0,882 (= `robust_0.8819`, ancien canonique PvE) | ancien hors famille, sparring le plus fort (pool + gate 0,60) |
+
+Chaque archive porte ses quatre fichiers (zip, `_vec_normalize.pkl`, `_training_contract.json`,
+`_run_state.json`) ; contrats identiques (diff vide), `--etape P1` résout `P0` avec origine 50 000
+(vérifié par `stage_source_model` / `stage_origin`, sans lancer). Conservés ailleurs :
+`ArmageddonAgent_x1_p0ctrl/` entier (26 checkpoints = instantanés espacés de C) ; `_expl/` :
+canonique S9 (0,9072), S9 final (`ppo_checkpoint_20260915-203439_12247944`), S25 30 000
+(`ppo_checkpoint_20260914-215730_8887944`) ; `_entnorm/` : témoin `20260913-040721` seul.
+**Déplacé, pas détruit** : 772 fichiers / 9,6 Go dans `ai/models/_corbeille_20260917/` (304 + 32
+`_pre_resume_*`, `OLD/`, canoniques horodatés de septembre, `P00`, `P0_pre_b6`, ancien `P2` du 11,
+tous les `ppo_checkpoint_*` de x1 et 14 de expl, instantanés robustes 0,8522 → 0,9078, modèle
+entnorm traité) — la suppression définitive (`rm -rf ai/models/_corbeille_20260917`) est à faire
+par l'utilisateur ; rien dans le code n'énumère les sous-dossiers de `ai/models/`.
+
+**Pool de la nouvelle P1 (décision utilisateur, quotas proposés par l'agent) : bots 30 % ;
+champion P0 0,40 ; P1a 0,15 ; P0a 0,075 ; P0b 0,075** — la part des anciens suit la difficulté
+mesurée (P0 à 0,56 / 0,75 / 0,72 contre P1a / P0a / P0b). Gate : 0,65 contre P0, 0,60 contre
+chacun des trois anciens. Entnorm reste juge (matrices), hors pool. Prérequis : type de membre de
+pool « archive » (code, chantier suivant). Canonique PvE : sans objet jusqu'à la fin du curriculum
+(décision utilisateur) ; il vaut P0 depuis le nettoyage.
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 

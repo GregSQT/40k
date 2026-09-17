@@ -165,6 +165,14 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-17, 10:15 — NOUVEAU CYCLE : P0 = P0 neuf, anciens P0a / P0b / P1a, dépôt nettoyé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Décision utilisateur : « le dernier run P0 devient LE P0 ». `ai/models/ArmageddonAgent_x1/` ne
+contient plus que P0 (= canonique), P0a (ancien P0), P0b (première tentative du 10), P1a (ancien P1),
+quatre fichiers chacun ; 9,6 Go déplacés dans `ai/models/_corbeille_20260917/` (à vider par
+l'utilisateur). Pool de la nouvelle P1 : bots 30 %, P0 0,40, P1a 0,15, P0a 0,075, P0b 0,075 ;
+gate 0,65 / 0,60 ; siège 0,75 conservé ; entnorm juge hors pool. Chantier suivant : membre de
+pool « archive » (`ai/curriculum.py`, `ai/train.py`), puis P1.
+
 **2026-09-17, 09:35 — C terminé : un P0 neuf sur le moteur figé bat toute la famille de P0 ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 `ArmageddonAgent_x1_p0ctrl` (graine 54321, 50 000 parties, 6 h 06) : robuste **0,903** (P0 du 10 :
 0,868), holdout 1 800 parties **92,3 %**, écart de siège **4,8 pts** à 0,75 (lignée : 12). Matrice à
