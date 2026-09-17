@@ -21,6 +21,7 @@ import pytest
 
 from tests.unit.engine._config_helpers import build_move_rules
 from engine.agent_decision import read_pending_agent_decision
+from engine.combat_utils import calculate_hex_distance
 from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
     AGENT_DECISION_TYPE_SLOTS,
@@ -63,11 +64,13 @@ def _gs(
     pve: bool = False,
     with_enemy: bool = True,
     shooter_player: int = 1,
+    inches_to_subhex: int = 1,
 ) -> Dict[str, Any]:
     """`game_state` minimal : un tireur porteur de la règle, un ennemi hors zone d'engagement.
 
     ``shooter_player`` existe pour le siège PvE : le bot y est le joueur 2 et LUI SEUL
     (`is_pve_ai` le vérifie), donc un tireur du joueur 1 y suivrait le chemin humain.
+    ``inches_to_subhex`` : échelle de la table (1 = x1) — les caches sont construits à cette échelle.
     """
     shooter: Dict[str, Any] = {**unit_invariants(),
         "id": "1", "player": shooter_player, "col": _SHOOTER[0], "row": _SHOOTER[1], "MOVE": 10,
@@ -115,7 +118,7 @@ def _gs(
         "console_logs": [],
         "gym_training_mode": gym,
         "pve_mode": pve,
-        "inches_to_subhex": 1,
+        "inches_to_subhex": inches_to_subhex,
     }
     build_units_cache(gs)
     build_enemy_adjacent_hexes(gs, 1)
@@ -488,51 +491,39 @@ def test_l_armement_est_le_seul_a_poser_l_etat_d_attente():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_la_distance_du_pool_est_convertie_en_sous_hexes():
-    """`_resolve_move_after_shooting_distance` rend des POUCES (D6" de la datasheet) ; `MOVE`,
-    que le pool d'ancre lit, est en SOUS-HEXES. Le pool écrivait les pouces tels quels dans
-    `MOVE` : à x5, un D6" valait D6 cases (1,2" au plus)."""
-    from engine.combat_utils import calculate_hex_distance
+#: Échelle x5 : 1" = 5 cases, celle où la conversion pouces → sous-hexes est visible.
+_X5 = 5
 
-    gs = _gs()
-    gs["inches_to_subhex"] = 5
-    build_units_cache(gs)
-    build_enemy_adjacent_hexes(gs, 1)
-    build_enemy_adjacent_hexes(gs, 2)
+
+def _pool_reach_x5(gs: Dict[str, Any]) -> int:
+    """Portée (cases) du pool construit pour le tireur `1` sur une table x5."""
     unit = gs["unit_by_id"]["1"]
     destinations = _build_move_after_shooting_destinations(gs, unit, _MOVE_AFTER_SHOOTING_INCHES)
-    reach = max(calculate_hex_distance(_SHOOTER[0], _SHOOTER[1], c, r) for c, r in destinations)
+    return max(calculate_hex_distance(_SHOOTER[0], _SHOOTER[1], c, r) for c, r in destinations)
+
+
+def test_la_distance_du_pool_est_convertie_en_sous_hexes():
+    """`_resolve_move_after_shooting_distance` rend des POUCES (D6" de la datasheet) ; le BFS
+    compte des SOUS-HEXES. Le pool écrivait les pouces tels quels dans `MOVE` : à x5, un D6"
+    valait D6 cases (1,2" au plus)."""
+    gs = _gs(inches_to_subhex=_X5)
+    reach = _pool_reach_x5(gs)
     # 3" = 15 cases : le pool dépasse largement les 3 cases qu'écrivait la distance non convertie,
     # sans jamais dépasser le budget converti.
-    assert _MOVE_AFTER_SHOOTING_INCHES < reach <= _MOVE_AFTER_SHOOTING_INCHES * 5, reach
-    assert unit["MOVE"] == 10, "MOVE jamais réécrit par la construction du pool"
+    assert _MOVE_AFTER_SHOOTING_INCHES < reach <= _MOVE_AFTER_SHOOTING_INCHES * _X5, reach
+    assert gs["unit_by_id"]["1"]["MOVE"] == 10, "MOVE jamais réécrit par la construction du pool"
 
 
 def test_le_jet_d_advance_ne_gonfle_pas_le_pool():
     """Le budget est la distance de la RÈGLE (« normal move up to X" after shooting »), jamais le
     régime de mouvement du tour. Une escouade encore dans `units_advanced` (tir Assault 10.05 puis
     move_after_shooting) voyait son pool construit au budget Advance : 3" + 6" = 45 cases à x5 au
-    lieu de 15. Aucun malus 21.03 non plus : take to the skies n'est pas déclarable pour ce
-    mouvement (aucune entrée « shoot » dans `_TAKE_TO_THE_SKIES_BY_PHASE`), donc ni malus ni
-    traversée — le budget est exactement `distance × inches_to_subhex`."""
-    from engine.combat_utils import calculate_hex_distance
-
-    gs = _gs()
-    gs["inches_to_subhex"] = 5
-    build_units_cache(gs)
-    build_enemy_adjacent_hexes(gs, 1)
-    build_enemy_adjacent_hexes(gs, 2)
+    lieu de 15 — le budget est exactement `distance × inches_to_subhex`."""
+    gs = _gs(inches_to_subhex=_X5)
     gs["units_advanced"] = {"1"}
     gs["advance_rolls"] = {"1": 6}
-    unit = gs["unit_by_id"]["1"]
-    unit["UNIT_KEYWORDS"] = [{"keywordId": "fly"}]
-    gs["units_took_to_skies"] = {"1"}
 
-    destinations = _build_move_after_shooting_destinations(gs, unit, _MOVE_AFTER_SHOOTING_INCHES)
-
-    reach = max(calculate_hex_distance(_SHOOTER[0], _SHOOTER[1], c, r) for c, r in destinations)
-    assert reach == _MOVE_AFTER_SHOOTING_INCHES * 5, reach
-    assert unit["MOVE"] == 10, "MOVE jamais réécrit par la construction du pool"
+    assert _pool_reach_x5(gs) == _MOVE_AFTER_SHOOTING_INCHES * _X5
 
 
 def _pvp_engine_in_shoot_phase(*, with_rule: bool, gym: bool = False) -> Any:

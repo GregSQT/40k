@@ -3427,13 +3427,11 @@ def movement_build_valid_destinations_pool(
     l'occupation de SON étage alors que la validation d'exécution la teste au sol — deux grandeurs
     différentes des deux côtés de l'invariant « masque ⊆ exécutable » (§0.34).
 
-    ``move_budget_override`` : force le budget (subhex) au lieu de le dériver de
-    ``_advance_roll_for``. Deux appelants : le gym, dont le masque a besoin du pool au budget
-    **Advance** alors que l'escouade n'a PAS encore déclaré Advance (elle n'est donc pas dans
-    ``units_advanced``, et le builder retomberait sur le budget normal) — un seul BFS au budget
-    Advance suffit, puisque le pool Normal y est inclus (§7 T2) ; et ``move_after_shooting``
-    (``shooting_handlers``), dont le budget est la distance de la règle, indépendante du régime
-    de mouvement du tour (une escouade encore dans ``units_advanced`` y aurait sinon son jet ajouté).
+    ``move_budget_override`` (subhex) : le pool est borné par CETTE valeur seule — ni le jet
+    d'Advance ni le malus 21.03 de ``squad_move_pool_budget_subhex`` ne s'y ajoutent. Pour tout
+    mouvement dont la distance n'est pas celle du régime du tour : masque gym au budget Advance
+    avant la déclaration (un seul BFS, le pool Normal y est inclus, §7 T2) ; règles à distance
+    propre (``move_after_shooting``).
 
     ``out_costs`` : rempli avec ``{(col, row): coût géodésique en subhex}``. C'est ce coût
     (distance de **chemin**, règle 03 — pas la distance à vol d'oiseau) qui détermine le type de
@@ -3462,7 +3460,7 @@ def movement_build_valid_destinations_pool(
 
     unit = require_unit_by_id(game_state, unit_id)
     if move_budget_override is not None:
-        # Budget imposé par l'appelant (gym §7 T2, move_after_shooting).
+        # Budget imposé par l'appelant.
         # `0` est ACCEPTÉ : `get_squad_move_budget` renvoie `max(0, MOVE - malus)` (Take to the
         # skies 21.03), donc un budget nul est un état de jeu légitime, et le BFS le traite déjà
         # sans erreur (`if cd >= move_range: continue` → pool vide). Lever ici serait incohérent

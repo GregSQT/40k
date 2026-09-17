@@ -5010,13 +5010,9 @@ def _build_move_after_shooting_destinations(
     # `move_distance` est en POUCES (D6" de la datasheet, `_resolve_move_after_shooting_distance`)
     # alors que le BFS compte des SOUS-HEXES : conversion comme le jumeau
     # `_build_reactive_move_destinations_pool`. Sans elle, un D6" valait D6 cases — 1,2" au plus à x5.
-    #
-    # Le budget est IMPOSÉ par override, jamais dérivé de `MOVE` : sans override, le builder passe
-    # par `squad_move_pool_budget_subhex`, qui ajoute le jet d'Advance d'une escouade encore dans
-    # `units_advanced` (tir Assault 10.05 puis move_after_shooting) — 3" + 6" au lieu de 3". La
-    # règle borne ce mouvement à SA distance (« normal move up to X" after shooting »), le régime
-    # du tour n'y entre pas. Ni malus ni traversée 21.03 : take to the skies ne se déclare que pour
-    # les mouvements de la table `_TAKE_TO_THE_SKIES_BY_PHASE` (move, charge), pas pour celui-ci.
+    # Budget imposé (`move_budget_override`) : la règle borne ce mouvement à SA distance (« normal
+    # move up to X" after shooting »), pas au régime de mouvement du tour — une escouade encore dans
+    # `units_advanced` (tir Assault 10.05) y verrait sinon son jet d'Advance ajouté.
     valid_destinations = movement_build_valid_destinations_pool(
         game_state,
         unit_id,
