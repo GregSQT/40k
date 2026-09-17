@@ -25,9 +25,10 @@ résolutions. Les dés sont figés par monkeypatch (``roll_advance_for_squad`` i
 ``roll_battle_shock`` et le D6 du mouvement réactif) — jamais par graine.
 
 Les écarts code/règle connus sont écrits en ``xfail(strict=True)`` avec la clause en raison, jamais
-en test vert qui les figerait ; ceux découverts pendant l'écriture (résolution x1 des étages,
-fenêtre réactive absente du commit par-figurine, crash de la réaction en x5, distance du
-move_after_shooting en x5) le sont de la même façon, propres à la résolution qui les montre.
+en test vert qui les figerait. Ceux découverts pendant l'écriture (résolution x1 des étages,
+fenêtre réactive absente du commit par-figurine, crash de la réaction en x5, move_after_shooting
+jamais proposé et distance en pouces, échelle √3 de la cohérence euclidienne) ont été corrigés le
+2026-09-17 et sont désormais des tests verts dans les deux résolutions.
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ from __future__ import annotations
 import json
 import math
 import random
-from contextlib import contextmanager
 from unittest import mock
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -44,7 +44,6 @@ import pytest
 import engine.phase_handlers.movement_handlers as movement_handlers
 import services.api_server as api_server
 from engine.hex_utils import downscale_cell, hex_distance
-from tests.integration.pvp._shared import ActionRejected
 from tests.integration.pvp.checklist.conftest import CHECKLIST_SCENARIO
 
 pytestmark = pytest.mark.integration
@@ -300,21 +299,6 @@ def _fix_advance_roll(monkeypatch, roll: int) -> Callable[[], int]:
     return lambda: calls["n"]
 
 
-@contextmanager
-def _expected_failure_at(game, resolution: str, reason: str):
-    """``xfail(strict=True)`` restreint à UNE résolution : hors de cette résolution le corps est
-    exigé vert ; dedans, il DOIT échouer (un passage inattendu est une erreur — l'écart a été
-    corrigé et le test doit redevenir vert)."""
-    if game.resolution != resolution:
-        yield
-        return
-    try:
-        yield
-    except (AssertionError, ActionRejected) as exc:
-        pytest.xfail(f"[{resolution}] {reason} — {type(exc).__name__}: {str(exc)[:160]}")
-    pytest.fail(f"[{resolution}] XPASS strict : l'écart « {reason} » ne se reproduit plus, retirer l'attente d'échec")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 09.02 — sélection, report, annulation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -532,13 +516,10 @@ class TestCoherency0303:
         for entry in plan:
             if entry[0] == last_id:
                 entry[1] += _inches(game, COHERENCY_NEAR_INCHES)
-        with _expected_failure_at(game, "x5", "la cohérence euclidienne convertit le sous-hex en √3 unités de rendu "
-                                                "(shared_utils _coherency_flags_euclidean) là où le move en compte 1,5 "
-                                                "par colonne : l'écart horizontal de 9 pouces y tolère ~10,4 pouces socle à socle"):
-            preview = game.act("preview_move_plan", unitId="102", plan=plan)["result"]
-            assert preview["coherency_ok"] is False
-            accepted, body = game.try_act("commit_move_plan", unitId="102", plan=plan)
-            assert not accepted and body["result"]["error"] == "invalid_move_plan"
+        preview = game.act("preview_move_plan", unitId="102", plan=plan)["result"]
+        assert preview["coherency_ok"] is False
+        accepted, body = game.try_act("commit_move_plan", unitId="102", plan=plan)
+        assert not accepted and body["result"]["error"] == "invalid_move_plan"
 
     def test_refus_de_deux_groupes_coherents_entre_eux_mais_disjoints(self, checklist_game):
         """03.03 lu par le moteur comme UNE seule chaîne (``_validate_plan_coherency``, lecture FAQ
@@ -866,18 +847,25 @@ class TestTerrainMovement1306:
         floor_cells, height_inches = _floor_cells_and_height(game)
         budget_inches = _datasheet_move_inches(game, "7")
         game.act("activate_unit", unitId="7")
-        with _expected_failure_at(game, "x1", "en géométrie hex le pool par-figurine ignore le coût vertical et "
-                                                "propose des cases d'étage que le commit refuse (movement_handlers "
-                                                "« FLY et métrique hex : hors périmètre (fly+étages différé) »)"):
-            elevated = [d for d in _model_dests(game, "7#0", level=1) if d[2] == 1]
-            assert elevated, "aucune case d'étage proposée à l'INFANTRY"
-            assert {(d[0], d[1]) for d in elevated} <= floor_cells
-            assert _farthest_reach(game, "7#0", elevated) <= _inches(game, budget_inches - height_inches)
-            plan = [["7#0", elevated[0][0], elevated[0][1], 1]] + [_placement(game, m) for m in game.models_of("7")[1:]]
-            preview = game.act("preview_move_plan", unitId="7", plan=plan)["result"]
-            assert preview["can_validate"] is True, preview
-            game.act("commit_move_plan", unitId="7", plan=plan)
-            assert int(game.state["models_cache"]["7#0"]["level"]) == 1
+        elevated = [d for d in _model_dests(game, "7#0", level=1) if d[2] == 1]
+        assert elevated, "aucune case d'étage proposée à l'INFANTRY"
+        assert {(d[0], d[1]) for d in elevated} <= floor_cells
+        assert _farthest_reach(game, "7#0", elevated) <= _inches(game, budget_inches - height_inches)
+        # Masque ⊆ exécutable : CHAQUE case d'étage offerte passe la validation individuelle du
+        # voile rouge (`movement_preview_move_plan`, mêmes contraintes : budget, sans cohérence —
+        # la cohérence dépend des sœurs, pas de la case).
+        from engine.phase_handlers.shared_utils import explain_move_plan_rejection, get_squad_move_budget
+
+        state = _engine_state()
+        constraints = {"budget_per_model": get_squad_move_budget("7", state, "normal"), "require_coherency": False}
+        for cell in elevated:
+            reason = explain_move_plan_rejection([("7#0", cell[0], cell[1], 1)], state, constraints)
+            assert reason is None, (cell, reason)
+        plan = [["7#0", elevated[0][0], elevated[0][1], 1]] + [_placement(game, m) for m in game.models_of("7")[1:]]
+        preview = game.act("preview_move_plan", unitId="7", plan=plan)["result"]
+        assert preview["can_validate"] is True, preview
+        game.act("commit_move_plan", unitId="7", plan=plan)
+        assert int(game.state["models_cache"]["7#0"]["level"]) == 1
 
     def test_vehicule_ne_finit_pas_en_hauteur(self, checklist_game):
         """13.06 : sans mot-clé INFANTRY/BEASTS/SWARM/FLY/MONSTER, le Dreadnought ``8`` ne reçoit
@@ -905,9 +893,7 @@ class TestTerrainMovement1306:
         accepted, body = game.try_act("commit_move_plan", unitId="8", plan=[["8#0", target[0], target[1], 1]])
         assert not accepted and body["result"]["error"] == "invalid_move_plan"
         assert int(game.state["models_cache"]["8#0"]["level"]) == 0
-        with _expected_failure_at(game, "x1", "en géométrie hex le pool par-figurine offre des cases d'étage à un "
-                                                "VEHICLE (masque ⊄ exécutable, cf. test précédent)"):
-            assert not [d for d in _model_dests(game, "8#0", level=1) if d[2] == 1]
+        assert not [d for d in _model_dests(game, "8#0", level=1) if d[2] == 1]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1028,26 +1014,34 @@ class TestStrategicReserves20:
         game.drain_to("charge")
         assert not _in(game, "units_ingressed_no_move", "10"), "le verrou tombe au début de la phase de charge"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="move_after_shooting n'est jamais proposé au siège PvP : `squad_shoot_validate` termine "
-               "l'activation par le `end_activation` générique (w40k_core, `_finish_manual_shoot_after_allocation`) "
-               "sans passer par `_handle_shooting_end_activation` (shooting_handlers), seul site qui arme "
-               "l'offre et applique le verrou 20.04 ; en x5 s'y ajoute la distance écrite en pouces dans "
-               "MOVE (`_build_move_after_shooting_destinations`), qui est en sous-hex",
-    )
     def test_20_04_verrou_couvre_le_move_after_shooting(self, checklist_game):
         """20.04 AFTER MOVING : « any other type of move » inclut le repositionnement post-tir de
         la datasheet (Purgation Run, ``move_after_shooting``) — refusé le tour de l'arrivée,
-        proposé le tour suivant."""
+        proposé le tour suivant, à D6" × ``inches_to_subhex`` (le D6 vaut 1 ici : tous les dés
+        du tir sont figés à 1, celui de la distance compris)."""
         game = checklist_game
         _at_round(game, INGRESS_FIRST_ROUND)
         enemy = _pos(game, game.models_of("109")[0])
         far = (enemy[0] - _inches(game, INGRESS_ENEMY_CLEARANCE_INCHES + 10), enemy[1] - _inches(game, 1))
         game.act("ingress_commit", unitId="10", plan=[["10#0", far[0], far[1], 0]])
-        assert "move_after_shooting" not in _shoot_with(game, "10", "109")
+        assert _shoot_with(game, "10", "109")["action"] == "squad_shoot"
         _at_round(game, INGRESS_FIRST_ROUND + 1)
-        assert "move_after_shooting" in _shoot_with(game, "10", "109")
+        result = _shoot_with(game, "10", "109")
+        assert result["action"] == "move_after_shooting_select_destination"
+        assert result["waiting_for_player"] is True
+        origin = _pos(game, "10#0")
+        dests = [(int(d["col"]), int(d["row"])) for d in result["move_after_shooting_destinations"]]
+        assert dests
+        # Budget 1" en cases du plateau : ≥ la portée en ligne droite le long d'une colonne
+        # (métrique du move), ≤ le budget. Sans conversion, le D6 valait 1 CASE (0,2" à x5).
+        reach = max(hex_distance(*origin, *d) for d in dests)
+        assert _straight_reach(game, _inches(game, 1)) <= reach <= _inches(game, 1), reach
+        assert game.state["active_shooting_unit"] == "10"
+        # Le tour se termine par l'action `move_after_shooting` : renoncer ferme l'activation.
+        body = game.act("move_after_shooting", unitId="10", skip_move_after_shooting=True)
+        assert body["result"]["activation_ended"] is True
+        assert "10" not in game.pool("shoot_activation_pool")
+        assert _pos(game, "10#0") == origin
 
     def test_20_04_reserves_jamais_arrivees_detruites_a_la_fin_du_3e_round(self, checklist_game):
         """20.04 « At the end of the third battle round […] all strategic reserves units that have
@@ -1066,10 +1060,11 @@ def _north_west_corner(game) -> Tuple[int, int]:
     return (_inches(game, 1), _inches(game, INGRESS_EDGE_BAND_INCHES) // 2)
 
 
-def _shoot_with(game, unit_id: str, target_id: str) -> str:
+def _shoot_with(game, unit_id: str, target_id: str) -> Dict[str, Any]:
     """Tir complet de ``unit_id`` sur ``target_id`` (armes au maximum, tous les dés à 1 : aucune
-    blessure, donc aucune attribution) ; rend l'``action`` de fin d'activation, qui vaut
-    ``move_after_shooting_select_destination`` quand le repositionnement est proposé."""
+    blessure, donc aucune attribution) ; rend le ``result`` de ``squad_shoot_validate``, dont
+    l'``action`` vaut ``move_after_shooting_select_destination`` quand le repositionnement est
+    proposé (son D6 de distance vaut alors 1 aussi)."""
     game.drain_to("shoot")
     assert unit_id in game.pool("shoot_activation_pool")
     game.act("squad_shoot_activate", unitId=unit_id)
@@ -1080,7 +1075,7 @@ def _shoot_with(game, unit_id: str, target_id: str) -> str:
     game.act("squad_shoot_assign_weapon_qty", unitId=unit_id, weaponCode=weapons[0]["code"], count=weapons[0]["m"], targetId=target_id)
     with mock.patch.object(random, "randint", lambda a, b: 1):
         body = game.act("squad_shoot_validate", unitId=unit_id)
-    return str(body["result"].get("action"))
+    return body["result"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1152,34 +1147,29 @@ class TestReactiveMove:
         decision = _pending(game)
         assert decision is not None
         press = next(i for i, option in enumerate(decision["options"]) if not option["declines"])
-        with _expected_failure_at(game, "x5", "l'application du mouvement réactif lève KeyError « Delta update "
-                                                "missing old zone hex » (shared_utils drive_reactive_move_window → "
-                                                "_apply_enemy_adjacent_delta_for_moved_unit) sur un plateau à empreintes"):
-            game.act("agent_decision", option_index=press)
-            assert _pending(game) is None
-            assert [_pos(game, m) for m in game.models_of("101")] != positions
-            assert _in(game, "units_reacted_this_enemy_turn", "101")
-            moved = max(hex_distance(*a, *b) for a, b in zip(positions, [_pos(game, m) for m in game.models_of("101")]))
-            assert 0 < moved <= _inches(game, MAX_D6)
-            _quick_move(game, "12", _southward(_pos(game, "12#0")[0]))
-            assert _pending(game) is None
+        game.act("agent_decision", option_index=press)
+        assert _pending(game) is None
+        assert [_pos(game, m) for m in game.models_of("101")] != positions
+        assert _in(game, "units_reacted_this_enemy_turn", "101")
+        moved = max(hex_distance(*a, *b) for a, b in zip(positions, [_pos(game, m) for m in game.models_of("101")]))
+        assert 0 < moved <= _inches(game, MAX_D6)
+        _quick_move(game, "12", _southward(_pos(game, "12#0")[0]))
+        assert _pending(game) is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="reactive_move : seul le déplacement rapide à l'ancre (movement_destination_selection_handler) "
-               "et le move_after_shooting ouvrent la fenêtre ; le commit du plan par-figurine "
-               "(movement_commit_move_plan_handler), chemin du front pour toute escouade, ne l'ouvre pas",
-    )
     def test_le_commit_par_figurine_declenche_aussi_la_fenetre(self, checklist_game):
         """config/unit_rules.json ``reactive_move`` : « when an enemy unit ends a Normal, Advance or
-        Fall Back move within 9" » — le type de commit n'entre pas dans la règle."""
+        Fall Back move within 9" » — le type de commit n'entre pas dans la règle. Le commit
+        par-figurine est le chemin du front pour toute escouade ; sa réponse porte l'attente
+        de l'adversaire, comme le move à l'ancre."""
         game = checklist_game
         termagant = _pos(game, game.models_of("101")[0])
         game.act("activate_unit", unitId="2")
-        game.act("commit_move_plan", unitId="2", plan=_plan_towards_row(game, "2", +1))
+        body = game.act("commit_move_plan", unitId="2", plan=_plan_towards_row(game, "2", +1))
         assert min(hex_distance(*_pos(game, m), *termagant) for m in game.models_of("2")) <= _inches(game, REACTIVE_TRIGGER_INCHES)
         decision = _pending(game)
         assert decision is not None and decision["type"] == "reactive_move"
+        assert body["result"]["waiting_for_player"] is True
+        assert game.act("activate_unit", unitId="12")["result"]["action"] == "waiting_for_reactive_move"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1197,10 +1187,13 @@ class TestEndOfMovementPhase0903:
         if game.phase == "move":
             game.act("advance_phase")
         assert game.phase == "shoot"
+        # `activate_unit` : verbe de la phase de mouvement, refusé lui aussi — il levait
+        # `RuntimeError` (HTTP 500) là où les trois autres rendaient déjà le refus.
         for action, payload in (
             ("commit_move_plan", {"unitId": "1", "plan": [_placement(game, m) for m in game.models_of("1")]}),
             ("advance", {"unitId": "1"}),
             ("take_to_skies", {"unitId": "6"}),
+            ("activate_unit", {"unitId": "1"}),
         ):
             accepted, body = game.try_act(action, **payload)
             assert not accepted, action

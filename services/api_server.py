@@ -5384,9 +5384,15 @@ def get_board_config():
                 terrain_ref_raw = scenario_data.get("terrain_ref")
                 if not isinstance(terrain_ref_raw, str) or not terrain_ref_raw.strip():
                     raise ValueError("scenario terrain_ref must be a non-empty string")
-                terrain_ref_candidate = terrain_ref_raw.strip()
-                if "/" in terrain_ref_candidate or "\\" in terrain_ref_candidate:
-                    raise ValueError("scenario terrain_ref must be filename only")
+                # Chemin RELATIF sous `terrain/`, sous-dossier compris (`divers/…`) : c'est ce que
+                # le moteur résout (`GameStateManager._read_terrain_file`, `/ "terrain" / ref`),
+                # et huit scénarios du dépôt l'utilisent. La route exigeait un nom de fichier
+                # seul et rendait 400 sur des parties que le moteur joue — le front ne pouvait
+                # pas dessiner leur plateau. La traversée est contrôlée plus bas, une fois le
+                # dossier de données connu (`board_data_dir`).
+                terrain_ref_candidate = terrain_ref_raw.strip().replace("\\", "/")
+                if terrain_ref_candidate.startswith("/") or ".." in terrain_ref_candidate.split("/"):
+                    raise ValueError(f"Unsafe scenario terrain_ref path: {terrain_ref_raw}")
                 terrain_ref = terrain_ref_candidate
 
         # Le plateau JOUÉ peut être plus grossier que celui qui PORTE les murs et le terrain
@@ -5546,7 +5552,10 @@ def get_board_config():
         terrain_icons: list = []
         deployment_zones_cfg: list = []
         if terrain_ref and terrain_ref.endswith(".json"):
-            terrain_path = board_data_dir / "terrain" / terrain_ref
+            terrain_dir = (board_data_dir / "terrain").resolve()
+            terrain_path = (terrain_dir / terrain_ref).resolve()
+            if terrain_dir not in terrain_path.parents:
+                raise ValueError(f"scenario terrain_ref must stay under {terrain_dir}: {terrain_ref}")
             if not terrain_path.exists():
                 raise FileNotFoundError(f"Referenced terrain file not found: {terrain_path}")
             with open(terrain_path, "r", encoding="utf-8-sig") as f:

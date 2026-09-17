@@ -5008,7 +5008,11 @@ def _build_move_after_shooting_destinations(
     unit_id = require_key(unit, "id")
     unit_col, unit_row = require_unit_position(unit, game_state)
     original_move = require_key(unit, "MOVE")
-    unit["MOVE"] = move_distance
+    # `move_distance` est en POUCES (D6" de la datasheet, `_resolve_move_after_shooting_distance`)
+    # alors que `MOVE` est porté en SOUS-HEXES (converti au chargement) : le pool se construit sur
+    # la distance convertie, comme le jumeau `_build_reactive_move_destinations_pool`. Sans la
+    # conversion, un D6" valait D6 cases — 1,2" au plus à x5.
+    unit["MOVE"] = int(move_distance) * int(require_key(game_state, "inches_to_subhex"))
     try:
         valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
     finally:
@@ -5566,6 +5570,32 @@ def _handle_move_after_shooting_action(
     return success, result
 
 
+#: Verbes d'avant le pipeline squad, encore reçus par la phase de tir (cf. `_refuse_legacy_verb`).
+_LEGACY_SHOOT_VERBS = frozenset({"activate_unit", "shoot", "select_weapon", "left_click", "invalid"})
+
+
+def _refuse_legacy_verb(
+    game_state: Dict[str, Any], action_type: str, unit_id_str: str
+) -> Tuple[bool, Dict[str, Any]]:
+    """Verbe d'avant le pipeline squad (`activate_unit`, `shoot`, `select_weapon`, `left_click`,
+    `invalid`) reçu par la phase de tir.
+
+    Le gym n'émet que des verbes squad (`convert_squad_action`) : y arriver est une rupture de
+    contrat, signalée par une erreur explicite — même garde que `_handle_unit_activation`
+    (movement_handlers). Un client API, lui, peut envoyer n'importe quelle chaîne : c'est un
+    REFUS, au même titre que `commit_move_plan` ou `advance` en phase de tir, jamais un HTTP 500.
+    Mesuré avant : `POST /api/game/action {activate_unit, unitId: 1}` en phase de tir →
+    `RuntimeError` → 500, là où `commit_move_plan` rendait `invalid_action_for_phase`.
+    """
+    cfg = game_state.get("config", {})  # get allowed (état de test sans config)
+    if cfg.get("gym_training_mode", False) or game_state.get("gym_training_mode", False):
+        raise RuntimeError(
+            f"{action_type} reached in execute_action — squad path expected. "
+            f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
+        )
+    return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}
+
+
 def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     AI_SHOOT.md EXACT: Complete action routing with full phase lifecycle management
@@ -5715,6 +5745,12 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
             return
         game_state["active_shooting_unit"] = unit_id
     
+    # Verbes d'avant le pipeline squad : refusés ICI, avant le prélude d'activation ci-dessous —
+    # `shoot` y démarrait l'activation (`shooting_unit_activation_start`) et pouvait la CLORE par
+    # un skip avant d'atteindre son refus : un verbe refusé consommait l'activation de tir.
+    if action_type in _LEGACY_SHOOT_VERBS:
+        return _refuse_legacy_verb(game_state, action_type, str(unit_id))
+
     # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
     # No shooting/advance allowed for a different unit while one is active
     if action_type in ["shoot", "move_after_shooting"]:
@@ -5757,26 +5793,8 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     # select_weapon can reactivate unit after weapon exhaustion (unit must have been eligible before)
     
     # AI_SHOOT.md action routing
-    if action_type == "activate_unit":
-        raise RuntimeError(
-            f"activate_unit reached in execute_action — squad path expected. "
-            f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
-        )
-
-    elif action_type == "shoot":
-        raise RuntimeError(
-            f"shoot reached in execute_action — squad path expected. "
-            f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
-        )
-
-    elif action_type == "move_after_shooting":
+    if action_type == "move_after_shooting":
         return _handle_move_after_shooting_action(game_state, unit, action, config)
-    
-    elif action_type == "select_weapon":
-        raise RuntimeError(
-            f"select_weapon reached in execute_action — squad_select_weapon expected. "
-            f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
-        )
 
     elif action_type == "skip" and action.get("manual_end_phase"):
         # Fin de phase manuelle (API) : forfait sans enchaîner move_after_shooting (évite un BFS move
@@ -5827,12 +5845,6 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         
         return success, result
     
-    elif action_type == "left_click":
-        raise RuntimeError(
-            f"left_click reached in execute_action — squad path expected. "
-            f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
-        )
-    
     elif action_type == "right_click":
         # tour_de_jeu.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
         has_shot = _unit_has_shot_with_any_weapon(unit)
@@ -5864,12 +5876,6 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
                 del game_state["active_shooting_unit"]
         
         return success, result
-    
-    elif action_type == "invalid":
-        raise RuntimeError(
-            f"invalid reached in execute_action — squad path expected. "
-            f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
-        )
     
     else:
         return False, {"error": "invalid_action_for_phase", "action": action_type, "phase": "shoot"}

@@ -366,8 +366,10 @@ def _make_fight_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
 class TestExecuteSemanticActionShoot:
     """Routing execute_semantic_action → _process_shooting_phase."""
 
-    def test_shoot_unit_not_in_pool_returns_unit_not_eligible(self):
-        """esa_shoot_not_in_pool : unitId absent du shoot_activation_pool → error 'unit_not_eligible'."""
+    def test_shoot_legacy_verb_is_refused_before_any_eligibility_check(self):
+        """esa_shoot_not_in_pool : `shoot` est un verbe d'avant le pipeline squad — refusé
+        `invalid_action_for_phase` AVANT l'éligibilité (il rendait `unit_not_eligible` ici, et
+        démarrait l'activation d'une unité éligible avant de lever) ; le pool n'a pas bougé."""
         units = [_unit("1", 1, 5, 10), _unit("2", 1, 8, 10)]
         gs = _make_shoot_gs(units)
         gs["shoot_activation_pool"] = ["2"]  # Unit 1 absent du pool
@@ -376,7 +378,8 @@ class TestExecuteSemanticActionShoot:
         success, result = engine.execute_semantic_action({"action": "shoot", "unitId": "1"})
 
         assert success is False
-        assert result.get("error") == "unit_not_eligible"
+        assert result.get("error") == "invalid_action_for_phase"
+        assert gs["shoot_activation_pool"] == ["2"]
 
     def test_shoot_routes_to_handler_not_invalid_phase(self):
         """esa_shoot_routing : phase='shoot' → pas d'erreur 'invalid_phase' (routing correct)."""

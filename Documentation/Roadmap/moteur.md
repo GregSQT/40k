@@ -261,7 +261,19 @@ n'est verrouillée par aucun test** (cf. la SUITE 🕳 du 2026-09-10).
 
 ## fix-reactive-move-engagement — ✅ livré 2026-09-09 {#reactive-move-engagement}
 
-Move réactif : la datasheet conditionne la capacité à « if this unit is not within Engagement Range of one or more enemy units », condition qu'aucun des six filtres d'éligibilité ne portait. Le pool BFS n'écarte que les cases d'ARRIVÉE adjacentes à un ennemi, jamais la position de DÉPART : un porteur au contact réagissait et quittait le corps à corps par un mouvement gratuit, sans les contraintes du Fall Back. Mesuré avant correctif — réactif engagé en (10,10) à distance 1, déplacé en (12,9) à distance 2, `applied=1`. Fix : `unit_within_engagement_zone_footprints` (primitive canonique EZ, celle des jumeaux fight/charge) après le filtre de rayon dans `maybe_resolve_reactive_move`. Rouge→vert par retrait de la porte, plus un contrôle jumeau hors zone qui distingue la porte de la scène. Livré avec le retrait de `reactive_move` au `FenrisianWolf`, qui ne porte pas cette règle — le Termagant en est le seul porteur. **Le volet REFUS n'est pas livré** : `reactive_decision_mode` vaut toujours `"auto"` en dur, la branche `"state"` et `decline_reactive_move` restent sans producteur.
+Move réactif : la datasheet conditionne la capacité à « if this unit is not within Engagement Range of one or more enemy units », condition qu'aucun des six filtres d'éligibilité ne portait. Le pool BFS n'écarte que les cases d'ARRIVÉE adjacentes à un ennemi, jamais la position de DÉPART : un porteur au contact réagissait et quittait le corps à corps par un mouvement gratuit, sans les contraintes du Fall Back. Mesuré avant correctif — réactif engagé en (10,10) à distance 1, déplacé en (12,9) à distance 2, `applied=1`. Fix : `unit_within_engagement_zone_footprints` (primitive canonique EZ, celle des jumeaux fight/charge) après le filtre de rayon dans `maybe_resolve_reactive_move`. Rouge→vert par retrait de la porte, plus un contrôle jumeau hors zone qui distingue la porte de la scène. Livré avec le retrait de `reactive_move` au `FenrisianWolf`, qui ne porte pas cette règle — le Termagant en est le seul porteur. Le volet REFUS a été livré depuis (`reactive_decision_mode` = `"state"`, décision `reactive_move` posée au siège qui réagit) ; la fenêtre s'ouvre sur les quatre chemins de commit depuis le 2026-09-17 (cf. [checklist-move-ecarts](#checklist-move-ecarts)).
+
+---
+
+## 13.06 — traversée du terrain DENSE par l'infanterie {#dense-traversal-1306}
+
+**Ouvert le 2026-09-17** (mesuré par la checklist mouvement PvP, `tests/integration/pvp/checklist/test_move.py::TestNormalMove0905::test_infanterie_traverse_un_mur_de_terrain_dense`, `xfail(strict=True)` x5 et x1). 13.06 « INFANTRY/BEASTS/SWARM/MOBILE models can move horizontally through dense terrain features » ; le moteur fait de tout mur un obstacle absolu hors vol déclaré (`build_move_traversal_blocked`, « ils bloquent TOUJOURS », tour_de_jeu.md « Murs : ni traversée ni arrêt dessus »). Change les parties jouées → ⛔ tant que le moteur est figé pour la démo.
+
+---
+
+## checklist-move-ecarts — ✅ livré 2026-09-17 {#checklist-move-ecarts}
+
+Les sept écarts mesurés par la checklist mouvement PvP (x5 et x1) sont corrigés et ses `xfail` retirés — détail dans `ROADMAP_INDEX.md`, suite 134 : fenêtre réactive sur le commit par-figurine et le squad move gym/PvE ; instantané d'adjacence de la réaction sur les empreintes (KeyError x5) ; 13.06 (mot-clé + coût vertical) dans le pool par-figurine en métrique hex ; `move_after_shooting` proposé au siège PvP à D6" × `inches_to_subhex` ; cohérence euclidienne à l'échelle 1,5 du move ; verbes legacy refusés en phase de tir au lieu d'un 500 ; `terrain_ref` en sous-dossier accepté par `/api/config/board`. Sans effet sur les parties x1 de la lignée. **Restent à décider** : fin d'activation du `squad_shoot` gym/PvE (l'agent et le bot ne reçoivent pas la décision `move_after_shooting`) et le front qui perd `selectedUnitId` après `move_after_shooting_select_destination` (`handleCommitSquadShoot`).
 
 ---
 

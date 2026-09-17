@@ -224,13 +224,17 @@ def test_shooting_type_cleared_after_manual_pvp_allocation(monkeypatch):
     Scénario : attaquant humain choisit INDIRECT en T1 (PvP), l'allocation manuelle se termine.
     Sans l'effacement, T2 `resolve_squad_shooting_type` retourne INDIRECT (le choix périmé) au
     lieu du défaut dérivé, corrompant éligibilité et entrées step.log."""
-    import engine.phase_handlers.shared_utils as SU_mod
     from engine.w40k_core import W40KEngine
-    import engine.phase_handlers.generic_handlers as gh
+    import engine.phase_handlers.shooting_handlers as sh
 
-    monkeypatch.setattr(gh, "end_activation", lambda *a, **kw: {"action": "end_activation"})
+    # La fin d'activation du tir d'escouade PvP passe par `_handle_shooting_end_activation`
+    # (seul site qui arme `move_after_shooting`) — c'est elle qu'on neutralise ici.
+    monkeypatch.setattr(
+        sh, "_handle_shooting_end_activation", lambda *a, **kw: (True, {"action": "shoot"})
+    )
 
     eng = object.__new__(W40KEngine)
+    eng.gym_training_mode = False  # siège humain : la fin de tir passe par le handler neutralisé
     eng.game_state = {
         SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_INDIRECT},
         "unit_by_id": {"1": {"id": "1", "player": 1}},

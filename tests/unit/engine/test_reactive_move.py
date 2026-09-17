@@ -1182,3 +1182,117 @@ class TestRefusEtCapaciteDuTour:
         assert int(decision["player"]) == 2
         # Elle n'a toujours pas bougé : deux questions, aucun mouvement.
         assert (reactive["col"], reactive["row"]) == (7, 10)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Les DEUX chemins de commit d'escouade ouvrent la fenêtre, pas seulement le move à l'ancre
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestLesCommitsDEscouadeOuvrentLaFenetre:
+    """`reactive_move` (config/unit_rules.json) : « when an enemy unit ends a Normal, Advance or
+    Fall Back move within 9" » — le CHEMIN de commit n'entre pas dans la règle. Seuls le move
+    rapide à l'ancre (`movement_destination_selection_handler`) et le move_after_shooting
+    ouvraient la fenêtre ; le commit par-figurine (chemin du front pour toute escouade) et le
+    squad move du gym / bot PvE (`execute_squad_move`, w40k_core) ne l'ouvraient pas."""
+
+    def test_le_commit_par_figurine_ouvre_la_fenetre_et_signale_l_attente(self):
+        engine = _pvp_engine_with_reactive_enemy()
+        gs = engine.game_state
+
+        engine.execute_semantic_action({"action": "activate_unit", "unitId": "2"})
+        success, result = engine.execute_semantic_action(
+            {"action": "commit_move_plan", "unitId": "2", "plan": [["2#0", 10, 16, 0]]}
+        )
+
+        assert success is True, result
+        assert (gs["unit_by_id"]["2"]["col"], gs["unit_by_id"]["2"]["row"]) == (10, 16)
+        decision = _pending_decision(gs)
+        assert decision["type"] == "reactive_move"
+        assert int(decision["player"]) == 2
+        assert str(decision["unit_id"]) == "3"
+        assert gs["reaction_window_active"] is True
+        # La réponse PRÉVIENT le siège qui doit répondre — valait `False` sans condition.
+        assert result["waiting_for_player"] is True
+        # Journal : le mouvement déclencheur précède la réaction (elle attend la décision).
+        assert [e["type"] for e in gs["action_logs"] if e["type"] in ("move", "reactive_move")] == ["move"]
+
+    def test_le_squad_move_du_gym_ouvre_la_fenetre(self):
+        """Chemin `execute_squad_move` (gym + bot PvE) : même règle, même fenêtre."""
+        engine = _pvp_engine_with_reactive_enemy()
+        gs = engine.game_state
+
+        success, result = engine._process_squad_action(
+            {"action": "squad_normal_move", "squad_id": "2", "destCol": 10, "destRow": 16}
+        )
+
+        assert success is True, result
+        # Position CANONIQUE (units_cache) : le pipeline squad ne resynchronise pas `units`.
+        assert (gs["units_cache"]["2"]["col"], gs["units_cache"]["2"]["row"]) == (10, 16)
+        decision = _pending_decision(gs)
+        assert decision["type"] == "reactive_move"
+        assert str(decision["unit_id"]) == "3"
+        assert result["waiting_for_player"] is True
+        assert result["reactive_moves_applied"] == 0
+
+    def test_un_squad_move_loin_de_tout_porteur_n_ouvre_rien(self):
+        """Contrôle : sans porteur à 9", le squad move se termine comme avant."""
+        engine = _pvp_engine_with_reactive_enemy()
+        gs = engine.game_state
+
+        success, result = engine._process_squad_action(
+            {"action": "squad_normal_move", "squad_id": "1", "destCol": 10, "destRow": 5}
+        )
+
+        assert success is True, result
+        assert read_pending_agent_decision(gs) is None
+        assert result["waiting_for_player"] is False
+        assert "1" not in gs["move_activation_pool"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Réaction appliquée sur un plateau à empreintes (x5) : l'instantané d'adjacence et le delta
+# dilatent la MÊME chose
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestReactionAppliqueeSurEmpreintesMultiHex:
+    """`drive_reactive_move_window` reconstruit un instantané d'adjacence puis, après le
+    déplacement, le met à jour par delta (`_apply_enemy_adjacent_delta_for_moved_unit`, qui
+    dilate `occupied_hexes`). L'instantané, lui, ne dilatait que les CENTRES de figurines
+    (`occupied_hexes_by_model`) : identique à x1, mais dès qu'un socle couvre plusieurs cases le
+    delta retirait des cases jamais posées — `KeyError: Delta update missing old zone hex`,
+    escouade déjà déplacée (mesuré en PvP x5 : HTTP 500 à la première réaction acceptée)."""
+
+    @staticmethod
+    def _x5_state() -> Dict[str, Any]:
+        # Réactif à socle de 5 cases de diamètre (25 mm à x5), zone d'engagement 2" = 10 cases.
+        # Déclencheur à 18 cases : hors EZ (bord à bord 16 > 10), dans les 9" (45 cases).
+        reactive = _unit_with_reactive(1, 1, 12, 10)
+        reactive["BASE_SIZE"] = 5
+        gs = _make_game_state([reactive, _unit(2, 2, 30, 10)])
+        gs["inches_to_subhex"] = 5
+        gs["board_cols"] = 45
+        gs["config"]["game_rules"]["engagement_zone"] = 10
+        build_units_cache(gs)
+        assert len(gs["units_cache"]["1"]["occupied_hexes"]) > 1, "prémisse : socle multi-cases"
+        return gs
+
+    def test_la_reaction_s_applique_et_le_cache_publie_egale_le_recalcul_complet(self, monkeypatch):
+        from engine.phase_handlers.shared_utils import (
+            _compute_enemy_adjacent_cache_for_player_from_units_cache,
+        )
+
+        gs = self._x5_state()
+        monkeypatch.setattr("random.randint", lambda a, b: 1)
+
+        result = maybe_resolve_reactive_move(gs, "2", 29, 10, 30, 10, "move", "normal")
+
+        assert result["reactive_moves_applied"] == 1
+        assert (gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]) != (12, 10)
+        assert "1" in gs["units_reacted_this_enemy_turn"]
+        # Le cache publié par la fenêtre (instantané + delta) est celui qu'un recalcul complet
+        # produit depuis les empreintes : une seule définition de la zone (03.04, socle entier).
+        _counts, full = _compute_enemy_adjacent_cache_for_player_from_units_cache(gs, 2)
+        assert set(gs["enemy_adjacent_hexes_player_2"]) == set(full)
+        assert set(gs["enemy_adjacent_hexes_player_2"]) >= set(gs["units_cache"]["1"]["occupied_hexes"])
