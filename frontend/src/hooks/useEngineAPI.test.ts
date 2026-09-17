@@ -1610,3 +1610,119 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
     expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 11 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Repositionnement post-tir (Purgation Run / Gargoyle, `move_after_shooting`)
+//
+// Depuis le 2026-09-17 le moteur répond à `squad_shoot_validate` par
+// `move_after_shooting_select_destination` quand la datasheet du tireur le permet. `executeAction`
+// traite cette réponse (tireur sélectionné, destinations orange, `pendingPreviewAction`), puis le
+// bouton Valider désélectionnait l'unité dans le même lot de rendu — le plateau n'entretient le
+// choix de destination que pour une unité sélectionnée (`BoardPvp`).
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — sélection après l'offre de mouvement post-tir", () => {
+  const etatTir = (extra: Record<string, unknown> = {}) =>
+    makeGameState({
+      phase: "shoot",
+      shoot_activation_pool: ["10"],
+      units_cache: { "10": { occupied_hexes_by_model: { "10#0": [5, 5] } } },
+      ...extra,
+    });
+
+  /** Réponse minimale de `squad_shoot_los_overview` (tous les contrats vérifiés, aucune cible). */
+  const overview = () =>
+    HttpResponse.json({
+      success: true,
+      result: {
+        valid_targets: [],
+        cover_by_unit_id: {},
+        hidden_too_far_by_unit_id: {},
+        hidden_detection_info_by_unit_id: {},
+        count_by_unit_id: {},
+        squad_free_count: 1,
+      },
+      game_state: etatTir(),
+      action_logs: [],
+    });
+
+  /** Amène le hook au bouton Valider : escouade 10 activée en tir, une déclaration posée. */
+  async function planPretAValider(validateResult: Record<string, unknown>) {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: etatTir() })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as { action: string };
+        if (body.action === "squad_shoot_activate") {
+          return HttpResponse.json({
+            success: true,
+            result: { action: "squad_shoot_activate", eligible_shooting_types: ["normal"] },
+            game_state: etatTir(),
+            action_logs: [],
+          });
+        }
+        if (body.action === "squad_shoot_los_overview") return overview();
+        if (body.action === "squad_shoot_validate") {
+          return HttpResponse.json({
+            success: true,
+            result: validateResult,
+            game_state: etatTir({ active_shooting_unit: "10" }),
+            action_logs: [],
+          });
+        }
+        throw new Error(`action inattendue : ${body.action}`);
+      })
+    );
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    await act(async () => {
+      await result.current.onStartSquadModelShoot(10);
+    });
+    expect(result.current.selectedUnitId).toBe(10);
+    // Une déclaration (flux cible-d'abord de BoardPvp) rend le bouton Valider actif.
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("squadShootDeclarationsUpdated", {
+          detail: { declarations: [{ model_id: "10#0", weapon_index: 0, target_unit_id: "20" }] },
+        })
+      );
+    });
+    await waitFor(() => expect(result.current.squadShootPlan?.canValidate).toBe(true));
+    return result;
+  }
+
+  it("l'offre de mouvement post-tir garde le tireur sélectionné et ses destinations", async () => {
+    const result = await planPretAValider({
+      action: "move_after_shooting_select_destination",
+      waiting_for_player: true,
+      unitId: "10",
+      move_after_shooting_destinations: [{ col: 6, row: 5 }],
+      highlight_color: "orange",
+      can_skip_move_after_shooting: true,
+    });
+
+    await act(async () => {
+      await result.current.onCommitSquadShoot();
+    });
+
+    expect(result.current.pendingMoveAfterShooting).toBe(true);
+    expect(result.current.selectedUnitId).toBe(10);
+    expect(result.current.availableCellsOverride).toEqual([{ col: 6, row: 5 }]);
+    expect(result.current.mode).toBe("select");
+    expect(result.current.squadShootPlan).toBeNull();
+  });
+
+  it("contrôle : un tir sans offre désélectionne comme avant", async () => {
+    const result = await planPretAValider({ action: "squad_shoot", activation_ended: true });
+
+    await act(async () => {
+      await result.current.onCommitSquadShoot();
+    });
+
+    expect(result.current.pendingMoveAfterShooting).toBe(false);
+    expect(result.current.selectedUnitId).toBeNull();
+    expect(result.current.availableCellsOverride).toBeUndefined();
+    expect(result.current.squadShootPlan).toBeNull();
+  });
+});

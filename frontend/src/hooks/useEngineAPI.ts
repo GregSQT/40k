@@ -5384,6 +5384,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (!plan.canValidate) {
       return;
     }
+    let offersPostShootMove = false;
     try {
       const data = await executeAction({
         action: "squad_shoot_validate",
@@ -5392,6 +5393,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
       // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
       if (noteActionOutcome(data, "Tir").kind !== "ok") return;
+      offersPostShootMove = data.result?.action === "move_after_shooting_select_destination";
     } catch (e) {
       console.error("[SQUAD-SHOOT] validate FAILED", e);
       setError(`Squad shoot failed: ${formatApiConnectionError(e)}`);
@@ -5403,6 +5405,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return { unitIds: [], blinkTimer: null, attackerId: null };
     });
     setSquadShootPlan(null);
+    // Repositionnement post-tir proposé (Purgation Run / Gargoyle, `move_after_shooting`) : la
+    // réponse vient d'être traitée par `executeAction`, qui a sélectionné le tireur et posé
+    // `pendingPreviewAction` sur ses destinations. Désélectionner ici effaçait cette sélection
+    // dans le même lot de rendu, et le plateau n'entretient le choix de destination que pour une
+    // unité sélectionnée (`BoardPvp`, `pendingMoveAfterShooting && selectedUnitId !== null`).
+    if (offersPostShootMove) return;
     setMode("select");
     setSelectedUnitId(null);
   }, [executeAction, noteActionOutcome]);
