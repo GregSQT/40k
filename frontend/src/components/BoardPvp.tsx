@@ -8611,12 +8611,28 @@ export default function Board({
     app.stage.addChild(layer);
     blockGhostLayerRef.current = layer;
     const ghostByModel = new Map<string, PIXI.Container>();
-    const nr = getNonRoundBasePixelLayout(unit, HEX_R);
-    const bd = resolveBaseSizeForUnitDisplay(unit);
-    const defaultIconDiam = bd > 1 ? bd * 1.5 * HEX_R : HEX_R * (unit.ICON_SCALE ?? 1.0);
     const baseColor = unit.player === 1 ? 0x1d4ed8 : 0x882222;
-    const orientation = orientationStepForBoard(unit, gameState?.units_cache);
+    const cacheEntry = (
+      gameState?.units_cache as
+        | Record<
+            string,
+            {
+              models_meta_by_model?: Record<string, ModelVisualMeta>;
+              orientation_by_model?: Record<string, number>;
+            }
+          >
+        | undefined
+    )?.[String(unit.id)];
+    const unitOrientation = orientationStepForBoard(unit, gameState?.units_cache);
     for (const mid of blockFollow.modelIds) {
+      // Escouade hétérogène (personnage attaché, sergent) : visuel COMPLET de LA figurine
+      // (models_meta_by_model), comme le ghost per-fig — sinon le Warboss est dessiné en Boy.
+      const meta = cacheEntry?.models_meta_by_model?.[mid];
+      const effectiveUnit = meta ? { ...unit, ...meta } : unit;
+      const nr = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
+      const bd = resolveBaseSizeForUnitDisplay(effectiveUnit);
+      const defaultIconDiam = bd > 1 ? bd * 1.5 * HEX_R : HEX_R * (effectiveUnit.ICON_SCALE ?? 1.0);
+      const orientation = cacheEntry?.orientation_by_model?.[mid] ?? unitOrientation;
       const g = new PIXI.Container();
       const base = new PIXI.Graphics();
       base.beginFill(baseColor, 0.7);
@@ -8636,11 +8652,12 @@ export default function Board({
       }
       base.endFill();
       g.addChild(base);
-      if (unit.ICON) {
-        const iconPath = unit.player === 2 ? unit.ICON.replace(".webp", "_red.webp") : unit.ICON;
+      if (effectiveUnit.ICON) {
+        const iconPath =
+          unit.player === 2 ? effectiveUnit.ICON.replace(".webp", "_red.webp") : effectiveUnit.ICON;
         const sprite = new PIXI.Sprite(PIXI.Texture.from(iconPath));
         sprite.anchor.set(0.5);
-        const nonRoundIconR = getNonRoundIconRadius(unit, HEX_R);
+        const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
         const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
         sprite.width = iconDiam;
         sprite.height = iconDiam;

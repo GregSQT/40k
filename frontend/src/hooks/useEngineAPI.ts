@@ -7518,12 +7518,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // sélectionnée (BoardPvp la dessine tant que ``blockFollow`` est posé).
       const rawLoops = raw?.footprint_mask_loops;
       const loops = Array.isArray(rawLoops) ? (rawLoops as number[][]) : null;
+      // Pool d'ancres (clés "col,row") posé dans la ref de pool per-fig : le board ne dessine la
+      // zone de charge que si ce pool est non vide (BoardDisplay `useChargeDestPoolDiskDraw`), et le
+      // move garde ainsi exactement l'état « pool + zone » d'une figurine sélectionnée.
+      const anchorKeys = new Set(pool.keys());
       if (kind === "move") {
         setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
-        squadMoveModelPoolRef.current = new Set();
+        squadMoveModelPoolRef.current = anchorKeys;
         squadMoveModelMaskLoopsRef.current = loops;
       } else {
-        chargeModelPoolRef.current = new Set();
+        chargeModelPoolRef.current = anchorKeys;
         chargeModelMaskLoopsRef.current = loops;
         setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
       }
@@ -7541,8 +7545,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** Sortie du suivi (pose ou abandon) : pool et zone effacés, fantômes retirés par BoardPvp. */
   const clearBlockFollow = useCallback((kind: "move" | "charge") => {
     blockPoolRef.current = new Map();
-    if (kind === "move") squadMoveModelMaskLoopsRef.current = null;
-    else chargeModelMaskLoopsRef.current = null;
+    if (kind === "move") {
+      squadMoveModelPoolRef.current = new Set();
+      squadMoveModelMaskLoopsRef.current = null;
+    } else {
+      chargeModelPoolRef.current = new Set();
+      chargeModelMaskLoopsRef.current = null;
+    }
     setBlockFollow(null);
   }, []);
 

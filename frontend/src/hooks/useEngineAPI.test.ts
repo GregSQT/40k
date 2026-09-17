@@ -1464,6 +1464,8 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
       grab: cubeSub(offsetToCube(5, 10), offsetToCube(6, 12)),
     });
     expect([...result.current.blockPoolRef.current.keys()]).toEqual(["5,11", "5,12"]);
+    // État « pool + zone » identique à celui d'une figurine sélectionnée → même rendu de zone.
+    expect([...result.current.squadMoveModelPoolRef.current]).toEqual(["5,11", "5,12"]);
     expect(result.current.squadMoveModelMaskLoopsRef.current).toEqual(LOOPS);
     const req = bodies.find((b) => b.action === "move_block_destinations");
     expect(req).toMatchObject({ model_ids: ["10#0", "10#1"], provisional_plan: {}, level: 0 });
@@ -1486,6 +1488,7 @@ describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () 
     });
     expect(result.current.blockFollow).toBeNull();
     expect(result.current.blockPoolRef.current.size).toBe(0);
+    expect(result.current.squadMoveModelPoolRef.current.size).toBe(0);
     expect(result.current.squadMoveModelMaskLoopsRef.current).toBeNull();
     expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({
       col: 5,
