@@ -69,6 +69,13 @@ def _gs(*, level: int, fly: bool = False, move: int = MOVE) -> Dict[str, Any]:
     }
     # Plancher de niveau 1 couvrant la case de départ (sinon `floor_height_at` lève, cf. bug 2).
     floor_hexes = [[START[0] + dc, START[1] + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)]
+    # Polygone du plancher (col/row), comme en production (`game_state.py`) : le confinement
+    # euclidien d'un socle rond (`resolve_model_floor_level`) le lit dès qu'une figurine en
+    # hauteur cherche où son étage continue (`model_rigid_level_map`).
+    floor_polygon = [
+        [START[0] - 2, START[1] - 2], [START[0] + 3, START[1] - 2],
+        [START[0] + 3, START[1] + 3], [START[0] - 2, START[1] + 3],
+    ]
     return {**turn_state_invariants(),
         "models_cache": models_cache,
         "squad_models": {"1": ["1#0"]},
@@ -97,7 +104,8 @@ def _gs(*, level: int, fly: bool = False, move: int = MOVE) -> Dict[str, Any]:
         "units_took_to_skies": set(),
         "current_player": 1,
         "terrain_areas": [
-            {"floors": [{"level": 1, "height_inches": FLOOR_HEIGHT_INCHES, "hexes": floor_hexes}]},
+            {"floors": [{"level": 1, "height_inches": FLOOR_HEIGHT_INCHES, "hexes": floor_hexes,
+                         "polygon_vertices": floor_polygon}]},
         ],
     }
 
@@ -129,10 +137,12 @@ def test_dead_band_cost_is_classified_advance_not_normal():
 
 
 def test_every_masked_cell_of_a_descending_squad_is_executable():
-    """Invariant « masque ⊆ exécutable » sur le cas MONO-figurine descendante.
+    """Invariant « masque ⊆ exécutable » sur le cas MONO-figurine partie de l'étage.
 
-    `erode_move_pool_by_squad_block` court-circuite le mono-figurine ; rien d'autre ne rattrape
-    donc une frontière fausse, et c'est exactement la configuration qui crashait le training.
+    Le court-circuit mono-figurine de `erode_move_pool_by_squad_block` ne s'applique pas en
+    hauteur (le trajet à l'étage n'est pas le BFS de sol du pool d'ancre) : c'est l'érosion
+    par-figurine, frontière exécutable comprise, qui tient ici l'invariant — et c'est
+    exactement la configuration qui crashait le training quand la frontière était fausse.
     """
     gs = _gs(level=1)
     cell_map = build_squad_move_cell_map(gs, "1", ADVANCE_ROLL)
@@ -267,24 +277,107 @@ def test_a_ground_squad_is_unaffected():
 # ── 2. Niveau de destination du plan rigide ──────────────────────────────────────────────
 
 
-def test_rigid_plan_lands_on_the_ground_level():
-    """Le plan PORTE le niveau d'arrivée (sol). Sans lui, `commit_move` garde le niveau
-    d'origine et la figurine reste marquée à l'étage hors empreinte de plancher."""
+def test_rigid_plan_lands_on_the_ground_level_off_the_floor():
+    """Le plan PORTE le niveau d'arrivée. Hors de l'empreinte du plancher, c'est le sol : sans
+    lui, `commit_move` garde le niveau d'origine et la figurine reste marquée à l'étage hors
+    empreinte de plancher."""
     gs = _gs(level=1)
     for entry in _plan((START[0] + 4, START[1] + 4), gs):
         assert len(entry) >= 4 and entry[3] == SQUAD_RIGID_MOVE_DESTINATION_LEVEL
 
 
-def test_masked_cells_of_a_descending_squad_are_all_off_floor_capable():
-    """La légalité des cellules est évaluée au niveau d'ARRIVÉE : une cellule du pool ne doit
-    jamais être refusée pour cause de niveau (le plan et la validation lisent le même)."""
+def test_rigid_plan_keeps_the_floor_where_it_continues():
+    """13.06 : bouger le long d'un plancher est un mouvement horizontal — sans déclaration de
+    montée, une figurine partie de l'étage y RESTE là où la case d'arrivée le porte. Le niveau
+    est celui de `model_rigid_level_map`, la même carte que lit l'érosion du masque."""
+    gs = _gs(level=1)
+    for entry in _plan((START[0] + 1, START[1]), gs):
+        assert len(entry) >= 4 and entry[3] == 1
+
+
+def test_masked_cells_of_a_floor_squad_carry_the_level_of_their_cell():
+    """La légalité des cellules est évaluée au niveau d'ARRIVÉE : le plan et la validation
+    lisent la même carte, étage conservé sur le plancher, sol ailleurs — et le masque offre
+    les deux sortes de cellules (sans quoi l'une des deux branches n'est pas éprouvée)."""
+    from engine.phase_handlers.movement_handlers import model_rigid_level_map
+
     gs = _gs(level=1)
     cell_map = build_squad_move_cell_map(gs, "1", None)
     assert cell_map
+    level_map = model_rigid_level_map(gs, gs["models_cache"]["1#0"], False)
+    seen_levels = set()
     for (cell, _cost) in cell_map.values():
+        for entry in _plan(cell, gs):
+            expected = level_map.get((entry[1], entry[2]), SQUAD_RIGID_MOVE_DESTINATION_LEVEL)
+            assert entry[3] == expected, (cell, entry, expected)
+            seen_levels.add(entry[3])
+    assert seen_levels == {SQUAD_RIGID_MOVE_DESTINATION_LEVEL, 1}
+
+
+# ── 2bis. Paire SUPERPOSÉE sur deux étages (socle rendu REVIVED, pile-in) ───────────────────
+
+
+def _gs_stacked() -> Dict[str, Any]:
+    """`1#0` à l'étage et `1#1` au SOL sur la MÊME case — l'état qui a tué le gate de P1.
+
+    Aplaties toutes deux au sol par le plan rigide, elles entraient en collision sur TOUTE
+    destination ; le masque, qui supposait la collision intra-plan invariante par translation,
+    les offrait quand même → `ValueError « collision intra-plan »` à l'exécution.
+    """
+    gs = _gs(level=1)
+    gs["models_cache"]["1#1"] = {
+        "col": START[0], "row": START[1], "level": 0, "player": 1, "squad_id": "1",
+        "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+    }
+    gs["squad_models"]["1"] = ["1#0", "1#1"]
+    return gs
+
+
+def test_stacked_pair_mask_is_executable_and_stays_on_two_floors():
+    """Masque ⊆ exécutable sur la paire superposée, ET la paire reste sur deux étages.
+
+    Chaque cellule offerte passe la validation ; la figurine de l'étage y RESTE (niveau 1) et sa
+    sœur reste au sol — donc pas de collision. Les ancres où l'étage ne continue pas (les deux
+    retomberaient au sol sur la même case) sont dans le pool d'ancre brut et ABSENTES du masque :
+    c'est l'érosion par `(niveau, case)` qui les retire, miroir du contrôle de la validation.
+    """
+    gs = _gs_stacked()
+    cell_map = build_squad_move_cell_map(gs, "1", None)
+    assert cell_map, "masque vide : la paire superposée est clouée au sol"
+    floor_cells = {(int(c), int(r)) for c, r in gs["terrain_areas"][0]["floors"][0]["hexes"]}
+    for (cell, cost) in cell_map.values():
         plan = _plan(cell, gs)
-        levels = {entry[3] for entry in plan}
-        assert levels == {SQUAD_RIGID_MOVE_DESTINATION_LEVEL}
+        by_mid = {entry[0]: entry for entry in plan}
+        assert by_mid["1#0"][3] == 1 and by_mid["1#1"][3] == 0, (cell, plan)
+        assert (by_mid["1#0"][1], by_mid["1#0"][2]) in floor_cells
+        move_type = infer_squad_move_type(gs, "1", cost)
+        constraints = resolve_squad_move_constraints("1", gs, move_type, None)
+        reason = explain_move_plan_rejection(plan, gs, constraints)
+        assert reason is None, (cell, reason)
+    raw_pool = {
+        (int(d[0]), int(d[1]))
+        for d in movement_build_valid_destinations_pool(gs, "1", read_only=True)
+    }
+    off_floor = raw_pool - floor_cells
+    assert off_floor, "le pool d'ancre brut n'offre aucune ancre hors plancher : rien à éroder"
+    masked = {cell for (cell, _c) in cell_map.values()}
+    assert not (off_floor & masked), (
+        f"ancres hors plancher offertes au masque (les deux figurines y retombent au sol sur la "
+        f"même case) : {sorted(off_floor & masked)}"
+    )
+
+
+def test_stacked_pair_off_floor_anchor_is_refused_by_validation():
+    """Contre-épreuve du prédicat miroir : l'ancre hors plancher que l'érosion retire est bien
+    celle que la validation refuse pour « collision intra-plan » — même règle des deux côtés."""
+    gs = _gs_stacked()
+    plan = _plan((START[0] + 3, START[1]), gs)
+    levels = {entry[3] for entry in plan}
+    assert levels == {SQUAD_RIGID_MOVE_DESTINATION_LEVEL}, plan
+    reason = explain_move_plan_rejection(
+        plan, gs, {"budget_per_model": None, "require_coherency": False}
+    )
+    assert reason is not None and "collision intra-plan" in reason, reason
 
 
 # ── 3. Mesure FLY sous métrique hex ──────────────────────────────────────────────────────

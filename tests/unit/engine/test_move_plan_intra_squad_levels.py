@@ -11,8 +11,10 @@ Conséquence en production : `build_rigid_plan` translate le bloc rigidement (m�
 pour toutes les figurines), donc deux figurines partagent `(col, row)` à l'arrivée si et
 seulement si elles la partageaient au départ. Dès qu'une escouade se retrouvait superposée
 sur deux étages, TOUS ses déplacements ultérieurs échouaient — et comme l'érosion du masque
-(`erode_move_pool_by_squad_block`) ne teste PAS la collision (elle la suppose invariante par
-translation, ce qui est vrai), le masque continuait d'offrir ces destinations. D'où
+(`erode_move_pool_by_squad_block`) ne testait PAS la collision (elle la supposait invariante par
+translation — vrai tant que le plan garde à chaque figurine son niveau ; FAUX dès qu'il aplatit
+la paire au sol, cf. le gate de P1 du 2026-09-17 et `test_rigid_plan_stacked_levels.py`), le
+masque continuait d'offrir ces destinations. D'où
 `ValueError: execute_squad_move a échoué : … incohérence masque/exécution`, qui a tué le
 training ArmageddonAgent à l'épisode ~250 le 2026-07-20.
 

@@ -518,6 +518,97 @@ def test_squad_can_still_move_after_restoration() -> None:
     )
 
 
+def _state_with_a_survivor_on_the_floor() -> Dict[str, Any]:
+    """Jumeau MULTI-NIVEAU : `pain#1` est à l'ÉTAGE (plancher 3×3 autour de (6,5)), ses deux
+    sœurs au sol — le gate de P1 (2026-09-17) : un socle rendu posé SOUS une survivante à l'étage.
+
+    L'état est aussi porté en phase de MOVE (budget, caches) pour mesurer le masque de move rigide
+    juste après la restitution : c'est là que la partie plantait.
+    """
+    gs = _state(n_alive=3, n_destroyed=1, enemy_at=None)
+    floor_hexes = [[6 + dc, 5 + dr] for dc in (-1, 0, 1) for dr in (-1, 0, 1)]
+    gs["terrain_areas"] = [{"floors": [{
+        "level": 1, "height_inches": 3.0, "hexes": floor_hexes,
+        "polygon_vertices": [[4, 3], [9, 3], [9, 8], [4, 8]],
+    }]}]
+    gs["models_cache"][f"{_SQUAD}#1"]["level"] = 1
+    _recompute_squad_occupied_hexes(gs, _SQUAD)
+    # Ce que porte toute unité et tout état de production, et que le masque de move lit
+    # (`battle_shocked`, `_unit_move_version`, …) : les invariants partagés des fixtures.
+    from tests._state_invariants import turn_state_invariants, unit_invariants
+
+    unit = gs["unit_by_id"][_SQUAD]
+    for key, value in unit_invariants().items():
+        unit.setdefault(key, value)
+    unit["MOVE"] = 6
+    unit["BASE_SHAPE"] = "round"
+    unit["BASE_SIZE"] = 1
+    unit["HP_CUR"] = 9
+    unit["level"] = 0
+    # Forme de production des mots-clés (objets `keywordId`), lue par le move (13.06) ; la
+    # restitution ne les lit pas, d'où la forme abrégée du fixture de base.
+    unit["UNIT_KEYWORDS"] = [{"keywordId": "infantry"}]
+    for key, value in turn_state_invariants().items():
+        gs.setdefault(key, value)
+    gs["units_took_to_skies"] = set()
+    gs["gym_training_mode"] = True
+    # Toggles de traversée RÉELS (03.01), lus par le pool de move.
+    from tests.unit.engine._config_helpers import build_move_rules
+
+    gs["config"]["move"] = build_move_rules()
+    return gs
+
+
+def test_returned_model_may_be_set_up_under_a_survivor_on_the_floor() -> None:
+    """REVIVED n'interdit pas la case SOUS une survivante à l'étage (13.06 : deux figurines à la
+    même position horizontale sur deux étages sont légales) — la règle de placement n'est PAS
+    durcie pour contourner le plan rigide, c'est le plan qui s'adapte."""
+    gs = _state_with_a_survivor_on_the_floor()
+    template = gs["destroyed_models"][_SQUAD][0]
+
+    assert (6, 5) in returned_models_legal_cells(gs, _SQUAD, template)
+
+
+def test_squad_can_still_move_after_restoration_under_a_survivor_on_the_floor() -> None:
+    """Le crash du gate de P1 : « collision intra-plan : deux figurines en (…) niveau 0 (dont
+    1#r0) ». Après restitution sous la survivante à l'étage, le masque de move rigide doit être
+    non vide et CHAQUE cellule offerte exécutable — la survivante garde son étage, le socle rendu
+    reste au sol, elles restent superposées sans se heurter.
+
+    ROUGE avant le fix : `build_rigid_plan` aplatissait toutes deux au niveau 0 et le masque,
+    supposant la collision intra-plan invariante par translation, offrait ces destinations.
+    """
+    from engine.phase_handlers.shared_utils import (
+        build_rigid_plan, build_squad_move_cell_map, explain_move_plan_rejection,
+        infer_squad_move_type, resolve_squad_move_constraints,
+    )
+
+    gs = _state_with_a_survivor_on_the_floor()
+    apply_returned_models_placement(gs, _SQUAD, [(6, 5)], [0], d3=1, destroyed=1)
+    returned = [m for m in gs["squad_models"][_SQUAD] if "#r" in m]
+    assert returned == [f"{_SQUAD}#r0"]
+    r0 = gs["models_cache"][f"{_SQUAD}#r0"]
+    assert (int(r0["col"]), int(r0["row"]), int(r0["level"])) == (6, 5, 0)
+
+    gs["phase"] = "move"
+    _build_enemy_adjacent_hexes_all_players(gs)
+    cell_map = build_squad_move_cell_map(gs, _SQUAD, None)
+    assert cell_map, "masque vide : l'escouade est clouée au sol après la restitution"
+    kept_on_floor = 0
+    for (cell, cost) in cell_map.values():
+        plan = build_rigid_plan(cell[0], cell[1], _SQUAD, gs)
+        assert plan is not None
+        by_mid = {entry[0]: entry for entry in plan}
+        assert by_mid[f"{_SQUAD}#1"][3] == 1, (cell, plan)
+        assert by_mid[f"{_SQUAD}#r0"][3] == 0, (cell, plan)
+        kept_on_floor += 1
+        move_type = infer_squad_move_type(gs, _SQUAD, cost)
+        constraints = resolve_squad_move_constraints(_SQUAD, gs, move_type, None)
+        reason = explain_move_plan_rejection(plan, gs, constraints)
+        assert reason is None, (cell, reason)
+    assert kept_on_floor > 0
+
+
 # ---------------------------------------------------------------------------
 # Correctifs de revue : réserves, bords de plateau, ordre de 08.04
 # ---------------------------------------------------------------------------

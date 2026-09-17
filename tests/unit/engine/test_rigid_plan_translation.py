@@ -25,7 +25,7 @@ from engine.phase_handlers.shared_utils import (
 def _game_state(positions):
     """game_state minimal : uniquement ce que `build_rigid_plan` lit."""
     models_cache = {
-        mid: {"col": col, "row": row, "squad_id": "1", "player": 1}
+        mid: {"col": col, "row": row, "level": 0, "squad_id": "1", "player": 1}
         for mid, (col, row) in positions.items()
     }
     return {

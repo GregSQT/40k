@@ -650,22 +650,63 @@ def squad_floor_level_map(
     )
 
 
+def model_rigid_level_map(
+    game_state: Dict[str, Any], model: Dict[str, Any], ascent: bool
+) -> Mapping[Tuple[int, int], int]:
+    """Carte `cellule -> niveau d'arrivée` de CETTE figurine pour un squad move rigide (13.06).
+
+    SOURCE UNIQUE des niveaux qu'un plan rigide peut assigner à une figurine, lue par le plan
+    (`build_rigid_plan` via `model_move_destination_level`) et par l'érosion du masque
+    (`erode_move_pool_by_squad_block`) : une cellule absente vaut le sol.
+
+      - montée déclarée (`ascent`) : la carte complète de son socle (`squad_floor_level_map`) —
+        elle peut monter, rester à son étage ou descendre selon la case d'arrivée ;
+      - sans déclaration, figurine EN HAUTEUR : les seules cellules qui portent SON étage — elle
+        y reste (13.06 MOVING VERTICALLY : bouger le long d'un plancher est un mouvement
+        horizontal, aucune règle ne force la descente) et descend au sol partout ailleurs. Elle ne
+        monte jamais : la montée est la décision `ascent_declaration`, pas un effet de bord ;
+      - sans déclaration, figurine AU SOL : carte vide, elle reste au sol.
+
+    POURQUOI par figurine et non « tout au sol ». Deux figurines d'une même escouade peuvent
+    occuper la même case à deux étages (socle rendu par REVIVED sous une survivante à l'étage,
+    pile-in inter-étage) : les envoyer toutes deux au sol les fait entrer en collision sur TOUTE
+    destination, donc le masque n'a plus rien d'exécutable — c'est le `ValueError « collision
+    intra-plan »` qui a tué le gate de P1 le 2026-09-17. À niveau conservé, la paire reste
+    superposée sur deux étages, ce que 13.06 autorise.
+
+    Le niveau rendu reste un HINT au sens de `place_model_at_effective_level` : le commit
+    revérifie l'empreinte avant d'écrire.
+    """
+    level_map = squad_floor_level_map(game_state, model)
+    if ascent:
+        return level_map
+    origin = int(require_key(model, "level"))
+    if origin < 1 or not level_map:
+        return {}
+    return {cell: lv for cell, lv in level_map.items() if lv == origin}
+
+
 def model_move_destination_level(
     game_state: Dict[str, Any], model: Dict[str, Any], col: int, row: int, ascent: bool
 ) -> int:
     """Niveau où CETTE figurine finit son move en `(col, row)` — 0 (sol) ou l'étage résolu.
 
-    SOURCE UNIQUE du niveau de destination d'un squad move. `ascent` est la déclaration de
-    l'escouade (`squad_ascent_declared`) : fausse, la réponse est le sol, quel que soit le
-    terrain — c'est ce qui rend le régime sans déclaration bit-à-bit identique à l'ancien.
+    SOURCE UNIQUE du niveau de destination d'un squad move, lue dans `model_rigid_level_map`.
+    Sans déclaration, une figurine AU SOL rend le sol quel que soit le terrain — le régime
+    sans étage reste bit-à-bit identique à l'ancien ; une figurine EN HAUTEUR garde son étage
+    là où la case d'arrivée le porte, et descend ailleurs.
 
     Le niveau rendu reste un HINT au sens de `place_model_at_effective_level` : la même carte est
     interrogée par l'érosion du masque et par le plan, donc les deux désignent le même étage,
     et le commit revérifie l'empreinte avant d'écrire.
     """
-    if not ascent:
+    if not ascent and int(require_key(model, "level")) < 1:
         return SQUAD_RIGID_MOVE_DESTINATION_LEVEL
-    return int(squad_floor_level_map(game_state, model).get((int(col), int(row)), 0))  # get allowed : hors étage = sol
+    return int(
+        model_rigid_level_map(game_state, model, ascent).get(
+            (int(col), int(row)), SQUAD_RIGID_MOVE_DESTINATION_LEVEL
+        )  # get allowed : hors étage = sol
+    )
 
 
 def _ascent_declaration_due_unit(
@@ -996,12 +1037,17 @@ def squad_move_pool_budget_subhex(game_state: Dict[str, Any], squad_id: str) -> 
 
 
 def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
-    """Coût de descente (§13.06) à retrancher du budget d'un squad move RIGIDE (destination sol).
+    """Coût de descente (§13.06) à retrancher du budget d'un squad move RIGIDE.
 
-    En squad move la destination est toujours le sol : une figurine partant d'un étage (niveau >= 1)
-    doit descendre. On pénalise TOUTE l'escouade du coût de descente de la figurine la plus haute
-    (max des hauteurs) — le move rigide gardant un delta unique, le pire cas dicte la limite commune,
-    afin qu'aucune fig ne gagne la distance verticale gratuitement.
+    Une figurine partant d'un étage (niveau >= 1) descend au sol partout où la case d'arrivée ne
+    porte pas son étage (`model_rigid_level_map`) ; elle y reste sinon, sans coût vertical. Le
+    budget étant COMMUN à l'escouade (delta unique du move rigide), on pénalise TOUTE l'escouade
+    du coût de descente de la figurine la plus haute (max des hauteurs) — le pire cas dicte la
+    limite commune, afin qu'aucune fig ne gagne la distance verticale gratuitement. C'est
+    CONSERVATEUR pour une escouade qui reste sur son étage : elle paie une descente qu'elle ne
+    fait pas, jamais l'inverse. La frontière normal/advance (`squad_normal_move_frontier_subhex`)
+    et la validation (`resolve_squad_move_constraints`) lisent la même grandeur, donc le masque
+    reste ⊆ exécutable.
 
     Retourne 0 si :
     - l'unité vole (``_fly_traversal_active`` : FLY + take-to-the-skies déclaré, §21.03) → pas de coût
