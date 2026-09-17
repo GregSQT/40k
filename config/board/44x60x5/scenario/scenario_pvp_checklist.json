@@ -1,0 +1,570 @@
+{
+  "_comment": "FIGÉ — fixture de tests/integration/pvp/checklist/ (test_move.py). Chaque position est mesurée par un test : ne PAS retoucher pour jouer. Résolution native x5 (dossier 44x60x5/scenario/), rejouée en x1 par conversion au chargement. Régions : A libre (1), B réaction (2, 12, 101), B2 réaction refusée car engagée (13, 106), C repli (3 vs 102), C2 repli VEHICLE (4 vs 103), F traversée 17.01 (9 vs 107, 14 vs 108), D murs (5 vs W1, 6 FLY vs W2), E ruine à étage (7, 8), réserves (10 Deep Strike, 104), 109 en zone P2 pour la distance d'arrivée.",
+  "wall_hexes": [],
+  "terrain_ref": "divers/terrain-checklist.json",
+  "uses_codex_detachment": {
+    "1": true,
+    "2": true
+  },
+  "army_faction": {
+    "1": "ADEPTUS ASTARTES",
+    "2": "TYRANIDS"
+  },
+  "scale": "2000pts",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 70,
+      "row": 95,
+      "models": [
+        {
+          "col": 70,
+          "row": 95
+        },
+        {
+          "col": 80,
+          "row": 95
+        },
+        {
+          "col": 90,
+          "row": 95
+        },
+        {
+          "col": 70,
+          "row": 105
+        },
+        {
+          "col": 80,
+          "row": 105
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 200,
+      "row": 60
+    },
+    {
+      "id": 16,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 200,
+      "row": 72
+    },
+    {
+      "id": 17,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 70,
+      "row": 120
+    },
+    {
+      "id": 2,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 150,
+      "row": 40,
+      "models": [
+        {
+          "col": 150,
+          "row": 40
+        },
+        {
+          "col": 160,
+          "row": 40
+        },
+        {
+          "col": 170,
+          "row": 40
+        },
+        {
+          "col": 150,
+          "row": 50
+        },
+        {
+          "col": 160,
+          "row": 50
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 120,
+      "row": 70,
+      "models": [
+        {
+          "col": 120,
+          "row": 70
+        },
+        {
+          "col": 130,
+          "row": 70
+        },
+        {
+          "col": 140,
+          "row": 70
+        },
+        {
+          "col": 120,
+          "row": 80
+        },
+        {
+          "col": 130,
+          "row": 80
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 190,
+      "row": 180,
+      "models": [
+        {
+          "col": 190,
+          "row": 180
+        },
+        {
+          "col": 200,
+          "row": 180
+        },
+        {
+          "col": 210,
+          "row": 180
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 25,
+      "row": 162,
+      "models": [
+        {
+          "col": 25,
+          "row": 162
+        },
+        {
+          "col": 30,
+          "row": 162
+        },
+        {
+          "col": 35,
+          "row": 162
+        },
+        {
+          "col": 40,
+          "row": 162
+        },
+        {
+          "col": 45,
+          "row": 162
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "unit_type": "DreadnoughtBallistus",
+      "player": 1,
+      "col": 100,
+      "row": 140
+    },
+    {
+      "id": 9,
+      "unit_type": "DreadnoughtBallistus",
+      "player": 1,
+      "col": 20,
+      "row": 80
+    },
+    {
+      "id": 14,
+      "unit_type": "DreadnoughtBallistus",
+      "player": 1,
+      "col": 100,
+      "row": 25
+    },
+    {
+      "id": 5,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 120,
+      "row": 205,
+      "models": [
+        {
+          "col": 120,
+          "row": 205
+        },
+        {
+          "col": 130,
+          "row": 205
+        },
+        {
+          "col": 140,
+          "row": 205
+        },
+        {
+          "col": 120,
+          "row": 195
+        },
+        {
+          "col": 130,
+          "row": 195
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "unit_type": "AssaultIntercessorJumpPack",
+      "player": 1,
+      "col": 190,
+      "row": 220,
+      "models": [
+        {
+          "col": 190,
+          "row": 220
+        },
+        {
+          "col": 200,
+          "row": 220
+        },
+        {
+          "col": 210,
+          "row": 220
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": 35,
+      "row": 250,
+      "models": [
+        {
+          "col": 35,
+          "row": 250
+        },
+        {
+          "col": 45,
+          "row": 250
+        },
+        {
+          "col": 55,
+          "row": 250
+        },
+        {
+          "col": 40,
+          "row": 260
+        },
+        {
+          "col": 50,
+          "row": 260
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "unit_type": "DreadnoughtBallistus",
+      "player": 1,
+      "col": 75,
+      "row": 235
+    },
+    {
+      "id": 10,
+      "unit_type": "LandSpeederOnslaughtGatlingCannon",
+      "player": 1,
+      "col": -1,
+      "row": -1,
+      "strategic_reserves": true
+    },
+    {
+      "id": 101,
+      "unit_type": "Termagant",
+      "player": 2,
+      "col": 150,
+      "row": 100,
+      "models": [
+        {
+          "col": 150,
+          "row": 100
+        },
+        {
+          "col": 160,
+          "row": 100
+        },
+        {
+          "col": 170,
+          "row": 100
+        },
+        {
+          "col": 150,
+          "row": 110
+        },
+        {
+          "col": 160,
+          "row": 110
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "unit_type": "Termagant",
+      "player": 2,
+      "col": 190,
+      "row": 190,
+      "models": [
+        {
+          "col": 190,
+          "row": 190
+        },
+        {
+          "col": 200,
+          "row": 190
+        },
+        {
+          "col": 210,
+          "row": 190
+        },
+        {
+          "col": 190,
+          "row": 200
+        },
+        {
+          "col": 200,
+          "row": 200
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "unit_type": "Hormagaunt",
+      "player": 2,
+      "col": 10,
+      "row": 170,
+      "models": [
+        {
+          "col": 10,
+          "row": 170
+        },
+        {
+          "col": 15,
+          "row": 170
+        },
+        {
+          "col": 20,
+          "row": 170
+        },
+        {
+          "col": 25,
+          "row": 170
+        },
+        {
+          "col": 30,
+          "row": 170
+        },
+        {
+          "col": 35,
+          "row": 170
+        },
+        {
+          "col": 40,
+          "row": 170
+        },
+        {
+          "col": 45,
+          "row": 170
+        },
+        {
+          "col": 50,
+          "row": 170
+        },
+        {
+          "col": 55,
+          "row": 170
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "unit_type": "Hormagaunt",
+      "player": 2,
+      "col": 75,
+      "row": 152,
+      "models": [
+        {
+          "col": 75,
+          "row": 152
+        },
+        {
+          "col": 80,
+          "row": 152
+        },
+        {
+          "col": 85,
+          "row": 152
+        },
+        {
+          "col": 90,
+          "row": 152
+        },
+        {
+          "col": 95,
+          "row": 152
+        },
+        {
+          "col": 100,
+          "row": 152
+        },
+        {
+          "col": 105,
+          "row": 152
+        },
+        {
+          "col": 110,
+          "row": 152
+        },
+        {
+          "col": 115,
+          "row": 152
+        },
+        {
+          "col": 120,
+          "row": 152
+        }
+      ]
+    },
+    {
+      "id": 107,
+      "unit_type": "Hormagaunt",
+      "player": 2,
+      "col": 5,
+      "row": 105,
+      "models": [
+        {
+          "col": 5,
+          "row": 105
+        },
+        {
+          "col": 10,
+          "row": 105
+        },
+        {
+          "col": 15,
+          "row": 105
+        },
+        {
+          "col": 20,
+          "row": 105
+        },
+        {
+          "col": 25,
+          "row": 105
+        },
+        {
+          "col": 30,
+          "row": 105
+        },
+        {
+          "col": 35,
+          "row": 105
+        },
+        {
+          "col": 40,
+          "row": 105
+        },
+        {
+          "col": 45,
+          "row": 105
+        },
+        {
+          "col": 50,
+          "row": 105
+        }
+      ]
+    },
+    {
+      "id": 108,
+      "unit_type": "Psychophage",
+      "player": 2,
+      "col": 100,
+      "row": 60
+    },
+    {
+      "id": 110,
+      "unit_type": "Hormagaunt",
+      "player": 2,
+      "col": 70,
+      "row": 142
+    },
+    {
+      "id": 109,
+      "unit_type": "Hormagaunt",
+      "player": 2,
+      "col": 150,
+      "row": 280,
+      "models": [
+        {
+          "col": 150,
+          "row": 280
+        },
+        {
+          "col": 160,
+          "row": 280
+        },
+        {
+          "col": 170,
+          "row": 280
+        },
+        {
+          "col": 150,
+          "row": 290
+        },
+        {
+          "col": 160,
+          "row": 290
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "unit_type": "Hormagaunt",
+      "player": 2,
+      "col": -1,
+      "row": -1,
+      "models": [
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        }
+      ],
+      "strategic_reserves": true
+    }
+  ]
+}
