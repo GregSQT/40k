@@ -61,6 +61,7 @@ from engine.phase_handlers.shared_utils import (
     model_datasheet_name,
     drive_reactive_move_window,
     maybe_resolve_reactive_move,
+    MOVE_KIND_BY_MOVE_TYPE,
     build_units_cache,
     destroy_model,
     rebuild_choice_timing_index,
@@ -4695,8 +4696,8 @@ class W40KEngine(gym.Env):
             # Allocation terminée : finaliser l'activation selon le contexte.
             attacker_squad_id = str(alloc_result["attacker_squad_id"])
             if ctx is SHOOT_CTX:
-                finish_result = self._finish_manual_shoot_after_allocation(
-                    attacker_squad_id, alloc_result)
+                finish_result = self._end_squad_shoot_activation(
+                    attacker_squad_id, alloc_result.get("shoot_result"))
                 return True, {**finish_result,
                                "decision_type": decision_type, "player": decision_player,
                                "model_id": model_id}
@@ -6175,7 +6176,6 @@ class W40KEngine(gym.Env):
             squad_weapon_valid_targets,
             squad_lock_shoot,
             squad_shooting_type_choose,
-            squad_shooting_type_clear,
             build_manual_shoot_allocation,
             apply_manual_shoot_allocation,
             apply_manual_shoot_declare_order,
@@ -6544,7 +6544,7 @@ class W40KEngine(gym.Env):
                 alloc_result = build_manual_shoot_allocation(self.game_state, squad_id)
                 if alloc_result.get("waiting_for_player"):
                     return True, alloc_result
-                return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
+                return True, self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
             # Defenseur IA : convergence §8 -> moteur d allocation par-figurine
             # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). auto_decider headless.
             _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
@@ -6555,9 +6555,7 @@ class W40KEngine(gym.Env):
                     f"squad_shoot_validate: allocation tir non terminee en auto pour squad "
                     f"{squad_id} (defenseur non-IA ?) — action={_shoot_alloc.get('action')}"
                 )
-            shoot_result = _shoot_alloc["shoot_result"]
-            squad_shooting_type_clear(self.game_state, squad_id)
-            return True, self._end_squad_shoot_activation(squad_id, shoot_result)
+            return True, self._end_squad_shoot_activation(squad_id, _shoot_alloc["shoot_result"])
 
         if name == "squad_shoot_allocate_model":
             chosen = action.get("modelId")
@@ -6566,7 +6564,7 @@ class W40KEngine(gym.Env):
             alloc_result = apply_manual_shoot_allocation(self.game_state, str(chosen), SHOOT_CTX)
             if alloc_result.get("waiting_for_player"):
                 return True, alloc_result
-            return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
+            return True, self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
 
         if name == "squad_shoot_declare_order":
             order = action.get("order")
@@ -6575,17 +6573,9 @@ class W40KEngine(gym.Env):
             alloc_result = apply_manual_shoot_declare_order(self.game_state, list(order), SHOOT_CTX)
             if alloc_result.get("waiting_for_player"):
                 return True, alloc_result
-            return True, self._finish_manual_shoot_after_allocation(squad_id, alloc_result)
+            return True, self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
 
         raise ValueError(f"Unknown squad manual shoot action: {name!r}")
-
-    def _finish_manual_shoot_after_allocation(
-        self, squad_id: str, alloc_result: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """end_activation differe : appele quand l allocation manuelle est terminee (done)."""
-        from engine.phase_handlers.shared_utils import squad_shooting_type_clear
-        squad_shooting_type_clear(self.game_state, squad_id)
-        return self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
 
     def _end_squad_shoot_activation(
         self, squad_id: str, shoot_result: Any
@@ -6610,24 +6600,23 @@ class W40KEngine(gym.Env):
         d'entraînement) — décision utilisateur en attente, cf. ROADMAP_INDEX suite 134.
         """
         from engine.phase_handlers.generic_handlers import end_activation
-        from engine.phase_handlers.shooting_handlers import _handle_shooting_end_activation
+        from engine.phase_handlers.shared_utils import squad_shooting_type_clear
 
+        squad_shooting_type_clear(self.game_state, squad_id)
         unit = require_unit_by_id(self.game_state, squad_id)
         if self._is_player_human(int(require_key(unit, "player"))):
-            _success, end_result = _handle_shooting_end_activation(
+            _, end_result = shooting_handlers._handle_shooting_end_activation(
                 self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
             )
-            if end_result.get("action") == "move_after_shooting_select_destination":
-                return {**end_result, "unitId": squad_id, "shoot_result": shoot_result}
             # `active_shooting_unit` : purgée par `shooting_clear_activation_state` (arg5 = 1).
         else:
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             if self.game_state.get("active_shooting_unit") == squad_id:
                 del self.game_state["active_shooting_unit"]
-        return {
-            **end_result, "action": "squad_shoot", "unitId": squad_id,
-            "shoot_result": shoot_result,
-        }
+        result = {**end_result, "unitId": squad_id, "shoot_result": shoot_result}
+        if result.get("action") != "move_after_shooting_select_destination":
+            result["action"] = "squad_shoot"
+        return result
 
     def _finish_manual_fight_after_allocation_model(
         self, squad_id: str, alloc_result: Dict[str, Any]
@@ -7314,11 +7303,7 @@ class W40KEngine(gym.Env):
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
     # handler squad_*_move). Mapping exhaustif : un move_type hors de ces 3 valeurs est un bug.
-    _STEP_LOG_MOVE_TYPE_MAP: Dict[str, str] = {
-        "normal": "move",
-        "advance": "advance",
-        "fall_back": "flee",
-    }
+    _STEP_LOG_MOVE_TYPE_MAP: Dict[str, str] = MOVE_KIND_BY_MOVE_TYPE
 
     # V11 T6 — traduction d'un shot_record moteur (shared_utils ~L6045 / fight_handlers ~L5727,
     # structure IDENTIQUE tir et combat) vers les champs du formateur du StepLogger.
@@ -8867,7 +8852,7 @@ class W40KEngine(gym.Env):
                 from_row=_move_from_row,
                 to_col=_move_to_col,
                 to_row=_move_to_row,
-                move_kind={"advance": "advance", "fall_back": "flee"}.get(move_type, "move"),
+                move_kind=MOVE_KIND_BY_MOVE_TYPE[move_type],
                 move_cause="normal",
             )
             if move_type == "fall_back":

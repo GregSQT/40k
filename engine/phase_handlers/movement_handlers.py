@@ -4746,9 +4746,8 @@ def movement_build_model_destinations_pool(
     # alors re-dérivé du champ multi-niveaux (descente facturée, §13.06) — indépendant de la vue.
     # FLY : hors périmètre (fly+étages différé) → inchangé. Métrique hex : branche `elif` ci-dessous.
     _floor_start = start_level_eff >= 1
+    _can_climb = _squad_can_end_move_elevated(game_state, unit)
     if _mm_use_euclidean and not has_fly and ((view_level >= 1 and floor_hexes_view) or _floor_start):
-        from engine.game_state import unit_can_occupy_upper_floor
-        _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
         if _floor_start and not _can_climb:
             # Incohérent : une fig posée en hauteur est forcément montante (13.06). Erreur explicite.
             raise ValueError(
@@ -4799,13 +4798,11 @@ def movement_build_model_destinations_pool(
         # le commit la refusait (masque ⊄ exécutable : 23 cases offertes à un Intercessor avec
         # M − 3" = 3, 24 cases offertes à un Dreadnought). Les cases d'étage viennent désormais
         # de `ascent_field_for_model`, la SOURCE que la validation interroge (`model_reach_
-        # predicate`) : mot-clé 13.06 par `unit_can_occupy_upper_floor`, sol en BFS hex, montée
+        # predicate`) : mot-clé 13.06 par `_squad_can_end_move_elevated`, sol en BFS hex, montée
         # facturée. Les cases au SOL gardent le BFS planaire (même chemin que la validation au
         # niveau 0). Rester sur son étage (`view_level == start_level_eff`) n'est pas une montée
         # et reste au BFS planaire, comme la validation à ce niveau.
-        from engine.game_state import unit_can_occupy_upper_floor
         from .shared_utils import ascent_field_for_model
-        _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
         _floor_dests = []
         if _can_climb:
             _fig_occ_view = fig_occ_by_level.get(view_level, set())

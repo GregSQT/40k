@@ -547,14 +547,14 @@ def _pvp_engine_in_shoot_phase(*, with_rule: bool, gym: bool = False) -> Any:
 
 def test_la_fin_du_tir_d_escouade_pvp_propose_le_repositionnement():
     """`squad_shoot_validate` terminait l'activation par le `end_activation` GÉNÉRIQUE
-    (`_finish_manual_shoot_after_allocation` et la branche défenseur IA), jamais par
+    (`_end_squad_shoot_activation` et la branche défenseur IA), jamais par
     `_handle_shooting_end_activation` — seul site qui arme l'offre : aucune escouade PvP ne se
     voyait proposer le mouvement. Mesuré sur la checklist PvP : `action = squad_shoot`, sans
     `move_after_shooting_destinations`, en x1 comme en x5."""
     engine = _pvp_engine_in_shoot_phase(with_rule=True)
     gs = engine.game_state
 
-    result = engine._finish_manual_shoot_after_allocation("1", {"shoot_result": {"hits": 0}})
+    result = engine._end_squad_shoot_activation("1", {"hits": 0})
 
     assert result["action"] == "move_after_shooting_select_destination"
     assert result["waiting_for_player"] is True
@@ -581,7 +581,7 @@ def test_la_fin_du_tir_d_escouade_pvp_sans_la_regle_se_termine_comme_avant():
     engine = _pvp_engine_in_shoot_phase(with_rule=False)
     gs = engine.game_state
 
-    result = engine._finish_manual_shoot_after_allocation("1", {"shoot_result": {"hits": 0}})
+    result = engine._end_squad_shoot_activation("1", {"hits": 0})
 
     assert result["action"] == "squad_shoot"
     assert result["activation_ended"] is True
@@ -599,7 +599,7 @@ def test_en_gym_la_fin_du_tir_par_allocation_reste_le_generique():
     engine = _pvp_engine_in_shoot_phase(with_rule=True, gym=True)
     gs = engine.game_state
 
-    result = engine._finish_manual_shoot_after_allocation("1", {"shoot_result": {"hits": 0}})
+    result = engine._end_squad_shoot_activation("1", {"hits": 0})
 
     assert result["action"] == "squad_shoot"
     assert result["activation_ended"] is True

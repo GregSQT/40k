@@ -3329,6 +3329,16 @@ def update_enemy_adjacent_caches_after_unit_removed(
         game_state[f"enemy_adjacent_hexes_player_{player_int}"] = hexes
 
 
+#: `move_type` moteur (handler squad_*_move du gym) → libellé de mouvement : `move_kind` de
+#: `maybe_resolve_reactive_move` et type d'action du step.log. Exhaustif : un move_type hors de
+#: ces 3 valeurs est un bug (KeyError), jamais un « move » par défaut.
+MOVE_KIND_BY_MOVE_TYPE: Dict[str, str] = {
+    "normal": "move",
+    "advance": "advance",
+    "fall_back": "flee",
+}
+
+
 def maybe_resolve_reactive_move(
     game_state: Dict[str, Any],
     moved_unit_id: str,

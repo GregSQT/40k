@@ -5575,7 +5575,7 @@ _LEGACY_SHOOT_VERBS = frozenset({"activate_unit", "shoot", "select_weapon", "lef
 
 
 def _refuse_legacy_verb(
-    game_state: Dict[str, Any], action_type: str, unit_id_str: str
+    game_state: Dict[str, Any], action_type: str, unit_id_str: str, is_gym_training: bool
 ) -> Tuple[bool, Dict[str, Any]]:
     """Verbe d'avant le pipeline squad (`activate_unit`, `shoot`, `select_weapon`, `left_click`,
     `invalid`) reçu par la phase de tir.
@@ -5587,8 +5587,7 @@ def _refuse_legacy_verb(
     Mesuré avant : `POST /api/game/action {activate_unit, unitId: 1}` en phase de tir →
     `RuntimeError` → 500, là où `commit_move_plan` rendait `invalid_action_for_phase`.
     """
-    cfg = game_state.get("config", {})  # get allowed (état de test sans config)
-    if cfg.get("gym_training_mode", False) or game_state.get("gym_training_mode", False):
+    if is_gym_training:
         raise RuntimeError(
             f"{action_type} reached in execute_action — squad path expected. "
             f"unit_id={unit_id_str} episode={game_state.get('episode_number')} turn={game_state.get('turn')}"
@@ -5745,34 +5744,19 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
             return
         game_state["active_shooting_unit"] = unit_id
     
-    # Verbes d'avant le pipeline squad : refusés ICI, avant le prélude d'activation ci-dessous —
-    # `shoot` y démarrait l'activation (`shooting_unit_activation_start`) et pouvait la CLORE par
-    # un skip avant d'atteindre son refus : un verbe refusé consommait l'activation de tir.
+    # Verbes d'avant le pipeline squad : refusés avant tout effet sur l'état — un verbe refusé
+    # ne consomme jamais l'activation de tir (verrou test_shoot_legacy_verbs_refused).
     if action_type in _LEGACY_SHOOT_VERBS:
-        return _refuse_legacy_verb(game_state, action_type, str(unit_id))
+        return _refuse_legacy_verb(game_state, action_type, unit_id_str, is_gym_training)
 
-    # STRICT AI_TURN: shoot/advance must ALWAYS follow activation start
-    # No shooting/advance allowed for a different unit while one is active
-    if action_type in ["shoot", "move_after_shooting"]:
-        unit_id_str = str(unit_id)
+    # STRICT AI_TURN: move_after_shooting ne vise que l'unité active, si une activation est ouverte
+    if action_type == "move_after_shooting":
         active_unit_id = str(active_shooting_unit) if active_shooting_unit is not None else None
         if active_unit_id and active_unit_id != unit_id_str:
             raise ValueError(
-                f"shoot/move_after_shooting called for non-active unit: "
+                f"move_after_shooting called for non-active unit: "
                 f"active_shooting_unit={active_unit_id} unit_id={unit_id_str}"
             )
-        if not unit.get("_shoot_activation_started", False):
-            # Verify unit is still in pool before activation (defense in depth)
-            pool_ids = [str(uid) for uid in require_key(game_state, "shoot_activation_pool")]
-            if unit_id_str not in pool_ids:
-                return False, {"error": "unit_not_eligible", "unitId": unit_id}
-            if action_type != "move_after_shooting":
-                activation_result = shooting_unit_activation_start(game_state, unit_id)
-                if activation_result.get("error"):
-                    return False, activation_result
-                if (activation_result.get("empty_target_pool")
-                        or activation_result.get("skip_reason")):
-                    return True, activation_result
     
     # CRITICAL FIX: Validate unit is current player's unit to prevent self-targeting
     # CRITICAL: Normalize player values to int for consistent comparison (handles int/string mismatches)
@@ -5786,11 +5770,9 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     # Pool always contains string IDs (normalized at creation), so direct comparison is safe
     if "shoot_activation_pool" not in game_state:
         raise KeyError("game_state missing required 'shoot_activation_pool' field")
-    unit_id_str = str(unit_id)
     pool_ids = [str(uid) for uid in game_state["shoot_activation_pool"]]
-    if action_type != "select_weapon" and unit_id_str not in pool_ids:
+    if unit_id_str not in pool_ids:
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
-    # select_weapon can reactivate unit after weapon exhaustion (unit must have been eligible before)
     
     # AI_SHOOT.md action routing
     if action_type == "move_after_shooting":
