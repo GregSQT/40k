@@ -850,6 +850,21 @@ export const BoardWithAPI: React.FC = () => {
   });
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
+  // L'écran de préparation se rouvre à chaque ENTRÉE en déploiement actif (partie neuve). La
+  // remise à zéro se fait PENDANT le rendu, pas dans un `useEffect` : un effet est différé par
+  // le scheduler et un clic sur « Start Deployment » traité entre le commit et cet effet était
+  // annulé par lui — mesuré sous charge dans BoardWithAPI.test.tsx, une fois sur cinq.
+  const isActiveSetupDeployment =
+    isRosterSetupMode &&
+    apiProps.gameState?.phase === "deployment" &&
+    apiProps.gameState?.deployment_type === "active";
+  const [wasActiveSetupDeployment, setWasActiveSetupDeployment] = useState(isActiveSetupDeployment);
+  if (isActiveSetupDeployment !== wasActiveSetupDeployment) {
+    setWasActiveSetupDeployment(isActiveSetupDeployment);
+    if (isActiveSetupDeployment) {
+      setTestDeploymentStarted(false);
+    }
+  }
   const urlMode = new URLSearchParams(window.location.search).get("mode");
   const availableTerrains = terrainsForMode(urlMode);
   const [selectedTerrain, _setSelectedTerrain] = useState<string>(() =>
@@ -1389,16 +1404,6 @@ export const BoardWithAPI: React.FC = () => {
       setShowGameOverPopup(true);
     }
   }, [isGameOver]);
-
-  useEffect(() => {
-    const isActiveSetupDeployment =
-      isRosterSetupMode &&
-      apiProps.gameState?.phase === "deployment" &&
-      apiProps.gameState?.deployment_type === "active";
-    if (isActiveSetupDeployment) {
-      setTestDeploymentStarted(false);
-    }
-  }, [isRosterSetupMode, apiProps.gameState?.phase, apiProps.gameState?.deployment_type]);
 
   const getVictoryPointsForPlayer = (player: 1 | 2): number | undefined => {
     if (!apiProps.gameState) {
