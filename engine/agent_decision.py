@@ -139,10 +139,11 @@ def set_pending_agent_decision(
     `observation_entities.decision_option_cont_row` depuis des champs NOMMÉS ; la longueur d'une
     ligne est celle de `DECISION_OPTION_CONT_FIELDS`, contrôlée à l'encodage.
 
-    Absent SEULEMENT pour les quatre types dont les candidats se distinguent par un autre canal :
-    `rule_choice` par le one-hot de l'effet accordé, `waaagh_call`, `fly_declaration` et
-    `ascent_declaration` par le bit `declines`. Pour les cinq autres, l'omettre rend les candidats
-    strictement identiques dans l'observation — le défaut mesuré à un écart d'embedding de 0.0.
+    Absent SEULEMENT pour les types dont les candidats se distinguent par un autre canal :
+    `rule_choice` par le one-hot de l'effet accordé ; `waaagh_call`, `fly_declaration`,
+    `ascent_declaration` et `fall_back_mode` par le bit `declines`. Pour les autres, l'omettre
+    rend les candidats strictement identiques dans l'observation — le défaut mesuré à un écart
+    d'embedding de 0.0.
     """
     if decision_type not in AGENT_DECISION_TYPE_IDS:
         raise KeyError(

@@ -976,6 +976,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   /** V11 : engagement de l'unité active (posé à l'activation via would_flee). Pilote l'UI des
    *  modes de déplacement (engagée → Fall-back/Stationary ; non engagée → Move/Advance). */
   const [activeUnitEngaged, setActiveUnitEngaged] = useState<number | null>(null);
+  /** 09.07 : unité active dont le mode Desperate Escape est RETENU (verrou moteur, lu dans
+   *  `fall_back_mode` de l'activation / de la reprise après hazard). Pilote le bouton de mode
+   *  enfoncé ; null = Ordered Retreat, Desperate Escape encore sélectionnable. Effacé avec
+   *  l'engagement. */
+  const [desperateEscapeUnitId, setDesperateEscapeUnitId] = useState<number | null>(null);
   const moveDestPoolRef = useRef<Set<string>>(new Set());
   const footprintZoneRef = useRef<Set<string>>(new Set());
   /** Boucles masque monde (API) — hit-test quand ``move_preview_footprint_zone`` est absent du JSON. */
@@ -1671,6 +1676,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
     setActiveUnitEngaged(null);
+    setDesperateEscapeUnitId(null);
   }, [clearChargePoolRefs]);
 
   // Effet de phase ORIGINAL (inchangé) : reset au CHANGEMENT de phase uniquement.
@@ -1696,6 +1702,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
       setActiveUnitEngaged(null);
+      setDesperateEscapeUnitId(null);
     }
   }, [gameState?.phase, targetPreview?.blinkTimer, clearChargePoolRefs]);
 
@@ -2162,6 +2169,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setHazardWarningPopup(null);
             hazardWarningPopupRef.current = null;
             setActiveUnitEngaged(null);
+            setDesperateEscapeUnitId(null);
             setSelectedUnitId(null);
             setMode("select");
             setGameState((p) => {
@@ -2746,6 +2754,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               const uidNum = parseInt(String(uid), 10);
               setSelectedUnitId(uidNum);
               setActiveUnitEngaged(data.result?.would_flee === true ? uidNum : null);
+              // 09.07 : mode de fall-back retenu, publié par le moteur (activation ET reprise
+              // après hazard_confirm). Même source que le commit : jamais déduit côté client.
+              setDesperateEscapeUnitId(
+                data.result?.fall_back_mode === "desperate_escape" ? uidNum : null
+              );
               // Desperate Escape : reprise après hazard → auto-entrer dans le plan Fall Back
               // par-figurine (consommé par un effet, une fois manualAllocation/render à jour).
               if (data.result?.fall_back_resume === true) {
@@ -4759,6 +4772,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
       setActiveUnitEngaged(null);
+      setDesperateEscapeUnitId(null);
     } catch (e) {
       console.error("[SQUAD-MOVE] commit FAILED", e);
       setError(`Squad move failed: ${formatApiConnectionError(e)}`);
@@ -4788,6 +4802,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
     setActiveUnitEngaged(null);
+    setDesperateEscapeUnitId(null);
   }, [executeAction, noteActionOutcome]);
 
   /** Bouton Advance (phase move) : bascule l'activation squad en mode Advance (jet D6 backend). */
@@ -4833,6 +4848,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
       setActiveUnitEngaged(null);
+      setDesperateEscapeUnitId(null);
       noteActionOutcome(await executeAction({ action: "wait", unitId: String(uid) }), "Stationary");
     },
     [executeAction, noteActionOutcome]
@@ -5635,6 +5651,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setError(`Hazard confirm failed: ${formatApiConnectionError(e)}`);
     }
   }, [hazardWarningPopup, executeAction, noteActionOutcome]);
+
+  /** 09.07 : le joueur SÉLECTIONNE Desperate Escape pour l'escouade engagée active (encart
+   *  SELECTING MODES : « ordered retreat is not mandatory »). Même popup que le mode imposé aux
+   *  unités battle-shocked, même confirmation (`hazard_confirm`) : c'est elle qui pose le verrou
+   *  côté moteur, roule le hazard 06.03 et rebâtit le pool à travers les ennemis. */
+  const handleSelectDesperateEscape = useCallback((unitId: number | string) => {
+    const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+    const hp = { unitId: uid };
+    setHazardWarningPopup(hp);
+    hazardWarningPopupRef.current = hp;
+  }, []);
 
   /** Desperate Escape : le joueur annule → l'unité reste sélectionnée mais non déplacée. */
   const handleCancelHazardWarning = useCallback(() => {
@@ -8454,9 +8481,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onSetAdvanceMode: async () => {},
       onTakeToSkies: async () => {},
       onStationary: async () => {},
+      onSelectDesperateEscape: () => {},
       onForceBattleShock: async () => {},
       onForceCharged: async () => {},
       activeUnitEngaged: null,
+      desperateEscapeUnitId: null,
       squadShootPlan: null,
       onStartSquadModelShoot: async () => {},
       onSelectModelForShoot: async () => {},
@@ -8913,9 +8942,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onSetAdvanceMode: handleSetAdvanceMode,
     onTakeToSkies: handleTakeToSkies,
     onStationary: handleStationary,
+    onSelectDesperateEscape: handleSelectDesperateEscape,
     onForceBattleShock: handleForceBattleShock,
     onForceCharged: handleForceCharged,
     activeUnitEngaged,
+    desperateEscapeUnitId,
     squadShootPlan,
     onStartSquadModelShoot: handleStartSquadModelShoot,
     onSelectModelForShoot: handleSelectModelForShoot,

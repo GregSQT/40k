@@ -769,6 +769,87 @@ describe("useEngineAPI — refus de la confirmation de danger", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sélection du mode de fall-back (09.07, encart SELECTING MODES) par le siège humain.
+//
+// Une escouade engagée et saine est activée en Ordered Retreat (`fall_back_mode`) ; le joueur
+// peut SÉLECTIONNER Desperate Escape : le bouton ouvre le popup hazard, sa confirmation envoie
+// `hazard_confirm`, et la reprise du moteur publie `fall_back_mode: "desperate_escape"`, que le
+// hook reflète (bouton enfoncé, plus re-sélectionnable).
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — sélection de Desperate Escape", () => {
+  it("activation Ordered Retreat → sélection → hazard_confirm → mode retenu lu de la reprise", async () => {
+    const actions: string[] = [];
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as { action: string };
+        actions.push(body.action);
+        if (body.action === "hazard_confirm") {
+          // Reprise après hazard : pool rebâti à travers les ennemis, mode retenu.
+          return HttpResponse.json({
+            success: true,
+            result: {
+              unit_activated: true,
+              unitId: "10",
+              valid_destinations: [[3, 3]],
+              waiting_for_player: true,
+              would_flee: true,
+              fall_back_mode: "desperate_escape",
+              fall_back_resume: true,
+            },
+            game_state: makeGameState({ active_movement_unit: "10" }),
+            action_logs: [],
+          });
+        }
+        // Activation : escouade engagée, saine, encerclée → aucune issue en Ordered Retreat,
+        // mais pas de skip (le choix du mode reste ouvert).
+        return HttpResponse.json({
+          success: true,
+          result: {
+            unit_activated: true,
+            unitId: "10",
+            valid_destinations: [],
+            waiting_for_player: true,
+            would_flee: true,
+            fall_back_mode: "ordered_retreat",
+          },
+          game_state: makeGameState({ active_movement_unit: "10" }),
+          action_logs: [],
+        });
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onSelectUnit(10);
+    });
+    await waitFor(() => expect(result.current.activeUnitEngaged).toBe(10), { timeout: 5000 });
+    expect(result.current.desperateEscapeUnitId).toBeNull();
+    expect(result.current.hazardWarningPopup).toBeNull();
+
+    act(() => {
+      result.current.onSelectDesperateEscape(10);
+    });
+    expect(result.current.hazardWarningPopup).toEqual({ unitId: 10 });
+
+    await act(async () => {
+      await result.current.onConfirmHazardWarning();
+    });
+
+    expect(actions).toContain("hazard_confirm");
+    expect(result.current.hazardWarningPopup).toBeNull();
+    expect(result.current.desperateEscapeUnitId).toBe(10);
+    expect(result.current.activeUnitEngaged).toBe(10);
+    expect(result.current.actionRefusal).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PvE, phase fight : le bot a attaqué (`/game/ai-turn`), le DÉFENSEUR HUMAIN alloue ses pertes
 // (05.03/05.04). Le prompt s'ouvre depuis la réponse du tour IA, sans attendre un geste humain.
 // ---------------------------------------------------------------------------

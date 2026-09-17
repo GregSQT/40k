@@ -829,7 +829,12 @@ def self_model_bin_index(field: str) -> int:
 #: Horrors » ; 01.03 : « each time a unit is selected to move, that unit's controlling player is
 #: the active player until that move ends »). Il est ajouté EN FIN de tuple, jamais inséré : un
 #: type déclaré garde son index, et le décaler réécrirait la colonne d'un type déjà vivant.
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move")
+#: ⚠️ `fall_back_mode` (09.07, encart SELECTING MODES : « ordered retreat is not mandatory ») est
+#: le QUATRIÈME type à deux candidats sans `effect_ids`, séparés par `declines` : `CHOICE_0`
+#: retient Desperate Escape (traversée des ennemis contre hazard 06.03 + battle-shock 01.07),
+#: `CHOICE_1` garde Ordered Retreat — le mode par défaut, qui « ne fait rien ». Posé par
+#: `arm_fall_back_mode_decision` à l'escouade engagée et saine désignée, AVANT son pool.
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move", "fall_back_mode")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

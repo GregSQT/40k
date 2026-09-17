@@ -170,6 +170,22 @@ def bot_action_for_pending_choice(
                 "CHOICE_0 ouvert."
             )
         return int(mi.CHOICE_BASE)
+    # `fall_back_mode` (09.07) relève de la MÊME exception, pour la même raison de baseline : le
+    # moteur IMPOSAIT Ordered Retreat à toute escouade saine jusqu'à ce que le mode devienne un
+    # choix du joueur actif. Le bot garde donc Ordered Retreat — exactement l'ancien comportement,
+    # y compris pour une escouade encerclée (pool vide → WAIT, comme le skip d'avant). Le laisser
+    # tomber dans le tirage ferait rouler des hazards et des tests de commandement à l'adversaire
+    # de référence une fois sur deux, donc bouger la baseline de win-rate.
+    if decision is not None and require_key(decision, "type") == "fall_back_mode":
+        from engine.phase_handlers.movement_handlers import FALL_BACK_MODE_ORDERED_RETREAT_INDEX
+
+        ordered_retreat = int(mi.CHOICE_BASE) + FALL_BACK_MODE_ORDERED_RETREAT_INDEX
+        if not bool(action_mask[ordered_retreat]):
+            raise RuntimeError(
+                f"{wrapper}: decision fall_back_mode en attente sans le candidat Ordered "
+                f"Retreat (CHOICE_{FALL_BACK_MODE_ORDERED_RETREAT_INDEX}) ouvert."
+            )
+        return ordered_retreat
     # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de
     # LISTE, jamais une decision de bot ». Le bot ne declare donc jamais de reserves de sa propre
     # initiative — invariant que portait auparavant le retrait de `SQUAD_ACTION_WAIT` du pool

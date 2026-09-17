@@ -862,3 +862,145 @@ describe("BoardWithAPI — bandeau de refus", () => {
     expect(screen.getByTestId("roster-row-select-7")).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// T_BoardWithAPI_FallBackMode — sélection du mode de fall-back 09.07 (encart SELECTING MODES :
+// « ordered retreat is not mandatory, so you could select desperate escape instead »).
+//
+// Une escouade engagée et saine est activée en Ordered Retreat, pool vide (encerclée) : le moteur
+// ne la ferme plus d'office, le bouton « Desp. Escape » est sélectionnable, « Fall-back » est le
+// mode enfoncé. Cliquer « Desp. Escape » ouvre le popup hazard ; « Confirmer » envoie
+// `hazard_confirm`, et la reprise du moteur (`fall_back_mode: "desperate_escape"`) enfonce le
+// bouton et grise « Fall-back ». Le mode n'est jamais déduit côté client.
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — mode de fall-back (09.07)", () => {
+  function moveState(over: Record<string, unknown> = {}) {
+    return makeGameState({
+      units: [
+        { ...makeUnit(10, 1), col: 5, row: 5 },
+        { ...makeUnit(20, 2), col: 6, row: 5 },
+      ],
+      move_activation_pool: ["10"],
+      ...over,
+    });
+  }
+
+  /** La table de statut du joueur 1 démarre REPLIÉE : la déplier fait apparaître la ligne de
+   *  l'escouade, dont le clic active l'unité (`onSelectUnit`). */
+  async function expandPlayer1Table() {
+    await waitFor(
+      () =>
+        expect(screen.getAllByRole("button", { name: "Expand table" }).length).toBeGreaterThan(0),
+      { timeout: 5000 }
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Expand table" })[0]);
+    await waitFor(() => expect(screen.getByText("Squad 10")).toBeTruthy(), { timeout: 5000 });
+  }
+
+  it("escouade engagée : Desp. Escape sélectionnable → popup → hazard_confirm → mode retenu", async () => {
+    const actions: string[] = [];
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: moveState() })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as { action: string };
+        actions.push(body.action);
+        const resumed = body.action === "hazard_confirm";
+        return HttpResponse.json({
+          success: true,
+          result: {
+            unit_activated: true,
+            unitId: "10",
+            valid_destinations: resumed ? [[2, 2]] : [],
+            waiting_for_player: true,
+            would_flee: true,
+            fall_back_mode: resumed ? "desperate_escape" : "ordered_retreat",
+            ...(resumed ? { fall_back_resume: true } : {}),
+          },
+          game_state: moveState({ active_movement_unit: "10" }),
+          action_logs: [],
+        });
+      })
+    );
+
+    renderBoard();
+    await expandPlayer1Table();
+
+    // Activation par la table de statut (la ligne porte le clic).
+    const row = screen.getByText("Squad 10").closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLElement);
+
+    await waitFor(
+      () => {
+        const btn = screen.getByRole("button", { name: "Desp. Escape" }) as HTMLButtonElement;
+        expect(btn.disabled).toBe(false);
+      },
+      { timeout: 5000 }
+    );
+    const fallBack = screen.getByRole("button", { name: "Fall-back" }) as HTMLButtonElement;
+    expect(fallBack.className).toContain("btn-active");
+    expect(screen.queryByRole("heading", { name: /Desperate Escape/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Desp. Escape" }));
+    await waitFor(
+      () => expect(screen.getByRole("heading", { name: /Desperate Escape/i })).toBeTruthy(),
+      { timeout: 5000 }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Confirmer" }));
+
+    await waitFor(
+      () => {
+        const btn = screen.getByRole("button", { name: "Desp. Escape" }) as HTMLButtonElement;
+        expect(btn.className).toContain("btn-active");
+      },
+      { timeout: 5000 }
+    );
+    expect(actions).toContain("hazard_confirm");
+    expect((screen.getByRole("button", { name: "Fall-back" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    // Mode retenu : un second clic ne rouvre pas le popup (les jets sont faits).
+    fireEvent.click(screen.getByRole("button", { name: "Desp. Escape" }));
+    expect(screen.queryByRole("heading", { name: /Desperate Escape/i })).toBeNull();
+  });
+
+  it("escouade non engagée : Desp. Escape grisé", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: moveState() })
+      ),
+      http.post("/api/game/action", () =>
+        HttpResponse.json({
+          success: true,
+          result: {
+            unit_activated: true,
+            unitId: "10",
+            valid_destinations: [[2, 2]],
+            waiting_for_player: true,
+            would_flee: false,
+            fall_back_mode: null,
+          },
+          game_state: moveState({ active_movement_unit: "10" }),
+          action_logs: [],
+        })
+      )
+    );
+
+    renderBoard();
+    await expandPlayer1Table();
+    fireEvent.click(screen.getByText("Squad 10").closest("tr") as HTMLElement);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Desp. Escape" })).toBeTruthy(), {
+      timeout: 5000,
+    });
+    expect(
+      (screen.getByRole("button", { name: "Desp. Escape" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    expect((screen.getByRole("button", { name: "Move" }) as HTMLButtonElement).className).toContain(
+      "btn-active"
+    );
+  });
+});

@@ -133,3 +133,23 @@ def test_the_two_view_levels_hold_two_distinct_cache_entries():
     # Même figurine, même départ, même budget, même orientation : seul le niveau les sépare.
     assert keys[0][:5] == keys[1][:5]
     assert {k[5] for k in keys} == {0, 1}
+
+
+def test_selecting_desperate_escape_does_not_reuse_the_ordered_retreat_field():
+    """Desperate Escape (09.07) retire les figurines ennemies des obstacles de traversée, et le
+    mode est RETENU entre deux constructions du pool de la même activation (Ordered Retreat à
+    l'activation, Desperate Escape après la confirmation du danger) sans qu'aucun commit ne
+    vide ce cache. Sans le mode dans la clé, le champ d'Ordered Retreat était resservi et le
+    choix du joueur restait sans effet sur les cases offertes.
+    """
+    from engine.phase_handlers.shared_utils import select_desperate_escape_mode
+
+    gs = _gs()
+    assert _anchors_beyond_wall(gs, 0) == [], "témoin : Ordered Retreat butte sur le mur"
+
+    select_desperate_escape_mode(gs, "1")
+
+    assert _anchors_beyond_wall(gs, 0), (
+        "le champ d'Ordered Retreat a été réutilisé après la sélection de Desperate Escape — la "
+        "clé du cache ne porte pas le mode"
+    )

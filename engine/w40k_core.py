@@ -4621,6 +4621,31 @@ class W40KEngine(gym.Env):
                 "success": True,
             }
 
+        if decision_type == "fall_back_mode":
+            # 09.07 « BEFORE MOVING: Select fall-back mode » : decision d'ESCOUADE, par fall-back.
+            # Jumeau exact de `fly_declaration` — memes candidats sans `effect_ids`, `declines`
+            # sur Ordered Retreat, reprise implicite de l'activation au step suivant sur un pool
+            # rebati (Desperate Escape traverse les figurines ennemies). Le hazard 06.03, lui,
+            # est resolu au commit par `desperate_escape_pre_move`, qui lit le verrou pose ici.
+            desperate = bool(
+                require_key(require_key(selected_option, "payload"), "desperate_escape")
+            )
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            # `apply_fall_back_mode_decision` efface la decision elle-meme (ecrivain unique).
+            movement_handlers.apply_fall_back_mode_decision(
+                self.game_state, decision_squad_id, desperate
+            )
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "desperateEscape": desperate,
+                "success": True,
+            }
+
         if decision_type == "allocation_model":
             # P3-4 : le défenseur gym choisit quelle figurine encaisse la prochaine blessure (05.04).
             # Le payload porte `model_id` (la figurine choisie) et `alloc_ctx_key` (le contexte
@@ -5520,14 +5545,24 @@ class W40KEngine(gym.Env):
     
     
     def _handle_hazard_confirm(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Desperate Escape (09.07) — validation du popup hazard à l'activation.
+        """Desperate Escape (09.07) — le siège humain RETIENT le mode et confirme le danger.
+
+        Deux cas, un seul acte (le popup `HazardWarningModal`, puis cette action) :
+        - escouade battle-shocked : le mode lui est IMPOSÉ (« Otherwise, you must select this
+          mode »), le popup s'ouvre de lui-même à l'activation ;
+        - escouade saine : le mode est SÉLECTIONNÉ par le bouton « Desperate Escape » de l'UI
+          (encart SELECTING MODES : « ordered retreat is not mandatory, so you could select
+          desperate escape instead »), qui ouvre le même popup. Le verrou est posé ICI, avant le
+          hazard : c'est lui que `desperate_escape_pre_move` lit, et que la reprise ci-dessous
+          fait lire au pool (traversée des figurines ennemies et de la bande d'EZ).
 
         Résout le hazard (06.03) + attribution 06.02 AVANT de bouger, puis :
         - unité détruite → fin d'activation sans move (``desperate_escape_died``) ;
         - unité vivante  → (re)construit le pool Fall Back et repasse en preview.
         """
         from engine.phase_handlers.shared_utils import (
-            desperate_escape_pre_move, _squad_is_in_enemy_er,
+            desperate_escape_mode_selected, desperate_escape_pre_move, _squad_is_in_enemy_er,
+            select_desperate_escape_mode,
         )
 
         uid = action.get("unitId")
@@ -5538,11 +5573,16 @@ class W40KEngine(gym.Env):
             return False, {"error": f"hazard_confirm: unit {uid} not found"}
 
         was_engaged = _squad_is_in_enemy_er(self.game_state, str(uid))
-        if not was_engaged or not bool(require_key(unit, "battle_shocked")):
+        if not was_engaged:
             return False, {
-                "error": f"hazard_confirm: unit {uid} not in Desperate Escape "
-                          "(engaged + battle_shocked required)"
+                "error": f"hazard_confirm: unit {uid} is not engaged — no fall-back mode to select"
             }
+        # Les jets de hazard sont faits UNE fois par mode retenu (09.07 BEFORE MOVING). Le verrou
+        # en témoigne : une seconde confirmation (double clic, report d'activation puis
+        # ré-activation) les rejouerait.
+        if desperate_escape_mode_selected(self.game_state, str(uid)):
+            return False, {"error": "hazard_already_resolved", "unitId": str(uid)}
+        select_desperate_escape_mode(self.game_state, str(uid))
 
         auto_resolve = bool(self.game_state.get("gym_training_mode", False))
         desperate_escape_pre_move(str(uid), self.game_state, was_engaged, auto_resolve)
@@ -5605,7 +5645,9 @@ class W40KEngine(gym.Env):
         - ``move`` (défaut historique) : Desperate Escape 09.07, déclenché AVANT le fall back —
           unité morte → fin d'activation sans move ; sinon → pool Fall Back + preview.
         """
-        from engine.phase_handlers.shared_utils import clear_desperate_escape_state
+        from engine.phase_handlers.shared_utils import (
+            clear_desperate_escape_state, fall_back_mode_of,
+        )
         from engine.phase_handlers import movement_handlers as _mh
         sid = str(uid)
         hazard_origin = self.game_state.pop("hazard_origin", "move")
@@ -5632,7 +5674,7 @@ class W40KEngine(gym.Env):
                 "done": True,
             }
         if not is_unit_alive(sid, self.game_state):
-            clear_desperate_escape_state(self.game_state)
+            clear_desperate_escape_state(self.game_state, sid)
             _mh._invalidate_all_destination_pools_after_movement(self.game_state)
             _mh.movement_clear_preview(self.game_state)
             return True, {
@@ -5658,6 +5700,9 @@ class W40KEngine(gym.Env):
             "preview_data": _mh.movement_preview(pool),
             "waiting_for_player": True,
             "would_flee": True,
+            # Le verrou est posé (hazard_confirm) : le bouton « Desperate Escape » s'enfonce et
+            # ne peut plus être re-cliqué. Même source que l'activation.
+            "fall_back_mode": fall_back_mode_of(self.game_state, sid),
             "advance_roll": _mh._advance_roll_for(sid, self.game_state),
             # Desperate Escape : le hazard a consommé le clic qui, normalement, entre dans le plan
             # par-figurine. Ce marqueur dit au front d'auto-entrer en perModelMove (Fall Back)
@@ -8613,7 +8658,7 @@ class W40KEngine(gym.Env):
                 if _is_desp and not _is_alive:
                     # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
                     # `_resume_after_hazard` → cas `not is_unit_alive`).
-                    clear_desperate_escape_state(self.game_state)
+                    clear_desperate_escape_state(self.game_state, str(squad_id))
                     _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                     _mh_de.movement_clear_preview(self.game_state)
                     return True, {
@@ -8648,7 +8693,7 @@ class W40KEngine(gym.Env):
                         _anchor_after_de != _anchor_before_de
                         or not validate_squad_coherency(self.game_state, str(squad_id))
                     ):
-                        clear_desperate_escape_state(self.game_state)
+                        clear_desperate_escape_state(self.game_state, str(squad_id))
                         clear_squad_move_cell_map(self.game_state, str(squad_id))
                         self.game_state.get("_squad_advance_rolls", {}).pop(  # get allowed
                             squad_id, None
@@ -8781,6 +8826,14 @@ class W40KEngine(gym.Env):
                     "models_segment": self._models_segment_for_unit(squad_id),
                 },
             )
+            if move_type == "fall_back":
+                # 09.07 AFTER MOVING — Desperate Escape : jet de battle-shock (01.07) si l'unite
+                # n'est pas battle-shocked. APRES la ligne de mouvement (le jet la suit dans
+                # step.log), AVANT `end_activation`, qui purge le verrou de mode que ce jet lit.
+                # Miroir des deux commits PvP de `movement_handlers`.
+                from engine.phase_handlers.shared_utils import desperate_escape_post_move
+
+                desperate_escape_post_move(str(squad_id), self.game_state)
             # Emission AVANT end_activation(ACTION) : c'est l'ordre qu'impose le contrat
             # (« action already logged by handlers »).
             end_result = end_activation(self.game_state, unit, ACTION, 1, tracking, MOVE, 0)

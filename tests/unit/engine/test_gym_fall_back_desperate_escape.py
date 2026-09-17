@@ -384,7 +384,7 @@ def test_desperate_escape_keeps_enemy_traversal_after_hazard_losses() -> None:
     destination que le masque venait d'offrir → `ValueError: execute_squad_move a échoué …
     incohérence masque/exécution`, qui tue les workers `SubprocVecEnv` du training.
 
-    Cycle rouge→vert : supprimer `game_state[DESPERATE_ESCAPE_MODE_KEY] = str(squad_id)` de
+    Cycle rouge→vert : supprimer l'appel `select_desperate_escape_mode(game_state, squad_id)` de
     `desperate_escape_pre_move` fait remonter ce ValueError.
     """
     from engine.phase_handlers.shared_utils import build_squad_move_cell_map
