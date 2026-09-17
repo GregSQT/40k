@@ -1527,6 +1527,9 @@ export default function Board({
   const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Cercles de portée autour de la fig activée (préservé au redraw, comme les autres overlays). */
   const rangeRingsOverlayRef = useRef<PIXI.Container | null>(null);
+  /** Rectangle de sélection + voile vert (outil sélection rectangle) — persistant à travers la
+   *  purge du stage, comme les autres overlays : sinon `redraw` dessine sur un Graphics détruit. */
+  const rectSelectOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Redessine les cercles à l'hex survolé : les cercles suivent le ghost pendant un preview.
    *  ``null`` quand aucune fig n'est activée (ou option désactivée) → les handlers n'ont rien à faire. */
   const rangeRingsFollowRef = useRef<((col: number, row: number) => void) | null>(null);
@@ -8438,6 +8441,7 @@ export default function Board({
     overlay.zIndex = 2800;
     overlay.eventMode = "none";
     app.stage.addChild(overlay);
+    rectSelectOverlayRef.current = overlay;
     const GREEN = cssColorToNumber("--veil-green");
     let start: { x: number; y: number } | null = null;
     let candidates: Array<SelectableModel & { unitId: number }> = [];
@@ -8550,6 +8554,7 @@ export default function Board({
       window.removeEventListener("click", onSynthClick, true);
       window.removeEventListener("dblclick", onSynthClick, true);
       canvas.removeEventListener("contextmenu", onContextMenu);
+      if (rectSelectOverlayRef.current === overlay) rectSelectOverlayRef.current = null;
       if (!overlay.destroyed) {
         overlay.clear();
         app.stage.removeChild(overlay);
@@ -10423,6 +10428,7 @@ export default function Board({
       const savedCoherencyRemovalOverlay = coherencyRemovalOverlayRef.current;
       const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
       const savedWaaaghFangsOverlay = waaaghFangsOverlayRef.current;
+      const savedRectSelectOverlay = rectSelectOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -10442,6 +10448,7 @@ export default function Board({
       if (savedCoherencyRemovalOverlay?.parent) app.stage.removeChild(savedCoherencyRemovalOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (savedWaaaghFangsOverlay?.parent) app.stage.removeChild(savedWaaaghFangsOverlay);
+      if (savedRectSelectOverlay?.parent) app.stage.removeChild(savedRectSelectOverlay);
       // `keepHighlightLayers` implique déjà « vivant ET attaché au stage » (conjoints de
       // `canReuseExistingHighlightsThroughDestroy`, dont il dérive) : seul le test de non-nullité
       // subsiste, pour le compilateur.
@@ -10572,6 +10579,10 @@ export default function Board({
         // sous les figurines (2000).
         savedWaaaghFangsOverlay.zIndex = 130;
         app.stage.addChild(savedWaaaghFangsOverlay);
+      }
+      if (savedRectSelectOverlay && !savedRectSelectOverlay.destroyed) {
+        savedRectSelectOverlay.zIndex = 2800;
+        app.stage.addChild(savedRectSelectOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
