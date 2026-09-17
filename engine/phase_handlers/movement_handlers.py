@@ -826,8 +826,10 @@ def arm_ascent_declaration_decision(
 
     ORDRE CONTRACTUEL des candidats : `CHOICE_0` = monter (les figurines dont la case d'arrivée
     porte un plancher tenable y finissent, chacune payant SA distance verticale), `CHOICE_1` =
-    rester au sol. Aucun des deux n'accorde d'effet de datasheet : c'est `declines` qui les
-    distingue dans l'observation, jamais l'index.
+    ne pas monter : une figurine au sol y reste, une figurine déjà en hauteur garde son étage là
+    où la case d'arrivée le porte et descend ailleurs (`model_rigid_level_map`). Aucun des deux
+    n'accorde d'effet de datasheet : c'est `declines` qui les distingue dans l'observation,
+    jamais l'index.
 
     POURQUOI une déclaration et pas une décision par figurine : le move gym translate le bloc
     d'un vecteur unique, donc l'agent choisit UNE destination, pas douze. La déclaration est le
