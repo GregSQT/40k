@@ -4806,9 +4806,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const data = await executeAction({ action: "advance", unitId: String(uid) });
       // AVANT le contrôle du jet : un refus n'a pas de jet, et tomber sur le `throw` ci-dessous
       // transformait un refus de règle en exception non traitée au clic.
-      if (noteActionOutcome(data, "Advance").kind !== "ok") return;
-      const roll = (data as { result?: { advance_roll?: number } })?.result?.advance_roll;
-      if (roll === undefined || roll === null) {
+      const outcome = noteActionOutcome(data, "Advance");
+      if (outcome.kind !== "ok") return;
+      const roll = outcome.data.result?.advance_roll;
+      if (typeof roll !== "number") {
         throw new Error(`[ADVANCE] réponse sans advance_roll pour unit=${uid}`);
       }
       setAdvanceRoll(roll);
@@ -5218,10 +5219,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result) return;
       const outcome = noteActionOutcome(result, "Assignation de tir");
       if (outcome.kind !== "ok") return;
-      const decls = (result.result?.declarations ?? []) as Array<{
+      const decls = (outcome.data.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
         target_unit_id: string;
@@ -5257,8 +5257,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           weaponCode,
           targetId: String(targetUnitId),
         });
-        if (noteActionOutcome(maxRes, "Assignation de tir").kind !== "ok") return;
-        const qtyMax = Number(maxRes?.result?.qty_max ?? 0);
+        const maxOutcome = noteActionOutcome(maxRes, "Assignation de tir");
+        if (maxOutcome.kind !== "ok") return;
+        const qtyMax = Number(maxOutcome.data.result?.qty_max ?? 0);
         if (qtyMax <= 0) {
           return;
         }
@@ -5279,10 +5280,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result) return;
       const outcome = noteActionOutcome(result, "Assignation de tir");
       if (outcome.kind !== "ok") return;
-      const decls = (result.result?.declarations ?? []) as Array<{
+      const decls = (outcome.data.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
         target_unit_id: string;
@@ -5321,10 +5321,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[SQUAD-SHOOT] unassign model=${modelId} FAILED`, e);
         return;
       }
-      if (!result) return;
       const outcome = noteActionOutcome(result, "Retrait d'une figurine du tir");
       if (outcome.kind !== "ok") return;
-      const decls = (result.result?.declarations ?? []) as Array<{
+      const decls = (outcome.data.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
         target_unit_id: string;
@@ -5359,10 +5358,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[SQUAD-SHOOT] unassign weapon=${weaponIndex} FAILED`, e);
         return;
       }
-      if (!result) return;
       const outcome = noteActionOutcome(result, "Retrait d'une arme du tir");
       if (outcome.kind !== "ok") return;
-      const decls = (result.result?.declarations ?? []) as Array<{
+      const decls = (outcome.data.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
         target_unit_id: string;
@@ -5479,10 +5477,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result) return;
       const outcome = noteActionOutcome(result, "Assignation de combat");
       if (outcome.kind !== "ok") return;
-      const decls = (result.result?.declarations ?? []) as Array<{
+      const decls = (outcome.data.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
         target_unit_id: string;
@@ -5528,10 +5525,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result) return;
       const outcome = noteActionOutcome(result, "Assignation d'arme de combat");
       if (outcome.kind !== "ok") return;
-      const decls = (result.result?.declarations ?? []) as Array<{
+      const decls = (outcome.data.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
         target_unit_id: string;
@@ -7152,7 +7148,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const data = await executeAction({ action: "take_to_skies", unitId: String(uid) });
-      if (noteActionOutcome(data, "Take to skies").kind !== "ok") return;
+      const outcome = noteActionOutcome(data, "Take to skies");
+      if (outcome.kind !== "ok") return;
       // Phase charge, plan par-fig actif (sécurité) : le toggle change budget (-2") + traversée → recalcul.
       const chargePlan = chargeMovePlanRef.current;
       if (chargePlan && chargePlan.unitId === uid) {
@@ -7162,8 +7159,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Phase charge, étape sélection de cible : le backend renvoie les cibles éligibles re-bornées par
       // la distance -2" (blinking_units). On force le surlignage (la logique needsNewTimer ne rafraîchit
       // pas un ensemble qui rétrécit) et on purge les cibles pré-déclarées devenues hors portée.
-      if (data?.game_state?.phase === "charge") {
-        const res = data.result as Record<string, unknown> | undefined;
+      if (outcome.data.game_state?.phase === "charge") {
+        const res = outcome.data.result;
         const blink = Array.isArray(res?.blinking_units)
           ? (res.blinking_units as string[]).map((id) => parseInt(id, 10))
           : [];

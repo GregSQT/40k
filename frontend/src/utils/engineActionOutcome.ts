@@ -34,7 +34,7 @@ export interface EngineActionResult {
   result?: { error?: unknown };
 }
 
-export type EngineActionOutcome<T extends EngineActionResult = EngineActionResult> =
+export type EngineActionOutcome<T extends EngineActionResult> =
   /** Le moteur a agi : appliquer les effets de bord. `data` est l'enveloppe rendue, garantie
    *  présente — la lire ici évite à l'appelant de re-tester un `undefined` déjà écarté. */
   | { kind: "ok"; data: T }
