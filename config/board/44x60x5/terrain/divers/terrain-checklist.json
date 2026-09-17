@@ -1,0 +1,35 @@
+{
+  "_comment": "FIGÉ — terrain de tests/integration/pvp/checklist/ (scenario_pvp_checklist.json). Lu par référence explicite seulement (dossier terrain/divers/ hors tirage du training). Deux murs droits isolés (W1 pour l'INFANTRY 13.06, W2 pour le vol 21.03), une ruine avec un étage (13.06) et deux zones de déploiement en bandes (P1 nord, P2 sud) pour l'ingress 20.04. Ne PAS retoucher pour jouer : chaque coordonnée est mesurée par un test.",
+  "terrain_id": "terrain-checklist",
+  "terrain": [
+    {
+      "id": "ruin_west",
+      "name": "ruine ouest (étage 13.06)",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [[20, 205], [70, 205], [70, 255], [20, 255]],
+      "objective": false,
+      "floors": [
+        {"level": 1, "height_inches": 3, "vertices": [[30, 215], [60, 215], [60, 245], [30, 245]]}
+      ]
+    },
+    {
+      "id": "objective_center",
+      "name": "marqueur central",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[100, 155], [120, 155], [120, 175], [100, 175]],
+      "objective": true
+    }
+  ],
+  "walls": [
+    {"name": "W1_infantry", "type": "dense", "segments": [[[75, 215], [175, 215]]]},
+    {"name": "W2_fly", "type": "dense", "segments": [[[100, 232], [219, 232]]]},
+    {"name": "ruin_west_d", "type": "dense", "segments": [[[20, 205], [70, 205]], [[20, 205], [20, 255]]]}
+  ],
+  "icons": [],
+  "deployment_zones": [
+    {"id": "1", "name": "Zone de déploiement joueur 1 (nord)", "shape": "polygon", "vertices": [[0, 0], [220, 0], [220, 60], [0, 60]], "objective": false},
+    {"id": "2", "name": "Zone de déploiement joueur 2 (sud)", "shape": "polygon", "vertices": [[0, 240], [220, 240], [220, 300], [0, 300]], "objective": false}
+  ]
+}

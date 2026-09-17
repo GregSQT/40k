@@ -1,0 +1,92 @@
+{
+  "_comment": "FIGÉ — fixture de tests/integration/pvp/checklist/ (test_move.py, plafond 20.01). Déploiement ACTIF : l'étape Declare Battle Formations s'ouvre et c'est elle qui applique le plafond de 50 % (scale 300pts → 150 pts) : le Dreadnought (160) n'est jamais proposable, les Intercessors (80) le sont ; côté 2 le Psychophage (125) consomme le plafond et retire les Termagants (30) de la liste. Ne PAS retoucher pour jouer.",
+  "deployment_type": "active",
+  "wall_hexes": [],
+  "terrain_ref": "divers/terrain-checklist.json",
+  "uses_codex_detachment": {
+    "1": true,
+    "2": true
+  },
+  "army_faction": {
+    "1": "ADEPTUS ASTARTES",
+    "2": "TYRANIDS"
+  },
+  "scale": "300pts",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "units": [
+    {
+      "id": 1,
+      "unit_type": "DreadnoughtBallistus",
+      "player": 1,
+      "col": -1,
+      "row": -1
+    },
+    {
+      "id": 2,
+      "unit_type": "Intercessor",
+      "player": 1,
+      "col": -1,
+      "row": -1,
+      "models": [
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "unit_type": "Psychophage",
+      "player": 2,
+      "col": -1,
+      "row": -1
+    },
+    {
+      "id": 102,
+      "unit_type": "Termagant",
+      "player": 2,
+      "col": -1,
+      "row": -1,
+      "models": [
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        },
+        {
+          "col": -1,
+          "row": -1
+        }
+      ]
+    }
+  ]
+}
