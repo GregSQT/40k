@@ -1426,7 +1426,19 @@ export class UnitRenderer {
             sprite.eventMode = "static";
             sprite.cursor = "pointer";
             sprite.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-              if (e.button === 0) onConfirmMove?.();
+              if (e.button !== 0) return;
+              // Le clic de pose est CONSOMMÉ (même contrat que le chemin capture de BoardPvp).
+              // PIXI écoute le pointerdown en capture sur le canvas, avant les écouteurs bubble ;
+              // la confirmation bascule React en perModelMove pendant cette même propagation, et
+              // l'écouteur de sélection de figurine installé par ce basculement verrait sinon le
+              // même événement → figurine sous le curseur activée au lieu d'une simple pose.
+              // nativeEvent est typé `MouseEvent | PointerEvent | PixiTouch` ; la variante Touch
+              // (navigateur sans PointerEvent) n'est pas un Event DOM et n'a rien à consommer.
+              if (!(e.nativeEvent instanceof Event)) {
+                throw new Error("movePreview confirm: nativeEvent n'est pas un Event DOM (Touch)");
+              }
+              e.nativeEvent.stopImmediatePropagation();
+              onConfirmMove?.();
             });
           }
           if (previewType === "attack") {

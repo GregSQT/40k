@@ -1509,8 +1509,6 @@ export default function Board({
   const hoverMoveOrientationStepRef = useRef<number | null>(null);
   /** Ligne mesure règle (ancre → hex sous curseur) */
   const measureGuideLineRef = useRef<PIXI.Graphics | null>(null);
-  /** Timestamp d'entrée en perModelMove depuis movePreview — bloque onPointerDownSelect pour le clic de confirmation */
-  const squadMoveEntryTimeRef = useRef<number | null>(null);
   /** Double-click détecté manuellement dans onEntryPointerDown : { unitId, ts } du dernier clic sur une unité */
   const lastUnitClickRef = useRef<{ unitId: number | string; ts: number } | null>(null);
   /** Timestamp du dernier dispatch de boardUnitDoubleClick depuis onEntryPointerDown — pour supprimer le dblclick natif redondant */
@@ -4539,7 +4537,10 @@ export default function Board({
   /**
    * Move / advance / charge / pile-in : clic gauche = valider le déplacement à l’hex de l’icône (``hoveredHexRef``).
    * La hitArea du plateau est sous les unités (zIndex) : ``boardHexClick`` ne recevait souvent pas le clic.
-   * Capture sur le canvas avant Pixi — même code que ``boardClickHandler`` via l’événement synthétique.
+   * Capture sur le canvas — même code que ``boardClickHandler`` via l’événement synthétique. PIXI écoute
+   * aussi en capture sur le canvas et est enregistré AVANT : un sprite sous le curseur (fantôme de
+   * movePreview) confirme donc en premier ; cet écouteur ne sert que quand aucun sprite n’absorbe le clic.
+   * Dans les deux cas le clic de pose est consommé (stopImmediatePropagation).
    */
   useEffect(() => {
     if (measureMode.kind !== "off") return;
@@ -5347,14 +5348,9 @@ export default function Board({
 
     const onPointerDownSelect = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      // Ignorer le clic qui a confirmé le movePreview (même événement, propagé après la transition)
-      if (
-        squadMoveEntryTimeRef.current !== null &&
-        performance.now() - squadMoveEntryTimeRef.current < 300
-      ) {
-        squadMoveEntryTimeRef.current = null;
-        return;
-      }
+      // Le clic qui a confirmé le movePreview n'arrive jamais ici : les deux chemins de pose
+      // (sprite fantôme dans UnitRenderer, capture ci-dessus) le consomment par
+      // stopImmediatePropagation, bien que cet écouteur soit installé pendant sa propagation.
       const rect = canvas.getBoundingClientRect();
       const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
       const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
@@ -8910,7 +8906,6 @@ export default function Board({
       onCombatAttack: stableCallbacks.current.onFightAttack || (() => {}),
       onConfirmMove: () => {
         clearMovePreviewLos();
-        squadMoveEntryTimeRef.current = performance.now();
         stableCallbacks.current.onConfirmMove();
       },
       onCancelMove: stableCallbacks.current.onCancelMove,
@@ -10349,13 +10344,6 @@ export default function Board({
 
     const chargeMaxDistance = gameConfig?.charge?.charge_max_distance;
 
-    // Wrapper qui enregistre le timestamp d'entrée en perModelMove avant de confirmer le move.
-    // Utilisé pour ignorer le select-click qui suit immédiatement la confirmation du movePreview.
-    const onConfirmMoveForRender = () => {
-      squadMoveEntryTimeRef.current = performance.now();
-      onConfirmMove();
-    };
-
     // Tir par-arme : couleur = arme (profils d'une même combi → couleur partagée).
     // weaponColorsByTarget : pour chaque escouade cible, les couleurs distinctes des armes qui
     // la visent → voile splitté. Au-delà de la palette : blanc.
@@ -10849,7 +10837,7 @@ export default function Board({
           chargeTargets,
           fightTargets,
           targetPreview,
-          onConfirmMove: onConfirmMoveForRender,
+          onConfirmMove,
           parseColor,
           onUnitIconHoverChange: handleUnitIconHoverChange,
           onUnitDisplaySelect: (unitId: UnitId) => onUnitDisplaySelectChange?.(unitId),
@@ -11301,7 +11289,7 @@ export default function Board({
             chargeTargets,
             fightTargets,
             targetPreview,
-            onConfirmMove: onConfirmMoveForRender,
+            onConfirmMove,
             parseColor,
             autoSelectWeapon,
             onUnitTooltip: handleUnitTooltip,
@@ -11408,7 +11396,7 @@ export default function Board({
             chargeTargets,
             fightTargets,
             targetPreview,
-            onConfirmMove: onConfirmMoveForRender,
+            onConfirmMove,
             parseColor,
             onUnitTooltip: handleUnitTooltip,
             onBlinkProbHtml: handleBlinkProbHtml,
