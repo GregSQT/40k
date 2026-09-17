@@ -143,7 +143,6 @@ Et c'est la seule des applications dont le revenu se calcule directement : un ab
 ---
 
 ## 4. L'image — faire d'une difficulté une force
-
 L'équilibrage de Warhammer 40,000 est un mur mathématique. Avec plusieurs centaines d'unités et un budget de 2000 points, le nombre d'affrontements possibles est astronomique. Aucun programme de playtest humain ne peut couvrir cet espace — ce n'est pas une question d'effort, c'est une question d'ordre de grandeur.
 
 Avec cet outil, cette critique ne disparaît pas — elle **se retourne**.
@@ -164,7 +163,7 @@ La fiabilité du moteur n'est pas un détail technique. Une mesure d'équilibrag
 
 - **7 113 tests automatisés**, nommés d'après les règles officielles qu'ils vérifient — lisibles sans savoir coder.
 - **Chaque test est validé en réintroduisant volontairement le défaut** qu'il doit attraper. Un test qui passe du premier coup ne prouve rien ; on vérifie qu'il échoue quand il doit échouer.
-- **Des parties entières jouées au hasard, en continu**, pour débusquer les incohérences que personne n'a pensé à tester.
+- **Un second filet, indépendant des tests unitaires** : chaque partie jouée produit une trace que l'analyseur relit automatiquement, règle par règle. 952 scénarios de partie couvrent les violations que le code seul ne peut pas détecter — un bug qui traverserait la première barrière est signalé dès qu'il se manifeste en jeu réel.
 
 **Les limites et les choix :** La démonstration a été mise au point avec un matériel grand public, avec les limites évidentes que cela implique. Cependant, le moteur a été pensé pour être utilisable à plus grand format, et la qualité de jeu de l'agent n'est qu'une question de ressources pour l'entraîner.
 
