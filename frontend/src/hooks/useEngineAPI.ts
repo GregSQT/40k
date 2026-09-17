@@ -7403,6 +7403,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
    * pour snapper les fantômes à chaque mousemove, et par la pose. */
   const blockPoolRef = useRef<BlockPool>(new Map());
 
+  /** Pool + zone du bloc, posés dans les refs per-fig de la phase hôte : le board dessine ainsi
+   * exactement l'état « pool + zone » d'une figurine sélectionnée (la zone de charge n'est dessinée
+   * que si ce pool est non vide — BoardDisplay `useChargeDestPoolDiskDraw`). */
+  const setBlockZone = useCallback(
+    (kind: "move" | "charge", anchorKeys: Set<string>, loops: number[][] | null) => {
+      if (kind === "move") {
+        squadMoveModelPoolRef.current = anchorKeys;
+        squadMoveModelMaskLoopsRef.current = loops;
+      } else {
+        chargeModelPoolRef.current = anchorKeys;
+        chargeModelMaskLoopsRef.current = loops;
+      }
+    },
+    []
+  );
+
+  /** Sortie du suivi (pose ou abandon) : pool et zone effacés, fantômes retirés par BoardPvp. Le
+   * plan n'a pas été touché pendant le suivi (fantômes seulement) → rien à restaurer. */
+  const clearBlockFollow = useCallback(() => {
+    const bf = blockFollowRef.current;
+    if (!bf) return;
+    blockPoolRef.current = new Map();
+    setBlockZone(bf.kind, new Set(), null);
+    setBlockFollow(null);
+  }, [setBlockZone]);
+
   /** Escouade propriétaire d'une figurine (units_cache.occupied_hexes_by_model). */
   const findSquadOfModel = useCallback((modelId: string): number | null => {
     const cache = latestGameStateRef.current?.units_cache as
@@ -7517,18 +7543,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Zone d'atterrissage du bloc : même ref et même rendu lissé que la zone de la figurine
       // sélectionnée (BoardPvp la dessine tant que ``blockFollow`` est posé).
       const rawLoops = raw?.footprint_mask_loops;
-      const loops = Array.isArray(rawLoops) ? (rawLoops as number[][]) : null;
-      // Pool d'ancres (clés "col,row") posé dans la ref de pool per-fig : le board ne dessine la
-      // zone de charge que si ce pool est non vide (BoardDisplay `useChargeDestPoolDiskDraw`), et le
-      // move garde ainsi exactement l'état « pool + zone » d'une figurine sélectionnée.
-      const anchorKeys = new Set(pool.keys());
+      setBlockZone(
+        kind,
+        new Set(pool.keys()),
+        Array.isArray(rawLoops) ? (rawLoops as number[][]) : null
+      );
       if (kind === "move") {
         setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
-        squadMoveModelPoolRef.current = anchorKeys;
-        squadMoveModelMaskLoopsRef.current = loops;
       } else {
-        chargeModelPoolRef.current = anchorKeys;
-        chargeModelMaskLoopsRef.current = loops;
         setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
       }
       setBlockFollow({ kind, unitId, modelIds, anchorModelId, grab });
@@ -7539,21 +7561,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       handleStartSquadModelMove,
       postEngineQuery,
       readSquadModelPositions,
+      setBlockZone,
     ]
   );
-
-  /** Sortie du suivi (pose ou abandon) : pool et zone effacés, fantômes retirés par BoardPvp. */
-  const clearBlockFollow = useCallback((kind: "move" | "charge") => {
-    blockPoolRef.current = new Map();
-    if (kind === "move") {
-      squadMoveModelPoolRef.current = new Set();
-      squadMoveModelMaskLoopsRef.current = null;
-    } else {
-      chargeModelPoolRef.current = new Set();
-      chargeModelMaskLoopsRef.current = null;
-    }
-    setBlockFollow(null);
-  }, []);
 
   /** Clic (BoardPvp) : pose le bloc à l'ancre snappée ``anchorKey`` — les placements de CHAQUE
    * figurine viennent du pool moteur — puis re-juge le plan par le flux existant (voile rouge /
@@ -7566,7 +7576,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (!placements) {
         throw new Error(`block freeze: ancre ${anchorKey} absente du pool`);
       }
-      clearBlockFollow(bf.kind);
+      clearBlockFollow();
       if (bf.kind === "move") {
         setSquadMovePlan((prev) => {
           if (!prev) return prev;
@@ -7592,14 +7602,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [clearBlockFollow, refreshSquadMovePlanValidity, refreshChargePlanState]
   );
 
-  /** Clic droit / Échap / sortie du mode : abandonne le bloc. Le plan n'a pas été touché pendant
-   * le suivi (fantômes seulement) → rien à restaurer. */
-  const handleCancelBlock = useCallback(() => {
-    const bf = blockFollowRef.current;
-    if (!bf) return;
-    clearBlockFollow(bf.kind);
-  }, [clearBlockFollow]);
-
   // Le plan hôte disparaît (Valider, Annuler, changement de phase) → le bloc n'a plus d'hôte.
   useEffect(() => {
     if (!blockFollow) return;
@@ -7607,7 +7609,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blockFollow.kind === "move"
         ? mode === "perModelMove" && squadMovePlan?.unitId === blockFollow.unitId
         : mode === "chargeModelMove" && chargeMovePlan?.unitId === blockFollow.unitId;
-    if (!hostAlive) clearBlockFollow(blockFollow.kind);
+    if (!hostAlive) clearBlockFollow();
   }, [blockFollow, mode, squadMovePlan?.unitId, chargeMovePlan?.unitId, clearBlockFollow]);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -9118,7 +9120,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blockPoolRef,
     onRectSelectionCommit: handleRectSelectionCommit,
     onFreezeBlock: handleFreezeBlock,
-    onCancelBlock: handleCancelBlock,
+    onCancelBlock: clearBlockFollow,
     // Réserves stratégiques (20.01 / 20.04)
     ingressMaskLoopsRef,
     ingressBlocked,
