@@ -29,6 +29,27 @@ import { setupServer } from "msw/node";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "../auth/authStorage";
+
+/** Vanne sur le travail différé de React.
+ *
+ *  Le scheduler de React capture `setImmediate` AU CHARGEMENT du module : d'où `vi.hoisted`, qui
+ *  pose l'enveloppe avant l'import de `react-dom` ci-dessous. Vanne ouverte (`hold: false`), elle
+ *  est transparente pour tous les tests du fichier. Vanne fermée, chaque tâche du scheduler est
+ *  retenue dans `held` et c'est le test qui la rejoue — voir `T_BoardWithAPI_StartDeploymentRace`. */
+const reactWorkGate = vi.hoisted(() => {
+  const gate = { hold: false, held: [] as Array<() => void> };
+  const realSetImmediate = globalThis.setImmediate;
+  const gatedSetImmediate = ((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+    if (gate.hold) {
+      gate.held.push(() => callback(...args));
+      return realSetImmediate(() => {});
+    }
+    return realSetImmediate(callback, ...args);
+  }) as typeof setImmediate;
+  globalThis.setImmediate = gatedSetImmediate;
+  return gate;
+});
+
 import { BoardWithAPI } from "./BoardWithAPI";
 
 vi.mock("./BoardPvp", () => ({
@@ -759,6 +780,82 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
       },
       { timeout: 5000 }
     );
+  });
+
+  // T_BoardWithAPI_StartDeploymentRace — la remise à zéro de l'écran de préparation à l'ENTRÉE en
+  // déploiement actif ne peut pas annuler un clic « Start Deployment » déjà donné.
+  //
+  // Défaut mesuré (2026-09-17, deux fichiers en parallèle, 2 échecs sur 10, trois tests de ce
+  // bloc touchés) : l'état de partie arrive d'un fetch, hors `act`, donc React rend puis diffère
+  // ses effets passifs dans une tâche du scheduler. Si cette tâche ne suit pas le rendu dans la
+  // même boucle (rendu > 5 ms sous charge, React cède la main), `waitFor` voit le DOM avant
+  // l'effet, le test clique, et l'effet — flushé par React avant de traiter le clic — remettait
+  // `testDeploymentStarted` à `false` : la modale restait ouverte et « strategic-reserves-… »
+  // n'apparaissait jamais.
+  //
+  // Le test REJOUE cette séquence sans dépendre de la charge : `performance.now` avance de 3 ms
+  // à chaque appel (moins que les 5 ms de tranche du scheduler au premier contrôle, plus après
+  // une tâche), donc le scheduler cède la main après CHAQUE tâche ; ses `setImmediate` sont
+  // retenus par `reactWorkGate` et rejoués un par un jusqu'à ce que la ligne d'escouade soit à
+  // l'écran. À ce moment la tâche des effets passifs est encore retenue — comme sous charge — et
+  // le clic tombe avant elle.
+  it("un clic Start Deployment donné avant les effets différés de React n'est pas annulé", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeDeclarationState({
+            pendingPlayer: 1,
+            pendingUnitId: "7",
+            seat2: "human",
+          }),
+        })
+      )
+    );
+    let fakeNow = performance.now();
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+      fakeNow += 3;
+      return fakeNow;
+    });
+    reactWorkGate.hold = true;
+    let replayed = 0;
+    try {
+      renderBoard();
+      await waitFor(
+        () => {
+          if (screen.queryByTestId("roster-row-select-7") === null) {
+            const task = reactWorkGate.held.shift();
+            if (task) {
+              replayed += 1;
+              task();
+            }
+          }
+          expect(screen.getByTestId("roster-row-select-7")).toBeTruthy();
+        },
+        { timeout: 5000 }
+      );
+      // VERT VACANT : la vanne a bien retenu du travail (le rendu est passé par elle) ET il en
+      // reste (les effets passifs du commit). Sans ces deux faits, le clic ci-dessous ne
+      // précéderait rien et le test ne prouverait pas la course.
+      expect(replayed).toBeGreaterThan(0);
+      expect(reactWorkGate.held.length).toBeGreaterThan(0);
+
+      fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+    } finally {
+      reactWorkGate.hold = false;
+      nowSpy.mockRestore();
+      for (const task of reactWorkGate.held.splice(0)) {
+        task();
+      }
+    }
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declaration-banner")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.queryByRole("button", { name: "Start Deployment" })).toBeNull();
   });
 
   it("écran de préparation, siège du bot : aucun tour IA ne part avant Start Deployment", async () => {
