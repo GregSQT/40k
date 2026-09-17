@@ -5009,6 +5009,50 @@ class W40KEngine(gym.Env):
             "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
 
+    def _resolve_move_after_shooting_decision_for_ai_seat(self) -> None:
+        """Répond, dans la MÊME requête, au repositionnement post-tir posé au bot PvE.
+
+        `_handle_shooting_end_activation` pose la décision `move_after_shooting` à tout siège
+        que `move_after_shooting_seat_is_model_driven` désigne — le gym, qui répond par le masque
+        au step suivant, et le bot PvE, qui n'a AUCUN canal de réponse dans la requête : le
+        client relance `/game/ai-turn` ou joue son propre coup, mais rien ne garantit qu'il
+        revienne poser `CHOICE_k` pour une décision qu'il ne connaît pas. Trois sièges, comme
+        `_resolve_reactive_move_decision_for_ai_seats` :
+          - gym            → sortie immédiate, la politique répond au step suivant ;
+          - humain (PvP)   → jamais armé par ce prédicat (il reçoit le prompt du PvP) ;
+          - bot PvE        → tranché ICI, par la POLITIQUE (`pve_controller.make_ai_decision`),
+                             pas par une heuristique : c'est ce qu'a appris le modèle qui doit
+                             jouer, sinon le bot PvE ne saurait pas ce que la lignée sait.
+
+        Le prédicat de siège est le MÊME que celui de l'armement (source unique) : un siège armé
+        par l'un et non reconnu par l'autre laisserait la décision sans répondeur. Un bot sans
+        modèle chargé est une rupture, pas un cas à absorber.
+        """
+        if self.gym_training_mode:
+            return
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None or str(require_key(decision, "type")) != "move_after_shooting":
+            return
+        unit = require_unit_by_id(self.game_state, str(require_key(decision, "unit_id")))
+        if not shooting_handlers.move_after_shooting_seat_is_model_driven(self.game_state, unit):
+            return
+        if not hasattr(self, "pve_controller") or not self.pve_controller.is_ready_for_decision():
+            raise RuntimeError(
+                "move_after_shooting : décision posée au bot PvE sans modèle chargé — "
+                "aucun siège ne peut y répondre."
+            )
+        semantic = self.pve_controller.make_ai_decision(self.game_state, self)
+        if str(semantic.get("action")) != "agent_decision":
+            raise RuntimeError(
+                "move_after_shooting : la politique du bot PvE a rendu "
+                f"{semantic.get('action')!r} alors que seul `agent_decision` est ouvert."
+            )
+        success, result = self._handle_agent_decision_action(semantic)
+        if not success:
+            raise RuntimeError(
+                f"move_after_shooting : réponse du bot PvE refusée — {result!r}"
+            )
+
     def _resolve_reactive_move_decision_for_ai_seats(self) -> None:
         """Tranche le mouvement réactif d'un siège qui n'a AUCUN canal de réponse.
 
@@ -5752,6 +5796,7 @@ class W40KEngine(gym.Env):
             # La réponse peut relancer la fenêtre réactive sur l'unité SUIVANTE de la file, qui
             # peut appartenir à un siège sans canal de réponse : la résolution suit la reprise.
             decision_success, decision_result = self._handle_agent_decision_action(action)
+            self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
             return decision_success, decision_result
         if action.get("action") == "select_oath_target":
@@ -5995,6 +6040,7 @@ class W40KEngine(gym.Env):
                     f"step_logger_block_s={_t_pre_cascade - _t_after_handlers:.6f}"
                 )
 
+        self._resolve_move_after_shooting_decision_for_ai_seat()
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 
@@ -6583,36 +6629,31 @@ class W40KEngine(gym.Env):
         """Fin d'activation d'un tir d'escouade résolu par allocation (`squad_shoot_validate`,
         `squad_shoot_allocate_model`, `squad_shoot_declare_order`, décision `allocation_model`).
 
-        TIREUR HUMAIN : par `_handle_shooting_end_activation`, le SEUL site qui arme le
-        repositionnement post-tir de la datasheet (`move_after_shooting`, Purgation Run /
-        Gargoyle) et qui applique le verrou 20.04 sur ce mouvement. Les deux fins d'activation
-        de `squad_shoot_validate` appelaient le `end_activation` générique : aucune escouade PvP
-        ne se voyait jamais proposer ce mouvement. Quand il est proposé, le résultat porte
-        `move_after_shooting_select_destination` + `waiting_for_player` (c'est ce que le front
-        lit), l'escouade reste active et son activation se termine par l'action
-        `move_after_shooting` (destination ou renoncement).
+        TOUS LES SIÈGES passent par `_handle_shooting_end_activation`, le SEUL site qui applique
+        les effets de datasheet de fin de tir : le repositionnement post-tir (`move_after_shooting`,
+        Purgation Run / Gargoyle) avec son verrou 20.04, et la suppression de la cible
+        (`suppress_target_on_shooting`, Indiscriminate Detonations). Le `end_activation` générique
+        n'en applique aucun : tant que le tireur gym et le bot PvE y passaient, aucune de ces deux
+        capacités n'existait pour eux (décision utilisateur du 2026-09-18 : le Land Speeder du
+        roster d'entraînement doit pouvoir apprendre Purgation Run).
 
-        TIREUR GYM OU BOT PvE : le générique, comme avant — et comme le chemin direct
-        `squad_shoot` de `_process_squad_action`, qui ne passe pas par ici. Ce site est atteint
-        en gym par la décision `allocation_model` du défenseur (cible d'au moins deux figurines) :
-        y armer la décision `move_after_shooting` ferait dépendre l'offre de l'effectif de la
-        cible, et changerait les parties jouées par la lignée (Land Speeder dans le roster
-        d'entraînement) — décision utilisateur en attente, cf. ROADMAP_INDEX suite 134.
+        Quand le repositionnement est proposé, l'activation N'EST PAS terminée : l'escouade reste
+        dans le pool et la clôt par sa réponse — clic `move_after_shooting` (destination ou
+        renoncement) pour l'humain, dont le résultat porte `move_after_shooting_select_destination`
+        + `waiting_for_player` (ce que le front lit) ; `CHOICE_k` pour le gym, dont le résultat
+        garde `squad_shoot` (le tir EST résolu, `shoot_result` est payé à ce step) avec
+        `waiting_for_player` (la décision est posée), miroir de la fenêtre réactive du move
+        d'escouade. Le bot PvE, lui, répond dans la même requête
+        (`_resolve_move_after_shooting_decision_for_ai_seat`).
         """
-        from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shared_utils import squad_shooting_type_clear
 
         squad_shooting_type_clear(self.game_state, squad_id)
         unit = require_unit_by_id(self.game_state, squad_id)
-        if self._is_player_human(int(require_key(unit, "player"))):
-            _, end_result = shooting_handlers._handle_shooting_end_activation(
-                self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
-            )
-            # `active_shooting_unit` : purgée par `shooting_clear_activation_state` (arg5 = 1).
-        else:
-            end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
-            if self.game_state.get("active_shooting_unit") == squad_id:
-                del self.game_state["active_shooting_unit"]
+        _, end_result = shooting_handlers._handle_shooting_end_activation(
+            self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
+        )
+        # `active_shooting_unit` : purgée par `shooting_clear_activation_state` (arg5 = 1).
         result = {**end_result, "unitId": squad_id, "shoot_result": shoot_result}
         if result.get("action") != "move_after_shooting_select_destination":
             result["action"] = "squad_shoot"
@@ -8377,6 +8418,7 @@ class W40KEngine(gym.Env):
             # Jumeau du chemin PvP : la reprise de fenêtre peut reposer la question à un siège
             # sans canal de réponse (bot PvE).
             decision_success, decision_result = self._handle_agent_decision_action(semantic)
+            self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
             return decision_success, decision_result
 
@@ -8932,7 +8974,15 @@ class W40KEngine(gym.Env):
                 # meme si une exception traverse le bare-except de execute_ai_turn (3462).
                 squad_shooting_type_clear(self.game_state, squad_id)
             unit = require_unit_by_id(self.game_state, squad_id)
-            end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
+            # Fin d'activation de la DATASHEET (`_handle_shooting_end_activation`), pas le
+            # générique : c'est elle qui applique la suppression de la cible (Indiscriminate
+            # Detonations) et qui pose la décision `move_after_shooting` (Purgation Run) au siège
+            # gym. Le tir est résolu : `shoot_result` est payé à CE step ; si la décision est
+            # posée, `waiting_for_player` l'annonce et l'activation se clôt au step `CHOICE_k`,
+            # comme la fenêtre réactive du move d'escouade. Même appel que le siège humain.
+            _, end_result = shooting_handlers._handle_shooting_end_activation(
+                self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
+            )
             result = {
                 **end_result,
                 "action": "squad_shoot",
@@ -9446,7 +9496,11 @@ class W40KEngine(gym.Env):
             _unit2 = get_unit_by_id(self.game_state, sw2_squad_id)
             if _unit2 is None:
                 raise KeyError(f"Squad {sw2_squad_id!r} introuvable après split-fire")
-            _end2 = end_activation(self.game_state, _unit2, ACTION, 1, SHOOTING, SHOOTING, 0)
+            # Même fin d'activation de datasheet que `squad_shoot` (suppression de la cible,
+            # décision `move_after_shooting`) : le tir fractionné est un tir comme un autre.
+            _, _end2 = shooting_handlers._handle_shooting_end_activation(
+                self.game_state, _unit2, ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
+            )
             result = {
                 **_end2,
                 "action": "squad_shoot_split_target",
@@ -9458,6 +9512,7 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
 
+        self._resolve_move_after_shooting_decision_for_ai_seat()
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 

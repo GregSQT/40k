@@ -609,19 +609,30 @@ def test_la_fin_du_tir_d_escouade_pvp_sans_la_regle_se_termine_comme_avant():
     assert "1" in gs["units_shot"]
 
 
-def test_en_gym_la_fin_du_tir_par_allocation_reste_le_generique():
-    """Ce site est aussi atteint en gym (décision `allocation_model` du défenseur). Y armer la
-    décision `move_after_shooting` la ferait dépendre de l'effectif de la cible — le chemin
-    direct `squad_shoot` ne l'arme pas — et changerait les parties de la lignée : le tireur gym
-    garde la fin générique tant que la décision utilisateur n'est pas prise."""
+def test_en_gym_la_fin_du_tir_par_allocation_arme_la_decision():
+    """Ce site est aussi atteint en gym (décision `allocation_model` du défenseur). Il armait
+    le `end_activation` GÉNÉRIQUE, comme le chemin direct `squad_shoot` : aucun tireur gym ne se
+    voyait poser la décision. Décision utilisateur du 2026-09-18 : le siège gym passe par la fin
+    de datasheet, le tir reste payé à ce step (`squad_shoot` + `shoot_result`) et l'activation se
+    clôt au step `CHOICE_k` — l'escouade reste dans le pool jusque-là."""
     engine = _pvp_engine_in_shoot_phase(with_rule=True, gym=True)
     gs = engine.game_state
 
     result = engine._end_squad_shoot_activation("1", {"hits": 0})
 
     assert result["action"] == "squad_shoot"
-    assert result["activation_ended"] is True
+    assert result["shoot_result"] == {"hits": 0}
+    assert result["waiting_for_player"] is True
+    assert "activation_ended" not in result
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "move_after_shooting"
+    assert str(decision["unit_id"]) == "1"
+    assert gs["shoot_activation_pool"] == ["1"]
+    assert gs["unit_by_id"]["1"]["_pending_move_after_shooting"] is True
+
+    success, done = engine._handle_agent_decision_action({"option_index": len(decision["options"]) - 1})
+    assert success is True
+    assert done["activation_ended"] is True
     assert read_pending_agent_decision(gs) is None
     assert gs["shoot_activation_pool"] == []
-    assert "active_shooting_unit" not in gs
-    assert "_pending_move_after_shooting" not in gs["unit_by_id"]["1"]
+    assert "1" in gs["units_shot"]

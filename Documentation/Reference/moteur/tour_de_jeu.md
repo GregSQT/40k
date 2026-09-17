@@ -1227,6 +1227,22 @@ le tue, tir 2 annulé, fin d'activation.
 5. **Report d'activation (postpone)** : humain uniquement — possible tant que l'unité n'a tiré
    avec AUCUNE arme ; dès le premier tir, l'activation doit se conclure (clic sur l'unité active
    pour confirmer la fin).
+6. **Fin d'activation de DATASHEET, pour les trois sièges (2026-09-18)** : `squad_shoot`,
+   `squad_shoot_split_target` et la fin par allocation (`_end_squad_shoot_activation`) terminent
+   par `_handle_shooting_end_activation(ACTION, 1, SHOOTING, SHOOTING, 1)`, plus par le
+   `end_activation` générique — qui n'appliquait ni le repositionnement post-tir
+   (`move_after_shooting`, Purgation Run) ni la suppression de la cible
+   (`suppress_target_on_shooting`, Indiscriminate Detonations) au siège gym et au bot PvE.
+   Le repositionnement est une DÉCISION d'agent (`move_after_shooting`, `CHOICE_k`, candidat
+   `declines` pour renoncer) : le tir est résolu et payé au step du tir (`squad_shoot` +
+   `shoot_result`, `waiting_for_player` annonce l'attente comme la fenêtre réactive du move),
+   l'escouade reste dans le pool et clôt son activation au step `CHOICE_k` (verrou de charge
+   `units_cannot_charge` si elle bouge). L'humain garde son prompt
+   `move_after_shooting_select_destination`. Le bot PvE répond dans la même requête, par sa
+   politique (`_resolve_move_after_shooting_decision_for_ai_seat`, prédicat de siège partagé
+   `move_after_shooting_seat_is_model_driven`). Suppression : cible principale = PREMIÈRE
+   déclarée (`_last_shoot_target_id`, `setdefault`), sans contrôle « hit by one or more of those
+   attacks » — écart connu, non couvert. Tests `test_move_after_shooting_gym_path.py`.
 
 ### Flux d'exécution complet (récapitulatif)
 
