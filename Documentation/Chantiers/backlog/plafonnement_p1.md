@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-17, 10:15) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; chantier suivant : membre de pool « archive » puis P1 ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-17, 09:46) : [§5.15 fin](#b-2026-09-16) — NOUVEAU CYCLE : moteur figé (`b2e8e241f`), P0 = P0 neuf (robuste 0,903, bat les anciens P0a 0,75 / P0b 0,72 / P1a 0,56), anciens renommés P0a / P0b / P1a, dépôt nettoyé (corbeille à vider), pool de P1 décidé ; chantier suivant : membre de pool « archive » puis P1 ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1815,8 +1815,8 @@ GPU libre à 17:54, aucun run lancé.
   n'est pas promue (P0ctrl le bat à 0,56 seulement, pas de quoi changer la démo aujourd'hui).
   Siège : 0,75 conservé (écart 4,8 sur P0ctrl contre 12 sur la lignée à 0,70).
 
-**NOUVEAU CYCLE — décision utilisateur du 2026-09-17 (10:00) : « le dernier run P0 devient LE P0 »,
-anciens renommés, dépôt de modèles nettoyé, canonique = P0.** Exécuté à 10:15 dans `ai/models/`
+**NOUVEAU CYCLE — décision utilisateur du 2026-09-17 (09:35) : « le dernier run P0 devient LE P0 »,
+anciens renommés, dépôt de modèles nettoyé, canonique = P0.** Exécuté à 09:40 dans `ai/models/`
 (hors git) ; table de correspondance, à lire pour toute référence antérieure de ce dossier :
 
 | nouveau nom (`ai/models/ArmageddonAgent_x1/model_ArmageddonAgent_x1_<X>.zip`) | ce que c'était | rôle dans le cycle |
@@ -1844,6 +1844,35 @@ mesurée (P0 à 0,56 / 0,75 / 0,72 contre P1a / P0a / P0b). Gate : 0,65 contre P
 chacun des trois anciens. Entnorm reste juge (matrices), hors pool. Prérequis : type de membre de
 pool « archive » (code, chantier suivant). Canonique PvE : sans objet jusqu'à la fin du curriculum
 (décision utilisateur) ; il vaut P0 depuis le nettoyage.
+
+**Membre de pool « archive » LIVRÉ (2026-09-17, 09:55, merge `4af864c95`, worktree
+`worktree-pool-archive`).** `POOL_KINDS` reçoit `archive` (`ai/curriculum.py`) : un membre qui n'est
+le produit d'aucune étape, déposé sous `model_<agent>_<label>.zip` + `_vec_normalize.pkl` ; la
+validation exige seulement que son label ne soit pas le nom d'une étape (la clôture homonyme
+écraserait le fichier), et le lancement vérifie zip + pkl sur disque avant tout effet de bord
+(`require_archive_members_on_disk`, appelé dans `_prepare_curriculum_stage`, `ai/train.py`). Tout le
+reste est inchangé par construction : même chemin dérivé, même montage (`opponent_mix`), même
+sonde de pool, même gate (plancher `others` 0,60) ; le diagnostic de monotonie ignore les archives
+(hors gate). Pool de P1 écrit dans `curriculum.json` : P0 0,40 · P1a 0,15 · P0a 0,075 · P0b 0,075.
+Verrous : `tests/unit/ai/test_curriculum.py` (4 tests : archive sans étape antérieure acceptée,
+archive homonyme refusée, `ancients` inconnu toujours refusé, zip ET pkl exigés — nom du manquant
+dans le message) et `tests/unit/ai/test_curriculum_cli.py` (2 tests : l'archive atteint
+`opponent_mix` ; archive absente → refus avant tout effet de bord). Rouge/vert par mutation :
+validation et contrôle pkl désactivés → 5 rouges ; rétablis → 148 verts sur les deux fichiers.
+`/code-review` : aucun finding.
+
+**P1 (nouveau cycle) LANCÉ à 09:58** : `bash scripts/train.sh --agent ArmageddonAgent_x1
+--training-config x1_lineage --scenario bot --resolution 1 --etape P1`, log
+`training_x1_07-p01-cycle2.log`, TensorBoard `x1_lineage_ArmageddonAgent_x1/run_20260917-095812`.
+Prologue vérifié : reprise de `model_ArmageddonAgent_x1_P0.zip` (P0 neuf, 50 000 parties d'origine),
+trois archives annoncées (P1a, P0a, P0b), « continuité : ent_coef 0,01, learning_rate 0,0005 »
+(régime S9, T = 2 par le profil), pool 4 adversaires 0,400 / 0,150 / 0,075 / 0,075, part 0,70,
+siège 0,75, échauffement critic 20 updates (table jamais échauffée sur ce zip), contrat inchangé.
+**Règle de lecture (celle de B, §5.15, inchangée)** : verrou de parité d'ouverture contre P0 dans
+[0,40, 0,60] ; promotion automatique à 30 000 si moyenne de trois sondes ≥ 0,65 contre P0 ET ≥ 0,60
+contre chacune des trois archives ; destruction < 0,50 après 20 000 ; arrêt manuel à 60 000 sinon.
+Au gate : matrice hors famille (entnorm en juge) et **écart de siège contre P0 comparé au miroir
+P0 contre P0** (règle du 16 soir). Sonde d'ouverture : à consigner (4 membres × 300 parties).
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 

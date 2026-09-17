@@ -165,7 +165,14 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
-**2026-09-17, 10:15 — NOUVEAU CYCLE : P0 = P0 neuf, anciens P0a / P0b / P1a, dépôt nettoyé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+**2026-09-17, 10:05 — membre de pool « archive » livré, P1 du nouveau cycle lancé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+`kind: "archive"` dans `curriculum.json` (`ai/curriculum.py` `POOL_KINDS`, `require_archive_members_on_disk` ;
+`ai/train.py` `_prepare_curriculum_stage`) : un modèle étranger au curriculum entre au pool et au gate
+comme un ancien. P1 lancé 09:58 depuis le P0 neuf, pool P0 0,40 / P1a 0,15 / P0a 0,075 / P0b 0,075,
+régime S9, siège 0,75 (`run_20260917-095812`, `training_x1_07-p01-cycle2.log`). Règle : promotion à
+30 000 si ≥ 0,65 contre P0 et ≥ 0,60 contre chaque archive.
+
+**2026-09-17, 09:46 — NOUVEAU CYCLE : P0 = P0 neuf, anciens P0a / P0b / P1a, dépôt nettoyé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Décision utilisateur : « le dernier run P0 devient LE P0 ». `ai/models/ArmageddonAgent_x1/` ne
 contient plus que P0 (= canonique), P0a (ancien P0), P0b (première tentative du 10), P1a (ancien P1),
 quatre fichiers chacun ; 9,6 Go déplacés dans `ai/models/_corbeille_20260917/` (à vider par
