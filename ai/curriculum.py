@@ -59,7 +59,18 @@ STAGE_ROLES = ("learner", "exploiter")
 
 #: Natures de membre du pool, telles qu'ecrites dans `curriculum.json`. `champion` designe le
 #: champion le PLUS RECENT : c'est lui, et lui seul, que le gate de fin d'etape mesure.
-POOL_KINDS = ("champion", "ancients", "exploiters")
+#: `archive` (2026-09-17) designe un modele qui n'est PAS le produit d'une etape de ce
+#: curriculum : un champion d'un autre cycle ou d'une autre lignee, depose sous le nom
+#: `model_<agent>_<label>.zip` (+ `_vec_normalize.pkl`) dans le dossier de l'agent. Il joue et
+#: compte au gate comme un ancien (plancher `min_score_vs_others`), mais son label ne nomme
+#: aucune etape : la validation exige qu'il n'en ait pas le nom, et c'est le lancement, qui
+#: connait le chemin canonique, qui verifie sa presence sur disque
+#: (`require_archive_members_on_disk`). POURQUOI : la lignee de demo repart d'un P0 neuf le
+#: 2026-09-17, et P1 doit s'entrainer aussi contre les champions de l'ancien cycle (P0a, P0b,
+#: P1a) — des adversaires hors famille, ce que ni `ancients` ni `exploiters` ne peuvent nommer
+#: (un membre devait etre une etape ANTERIEURE de l'ordre).
+POOL_KINDS = ("champion", "ancients", "exploiters", "archive")
+ARCHIVE_KIND = "archive"
 
 CURRICULUM_FILENAME = "curriculum.json"
 
@@ -723,10 +734,20 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
             validate_exploiter_protocol(curriculum, stage, name, "")
 
         for member in members:
+            if member["kind"] == ARCHIVE_KIND:
+                if member["label"] in stages:
+                    raise ValueError(
+                        f"{source}: stages[{name}].pool nomme l'archive {member['label']!r}, qui "
+                        "est aussi le nom d'une etape : le fichier model_<agent>_"
+                        f"{member['label']}.zip serait ecrase par la cloture de cette etape. "
+                        "Renommer l'archive."
+                    )
+                continue
             if member["label"] not in earlier:
                 raise ValueError(
                     f"{source}: stages[{name}].pool nomme {member['label']!r}, qui n'est pas une "
-                    f"etape ANTERIEURE. Un adversaire fige doit exister avant d'etre joue. "
+                    f"etape ANTERIEURE. Un adversaire fige doit exister avant d'etre joue "
+                    f"(un modele etranger au curriculum se declare avec kind 'archive'). "
                     f"Etapes disponibles a ce point : {sorted(earlier)}"
                 )
 
@@ -1062,6 +1083,40 @@ def stage_model_path(canonical_model_path: str, stage_name: str) -> str:
     """
     stem, ext = os.path.splitext(canonical_model_path)
     return f"{stem}_{stage_name}{ext}"
+
+
+def archive_member_labels(stage: Dict[str, Any]) -> List[str]:
+    """Les labels des membres de pool de nature `archive`, dans l'ordre du JSON."""
+    return [m["label"] for m in stage_pool_members(stage) if m["kind"] == ARCHIVE_KIND]
+
+
+def require_archive_members_on_disk(canonical_model_path: str, stage: Dict[str, Any]) -> List[str]:
+    """Les chemins des archives du pool, ou LEVE si l'une d'elles manque sur disque.
+
+    Une archive n'est produite par aucune etape : rien ne la cree, rien ne la verifie en amont,
+    donc c'est ici, avant tout effet de bord du lancement (mise de cote du canonique, montage
+    des environnements), qu'on refuse un pool dont un membre n'existe pas. Le zip ET son pkl
+    de normalisation sont exiges : un adversaire fige joue avec les statistiques d'observation
+    de son propre entrainement (`build_snapshot_normalizer`), sans pkl il jouerait sur des
+    observations qu'il n'a jamais vues, en silence.
+    """
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
+    paths: List[str] = []
+    missing: List[str] = []
+    for label in archive_member_labels(stage):
+        zip_path = stage_model_path(canonical_model_path, label)
+        for path in (zip_path, get_vec_normalize_path(zip_path)):
+            if not os.path.exists(path):
+                missing.append(path)
+        paths.append(zip_path)
+    if missing:
+        raise FileNotFoundError(
+            "Archive(s) du pool absente(s) : " + ", ".join(missing) + ". Une archive est un "
+            "modele etranger au curriculum, a deposer sous model_<agent>_<label>.zip avec son "
+            "_vec_normalize.pkl dans le dossier de l'agent avant de lancer l'etape."
+        )
+    return paths
 
 
 def stage_source_model(canonical_model_path: str, stage: Dict[str, Any]) -> Optional[str]:

@@ -176,6 +176,47 @@ def test_the_stage_pool_reaches_every_later_read_of_the_config(curriculum_agent)
     assert "opponent_mix" not in config.load_agent_training_config("OtherAgent", "x1_long")
 
 
+def _curriculum_with_archive(curriculum_agent) -> None:
+    """Reecrit le curriculum de l'agent de test : P1 joue P0 (champion) + l'archive 'OLD'."""
+    cur = json.loads(json.dumps(CURRICULUM))
+    cur["stages"]["P1"]["pool"] = [
+        {"kind": "champion", "members": ["P0"], "weight": 0.3},
+        {"kind": "archive", "members": ["OLD"], "weight": 0.1},
+    ]
+    (curriculum_agent.models_root.parent / "curriculum.json").write_text(
+        json.dumps(cur), encoding="utf-8"
+    )
+
+
+def test_an_archive_of_the_pool_reaches_the_opponent_mix(curriculum_agent) -> None:
+    """Une archive est montee comme n'importe quel membre : meme chemin derive, meme poids."""
+    _curriculum_with_archive(curriculum_agent)
+    _write_stage_model(curriculum_agent.models_root, "P0")
+    archive = curriculum_agent.models_root / "TestAgent" / "model_TestAgent_OLD.zip"
+    archive.write_bytes(b"zip")
+    (curriculum_agent.models_root / "TestAgent" / "model_TestAgent_OLD_vec_normalize.pkl").write_bytes(b"pkl")
+    config = curriculum_agent.config
+
+    _prepare_curriculum_stage(_args("P1"), config)
+
+    mix = config.load_agent_training_config("TestAgent", "x1_long")["opponent_mix"]
+    assert mix["pool"] == [
+        {"label": "P0", "path": str(curriculum_agent.models_root / "TestAgent" / "model_TestAgent_P0.zip"), "weight": 0.3},
+        {"label": "OLD", "path": str(archive), "weight": 0.1},
+    ]
+
+
+def test_a_missing_archive_refuses_the_stage_before_any_side_effect(curriculum_agent) -> None:
+    """Rien ne produit une archive : son absence est refusee au lancement, le nom en clair."""
+    _curriculum_with_archive(curriculum_agent)
+    _write_stage_model(curriculum_agent.models_root, "P0")
+    config = curriculum_agent.config
+
+    with pytest.raises(FileNotFoundError, match="model_TestAgent_OLD.zip"):
+        _prepare_curriculum_stage(_args("P1"), config)
+    assert "opponent_mix" not in config.load_agent_training_config("TestAgent", "x1_long")
+
+
 def test_a_stage_without_pool_leaves_the_config_untouched(curriculum_agent) -> None:
     """P0 s'entraine contre les bots seuls : `opponent_mix` doit etre ABSENT, pas desarme."""
     config = curriculum_agent.config
