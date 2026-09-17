@@ -1,7 +1,7 @@
 # Plafonnement de l'apprentissage — P1 contre P0 : causes, solutions, état
 
 > **Chantier ouvert le 2026-09-13.** Sujet : [Roadmap/training.md](../../Roadmap/training.md).
-> **Point de reprise sans contexte (2026-09-16 nuit) : [§5.15 fin](#b-2026-09-16) — P1 PROMU (0,700), moteur FIGÉ (`b2e8e241f`), canonique re-mesuré 89,3 %, C (P0 neuf) lancé 22:55 avec rétention des checkpoints, règle de lecture du siège écrite ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
+> **Point de reprise sans contexte (2026-09-17 matin) : [§5.15 fin](#b-2026-09-16) — moteur FIGÉ (`b2e8e241f`) ; C terminé : P0 neuf `p0ctrl` robuste 0,903, holdout 92,3 %, bat P0 0,75 / P1 0,56 / entnorm 0,77 ; proposition : la lignée de démo repart de P0ctrl, anciens P0 / P1 en archives hors famille ; état général : [ÉTAT AU 2026-09-16](#etat-2026-09-16).** Précédent (2026-09-15) : [§9.9](#suite-2026-09-15) — verdict S25, S14 lancé, ORDRE DE LA SUITE FIGÉ.**
 > Dossier de synthèse : il **relate** ce qui a été fait sur le plateau de la lignée P0 → P1 entre
 > le 2026-09-11 et le 2026-09-13 (avec les antécédents P2 du 2026-09-04 → 09-08 qui ont fixé le
 > régime de lignée), inventorie **toutes** les causes envisagées et **toutes** les solutions, et
@@ -1772,6 +1772,48 @@ GPU libre à 17:54, aucun run lancé.
   pipeline intact sur le moteur figé ; 0,80–0,85 → deuxième graine ; ≤ 0,80 → régression à chercher
   avant tout autre run. Au réveil : holdout, matrice à froid P0ctrl contre P0 / P0a / entnorm / P1
   (`scripts/seat_matrix_probe.py`), puis membre de pool « archive » et P2.
+
+**C TERMINÉ (2026-09-17, 05:01, 6 h 06) — PIPELINE INTACT, ET UN P0 NEUF PLUS FORT QUE P1.**
+- Robuste **0,903** à 50 000 (règle ≥ 0,85 tenue ; P0 du 10 : 0,868). Courbe `a_bot_eval_combined` :
+  0,617 / 0,797 / 0,895 / 0,878 / **0,935** à 10 / 20 / 30 / 40 / 50 000 (P0 du 10 : 0,695 / 0,779 /
+  0,868 à 30 / 40 / 50 000), encore en montée au bout du budget. Holdout final (1 800 parties) :
+  **92,3 %** — alpha 91,7 · attrition 90,7 · decapitation 93,3 · endgame 98,0 · racer 87,7 · scorer
+  92,3 ; scénarios 0,984 / 0,947 / 0,927 / 0,833 ; SM − Orks +6,6 ; 0 troncature. Archive
+  `model_ArmageddonAgent_x1_p0ctrl_P0.zip` = instantané robuste = poids finaux (même md5) ;
+  **26 checkpoints conservés** (rétention 64). `curriculum.log` ligne 19. Log
+  `training_x1_p0ctrl_01-p00.log`, TensorBoard `x1_long_ArmageddonAgent_x1_p0ctrl/run_20260916-225505`.
+- **Siège (entraîné à 0,75)** : `bot_eval/seat` à 50 000 **0,962 / 0,914 — écart 4,8 pts**
+  (`0_gap_p1-p2` : −0,07 / −0,05 / +0,05 / +0,08 / +0,05 par 10 000) ; P1 : 12,3 (holdout du 16
+  soir), référence du 13 : 12,0. Collecte : 12 299 parties en premier / 37 701 en second (0,754).
+- **Matrice à froid P0ctrl (09:19 → 09:29, 300 parties par case, argmax des deux côtés, sièges
+  50/50 via `ArmageddonAgent_x1_expl` / `x1_lineage`, JSON `logs/matrix_heldout_20260917/`)** :
+
+| P0ctrl contre | score de P0ctrl | rappel de la veille |
+|---|---|---|
+| **P0** (racine de la lignée) | **0,753** (226 / 73 / 1 nul) | S9 après 60 000 d'exploitation : 0,78 ; P1 promu : 0,700 |
+| **P1** (champion courant, canonique PvE) | **0,557** (167 / 131 / 2 nuls, ≈ 2 σ) | P1 bat P0 à 0,70, P0a à 0,64, entnorm à 0,68 |
+| P0a (premier P0 du 10, bat P0 à 0,58) | 0,720 (216 / 84) | — |
+| témoin entnorm (sans parenté) | 0,770 (231 / 67 / 2 nuls) | P0 ≈ 0,57–0,72, S9 0,71, P1 0,68 : **premier gain hors famille jamais mesuré** |
+
+  Lecture. (1) Un départ à froid de 50 000 parties sur le moteur figé, la récompense marge et
+  l'obs 18 204 bat **toute** la famille de P0, y compris P1 (50 000 + 30 000 parties, régime S9),
+  et bat le témoin étranger à 0,77 là où toute la famille plafonnait à ~0,70 : ce n'est pas un
+  exploiteur, c'est un meilleur joueur. (2) La lignée P0 → P1 repartait des poids d'un modèle qui
+  avait appris un AUTRE jeu (moteur d'avant les correctifs du 10 pour ses 50 000 premières parties,
+  récompense sans marge) ; le plafond de reprise mesuré tout ce mois (§5.14) s'ajoutait à un
+  point de départ inférieur. (3) Une graine — mais l'écart contre P0 (0,753, 8,7 σ) et le holdout
+  (92,3 contre 89,3) ne sont pas du bruit ; seul le 0,557 contre P1 est à 2 σ.
+- **Conséquence proposée (décision utilisateur) : la lignée de démo repart de P0ctrl.** P0ctrl
+  devient la racine (`P0` de `ArmageddonAgent_x1`, transplantation des quatre fichiers zip / pkl /
+  contrat / run_state — table de récompense et contrat identiques, vérifiés par diff, seule la clé
+  d'agent diffère), l'ancien P0 et l'ancien P1 sont renommés (`_P0_old_20260910`, `_P1_old_20260916`)
+  et deviennent, avec P0a et entnorm, les **membres hors famille** du pool de la nouvelle P1 dès
+  que le type « archive » existe ; l'ancien P1 est le sparring le plus fort (0,557), l'ancien P0 le
+  plus utile comme contrainte de transitivité. Gate de la nouvelle P1 : 0,65 contre P0ctrl (parité
+  à l'ouverture par construction), 0,60 contre chaque archive — P0ctrl y est déjà à 0,56 / 0,75 /
+  0,72 / 0,77, donc un gate tenable. Le canonique PvE reste l'ancien P1 tant que la nouvelle P1
+  n'est pas promue (P0ctrl le bat à 0,56 seulement, pas de quoi changer la démo aujourd'hui).
+  Siège : 0,75 conservé (écart 4,8 sur P0ctrl contre 12 sur la lignée à 0,70).
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 

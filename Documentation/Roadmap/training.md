@@ -165,6 +165,16 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-17, 09:35 — C terminé : un P0 neuf sur le moteur figé bat toute la famille de P0 ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+`ArmageddonAgent_x1_p0ctrl` (graine 54321, 50 000 parties, 6 h 06) : robuste **0,903** (P0 du 10 :
+0,868), holdout 1 800 parties **92,3 %**, écart de siège **4,8 pts** à 0,75 (lignée : 12). Matrice à
+froid (300 parties par case, argmax, sièges 50/50) : P0ctrl bat **P0 0,753, P1 0,557, P0a 0,720,
+entnorm 0,770** — premier gain hors famille mesuré. Lecture : le pipeline apprend à froid mieux
+qu'en reprise ; la lignée P0 → P1 partait d'un modèle ayant appris un autre jeu. Proposition en
+attente de décision : la lignée de démo repart de P0ctrl (transplanté en `P0` de l'agent x1),
+anciens P0 / P1 + P0a + entnorm en archives hors famille du pool de la nouvelle P1 (type de membre
+« archive » à coder d'abord). Canonique PvE inchangé (ancien P1).
+
 **2026-09-16, 23:05 — moteur figé, canonique re-mesuré, C lancé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Décisions utilisateur : moteur FIGÉ pour la démo (`b2e8e241f`, règle dans `ROADMAP_INDEX.md`
 Direction et en tête de `moteur.md`) ; siège 0,75 délibéré (baisser l'écart de siège) ; re-mesure
