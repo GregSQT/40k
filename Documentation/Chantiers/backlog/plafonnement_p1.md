@@ -1932,7 +1932,7 @@ sait où elle plafonnait ; S9 (sans gate) est le seul run dont on connaît le pl
 **P1 RELANCÉE à 11:35** (`run_20260917-113528`, `training_x1_07-p01-cycle2.log`), même commande,
 même pool, même régime ; prologue vérifié : « sonde tous les 5000 ep. ; instantanes aux seuils
 [0.5, 0.6, 0.7] ; plateau : patience 4 sondes, min_delta 0.02, des 40000 ep. ; RUN DE CHECK :
-promotion differee jusqu'au plateau, plafond 100000 ep. ». **Règle de lecture** : parité
+promotion differee jusqu'au plateau, plafond 100000 ep. ». Sonde d'ouverture (11:49) : **P0 0,520** (parité tenue), P1a 0,577 · P0a 0,700 · P0b 0,720 (première relance : 0,483 / 0,563 / 0,750 / 0,693 — graines tirées, ±2,7 pts). **Règle de lecture** : parité
 d'ouverture dans [0,40, 0,60] ; destruction < 0,50 après 20 000 ; la promotion (≥ 0,65 contre P0,
 ≥ 0,60 contre P1a / P0a / P0b, moyenne de 3) est DATÉE (`episodes_to_gate`) mais n'arrête pas le run ;
 arrêt au plateau (dès 40 000 au plus tôt) ou à 100 000 ; promotion alors si les planchers tiennent,
