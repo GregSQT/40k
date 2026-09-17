@@ -3805,9 +3805,15 @@ export const BoardWithAPI: React.FC = () => {
                 // ou advance en cours cette activation), le mode reste verrouillé tout le tour.
                 const advanced = alreadyAdvanced || isAdv;
                 const engaged = apiProps.activeUnitEngaged === advUnitId;
+                // 09.07 : Desperate Escape RETENU pour cette unité (verrou moteur, lu de l'API).
+                const desperateEscape = apiProps.desperateEscapeUnitId === advUnitId;
                 const canAdvance = !advanced && !engaged;
-                // Règle 09 : non engagée → Move (défaut) + Advance ; engagée → Fall-back (défaut) + Stationary.
-                // Move/Fall-back = purement visuels (le commit applique flee si engagé). Stationary = action wait.
+                // Règle 09 : non engagée → Move (défaut) + Advance ; engagée → Fall-back (défaut,
+                // = Ordered Retreat) + Desperate Escape + Stationary. Move/Fall-back = purement
+                // visuels (le commit applique flee si engagé). Desperate Escape = sélection du mode
+                // (encart SELECTING MODES : « ordered retreat is not mandatory ») → popup hazard →
+                // hazard_confirm ; une fois retenu (hazard roulé), il reste enfoncé et Fall-back
+                // se grise. Stationary = action wait.
                 // 3 états : "selected" (enfoncé), "relief" (possible), "disabled" (grisé).
                 const modeBtn = (
                   label: string,
@@ -3855,9 +3861,15 @@ export const BoardWithAPI: React.FC = () => {
                 // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
                 const moveState: "selected" | "relief" | "disabled" =
                   engaged || advanced ? "disabled" : "selected";
-                const fallbackState: "selected" | "relief" | "disabled" = engaged
-                  ? "selected"
-                  : "disabled";
+                const fallbackState: "selected" | "relief" | "disabled" =
+                  engaged && !desperateEscape ? "selected" : "disabled";
+                // Engagée : retenu → enfoncé ; sinon sélectionnable. Non engagée → grisé.
+                const desperateEscapeState: "selected" | "relief" | "disabled" = !engaged
+                  ? "disabled"
+                  : desperateEscape
+                    ? "selected"
+                    : "relief";
+                const red = { relief: "#b91c1c", dark: "#450a0a" };
                 // Advancé → bouton enfoncé (sélectionné, irréversible). Engagé → grisé. Libre → relief.
                 const advanceState: "selected" | "relief" | "disabled" = advanced
                   ? "selected"
@@ -3878,6 +3890,10 @@ export const BoardWithAPI: React.FC = () => {
                       }
                     )}
                     {modeBtn("Fall-back", fallbackState, yellow)}
+                    {modeBtn("Desp. Escape", desperateEscapeState, red, () => {
+                      if (desperateEscapeState === "relief")
+                        apiProps.onSelectDesperateEscape?.(advUnitId);
+                    })}
                     {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
                       apiProps.onStationary?.(advUnitId)
                     )}

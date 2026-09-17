@@ -621,15 +621,15 @@ decision_ctx_bin[9]      = decision_type_ascent_declaration        # 0.0 / 1.0 �
 decision_ctx_bin[10]     = decision_type_move_after_shooting        # 0.0 / 1.0 — repositionnement post-tir
 decision_ctx_bin[11]     = decision_type_reserves_declaration       # 0.0 / 1.0 — Declare Battle Formations 20.01
 decision_ctx_bin[12]     = decision_type_reactive_move              # 0.0 / 1.0 — move réactif (L5) : accepter ou refuser la fenêtre
+decision_ctx_bin[13]     = decision_type_fall_back_mode             # 0.0 / 1.0 — mode de fall-back 09.07 : CHOICE_0 Desperate Escape, CHOICE_1 Ordered Retreat (declines)
 # RÉSERVÉ J4 — AGENT_DECISION_TYPE_SLOTS 8→16 ; slots restants nuls jusqu'à implémentation.
 # Candidats prévus : decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention
-# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). 1 slot de marge supplémentaire
-# (quatre des huit réservés ont été consommés par `ascent_declaration` 13.06,
-# `move_after_shooting`, `reserves_declaration` 20.01 et `reactive_move`).
-decision_ctx_bin[13]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
-decision_ctx_bin[14]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
-decision_ctx_bin[15]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
-decision_ctx_bin[16]     = decision_type_reserved_3    # réservé J4
+# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). Plus aucune marge au-delà
+# (cinq des huit réservés ont été consommés par `ascent_declaration` 13.06,
+# `move_after_shooting`, `reserves_declaration` 20.01, `reactive_move` et `fall_back_mode` 09.07).
+decision_ctx_bin[14]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
+decision_ctx_bin[15]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
+decision_ctx_bin[16]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
 
 # UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui décrivent
 # la MÊME grandeur partagent la colonne ; les colonnes qu'un type ne remplit pas restent à zéro, et
@@ -650,8 +650,9 @@ decision_options_cont[c][6] = target_wounded_hp_norm # [0,1] PV de la figurine l
                                                      #       cible / son HP_MAX (1.0 si aucune)
 decision_options_cont[c][7] = target_value_norm      # [0,1] VALUE vivante de la cible / la plus forte — mortal_wounds_target
                                                      #       parmi les cibles proposées
-# Bloc NUL pour `rule_choice`, `waaagh_call`, `fly_declaration` et `ascent_declaration` : leurs
-# candidats se distinguent par le one-hot de l'effet accordé ou par le bit `declines`.
+# Bloc NUL pour `rule_choice`, `waaagh_call`, `fly_declaration`, `ascent_declaration` et
+# `fall_back_mode` : leurs candidats se distinguent par le one-hot de l'effet accordé ou par le
+# bit `declines`.
 
 decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
 decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0

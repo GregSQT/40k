@@ -81,7 +81,7 @@ from engine.agent_decision import read_pending_agent_decision
 # 21.03 « take to the skies » (V11 §0.48 `L6`) : le point de choix s'ouvre AVANT le pool, puisque
 # la declaration en change le budget et la traversee. Importe ici, module de la table de phase.
 from engine.phase_handlers.movement_handlers import (
-    arm_ascent_declaration_decision, arm_fly_declaration_decision,
+    arm_ascent_declaration_decision, arm_fall_back_mode_decision, arm_fly_declaration_decision,
 )
 
 # Game phases - single source of truth for phase count
@@ -877,6 +877,21 @@ class ActionDecoder:
         armed_ascent = arm_ascent_declaration_decision(game_state, squad_id)
         if armed_ascent is not None:
             return self._agent_decision_mask(armed_ascent), []
+
+        # ─── 3ter. MODE DE FALL-BACK (09.07, encart SELECTING MODES) ───
+        # Même raison d'être ici que les deux déclarations : Desperate Escape change la TRAVERSÉE
+        # (figurines ennemies et bande d'EZ), donc le pool que la section 4 construit. Le moteur
+        # imposait Ordered Retreat à toute escouade saine — « ordered retreat is not mandatory, so
+        # you could select desperate escape instead » —, et une escouade encerclée n'avait alors
+        # que WAIT. Posé à l'escouade engagée, saine et désignée ; l'escouade battle-shocked n'est
+        # pas interrogée (mode imposé, appliqué au commit par `desperate_escape_pre_move`).
+        #
+        # ⚠️ APRÈS le vol : `_fall_back_mode_due_unit` refuse la question à une escouade dont la
+        # traversée FLY est active (21.03 traverse déjà les figurines, le candidat serait
+        # strictement dominé). Interroger le mode d'abord la poserait à un état non décidé.
+        armed_fall_back = arm_fall_back_mode_decision(game_state, squad_id)
+        if armed_fall_back is not None:
+            return self._agent_decision_mask(armed_fall_back), []
 
         # ─── 4. Carte de cellules + masque d'activation ordinaire ───
         advance_roll: Optional[int] = None
