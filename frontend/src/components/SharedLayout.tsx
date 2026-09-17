@@ -331,6 +331,20 @@ function BoardResolutionPicker() {
   );
 }
 
+function toolButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    outline: "none",
+    color: active ? "#22c55e" : "#9ca3af",
+    padding: "4px",
+  };
+}
+
 const Navigation: React.FC<NavigationProps> = ({
   onOpenSettings,
   onToggleMeasureMode,
@@ -477,17 +491,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 onClick={onToggleHelper}
                 className="settings-button"
                 aria-pressed={helperActive}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  outline: "none",
-                  color: helperActive ? "#22c55e" : "#9ca3af",
-                  padding: "4px",
-                }}
+                style={toolButtonStyle(helperActive)}
               >
                 <HelperIcon active={helperActive} />
               </button>
@@ -507,17 +511,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 className="settings-button"
                 aria-pressed={rectSelectActive}
                 aria-label="Sélection rectangle"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  outline: "none",
-                  color: rectSelectActive ? "#22c55e" : "#9ca3af",
-                  padding: "4px",
-                }}
+                style={toolButtonStyle(rectSelectActive)}
               >
                 <RectSelectIcon active={rectSelectActive} />
               </button>
@@ -536,17 +530,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 onClick={onToggleReplay}
                 className="settings-button"
                 aria-pressed={replayActive}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  outline: "none",
-                  color: replayActive ? "#22c55e" : "#9ca3af",
-                  padding: "4px",
-                }}
+                style={toolButtonStyle(replayActive ?? false)}
               >
                 <CameraIcon active={replayActive ?? false} />
               </button>
@@ -565,17 +549,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 onClick={onToggleHideIndicators}
                 className="settings-button"
                 aria-pressed={hideIndicatorsActive}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  outline: "none",
-                  color: hideIndicatorsActive ? "#22c55e" : "#9ca3af",
-                  padding: "4px",
-                }}
+                style={toolButtonStyle(hideIndicatorsActive)}
               >
                 <EyeIndicatorsIcon hidden={hideIndicatorsActive} />
               </button>
@@ -594,17 +568,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 onClick={onToggleRangeRings}
                 className="settings-button"
                 aria-pressed={rangeRingsActive}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  outline: "none",
-                  color: rangeRingsActive ? "#22c55e" : "#9ca3af",
-                  padding: "4px",
-                }}
+                style={toolButtonStyle(rangeRingsActive)}
               >
                 <RangeRingsIcon active={rangeRingsActive} />
               </button>
@@ -624,17 +588,7 @@ const Navigation: React.FC<NavigationProps> = ({
                 onClick={onToggleMeasureMode}
                 className="settings-button"
                 aria-pressed={measureModeActive}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  outline: "none",
-                  color: measureModeActive ? "#22c55e" : "#9ca3af",
-                  padding: "4px",
-                }}
+                style={toolButtonStyle(measureModeActive)}
               >
                 <RulerMenuIcon active={measureModeActive} />
               </button>
