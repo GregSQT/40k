@@ -5388,12 +5388,9 @@ def get_board_config():
                 # le moteur résout (`GameStateManager._read_terrain_file`, `/ "terrain" / ref`),
                 # et huit scénarios du dépôt l'utilisent. La route exigeait un nom de fichier
                 # seul et rendait 400 sur des parties que le moteur joue — le front ne pouvait
-                # pas dessiner leur plateau. La traversée est contrôlée plus bas, une fois le
-                # dossier de données connu (`board_data_dir`).
-                terrain_ref_candidate = terrain_ref_raw.strip().replace("\\", "/")
-                if terrain_ref_candidate.startswith("/") or ".." in terrain_ref_candidate.split("/"):
-                    raise ValueError(f"Unsafe scenario terrain_ref path: {terrain_ref_raw}")
-                terrain_ref = terrain_ref_candidate
+                # pas dessiner leur plateau. La traversée est contrôlée sur le chemin RÉSOLU,
+                # une fois le dossier de données connu (`board_data_dir`).
+                terrain_ref = terrain_ref_raw.strip()
 
         # Le plateau JOUÉ peut être plus grossier que celui qui PORTE les murs et le terrain
         # (option x1 = plateau 44×60 à 1 hex = 1 pouce, données écrites en x5). Les fichiers sont

@@ -926,7 +926,7 @@ Ordre par valeur tactique :
    laisserait périmée. Le front lit le tireur dans `result.unitId`, que `end_activation` fournit
    toujours et que tous ses sites préfèrent déjà à cette clé. Le PvP humain garde son cycle
    intact (`squad_shoot_activate` la pose, `squad_shoot_cancel` / `squad_shoot_validate` /
-   `_finish_manual_shoot_after_allocation` la retirent). Aucun contrat touché : `obs_size` et
+   `_end_squad_shoot_activation` la retirent). Aucun contrat touché : `obs_size` et
    `TOTAL_ACTION_SIZE` ne bougent pas, **aucun ré-entraînement**.
 
    ⚠️ **La reprise a découvert un SECOND défaut, plus grave et antérieur à `L2`** : le chemin

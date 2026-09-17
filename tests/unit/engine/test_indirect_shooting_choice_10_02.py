@@ -219,7 +219,7 @@ def test_shooting_type_cleared_if_squad_declare_shoot_raises(monkeypatch):
 
 
 def test_shooting_type_cleared_after_manual_pvp_allocation(monkeypatch):
-    """_finish_manual_shoot_after_allocation doit effacer le type choisi.
+    """_end_squad_shoot_activation doit effacer le type choisi.
 
     Scénario : attaquant humain choisit INDIRECT en T1 (PvP), l'allocation manuelle se termine.
     Sans l'effacement, T2 `resolve_squad_shooting_type` retourne INDIRECT (le choix périmé) au
@@ -240,9 +240,9 @@ def test_shooting_type_cleared_after_manual_pvp_allocation(monkeypatch):
         "unit_by_id": {"1": {"id": "1", "player": 1}},
     }
 
-    eng._finish_manual_shoot_after_allocation("1", {"shoot_result": {}})
+    eng._end_squad_shoot_activation("1", {})
 
     choices = eng.game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {})
     assert "1" not in choices, (
-        "_finish_manual_shoot_after_allocation doit effacer le type choisi avant end_activation"
+        "_end_squad_shoot_activation doit effacer le type choisi avant end_activation"
     )
