@@ -5007,16 +5007,21 @@ def _build_move_after_shooting_destinations(
 
     unit_id = require_key(unit, "id")
     unit_col, unit_row = require_unit_position(unit, game_state)
-    original_move = require_key(unit, "MOVE")
     # `move_distance` est en POUCES (D6" de la datasheet, `_resolve_move_after_shooting_distance`)
-    # alors que `MOVE` est porté en SOUS-HEXES (converti au chargement) : le pool se construit sur
-    # la distance convertie, comme le jumeau `_build_reactive_move_destinations_pool`. Sans la
-    # conversion, un D6" valait D6 cases — 1,2" au plus à x5.
-    unit["MOVE"] = int(move_distance) * int(require_key(game_state, "inches_to_subhex"))
-    try:
-        valid_destinations = movement_build_valid_destinations_pool(game_state, unit_id)
-    finally:
-        unit["MOVE"] = original_move
+    # alors que le BFS compte des SOUS-HEXES : conversion comme le jumeau
+    # `_build_reactive_move_destinations_pool`. Sans elle, un D6" valait D6 cases — 1,2" au plus à x5.
+    #
+    # Le budget est IMPOSÉ par override, jamais dérivé de `MOVE` : sans override, le builder passe
+    # par `squad_move_pool_budget_subhex`, qui ajoute le jet d'Advance d'une escouade encore dans
+    # `units_advanced` (tir Assault 10.05 puis move_after_shooting) — 3" + 6" au lieu de 3". La
+    # règle borne ce mouvement à SA distance (« normal move up to X" after shooting »), le régime
+    # du tour n'y entre pas. Ni malus ni traversée 21.03 : take to the skies ne se déclare que pour
+    # les mouvements de la table `_TAKE_TO_THE_SKIES_BY_PHASE` (move, charge), pas pour celui-ci.
+    valid_destinations = movement_build_valid_destinations_pool(
+        game_state,
+        unit_id,
+        move_budget_override=int(move_distance) * int(require_key(game_state, "inches_to_subhex")),
+    )
 
     return [
         (int(col), int(row))
