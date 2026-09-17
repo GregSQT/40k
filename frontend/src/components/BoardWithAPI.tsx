@@ -3807,7 +3807,6 @@ export const BoardWithAPI: React.FC = () => {
                 const engaged = apiProps.activeUnitEngaged === advUnitId;
                 // 09.07 : Desperate Escape RETENU pour cette unité (verrou moteur, lu de l'API).
                 const desperateEscape = apiProps.desperateEscapeUnitId === advUnitId;
-                const canAdvance = !advanced && !engaged;
                 // Règle 09 : non engagée → Move (défaut) + Advance ; engagée → Fall-back (défaut,
                 // = Ordered Retreat) + Desperate Escape + Stationary. Move/Fall-back = purement
                 // visuels (le commit applique flee si engagé). Desperate Escape = sélection du mode
@@ -3815,6 +3814,7 @@ export const BoardWithAPI: React.FC = () => {
                 // hazard_confirm ; une fois retenu (hazard roulé), il reste enfoncé et Fall-back
                 // se grise. Stationary = action wait.
                 // 3 états : "selected" (enfoncé), "relief" (possible), "disabled" (grisé).
+                // Seul "relief" est cliquable : un bouton enfoncé ne se re-sélectionne pas.
                 const modeBtn = (
                   label: string,
                   state: "selected" | "relief" | "disabled",
@@ -3827,7 +3827,7 @@ export const BoardWithAPI: React.FC = () => {
                     className={state === "selected" ? "btn-active" : undefined}
                     disabled={state === "disabled"}
                     onClick={() => {
-                      if (state !== "disabled" && !isGameOver) onClick?.();
+                      if (state === "relief" && !isGameOver) onClick?.();
                     }}
                     style={{
                       border: "1px solid rgba(0,0,0,0.35)",
@@ -3857,6 +3857,7 @@ export const BoardWithAPI: React.FC = () => {
                 };
                 const orange = { relief: "#ea580c", dark: "#431407" };
                 const yellow = { relief: "#ca8a04", dark: "#422006" };
+                const red = { relief: "#b91c1c", dark: "#450a0a" };
                 const grey = { relief: "var(--ui-gray-cancel)", dark: "#1f2937" };
                 // Advancé → Move grisé (verrouillé). Sinon engagé → grisé, libre → sélectionné.
                 const moveState: "selected" | "relief" | "disabled" =
@@ -3869,7 +3870,6 @@ export const BoardWithAPI: React.FC = () => {
                   : desperateEscape
                     ? "selected"
                     : "relief";
-                const red = { relief: "#b91c1c", dark: "#450a0a" };
                 // Advancé → bouton enfoncé (sélectionné, irréversible). Engagé → grisé. Libre → relief.
                 const advanceState: "selected" | "relief" | "disabled" = advanced
                   ? "selected"
@@ -3885,15 +3885,12 @@ export const BoardWithAPI: React.FC = () => {
                         : "Advance",
                       advanceState,
                       orange,
-                      () => {
-                        if (canAdvance) void apiProps.onSetAdvanceMode?.(advUnitId);
-                      }
+                      () => void apiProps.onSetAdvanceMode?.(advUnitId)
                     )}
                     {modeBtn("Fall-back", fallbackState, yellow)}
-                    {modeBtn("Desp. Escape", desperateEscapeState, red, () => {
-                      if (desperateEscapeState === "relief")
-                        apiProps.onSelectDesperateEscape?.(advUnitId);
-                    })}
+                    {modeBtn("Desp. Escape", desperateEscapeState, red, () =>
+                      apiProps.onSelectDesperateEscape?.(advUnitId)
+                    )}
                     {modeBtn("Stationary", advanced ? "disabled" : "relief", grey, () =>
                       apiProps.onStationary?.(advUnitId)
                     )}

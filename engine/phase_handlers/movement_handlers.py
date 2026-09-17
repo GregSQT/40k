@@ -44,8 +44,9 @@ from .shared_utils import (
     coherency_violation_flags,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er, squad_is_battle_shocked_in_enemy_er,
     squad_move_is_fall_back, squad_advance_or_fall_back_allowed,
-    FALL_BACK_MODE_RESOLVED_KEY, desperate_escape_mode_selected, desperate_escape_post_move,
-    fall_back_mode_of, select_desperate_escape_mode,
+    FALL_BACK_MODE_ORDERED_RETREAT, desperate_escape_mode_selected, desperate_escape_post_move,
+    desperate_escape_transit_exempt, fall_back_mode_of, fall_back_mode_resolved,
+    select_desperate_escape_mode, select_ordered_retreat_mode,
     roll_advance_for_squad, unit_is_in_strategic_reserves,
     MovePlan, parse_model_plan_with_orientation, plan_entry_level, plan_entry_model_orientation,
     resolve_model_effective_level, SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
@@ -264,7 +265,7 @@ def _unit_is_ai_controlled(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
     (``arm_fly_declaration_decision``) qui lui demande sa déclaration 21.03, là où un humain
     utilise le toggle ``movement_set_fly_mode_handler`` / ``charge_set_fly_mode_handler``.
 
-    Privée : un seul appelant, ``_fly_declaration_due_unit``, dans ce module.
+    Privée : lue par ``_model_seat_unit`` seule, dans ce module.
     """
     is_gym = bool(game_state.get("gym_training_mode", False))
     is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
@@ -398,6 +399,56 @@ def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit
     return took_to_the_skies(game_state, unit, unit_id, charge=entry.is_charge)
 
 
+def _model_seat_unit(
+    game_state: Dict[str, Any], squad_id: str, who: str
+) -> Optional[Dict[str, Any]]:
+    """L'escouade si un point de choix de MOUVEMENT peut lui être posé, sinon None.
+
+    Les trois conditions de SIÈGE communes aux déclarations de vol (21.03), de montée (13.06) et
+    au mode de fall-back (09.07) : l'unité existe (sinon KeyError, `who` nomme l'appelant), elle
+    est pilotée par le modèle, et son joueur est celui dont c'est le tour. Chaque `_due_unit`
+    ajoute ensuite ses conditions propres ; la garde de phase reste chez lui, parce qu'elle
+    n'est pas la même pour le vol (move OU charge) et pour les deux autres (move seul).
+    """
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"{who}: escouade {squad_id} introuvable")
+    if not _unit_is_ai_controlled(game_state, unit):
+        return None
+    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
+        return None
+    return unit
+
+
+def _binary_declaration_options(
+    accept_label: str, decline_label: str, payload_key: str
+) -> List[Dict[str, Any]]:
+    """Les deux candidats d'un point de choix « déclarer / ne pas déclarer » de mouvement.
+
+    ORDRE CONTRACTUEL : `CHOICE_0` = accepter (`payload[payload_key] = True`), `CHOICE_1` = refuser
+    (`declines`). `effect_ids` vide des DEUX côtés : aucune de ces déclarations n'est accordée par
+    une datasheet, donc elle n'appartient pas au registre des accordables. C'est `declines` — et
+    non l'index, qui n'est écrit dans AUCUN scalaire d'observation — qui distingue les deux
+    lignes : sans lui elles sortiraient identiques et l'agent ne pourrait pas apprendre à choisir
+    (cf. `DECISION_OPTION_BIN_FIELDS`, défaut mesuré sur `waaagh_call`). Les poseurs automatiques
+    (`engine.agent_decision.pending_decision_decline_slot`) retrouvent le refus par ce drapeau.
+    """
+    return [
+        {
+            "label": accept_label,
+            "effect_ids": (),
+            "declines": False,
+            "payload": {payload_key: True},
+        },
+        {
+            "label": decline_label,
+            "effect_ids": (),
+            "declines": True,
+            "payload": {payload_key: False},
+        },
+    ]
+
+
 def _fly_declaration_due_unit(
     game_state: Dict[str, Any], squad_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -427,14 +478,10 @@ def _fly_declaration_due_unit(
     entry = _fly_phase_entry(game_state)
     if entry is None:
         return None
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = _model_seat_unit(game_state, squad_id, "_fly_declaration_due_unit")
     if unit is None:
-        raise KeyError(f"_fly_declaration_due_unit: escouade {squad_id} introuvable")
+        return None
     if not _unit_has_keyword(unit, "fly"):
-        return None
-    if not _unit_is_ai_controlled(game_state, unit):
-        return None
-    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
         return None
     if str(squad_id) in game_state.get(entry.resolved_key, set()):  # get allowed : absent = jamais posée
         return None
@@ -485,26 +532,9 @@ def arm_fly_declaration_decision(
         decision_type="fly_declaration",
         player=int(require_key(unit, "player")),
         unit_id=str(squad_id),
-        options=[
-            # `effect_ids` vide des DEUX côtés : « take to the skies » n'est accordé par aucune
-            # datasheet (c'est le mot-clé FLY qui l'ouvre, 21.03 qui en fixe le prix), donc il
-            # n'appartient pas au registre des accordables. C'est `declines` — et non l'index,
-            # qui n'est écrit dans AUCUN scalaire d'observation — qui distingue les deux lignes :
-            # sans lui elles sortiraient identiques et l'agent ne pourrait pas apprendre à
-            # choisir (cf. `DECISION_OPTION_BIN_FIELDS`, défaut mesuré sur `waaagh_call`).
-            {
-                "label": "Take to the skies",
-                "effect_ids": (),
-                "declines": False,
-                "payload": {"declare": True},
-            },
-            {
-                "label": "Stay grounded",
-                "effect_ids": (),
-                "declines": True,
-                "payload": {"declare": False},
-            },
-        ],
+        # « take to the skies » n'est accordé par aucune datasheet : c'est le mot-clé FLY qui
+        # l'ouvre, 21.03 qui en fixe le prix — d'où `effect_ids` vide, `declines` seul discriminant.
+        options=_binary_declaration_options("Take to the skies", "Stay grounded", "declare"),
     )
 
 
@@ -660,14 +690,10 @@ def _ascent_declaration_due_unit(
     """
     if str(require_key(game_state, "phase")) != "move":
         return None
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = _model_seat_unit(game_state, squad_id, "_ascent_declaration_due_unit")
     if unit is None:
-        raise KeyError(f"_ascent_declaration_due_unit: escouade {squad_id} introuvable")
+        return None
     if not _squad_can_end_move_elevated(game_state, unit):
-        return None
-    if not _unit_is_ai_controlled(game_state, unit):
-        return None
-    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
         return None
     if str(squad_id) in game_state.get(ASCENT_RESOLVED_KEY, set()):  # get allowed : absent = jamais posée
         return None
@@ -780,20 +806,9 @@ def arm_ascent_declaration_decision(
         decision_type="ascent_declaration",
         player=int(require_key(unit, "player")),
         unit_id=str(squad_id),
-        options=[
-            {
-                "label": "End the move elevated",
-                "effect_ids": (),
-                "declines": False,
-                "payload": {"declare": True},
-            },
-            {
-                "label": "Stay on ground level",
-                "effect_ids": (),
-                "declines": True,
-                "payload": {"declare": False},
-            },
-        ],
+        options=_binary_declaration_options(
+            "End the move elevated", "Stay on ground level", "declare"
+        ),
     )
 
 
@@ -830,13 +845,6 @@ def apply_ascent_declaration_decision(
     game_state["_unit_move_version"] += 1
 
 
-#: ORDRE CONTRACTUEL des candidats du point de choix `fall_back_mode` (09.07). `CHOICE_0` retient
-#: Desperate Escape, `CHOICE_1` garde Ordered Retreat. Lu par l'armement (ordre des options) ET
-#: par la réponse des bots (`ai/env_wrappers.bot_action_for_pending_choice`) : un seul littéral,
-#: sinon le bot répondrait un index que l'armement ne lui donne pas.
-FALL_BACK_MODE_ORDERED_RETREAT_INDEX = 1
-
-
 def _fall_back_mode_due_unit(
     game_state: Dict[str, Any], squad_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -852,9 +860,9 @@ def _fall_back_mode_due_unit(
       - elle N'EST PAS battle-shocked : 09.07 lui IMPOSE alors Desperate Escape (« Otherwise, you
         must select this mode »), et c'est `desperate_escape_pre_move` qui l'applique — poser la
         question serait offrir un candidat que la règle interdit ;
-      - le mode n'est pas déjà retenu (verrou posé) ni la question déjà posée
-        (`FALL_BACK_MODE_RESOLVED_KEY`) : « Ordered Retreat » ne pose pas le verrou, d'où la
-        trace séparée, sans laquelle la question se reposerait à chaque masque ;
+      - le mode n'est pas déjà arrêté (`fall_back_mode_resolved`) : par le point de choix, par
+        la confirmation humaine du danger ou par le mode imposé — « Ordered Retreat » répondu
+        compte, sans quoi la question se reposerait à chaque masque ;
       - PAS de vol déclaré. 21.03 accorde déjà la traversée des figurines ennemies (« can move
         through models ») : Desperate Escape n'ajouterait à un vol que le hazard 06.03 et le jet
         de battle-shock 01.07, sans rien ouvrir — un candidat strictement dominé, donc un step
@@ -863,24 +871,19 @@ def _fall_back_mode_due_unit(
     """
     if str(require_key(game_state, "phase")) != "move":
         return None
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = _model_seat_unit(game_state, squad_id, "_fall_back_mode_due_unit")
     if unit is None:
-        raise KeyError(f"_fall_back_mode_due_unit: escouade {squad_id} introuvable")
-    if not _unit_is_ai_controlled(game_state, unit):
         return None
-    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
-        return None
-    if desperate_escape_mode_selected(game_state, str(squad_id)):
-        return None
-    if str(game_state.get(FALL_BACK_MODE_RESOLVED_KEY)) == str(squad_id):  # get allowed : absent = jamais posée
+    if fall_back_mode_resolved(game_state, str(squad_id)):
         return None
     if bool(require_key(unit, "battle_shocked")):
         return None
     if not squad_advance_or_fall_back_allowed(game_state, str(squad_id)):
         return None
-    if not _squad_is_in_enemy_er(game_state, str(squad_id)):
-        return None
+    # Le balayage d'engagement (O(ennemis)) en dernier : tout ce qui précède est une lecture.
     if _fly_traversal_active(game_state, unit, str(squad_id)):
+        return None
+    if not _squad_is_in_enemy_er(game_state, str(squad_id)):
         return None
     return unit
 
@@ -910,11 +913,12 @@ def arm_fall_back_mode_decision(
     (`no_valid_move_destinations`) alors que Desperate Escape lui ouvrait la traversée des
     ennemis. Trancher par une constante reviendrait à décider à la place de l'agent (§0.48 `L6`).
 
-    ORDRE CONTRACTUEL des candidats (`FALL_BACK_MODE_ORDERED_RETREAT_INDEX`) : `CHOICE_0` =
-    Desperate Escape (traversée des figurines ennemies, contre un hazard 06.03 par figurine et un
-    jet de battle-shock 01.07 après le mouvement), `CHOICE_1` = Ordered Retreat. Aucun des deux
+    ORDRE CONTRACTUEL des candidats (`_binary_declaration_options`) : `CHOICE_0` = Desperate
+    Escape (traversée des figurines ennemies, contre un hazard 06.03 par figurine et un jet de
+    battle-shock 01.07 après le mouvement), `CHOICE_1` = Ordered Retreat. Aucun des deux
     n'accorde d'effet de datasheet : c'est `declines` qui les distingue dans l'observation, et
-    c'est Ordered Retreat qui « ne fait rien » — le mode par défaut, sans hazard.
+    c'est Ordered Retreat qui « ne fait rien » — le mode par défaut, sans hazard. Les bots le
+    retrouvent par ce drapeau (`pending_decision_decline_slot`), jamais par l'index.
 
     POSÉ AVANT LE POOL, et c'est une règle : le mode change la traversée, donc les cellules que
     le masque ouvre. Le poser après serait le poser trop tard (cf. `action_decoder`, section 3ter).
@@ -924,27 +928,14 @@ def arm_fall_back_mode_decision(
         return None
     from engine.agent_decision import set_pending_agent_decision
 
-    options: List[Dict[str, Any]] = [
-        {
-            "label": "Desperate Escape",
-            "effect_ids": (),
-            "declines": False,
-            "payload": {"desperate_escape": True},
-        },
-        {
-            "label": "Ordered Retreat",
-            "effect_ids": (),
-            "declines": True,
-            "payload": {"desperate_escape": False},
-        },
-    ]
-    assert options[FALL_BACK_MODE_ORDERED_RETREAT_INDEX]["declines"] is True
     return set_pending_agent_decision(
         game_state,
         decision_type="fall_back_mode",
         player=int(require_key(unit, "player")),
         unit_id=str(squad_id),
-        options=options,
+        options=_binary_declaration_options(
+            "Desperate Escape", "Ordered Retreat", "desperate_escape"
+        ),
     )
 
 
@@ -953,19 +944,19 @@ def apply_fall_back_mode_decision(
 ) -> None:
     """Applique le candidat choisi pour `fall_back_mode`, et EFFACE la décision.
 
-    Écrivain unique du couple (verrou de mode, trace de résolution) pour les sièges pilotés par
-    le modèle — pendant exact d'`apply_fly_declaration_decision`, dont il partage le préambule
+    Écrit le mode retenu (`FALL_BACK_MODES_KEY`) pour les sièges pilotés par le modèle — pendant
+    exact d'`apply_fly_declaration_decision`, dont il partage le préambule
     (`consume_pending_agent_decision` : vérifie le type et le propriétaire, puis efface).
 
-    « Ordered Retreat » n'est PAS un non-événement : il doit laisser une trace
-    (`FALL_BACK_MODE_RESOLVED_KEY`), sans quoi la question se reposerait indéfiniment. Les deux
-    clés sont des scalaires d'ACTIVATION, purgés par `end_activation` — pas des sets de tour comme
-    ceux du vol : le mode est sélectionné pour CE mouvement-là (09.07 « BEFORE MOVING »), et une
-    escouade n'est activée qu'une fois par phase de mouvement.
+    « Ordered Retreat » n'est PAS un non-événement : il est retenu lui aussi
+    (`select_ordered_retreat_mode`), sans quoi la question se reposerait indéfiniment. Le mode est
+    une entrée d'ACTIVATION, purgée par `end_activation` — pas un set de tour comme ceux du vol :
+    il est sélectionné pour CE mouvement-là (09.07 « BEFORE MOVING »), et une escouade n'est
+    activée qu'une fois par phase de mouvement.
 
     `_unit_move_version` est incrémenté comme pour le vol : Desperate Escape change la traversée,
     donc le pool, et tout cache de masque clé sur cette version doit être invalidé. Le cache
-    spatial, lui, lit le verrou dans son fingerprint.
+    spatial, lui, lit le mode retenu dans son fingerprint.
     """
     from engine.agent_decision import consume_pending_agent_decision
 
@@ -980,9 +971,10 @@ def apply_fall_back_mode_decision(
         player=int(require_key(game_state, "current_player")),
         unit_id=str(squad_id),
     )
-    game_state[FALL_BACK_MODE_RESOLVED_KEY] = str(squad_id)
     if desperate_escape:
         select_desperate_escape_mode(game_state, str(squad_id))
+    else:
+        select_ordered_retreat_mode(game_state, str(squad_id))
     game_state["_unit_move_version"] += 1
 
 
@@ -1729,14 +1721,16 @@ def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, acti
     pool = movement_build_valid_destinations_pool(game_state, unit_id)
     # Réponse état-complète comme l'activation : le front re-dérive engagement (would_flee) et
     # mode Advance (advance_roll) à partir de la réponse ; les omettre les réinitialiserait.
+    # `would_flee` dérive du mode : un fall-back a un mode, un move normal n'en a pas.
+    fall_back_mode = fall_back_mode_of(game_state, str(unit_id))
     return True, {
         "action": "fly_mode_set",
         "unitId": unit["id"],
         "took_to_skies": declared,
         "valid_destinations": pool,
         "waiting_for_player": True,
-        "would_flee": bool(squad_move_is_fall_back(game_state, str(unit_id))),
-        "fall_back_mode": fall_back_mode_of(game_state, str(unit_id)),
+        "would_flee": fall_back_mode is not None,
+        "fall_back_mode": fall_back_mode,
         "advance_roll": _advance_roll_for(str(unit_id), game_state),
     }
 
@@ -1799,10 +1793,13 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     # lui permette de choisir. Elle reçoit donc le flux normal, pool vide compris : le front lui
     # offre Desperate Escape et Stationary. Battle-shocked (mode imposé) ou mode déjà retenu :
     # le pool EST celui de Desperate Escape, vide = aucun fall-back possible → skip, sans hazard.
-    engaged_de = _squad_is_in_enemy_er(game_state, str(unit_id))
+    # `fall_back_mode_of` est la MÊME lecture que le commit et que le payload ci-dessous :
+    # `ordered_retreat` = engagée sans mode retenu, `desperate_escape` = retenu, None = move normal.
+    fall_back_mode = fall_back_mode_of(game_state, str(unit_id))
     shocked_de = bool(require_key(unit, "battle_shocked"))
-    mode_locked = desperate_escape_mode_selected(game_state, str(unit_id))
-    desperate_escape_selectable = engaged_de and not shocked_de and not mode_locked
+    desperate_escape_selectable = (
+        fall_back_mode == FALL_BACK_MODE_ORDERED_RETREAT and not shocked_de
+    )
 
     # Check if valid destinations exist
     if not game_state["valid_move_destinations_pool"] and not desperate_escape_selectable:
@@ -1835,9 +1832,10 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     # attribution 06.02 AVANT de bouger). Une escouade engagée mais saine part en Ordered Retreat
     # (aucun hazard) par le flux normal ci-dessous, et peut y SÉLECTIONNER Desperate Escape par
     # le bouton de mode — même popup, même hazard_confirm.
-    # `not mode_locked` : après un report d'activation (`postpone`) qui suit le hazard, les jets
-    # sont FAITS (le verrou en témoigne) ; reposer le popup les ferait rejouer.
-    if engaged_de and shocked_de and not mode_locked:
+    # `ordered_retreat` et non « engagée » : après un report d'activation (`postpone`) qui suit
+    # le hazard, les jets sont FAITS (le mode retenu en témoigne) ; reposer le popup les ferait
+    # rejouer.
+    if fall_back_mode == FALL_BACK_MODE_ORDERED_RETREAT and shocked_de:
         # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
         # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool
         # vert, aucun ghost. movement_clear_preview met aussi active_movement_unit=None, et on
@@ -1860,16 +1858,16 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
         "waiting_for_player": True,
         # V11 : le mouvement en cours est-il un Fall Back ? Pilote l'UI des modes de deplacement
         # (fall-back => Fall-back/Stationary ; sinon => Move/Advance). MEME source que le commit
-        # (`squad_move_is_fall_back`) : apres un report d'activation (`postpone`) qui suit un
-        # Desperate Escape, les jets de hazard sont DEJA faits et ne se rejouent pas — le mode
-        # retenu vaut encore, alors que l'engagement, lui, a pu disparaitre avec les figurines
-        # tuees. Relire l'engagement seul reproposait les modes Move/Advance sur un fall-back
-        # que le commit enregistre en `flee`.
-        "would_flee": bool(squad_move_is_fall_back(game_state, str(unit_id))),
+        # (`fall_back_mode_of`, mode retenu puis engagement comme `squad_move_is_fall_back`) :
+        # apres un report d'activation (`postpone`) qui suit un Desperate Escape, les jets de
+        # hazard sont DEJA faits et ne se rejouent pas — le mode retenu vaut encore, alors que
+        # l'engagement, lui, a pu disparaitre avec les figurines tuees. Relire l'engagement seul
+        # reproposait les modes Move/Advance sur un fall-back que le commit enregistre en `flee`.
+        "would_flee": fall_back_mode is not None,
         # 09.07 : mode du fall-back en cours (`ordered_retreat` / `desperate_escape` / None).
         # Pilote le bouton de mode enfoncé, et dit au front si Desperate Escape est encore
         # SÉLECTIONNABLE (`ordered_retreat` = pas encore retenu). Même source que le commit.
-        "fall_back_mode": fall_back_mode_of(game_state, str(unit_id)),
+        "fall_back_mode": fall_back_mode,
         # V11 : jet d'Advance figé si l'escouade a déjà advancé ce tour (sinon None) — restaure
         # le badge + l'état « advancé » du bouton à la ré-activation après un cancel.
         "advance_roll": _advance_roll_for(str(unit_id), game_state),
@@ -3523,18 +3521,15 @@ def movement_build_valid_destinations_pool(
     # Seul `thru_ez` reste lu ici : les deux autres toggles sont appliqués par
     # `build_move_traversal_blocked`, avec Desperate Escape et 17.01, en un seul endroit.
     _thru_ez, _, _ = _get_move_traversal_rules(game_state)
-    # Desperate Escape (09.07) : la bande d'EZ sort du TRANSIT — même prédicat et même garde de
-    # phase que `build_move_transit_blocked` (validation) et que le pool par-figurine, dont ce
-    # pool d'ancre est le miroir. Il ne lisait ici que le toggle de config : les figurines
-    # ennemies étaient bien levées (`build_move_traversal_blocked`), mais pas la bande autour
-    # d'elles, donc une escouade encerclée n'avait AUCUNE ancre en Desperate Escape alors que la
-    # validation en acceptait — le mode restait inerte sur le siège du modèle et sur le pool
-    # d'ancre PvP. La DESTINATION, elle, exclut toujours l'EZ (AFTER MOVING : « unengaged »),
-    # et les trois chemins ci-dessous ne lisent `thru_ez` que pour le transit.
-    if (
-        str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
-        and squad_is_battle_shocked_in_enemy_er(game_state, unit_id_str)
-    ):
+    # Desperate Escape (09.07) : la bande d'EZ sort du TRANSIT — le prédicat gardé par la phase
+    # de `build_move_transit_blocked` (validation), dont ce pool d'ancre est le miroir. Il ne
+    # lisait ici que le toggle de config : les figurines ennemies étaient bien levées
+    # (`build_move_traversal_blocked`), mais pas la bande autour d'elles, donc une escouade
+    # encerclée n'avait AUCUNE ancre en Desperate Escape alors que la validation en acceptait —
+    # le mode restait inerte sur le siège du modèle et sur le pool d'ancre PvP. La DESTINATION,
+    # elle, exclut toujours l'EZ (AFTER MOVING : « unengaged »), et les trois chemins ci-dessous
+    # ne lisent `thru_ez` que pour le transit.
+    if desperate_escape_transit_exempt(game_state, unit_id_str):
         _thru_ez = True
     _mover_player_int = int(require_key(unit, "player"))
     # ez > 1 : une seule liste d’ennemis pour ``_movement_engagement_violates`` (évite O(units)×BFS).
@@ -4620,7 +4615,7 @@ def movement_build_model_destinations_pool(
         # `_unit_move_version` et se périme tout seul.
         _mm_key = (
             str(model_id), start_col, start_row, int(budget), mover_orient, view_level, has_fly,
-            bool(desperate_escape),
+            desperate_escape,
         )
         _mm_field = _mm_cache.get(_mm_key) if _mm_can_cache else None
         _mm_cache_hit = _mm_field is not None

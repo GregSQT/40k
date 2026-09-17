@@ -124,6 +124,42 @@ def _validate_options(decision_type: str, options: Sequence[Dict[str, Any]]) -> 
     return normalized
 
 
+def pending_decision_decline_slot(
+    game_state: Dict[str, Any], action_mask: Any, decision_type: str
+) -> Optional[int]:
+    """Le `CHOICE_i` qui REFUSE la décision `decision_type` en attente, ou ``None`` si aucune
+    décision de ce type n'est en attente.
+
+    SOURCE UNIQUE des poseurs automatiques qui répondent « non » par doctrine, pas par tirage :
+    le refus des réserves 20.01 (`deployment_handlers.reserves_declaration_decline_slot`, pour
+    les bots ET le déploiement `auto` du moteur) et l'Ordered Retreat des bots
+    (`ai.env_wrappers.bot_action_for_pending_choice`, baseline de win-rate inchangée).
+
+    Le candidat est retrouvé par son drapeau `declines`, jamais par son index : c'est lui qui
+    porte « ne rien faire » (`DECISION_OPTION_BIN_FIELDS`), et un index en dur deviendrait faux le
+    jour où l'ordre des candidats changerait.
+    """
+    from engine.macro_intents import CHOICE_BASE
+
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != str(decision_type):
+        return None
+    options = require_key(decision, "options")
+    declining = [i for i, option in enumerate(options) if require_key(option, "declines")]
+    if len(declining) != 1:
+        raise RuntimeError(
+            f"pending_decision_decline_slot({decision_type}): {len(declining)} candidats "
+            "`declines` — il en faut exactement un pour que le refus soit sans ambiguite."
+        )
+    slot = int(CHOICE_BASE + declining[0])
+    if not bool(action_mask[slot]):
+        raise RuntimeError(
+            f"pending_decision_decline_slot({decision_type}): CHOICE_{declining[0]} ferme alors "
+            "qu'une decision de ce type est en attente — masque incoherent."
+        )
+    return slot
+
+
 def set_pending_agent_decision(
     game_state: Dict[str, Any],
     *,

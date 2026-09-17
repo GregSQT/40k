@@ -90,7 +90,7 @@ def test_pvp_resume_after_hazard_pool_rebuilt_from_new_anchor() -> None:
         return _real_pool(game_state, unit_id, **kwargs)
 
     def _mock_desperate_escape(
-        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+        squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
     ) -> tuple:
         """Simule la mort de 1#0 par hazard; la nouvelle ancre est 1#1 à (22,20)."""
         game_state["models_cache"].pop("1#0", None)

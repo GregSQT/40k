@@ -31,6 +31,7 @@ from engine.phase_handlers.fight_handlers import (
     fight_v11_enter_fight_step,
     fight_v11_start,
 )
+from engine.agent_decision import clear_pending_agent_decision
 from engine.game_utils import require_unit_by_id
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import (
@@ -62,6 +63,11 @@ def _engine(mode: str, seat2: str, units: List[Dict[str, Any]]) -> W40KEngine:
     gs = eng.game_state
     # Le helper boote en `gym_training_mode` ; l'état visé est une partie servie par l'API.
     gs["gym_training_mode"] = False
+    # Le masque bâti au `reset` (phase de mouvement, siège gym) a posé la question 09.07 « mode de
+    # fall-back » à l'aumônier, engagé dès la pose. Une partie servie atteint la phase de combat
+    # par des transitions qui la consomment ; ici la phase est posée à la main, donc la décision
+    # de boot est effacée avec le reste de l'état gym.
+    clear_pending_agent_decision(gs)
     gs["player_types"] = {"1": "human", "2": seat2}
     gs["current_mode_code"] = mode
     eng.current_mode_code = mode
