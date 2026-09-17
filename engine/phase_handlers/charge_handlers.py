@@ -10,7 +10,7 @@ ZERO TOLERANCE for state storage or wrapper patterns
 import os
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, Sequence, Mapping, cast
+from typing import Dict, List, Tuple, Set, Optional, Any, FrozenSet, Iterable, Sequence, Mapping, cast
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, require_present
 # Seuil vertical d'engagement (§03.04 : 2" horizontal ET 5" vertical) — primitive publique,
@@ -1354,10 +1354,10 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         if not isinstance(raw_ids, list) or not raw_ids:
             return False, {"error": "charge_block_destinations requires model_ids", "action": action}
         _lvl_blk = action.get("level")
+        _level_blk = int(_lvl_blk) if _lvl_blk is not None else 0
         try:
             anchors = charge_block_destinations(
-                game_state, unit_id, [str(m) for m in raw_ids], prov_blk,
-                level=int(_lvl_blk) if _lvl_blk is not None else 0,
+                game_state, unit_id, [str(m) for m in raw_ids], prov_blk, level=_level_blk
             )
         except ValueError as exc:
             return False, {"error": str(exc), "action": "charge_block_destinations"}
@@ -1370,8 +1370,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
             ],
             # Zone d'atterrissage du bloc (même rendu lissé que la figurine sélectionnée).
             "footprint_mask_loops": charge_block_footprint_mask_loops(
-                game_state, unit_id, anchors, prov_blk,
-                level=int(_lvl_blk) if _lvl_blk is not None else 0,
+                game_state, unit_id, anchors, prov_blk, level=_level_blk
             ),
         }
 
@@ -2679,6 +2678,32 @@ def charge_block_destinations(
     return rigid_block_anchor_placements(require_key(game_state, "models_cache"), ids, pools)
 
 
+def _charge_fp_zone_loops(
+    game_state: Dict[str, Any],
+    ctx: Mapping[str, Any],
+    cells: Iterable[Tuple[Optional[str], int, int, int]],
+) -> List[List[List[float]]]:
+    """Zone de landing charge → boucles de contour monde (même rendu que le move per-fig).
+
+    Union des empreintes mémoïsées (``region[...]["fp"]`` du contexte, sol ou étage selon le
+    niveau de chaque cellule) pour ``cells`` = (clé de socle, col, row, niveau) ; le front rend ces
+    boucles en polygone lissé (Chaikin). Source unique de la zone de la figurine sélectionnée
+    (``charge_model_plan_state``) et de celle du bloc de sélection rectangle.
+    """
+    from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+
+    region_by_base = ctx["region_by_base"]
+    floor_region_by_base = ctx["floor_region_by_base"]
+    fp_zone: Set[Tuple[int, int]] = set()
+    for bk, c, r, lv in cells:
+        region = (floor_region_by_base if int(lv) >= 1 else region_by_base).get(bk, {})  # get allowed
+        rg = region.get((int(c), int(r)))
+        if rg is not None:
+            fp_zone |= rg["fp"]
+    loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
+    return [[[float(x), float(y)] for (x, y) in loop] for loop in loops] if loops else []
+
+
 def charge_block_footprint_mask_loops(
     game_state: Dict[str, Any],
     unit_id: str,
@@ -2688,14 +2713,12 @@ def charge_block_footprint_mask_loops(
 ) -> List[List[List[float]]]:
     """Zone d'atterrissage d'un bloc de charge → boucles de contour monde.
 
-    Jumeau charge de ``movement_block_footprint_mask_loops`` : union des empreintes
-    (``region[...]["fp"]``, sol ou étage selon le niveau de chaque destination) de chaque figurine
-    du bloc sur ses destinations, via le même helper que la zone de la figurine sélectionnée de
-    ``charge_model_plan_state``. Contexte mémoïsé (aucun recalcul lourd). Vide si aucune ancre.
+    Jumeau charge de ``movement_block_footprint_mask_loops`` : union des empreintes de chaque
+    figurine du bloc sur ses destinations, via ``_charge_fp_zone_loops`` comme la zone de la
+    figurine sélectionnée. Contexte mémoïsé (aucun recalcul lourd). Vide si aucune ancre.
     """
     if not anchors:
         return []
-    from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
     from engine.perf_timing import perf_timing_enabled
 
     unit = require_unit_by_id(game_state, unit_id)
@@ -2703,18 +2726,14 @@ def charge_block_footprint_mask_loops(
         game_state, unit, unit_id, provisional_plan, int(level), perf_timing_enabled(game_state)
     )
     base_of_model = ctx["base_of_model"]
-    region_by_base = ctx["region_by_base"]
-    floor_region_by_base = ctx["floor_region_by_base"]
-    fp_zone: Set[Tuple[int, int]] = set()
-    for _ac, _ar, placements in anchors:
-        for mid, (c, r, lv) in placements.items():
-            bk = base_of_model.get(mid)  # get allowed (base sans région = vide)
-            region = (floor_region_by_base if int(lv) >= 1 else region_by_base).get(bk, {})  # get allowed
-            rg = region.get((int(c), int(r)))
-            if rg is not None:
-                fp_zone |= rg["fp"]
-    loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
-    return [[[float(x), float(y)] for (x, y) in loop] for loop in loops] if loops else []
+    return _charge_fp_zone_loops(
+        game_state, ctx,
+        (
+            (base_of_model.get(mid), c, r, lv)  # get allowed (base sans région = vide)
+            for _ac, _ar, placements in anchors
+            for mid, (c, r, lv) in placements.items()
+        ),
+    )
 
 
 def charge_model_plan_state(
@@ -2770,7 +2789,6 @@ def charge_model_plan_state(
     reach_by_model = ctx["reach_by_model"]
     region_by_base = ctx["region_by_base"]
     floor_dist_by_model = ctx["floor_dist_by_model"]
-    floor_region_by_base = ctx["floor_region_by_base"]
     base_of_model = ctx["base_of_model"]
     phase = ctx["phase"]
     eligible_models = ctx["eligible_models"]
@@ -2814,18 +2832,10 @@ def charge_model_plan_state(
     # lissé (Chaikin), au lieu de disques bruts festonnés.
     footprint_mask_loops: List[List[List[float]]] = []
     if pool:
-        from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
         _bk_sel = base_of_model.get(str(selected_model)) if selected_model is not None else None
-        _sel_region = region_by_base.get(_bk_sel, {})  # get allowed
-        _sel_fregion = floor_region_by_base.get(_bk_sel, {})  # get allowed
-        fp_zone: Set[Tuple[int, int]] = set()
-        for _c, _r, _lv in pool:
-            rg = (_sel_fregion if int(_lv) >= 1 else _sel_region).get((int(_c), int(_r)))
-            if rg is not None:
-                fp_zone |= rg["fp"]
-        loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
-        if loops:
-            footprint_mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
+        footprint_mask_loops = _charge_fp_zone_loops(
+            game_state, ctx, ((_bk_sel, _c, _r, _lv) for _c, _r, _lv in pool)
+        )
 
     if _perf and _t0 is not None:
         _total = time.perf_counter() - _t0

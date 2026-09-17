@@ -39,6 +39,7 @@ import {
   pixiStagePointToClientScreen,
 } from "../utils/blinkingHPBar";
 import {
+  type BlockPlacements,
   type BlockPool,
   cubeAdd,
   normalizeRect,
@@ -55,6 +56,7 @@ import {
   planBoardRedraw,
 } from "../utils/boardRedrawDecision";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
+import { buildGhostFigure } from "../utils/ghostFigure";
 import {
   boardWorldSize,
   buildOccupiedSet,
@@ -103,11 +105,7 @@ import {
 import { destroyLayerChild } from "../utils/pixiTeardown";
 import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
 import type { TerrainEntry } from "../utils/terrainSelection";
-import {
-  getNonRoundBasePixelLayout,
-  getNonRoundIconRadius,
-  getSquareCornerRadiusPx,
-} from "../utils/unitBaseDisplay";
+import { getNonRoundBasePixelLayout } from "../utils/unitBaseDisplay";
 import {
   buildWaaaghFangs,
   drawWaaaghFangs,
@@ -3926,68 +3924,24 @@ export default function Board({
           hoverSpriteRef.current = null;
         }
         hoverMoveOrientationStepRef.current = null;
-        const container = new PIXI.Container();
+        const hoverOrientation = orientationStepForBoard(selectedUnit, gameState?.units_cache);
+        const { container } = buildGhostFigure(
+          selectedUnit,
+          selectedUnit.player,
+          HEX_RADIUS_H,
+          hoverOrientation
+        );
+        if (
+          getNonRoundBasePixelLayout(selectedUnit, HEX_RADIUS_H) &&
+          hoverOrientation !== undefined
+        ) {
+          hoverMoveOrientationStepRef.current = hoverOrientation;
+        }
         container.zIndex = 2500;
         container.eventMode = "none";
         container.interactiveChildren = false;
-        app.stage.addChild(container);
-
-        const HEX_R = HEX_RADIUS_H;
-        const nrHover = getNonRoundBasePixelLayout(selectedUnit, HEX_R);
-        const bdSel = resolveBaseSizeForUnitDisplay(selectedUnit);
-        const baseSizeVal = bdSel > 1 ? bdSel : undefined;
-        const defaultIconDiam = baseSizeVal
-          ? baseSizeVal * 1.5 * HEX_RADIUS_H
-          : HEX_RADIUS_H * (selectedUnit.ICON_SCALE ?? 1.0);
-
-        const baseColor = selectedUnit.player === 1 ? 0x1d4ed8 : 0x882222;
-        const baseCircle = new PIXI.Graphics();
-        baseCircle.name = "hover-base-shape";
-        baseCircle.beginFill(baseColor, 0.7);
-        if (nrHover) {
-          if (nrHover.kind === "oval") {
-            baseCircle.drawEllipse(0, 0, nrHover.outerRx, nrHover.outerRy);
-          } else {
-            const h = nrHover.squareHalf;
-            const s = nrHover.squareSide;
-            baseCircle.drawRoundedRect(-h, -h, s, s, getSquareCornerRadiusPx());
-          }
-        } else {
-          baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
-        }
-        baseCircle.endFill();
-        const hoverOrientation =
-          hoverMoveOrientationStepRef.current ??
-          orientationStepForBoard(selectedUnit, gameState?.units_cache);
-        if (nrHover && hoverOrientation !== undefined) {
-          baseCircle.rotation = orientationStepToRadians(hoverOrientation);
-          hoverMoveOrientationStepRef.current = hoverOrientation;
-        }
-        container.addChild(baseCircle);
-
-        if (selectedUnit.ICON) {
-          const iconPath =
-            selectedUnit.player === 2
-              ? selectedUnit.ICON.replace(".webp", "_red.webp")
-              : selectedUnit.ICON;
-          const texture = PIXI.Texture.from(iconPath);
-          const iconSprite = new PIXI.Sprite(texture);
-          iconSprite.anchor.set(0.5);
-          const nonRoundIconR = getNonRoundIconRadius(selectedUnit, HEX_R);
-          const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
-          iconSprite.width = iconDiam;
-          iconSprite.height = iconDiam;
-          if (nonRoundIconR != null) {
-            const maskG = new PIXI.Graphics();
-            maskG.beginFill(0xffffff);
-            maskG.drawCircle(0, 0, nonRoundIconR);
-            maskG.endFill();
-            iconSprite.mask = maskG;
-            container.addChild(maskG);
-          }
-          container.addChild(iconSprite);
-        }
         container.alpha = 0.65;
+        app.stage.addChild(container);
         hoverSpriteRef.current = container;
         spriteBuiltForUnitId = movementPreviewUnitId;
       }
@@ -6817,69 +6771,19 @@ export default function Board({
       hoverSpriteRef.current.destroy({ children: true });
       hoverSpriteRef.current = null;
     }
-    const container = new PIXI.Container();
-    container.zIndex = 2500;
-    container.eventMode = "none";
-    container.interactiveChildren = false;
-    app.stage.addChild(container);
-
     const activeMeta = (
       gameState?.units_cache as
         | Record<string, { models_meta_by_model?: Record<string, ModelVisualMeta> }>
         | undefined
     )?.[String(charger.id)]?.models_meta_by_model?.[activeModelId];
     const effectiveUnit = activeMeta ? { ...charger, ...activeMeta } : charger;
-
-    const HEX_R = HEX_RADIUS_H;
-    const nrHover = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
-    const bdSel = resolveBaseSizeForUnitDisplay(effectiveUnit);
-    const baseSizeVal = bdSel > 1 ? bdSel : undefined;
-    const defaultIconDiam = baseSizeVal
-      ? baseSizeVal * 1.5 * HEX_RADIUS_H
-      : HEX_RADIUS_H * (effectiveUnit.ICON_SCALE ?? 1.0);
-
-    const baseColor = charger.player === 1 ? 0x1d4ed8 : 0x882222;
-    const baseCircle = new PIXI.Graphics();
-    baseCircle.name = "hover-base-shape";
-    baseCircle.beginFill(baseColor, 0.7);
-    if (nrHover) {
-      if (nrHover.kind === "oval") {
-        baseCircle.drawEllipse(0, 0, nrHover.outerRx, nrHover.outerRy);
-      } else {
-        const h = nrHover.squareHalf;
-        const s = nrHover.squareSide;
-        baseCircle.drawRoundedRect(-h, -h, s, s, getSquareCornerRadiusPx());
-      }
-    } else {
-      baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
-    }
-    baseCircle.endFill();
-    container.addChild(baseCircle);
-
-    if (effectiveUnit.ICON) {
-      const iconPath =
-        charger.player === 2
-          ? effectiveUnit.ICON.replace(".webp", "_red.webp")
-          : effectiveUnit.ICON;
-      const texture = PIXI.Texture.from(iconPath);
-      const iconSprite = new PIXI.Sprite(texture);
-      iconSprite.anchor.set(0.5);
-      const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
-      const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
-      iconSprite.width = iconDiam;
-      iconSprite.height = iconDiam;
-      if (nonRoundIconR != null) {
-        const maskG = new PIXI.Graphics();
-        maskG.beginFill(0xffffff);
-        maskG.drawCircle(0, 0, nonRoundIconR);
-        maskG.endFill();
-        iconSprite.mask = maskG;
-        container.addChild(maskG);
-      }
-      container.addChild(iconSprite);
-    }
+    const { container } = buildGhostFigure(effectiveUnit, charger.player, HEX_RADIUS_H, undefined);
+    container.zIndex = 2500;
+    container.eventMode = "none";
+    container.interactiveChildren = false;
     container.alpha = 0.65;
     container.visible = false;
+    app.stage.addChild(container);
     hoverSpriteRef.current = container;
 
     // Overlay dédié des halos de cohésion (suivent la fig active au survol).
@@ -7607,12 +7511,6 @@ export default function Board({
         hoverSpriteRef.current.destroy({ children: true });
         hoverSpriteRef.current = null;
       }
-      const container = new PIXI.Container();
-      container.zIndex = 2500;
-      container.eventMode = "none";
-      container.interactiveChildren = false;
-      app.stage.addChild(container);
-
       // Escouade hétérogène : appliquer le visuel COMPLET (icône, taille, forme, échelle) de la
       // figurine active (models_meta_by_model[activeModelId]) sur l'unité de base, sinon le ghost
       // prend l'apparence d'une figurine de base d'un autre type.
@@ -7624,64 +7522,24 @@ export default function Board({
           )?.[String(squadUnit.id)]?.models_meta_by_model?.[activeModelId]
         : undefined;
       const effectiveUnit = activeMeta ? { ...squadUnit, ...activeMeta } : squadUnit;
-
-      const HEX_R = HEX_RADIUS_H;
-      const nrHover = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
-      const bdSel = resolveBaseSizeForUnitDisplay(effectiveUnit);
-      const baseSizeVal = bdSel > 1 ? bdSel : undefined;
-      const defaultIconDiam = baseSizeVal
-        ? baseSizeVal * 1.5 * HEX_RADIUS_H
-        : HEX_RADIUS_H * (effectiveUnit.ICON_SCALE ?? 1.0);
-
-      const baseColor = squadUnit.player === 1 ? 0x1d4ed8 : 0x882222;
-      const baseCircle = new PIXI.Graphics();
-      baseCircle.name = "hover-base-shape";
-      baseCircle.beginFill(baseColor, 0.7);
-      if (nrHover) {
-        if (nrHover.kind === "oval") {
-          baseCircle.drawEllipse(0, 0, nrHover.outerRx, nrHover.outerRy);
-        } else {
-          const h = nrHover.squareHalf;
-          const s = nrHover.squareSide;
-          baseCircle.drawRoundedRect(-h, -h, s, s, getSquareCornerRadiusPx());
-        }
-      } else {
-        baseCircle.drawCircle(0, 0, defaultIconDiam / 2);
-      }
-      baseCircle.endFill();
       // Applique l'orientation EN COURS du socle (pivot molette) : sans ça, toute reconstruction du
       // fantôme (ex. refresh backend du badge caché au mousemove) le remettrait à plat (origine).
       const hoverOri =
         hoverMoveOrientationStepRef.current ??
         orientationStepForBoard(squadUnit, gameState?.units_cache);
-      if (nrHover && hoverOri !== undefined) {
-        baseCircle.rotation = orientationStepToRadians(hoverOri);
+      const { container } = buildGhostFigure(
+        effectiveUnit,
+        squadUnit.player,
+        HEX_RADIUS_H,
+        hoverOri
+      );
+      if (getNonRoundBasePixelLayout(effectiveUnit, HEX_RADIUS_H) && hoverOri !== undefined) {
         hoverMoveOrientationStepRef.current = hoverOri;
       }
-      container.addChild(baseCircle);
-
-      if (effectiveUnit.ICON) {
-        const iconPath =
-          squadUnit.player === 2
-            ? effectiveUnit.ICON.replace(".webp", "_red.webp")
-            : effectiveUnit.ICON;
-        const texture = PIXI.Texture.from(iconPath);
-        const iconSprite = new PIXI.Sprite(texture);
-        iconSprite.anchor.set(0.5);
-        const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
-        const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
-        iconSprite.width = iconDiam;
-        iconSprite.height = iconDiam;
-        if (nonRoundIconR != null) {
-          const maskG = new PIXI.Graphics();
-          maskG.beginFill(0xffffff);
-          maskG.drawCircle(0, 0, nonRoundIconR);
-          maskG.endFill();
-          iconSprite.mask = maskG;
-          container.addChild(maskG);
-        }
-        container.addChild(iconSprite);
-      }
+      container.zIndex = 2500;
+      container.eventMode = "none";
+      container.interactiveChildren = false;
+      app.stage.addChild(container);
       // Badge "caché" en bas-gauche de la fig — même géométrie/offset que renderHiddenBadge
       // (util partagé). Fig centrée en (0,0), container placé au curseur → offset local.
       const badgeIconScale = (() => {
@@ -8595,14 +8453,7 @@ export default function Board({
       throw new Error(`block follow: unité ${blockFollow.unitId} absente de units`);
     }
     const HEX_R = boardConfig.hex_radius;
-    const HEX_W = 1.5 * HEX_R;
-    const HEX_H = Math.sqrt(3) * HEX_R;
-    const MARGIN = boardConfig.margin;
-    const center = (c: number, r: number): [number, number] => [
-      c * HEX_W + HEX_W / 2 + MARGIN,
-      r * HEX_H + ((c % 2) * HEX_H) / 2 + HEX_H / 2 + MARGIN,
-    ];
-    // Un fantôme par figurine, même construction que le move preview d'escouade (~L3916).
+    // Un fantôme par figurine, même construction que le move preview d'escouade (buildGhostFigure).
     const layer = new PIXI.Container();
     layer.zIndex = 2500;
     layer.eventMode = "none";
@@ -8611,7 +8462,6 @@ export default function Board({
     app.stage.addChild(layer);
     blockGhostLayerRef.current = layer;
     const ghostByModel = new Map<string, PIXI.Container>();
-    const baseColor = unit.player === 1 ? 0x1d4ed8 : 0x882222;
     const cacheEntry = (
       gameState?.units_cache as
         | Record<
@@ -8629,62 +8479,22 @@ export default function Board({
       // (models_meta_by_model), comme le ghost per-fig — sinon le Warboss est dessiné en Boy.
       const meta = cacheEntry?.models_meta_by_model?.[mid];
       const effectiveUnit = meta ? { ...unit, ...meta } : unit;
-      const nr = getNonRoundBasePixelLayout(effectiveUnit, HEX_R);
-      const bd = resolveBaseSizeForUnitDisplay(effectiveUnit);
-      const defaultIconDiam = bd > 1 ? bd * 1.5 * HEX_R : HEX_R * (effectiveUnit.ICON_SCALE ?? 1.0);
-      const orientation = cacheEntry?.orientation_by_model?.[mid] ?? unitOrientation;
-      const g = new PIXI.Container();
-      const base = new PIXI.Graphics();
-      base.beginFill(baseColor, 0.7);
-      if (nr) {
-        if (nr.kind === "oval") base.drawEllipse(0, 0, nr.outerRx, nr.outerRy);
-        else
-          base.drawRoundedRect(
-            -nr.squareHalf,
-            -nr.squareHalf,
-            nr.squareSide,
-            nr.squareSide,
-            getSquareCornerRadiusPx()
-          );
-        if (orientation !== undefined) base.rotation = orientationStepToRadians(orientation);
-      } else {
-        base.drawCircle(0, 0, defaultIconDiam / 2);
-      }
-      base.endFill();
-      g.addChild(base);
-      if (effectiveUnit.ICON) {
-        const iconPath =
-          unit.player === 2 ? effectiveUnit.ICON.replace(".webp", "_red.webp") : effectiveUnit.ICON;
-        const sprite = new PIXI.Sprite(PIXI.Texture.from(iconPath));
-        sprite.anchor.set(0.5);
-        const nonRoundIconR = getNonRoundIconRadius(effectiveUnit, HEX_R);
-        const iconDiam = nonRoundIconR != null ? nonRoundIconR * 2 : defaultIconDiam;
-        sprite.width = iconDiam;
-        sprite.height = iconDiam;
-        if (nonRoundIconR != null) {
-          const maskG = new PIXI.Graphics();
-          maskG.beginFill(0xffffff);
-          maskG.drawCircle(0, 0, nonRoundIconR);
-          maskG.endFill();
-          sprite.mask = maskG;
-          g.addChild(maskG);
-        }
-        g.addChild(sprite);
-      }
+      const { container: g } = buildGhostFigure(
+        effectiveUnit,
+        unit.player,
+        HEX_R,
+        cacheEntry?.orientation_by_model?.[mid] ?? unitOrientation
+      );
       g.visible = false;
       layer.addChild(g);
       ghostByModel.set(mid, g);
     }
     let currentKey: string | null = null;
-    const placeAt = (key: string) => {
-      const placements = blockPoolRef?.current.get(key);
-      if (!placements) {
-        throw new Error(`block follow: ancre ${key} absente du pool`);
-      }
+    const placeAt = (key: string, placements: BlockPlacements) => {
       for (const [mid, [c, r]] of Object.entries(placements)) {
         const g = ghostByModel.get(mid);
         if (!g) continue;
-        const [x, y] = center(c, r);
+        const { x, y } = hexToPixel(c, r, HEX_R, boardConfig.margin);
         g.position.set(x, y);
         g.visible = true;
       }
@@ -8719,7 +8529,11 @@ export default function Board({
       if (!pool) return;
       const key = snapBlockAnchor(pool, cubeAdd(offsetToCube(h.col, h.row), blockFollow.grab));
       if (key === null || key === currentKey) return;
-      placeAt(key);
+      const placements = pool.get(key);
+      if (!placements) {
+        throw new Error(`block follow: ancre ${key} absente du pool`);
+      }
+      placeAt(key, placements);
     };
     const onDown = (e: PointerEvent) => {
       if (e.target !== canvas) return;
@@ -10267,7 +10081,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}#blk:${blockFollow ? blockFollow.modelIds.join(",") : ""}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 

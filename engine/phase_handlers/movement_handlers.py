@@ -4979,34 +4979,21 @@ def movement_block_footprint_mask_loops(
     """
     if not anchors:
         return []
-    from engine.hex_utils import precompute_footprint_offsets
+    from engine.hex_utils import compute_occupied_hexes
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
 
     models_cache = require_key(game_state, "models_cache")
-    wall_hexes = game_state.get("wall_hexes", set())
-    offsets_by_model: Dict[str, Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = {}
     zone: Set[Tuple[int, int]] = set()
     for _ac, _ar, placements in anchors:
         for mid, (c, r, _lv) in placements.items():
-            offs = offsets_by_model.get(mid)
-            if offs is None:
-                model = models_cache[mid]
-                shape = require_key(model, "BASE_SHAPE")
-                size = require_key(model, "BASE_SIZE")
-                if socle_is_single_hex(shape, size):
-                    offs = (((0, 0),), ((0, 0),))
-                else:
-                    orient = orientations.get(mid) if orientations else None
-                    offs = precompute_footprint_offsets(
-                        shape, size,
-                        int(orient) if orient is not None else int(require_key(model, "orientation")),
-                    )
-                offsets_by_model[mid] = offs
-            for dc, dr in offs[0] if (c & 1) == 0 else offs[1]:
-                zone.add((c + dc, r + dr))
-    zone -= wall_hexes
-    loops = compute_move_preview_mask_loops_world(zone, game_state)
-    return [[(float(x), float(y)) for (x, y) in loop] for loop in loops] if loops else []
+            model = models_cache[mid]
+            orient = orientations.get(mid) if orientations else None
+            zone |= compute_occupied_hexes(
+                c, r, require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"),
+                int(orient) if orient is not None else int(require_key(model, "orientation")),
+            )
+    zone -= game_state.get("wall_hexes", set())
+    return compute_move_preview_mask_loops_world(zone, game_state) or []
 
 
 def movement_preview_move_plan(
@@ -5289,6 +5276,7 @@ def movement_commit_move_plan_handler(
     if move_type == "advance":
         action_name = "ADVANCED"
         was_flee = False
+        move_kind = "advance"
         movement_message = (
             f"Unit {unit['id']}{_ut_seg} ADVANCED{_fly_seg} from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row}) [Advance:{_adv_roll}]"
@@ -5296,6 +5284,7 @@ def movement_commit_move_plan_handler(
     elif move_type == "fall_back":
         action_name = "FLED"
         was_flee = True
+        move_kind = "flee"
         movement_message = (
             f"Unit {unit['id']}{_ut_seg} FLED{_fly_seg} from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row})"
@@ -5303,6 +5292,7 @@ def movement_commit_move_plan_handler(
     else:
         action_name = "MOVE"
         was_flee = False
+        move_kind = "move"
         movement_message = (
             f"Unit {unit['id']}{_ut_seg} MOVED{_fly_seg} from ({orig_anchor_col},{orig_anchor_row}) "
             f"to ({dest_anchor_col},{dest_anchor_row})"
@@ -5343,7 +5333,7 @@ def movement_commit_move_plan_handler(
         from_row=orig_anchor_row,
         to_col=dest_anchor_col,
         to_row=dest_anchor_row,
-        move_kind={"advance": "advance", "fall_back": "flee"}.get(move_type, "move"),
+        move_kind=move_kind,
         move_cause="normal",
     )
 
