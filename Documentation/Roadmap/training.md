@@ -172,8 +172,8 @@ franchissement de 0,50 / 0,60 / 0,70 contre le champion (`model_<agent>_<étape>
 membres `archive` possibles), verdict `plateau` par patience (4 sondes sans +2 pts sur le meilleur
 score lissé, dès 40 000 ; sous les planchers = refus sans gate, actif partout), `run_to_plateau` sur
 P1 / P4 / P6 / P9 (promotion différée jusqu'au plateau, plafond 100 000), `episodes_to_gate` dans
-`curriculum.log`, `bot_eval_intermediate` 50 sur `x1_lineage`. P1 arrêtée à 9 180 et relancée 11:38
-(`run_20260917-113822`) sous cette règle ; sortie attendue : le plafond de P1, entre 40 000 et
+`curriculum.log`, `bot_eval_intermediate` 50 sur `x1_lineage`. P1 arrêtée à 9 180 et relancée 11:35
+(`run_20260917-113528`) sous cette règle ; sortie attendue : le plafond de P1, entre 40 000 et
 100 000 parties. Référence : [metriques.md — sonde de curriculum](../Reference/training/metriques.md).
 
 **2026-09-17, 10:05 — membre de pool « archive » livré, P1 du nouveau cycle lancé ([dossier §5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
