@@ -456,6 +456,31 @@ class TestNormalMove0905:
         assert not accepted
         assert body["result"]["error"] == "invalid_move_plan"
 
+    def test_traverse_la_zone_d_engagement_sans_y_finir(self, checklist_game, monkeypatch):
+        """03.01 n'interdit que « through enemy models » et 09.05/09.06 n'exigent « unengaged »
+        qu'AFTER MOVING : la bande d'engagement se traverse, on n'y finit pas
+        (``config.move.can_move_through_enemy_engagement_zone`` = true). L'Intercessor ``17``
+        (Advance de 6) atteint des cases au-delà de l'Hormagaunt ``110`` que seule la traversée de
+        sa bande rend joignables : le même pool, bande fermée au transit, ne les offre plus."""
+        game = checklist_game
+        _fix_advance_roll(monkeypatch, MAX_D6)
+        game.act("activate_unit", unitId="17")
+        game.act("advance", unitId="17")
+        enemy = _pos(game, "110#0")
+        ez = _inches(game, ENGAGEMENT_RANGE_INCHES)
+        dests = {(d[0], d[1]) for d in _model_dests(game, "17#0")}
+        # AFTER MOVING « unengaged » : aucune destination dans la bande, quels que soient les toggles.
+        assert all(hex_distance(*d, *enemy) > ez for d in dests)
+        beyond = max(dests, key=lambda d: d[1])
+        assert beyond[1] > enemy[1] + ez, "prémisse : une case au-delà de la bande, côté opposé à ``17``"
+        # Même activation, bande d'EZ fermée au transit (toggle à false) : la case au-delà disparaît,
+        # elle n'était joignable qu'en traversant la bande. Le champ par-figurine est mémoïsé et sa
+        # clé ne porte pas ce toggle (constant en production) : on l'invalide comme après un commit.
+        rules = movement_handlers._get_move_traversal_rules
+        monkeypatch.setattr(movement_handlers, "_get_move_traversal_rules", lambda gs: (False,) + rules(gs)[1:])
+        movement_handlers._invalidate_all_destination_pools_after_movement(_engine_state())
+        assert beyond not in {(d[0], d[1]) for d in _model_dests(game, "17#0")}
+
     @pytest.mark.xfail(
         strict=True,
         reason="13.06 « INFANTRY/BEASTS/SWARM/MOBILE models can move horizontally through dense "
@@ -562,6 +587,33 @@ class TestAdvance0906:
         again = game.act("activate_unit", unitId="1")["result"]
         assert again["advance_roll"] == roll
         assert calls() == 1, "le D6 d'Advance a été relancé"
+
+    def test_advance_puis_stationnaire_reste_un_advance(self, checklist_game, monkeypatch):
+        """09.02 « Select one move type […] and resolve it » + 09.06 « BEFORE MOVING: Make an
+        advance roll » : dès le clic, le type de move est choisi et son jet fait ; 03.02 ne rend
+        « not selected to make that move » qu'une unité dont la mise en place est impossible.
+        Décision (tour_de_jeu.md, POINT OF NO RETURN) : reporter (``right_click``) puis clore sans
+        bouger (``wait``) laisse l'escouade advancée — pas de charge, tir ASSAULT seulement. Les
+        Intercessors ``1`` (bolt rifle [ASSAULT]) et le Dreadnought ``9`` (sans ASSAULT)."""
+        game = checklist_game
+        _fix_advance_roll(monkeypatch, MAX_D6)
+        for unit_id in ("1", "9"):
+            before = [_pos(game, m) for m in game.models_of(unit_id)]
+            game.act("activate_unit", unitId=unit_id)
+            game.act("advance", unitId=unit_id)
+            game.act("right_click", unitId=unit_id)
+            assert _in(game, "units_advanced", unit_id), "le report a levé l'Advance déclaré"
+            game.act("activate_unit", unitId=unit_id)
+            game.act("wait", unitId=unit_id)
+            assert [_pos(game, m) for m in game.models_of(unit_id)] == before
+            assert unit_id not in game.pool("move_activation_pool")
+            assert _in(game, "units_advanced", unit_id), "clore sans bouger a levé l'Advance déclaré"
+        game.drain_to("shoot")
+        assert "9" not in game.pool("shoot_activation_pool")
+        assert "1" in game.pool("shoot_activation_pool")
+        game.drain_to("charge")
+        assert "1" not in game.pool("charge_activation_pool")
+        assert "9" not in game.pool("charge_activation_pool")
 
     def test_refus_si_engagee(self, checklist_game):
         """09.06 « ELIGIBLE IF: Your unit is on the battlefield and unengaged »."""
