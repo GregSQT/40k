@@ -627,8 +627,13 @@ def _beyond_enemy_line(game, unit_id: str, line_unit_id: str, dests_by_model: Di
     }
 
 
-def _hazard_logs() -> List[Dict[str, Any]]:
-    return [entry for entry in _engine_state()["action_logs"] if entry.get("type") == "hazard"]
+def _hazard_logs(*bodies: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Lignes de hazard (06.03) portées par des RÉPONSES de l'API : ``action_logs`` est vidé
+    du moteur à chaque réponse (``api_server``), le lire dans ``game_state`` après un ``act``
+    rendait toujours ``[]`` — assertion vacante."""
+    return [
+        entry for body in bodies for entry in body["action_logs"] if entry.get("type") == "hazard"
+    ]
 
 
 class TestFallBack0907:
@@ -642,10 +647,10 @@ class TestFallBack0907:
         assert body["result"]["would_flee"] is True
         assert body["result"]["fall_back_mode"] == "ordered_retreat"
         plan = _plan_towards_row(game, "3", -1)
-        game.act("commit_move_plan", unitId="3", plan=plan)
+        committed = game.act("commit_move_plan", unitId="3", plan=plan)
         assert _in(game, "units_fled", "3") and _in(game, "units_moved", "3")
         assert {m: _hp(game, m) for m in game.models_of("3")} == hp_before
-        assert _hazard_logs() == []
+        assert _hazard_logs(body, committed) == []
         assert game.unit("3")["battle_shocked"] is False
         assert not _engaged_per_engine(game, "3")
 
@@ -705,15 +710,32 @@ class TestFallBack0907:
 
     def test_desperate_escape_impose_a_une_unite_battle_shocked(self, checklist_game, monkeypatch):
         """09.07 « Desperate Escape: Otherwise, you must select this mode » : engagée ET
-        battle-shocked, l'activation ne propose pas Ordered Retreat, elle exige le hazard."""
+        battle-shocked, l'activation ne propose pas Ordered Retreat, elle exige le hazard ;
+        « BEFORE MOVING » : tant qu'il n'est pas roulé, aucun plan — même LÉGAL une fois le mode
+        retenu — ne se commit, et le preview ne le déclare pas validable."""
         game = checklist_game
         _fix_dice(monkeypatch, [1, 1])  # 2D6 = 2 < Ld → battle-shocked (01.07)
         assert game.act("force_battle_shock", unitId="3")["result"]["battle_shocked"] is True
         body = game.act("activate_unit", unitId="3")
         assert body["result"]["action"] == "requires_hazard"
         assert body["result"]["requires_hazard"] is True
-        accepted, refused = game.try_act("commit_move_plan", unitId="3", plan=[_placement(game, m) for m in game.models_of("3")])
+        # Plan que le commit ACCEPTE après hazard_confirm (cf. test « sélectionnable ») : le pool
+        # par-figurine prédit déjà la traversée Desperate Escape, la garde ne peut venir de lui.
+        plan = _plan_towards_row(game, "3", +1)
+        preview = game.act("preview_move_plan", unitId="3", plan=plan)["result"]
+        assert all(preview["per_model"].values()), "prémisse : plan légal figurine par figurine"
+        assert preview["can_validate"] is False
+        accepted, refused = game.try_act("commit_move_plan", unitId="3", plan=plan)
         assert not accepted, "un déplacement a été accepté avant la résolution du hazard imposé"
+        assert refused["result"]["error"] == "hazard_required"
+        assert _hazard_logs(body, refused) == [] and not _in(game, "units_fled", "3")
+        assert {tuple(_placement(game, m)) for m in game.models_of("3")} != {tuple(e) for e in plan}
+        # Le hazard confirmé, le MÊME plan passe.
+        _fix_dice(monkeypatch, [MAX_D6] * len(game.models_of("3")))
+        confirmed = game.act("hazard_confirm", unitId="3")
+        assert len(_hazard_logs(confirmed)) == 1
+        game.act("commit_move_plan", unitId="3", plan=plan)
+        assert _in(game, "units_fled", "3")
 
     def test_hazard_ne_se_rejoue_pas(self, checklist_game, monkeypatch):
         """09.07 BEFORE MOVING : le mode est arrêté une fois — une seconde confirmation (double
