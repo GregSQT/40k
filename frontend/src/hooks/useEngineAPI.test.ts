@@ -10,7 +10,7 @@
  * avant chaque test pour éviter le court-circuit 401.
  */
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { HttpResponse, http } from "msw";
+import { delay, HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import React from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1280,5 +1280,234 @@ describe.each(OVERRUN_SCENARIOS)("useEngineAPI — overrun 12.06 : $label", (sc)
     });
     expect(bodies.at(-1)).toMatchObject({ action: "skip" });
     expectSeat(result, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sélection rectangle — bloc partiel de figurines (phase move) : pool moteur, snap, pose.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — sélection rectangle (bloc partiel, phase move)", () => {
+  /** Escouade 10 = deux figurines (5,10) et (6,10), déjà active côté moteur. */
+  const etatMove = () =>
+    makeGameState({
+      active_movement_unit: "10",
+      move_activation_pool: ["10"],
+      units_cache: {
+        "10": {
+          player: 1,
+          col: 5,
+          row: 10,
+          occupied_hexes_by_model: { "10#0": [5, 10], "10#1": [6, 10] },
+          level_by_model: { "10#0": 0, "10#1": 0 },
+          orientation_by_model: { "10#0": 0, "10#1": 0 },
+        },
+      },
+    });
+
+  /** Pool moteur : deux ancres, chacune avec la destination de CHAQUE figurine. */
+  const POOL = [
+    [
+      5,
+      11,
+      [
+        ["10#0", 5, 11, 0],
+        ["10#1", 6, 11, 0],
+      ],
+    ],
+    [
+      5,
+      12,
+      [
+        ["10#0", 5, 12, 0],
+        ["10#1", 6, 12, 0],
+      ],
+    ],
+  ];
+
+  const monteServeur = (bodies: Array<Record<string, unknown>>, pool: unknown[] = POOL) => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: etatMove() })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.action === "move_block_destinations") {
+          return HttpResponse.json({
+            success: true,
+            result: { action: "move_block_destinations", destinations: pool },
+          });
+        }
+        if (body.action === "preview_move_plan") {
+          return HttpResponse.json({
+            success: true,
+            result: {
+              per_model: { "10#0": true, "10#1": true },
+              coherency_ok: true,
+              can_validate: true,
+            },
+          });
+        }
+        return HttpResponse.json({ success: true, game_state: etatMove(), action_logs: [] });
+      })
+    );
+  };
+
+  it("relâchement → entrée en plan par-fig, pool demandé au moteur avec les figurines du bloc", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    monteServeur(bodies);
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
+    });
+
+    expect(result.current.mode).toBe("perModelMove");
+    expect(result.current.blockFollow).toMatchObject({
+      kind: "move",
+      unitId: 10,
+      modelIds: ["10#0", "10#1"],
+      anchorModelId: "10#0",
+    });
+    const req = bodies.find((b) => b.action === "move_block_destinations");
+    expect(req).toMatchObject({ model_ids: ["10#0", "10#1"], provisional_plan: {}, level: 0 });
+    expect(result.current.actionRefusal).toBeNull();
+  });
+
+  it("suivi : l'ancre voulue snappe sur le pool et CHAQUE figurine prend sa destination ; clic = pose", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    monteServeur(bodies);
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    await act(async () => {
+      // Relâché en (6,12) : grab = origine (5,10) − (6,12) → le bloc garde son décalage au curseur.
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
+    });
+
+    // Curseur en (6,14) → ancre voulue (5,12) : dans le pool, prise telle quelle.
+    await act(async () => {
+      result.current.onBlockFollowHex(6, 14);
+    });
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({
+      col: 5,
+      row: 12,
+      level: 0,
+    });
+    expect(result.current.squadMovePlan?.models["10#1"]).toMatchObject({
+      col: 6,
+      row: 12,
+      level: 0,
+    });
+
+    // Curseur en (6,12) → ancre voulue (5,10) = origine, HORS pool → snap sur (5,11), la plus proche.
+    await act(async () => {
+      result.current.onBlockFollowHex(6, 12);
+    });
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 11 });
+    expect(result.current.squadMovePlan?.models["10#1"]).toMatchObject({ col: 6, row: 11 });
+
+    await act(async () => {
+      result.current.onFreezeBlock();
+    });
+    expect(result.current.blockFollow).toBeNull();
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 11 });
+    // La pose re-juge le plan par le flux existant.
+    expect(bodies.filter((b) => b.action === "preview_move_plan").length).toBeGreaterThan(0);
+  });
+
+  it("clic droit : abandon → figurines revenues à l'origine", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    monteServeur(bodies);
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    await act(async () => {
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
+    });
+    await act(async () => {
+      result.current.onBlockFollowHex(6, 14);
+    });
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 12 });
+
+    await act(async () => {
+      result.current.onCancelBlock();
+    });
+    expect(result.current.blockFollow).toBeNull();
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 10 });
+    expect(result.current.squadMovePlan?.models["10#1"]).toMatchObject({ col: 6, row: 10 });
+  });
+
+  it("pool vide → refus métier affiché, aucun bloc", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    monteServeur(bodies, []);
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    await act(async () => {
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
+    });
+    expect(result.current.blockFollow).toBeNull();
+    expect(result.current.actionRefusal).toContain("aucune position");
+    expect(result.current.error).toBeNull();
+  });
+
+  it("une réponse de validité PÉRIMÉE (plan déjà remplacé) n'écrase pas la dernière", async () => {
+    // Le suivi émet un preview_move_plan par hex : la 1re réponse (ancre 5,12) arrive APRÈS la 2e
+    // (ancre 5,11). Sans garde de séquence, la validité affichée serait celle d'un plan disparu.
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: etatMove() })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        if (body.action === "move_block_destinations") {
+          return HttpResponse.json({
+            success: true,
+            result: { action: "move_block_destinations", destinations: POOL },
+          });
+        }
+        if (body.action === "preview_move_plan") {
+          const plan = body.plan as Array<[string, number, number, number, number | null]>;
+          const anchorRow = plan.find((p) => p[0] === "10#0")?.[2];
+          if (anchorRow === 12) {
+            await delay(120);
+            return HttpResponse.json({
+              success: true,
+              result: {
+                per_model: { "10#0": false, "10#1": false },
+                coherency_ok: false,
+                can_validate: false,
+              },
+            });
+          }
+          return HttpResponse.json({
+            success: true,
+            result: {
+              per_model: { "10#0": true, "10#1": true },
+              coherency_ok: true,
+              can_validate: true,
+            },
+          });
+        }
+        return HttpResponse.json({ success: true, game_state: etatMove(), action_logs: [] });
+      })
+    );
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    await act(async () => {
+      await result.current.onRectSelectionCommit(["10#0", "10#1"], 6, 12);
+    });
+    await act(async () => {
+      result.current.onBlockFollowHex(6, 14); // ancre (5,12) → réponse LENTE, can_validate false
+    });
+    await act(async () => {
+      result.current.onBlockFollowHex(6, 12); // ancre (5,11) → réponse immédiate, can_validate true
+    });
+    await waitFor(() => expect(result.current.squadMovePlan?.canValidate).toBe(true));
+    await act(async () => {
+      await delay(200); // laisse arriver la réponse périmée
+    });
+    expect(result.current.squadMovePlan?.canValidate).toBe(true);
+    expect(result.current.squadMovePlan?.models["10#0"]).toMatchObject({ col: 5, row: 11 });
   });
 });

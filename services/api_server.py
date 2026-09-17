@@ -3663,6 +3663,53 @@ def execute_action():
             },
         })
 
+    # Read-only: sélection rectangle — pool d'ancres d'un BLOC PARTIEL de figurines translaté
+    # rigidement (jumeau charge : ``charge_block_destinations`` dans charge_handlers). Chaque ancre porte
+    # la destination (col,row,level) de chaque figurine du bloc, toutes dans leur pool par-figurine.
+    if action.get("action") == "move_block_destinations":
+        raw_ids = action.get("model_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({
+                "success": False,
+                "error": "move_block_destinations requires model_ids",
+            }), 400
+        from engine.phase_handlers import movement_handlers as _mh_block
+        _raw_plan_blk = action.get("provisional_plan")
+        _provisional_plan_blk: Optional[Dict[str, Tuple[int, ...]]] = None
+        if isinstance(_raw_plan_blk, dict):
+            # (col,row) ou (col,row,level) : niveau par sœur (superposition inter-étage), cf. per-fig.
+            _provisional_plan_blk = {
+                str(k): tuple(int(x) for x in v)
+                for k, v in _raw_plan_blk.items()
+                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
+            }
+        _blk_level_raw = action.get("level")
+        _blk_level = int(_blk_level_raw) if _blk_level_raw is not None else 0
+        # Orientations EN COURS par fig (pivot molette non committé) → empreintes du pool orientées.
+        _raw_orients = action.get("orientations")
+        _orients: Optional[Dict[str, int]] = (
+            {str(k): int(v) for k, v in _raw_orients.items() if v is not None}
+            if isinstance(_raw_orients, dict)
+            else None
+        )
+        try:
+            _anchors = _mh_block.movement_build_block_destinations_pool(
+                engine.game_state, [str(m) for m in raw_ids],
+                provisional_plan=_provisional_plan_blk, level=_blk_level, orientations=_orients,
+            )
+        except (ValueError, KeyError) as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        return api_json_response({
+            "success": True,
+            "result": {
+                "action": "move_block_destinations",
+                "destinations": [
+                    [ac, ar, [[mid, c, r, lv] for mid, (c, r, lv) in placements.items()]]
+                    for ac, ar, placements in _anchors
+                ],
+            },
+        })
+
     # Read-only: pools de déplacement de TOUTES les figs NON POSÉES d'une escouade, en un seul appel
     # (tranche 2 move-preview persistant). Évite N round-trips move_model_destinations. Chaque pool est
     # calculé avec le même provisional_plan (figs déjà posées bloquent les autres).

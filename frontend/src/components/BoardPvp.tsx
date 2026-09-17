@@ -38,6 +38,7 @@ import {
   type HpBarHtmlTooltipPayload,
   pixiStagePointToClientScreen,
 } from "../utils/blinkingHPBar";
+import { normalizeRect, type SelectableModel, selectBlockInRect } from "../utils/blockSelection";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
 import {
@@ -664,7 +665,7 @@ type BoardProps = {
   squadMoveModelPoolRef?: React.RefObject<Set<string>>;
   /** Mask loops per-fig (polygone lissé) reçus de move_model_destinations. */
   squadMoveModelMaskLoopsRef?: React.RefObject<number[][] | null>;
-  onStartSquadModelMove?: (unitId: number | string) => void | Promise<void>;
+  onStartSquadModelMove?: (unitId: number | string) => unknown;
   onSelectModelForMove?: (modelId: string, orientation?: number) => void | Promise<void>;
   /** Pivot molette fig active : recalcule son pool orienté sans re-render (préserve le fantôme). */
   onReorientActiveModelPool?: (modelId: string, orientation: number) => void | Promise<void>;
@@ -963,6 +964,25 @@ type BoardProps = {
   onMeasureHexCommit?: (col: number, row: number) => void;
   /** Pendant `measuring` : clic droit sur un hex ajoute une jonction et poursuit la mesure depuis ce hex. */
   onMeasureJunctionCommit?: (col: number, row: number) => void;
+  /** Outil « sélection rectangle » (barre latérale) : clic-glisser capture les figurines de l'escouade
+   * activée dont le socle touche le rectangle (voile vert en direct) ; au relâchement le bloc suit le
+   * curseur (``blockFollow``), clic = pose, clic droit = abandon. Exclusif avec le pan. */
+  rectSelectMode?: boolean;
+  onRectSelectionCommit?: (
+    modelIds: string[],
+    releaseCol: number,
+    releaseRow: number
+  ) => void | Promise<void>;
+  /** Bloc en cours de suivi (useEngineAPI) — son pool et son snap vivent dans le hook. */
+  blockFollow?: {
+    kind: "move" | "charge";
+    unitId: number;
+    modelIds: string[];
+    anchorModelId: string;
+  } | null;
+  onBlockFollowHex?: (col: number, row: number) => void;
+  onFreezeBlock?: () => void;
+  onCancelBlock?: () => void;
   /** true → masque tous les indicateurs autour des icônes (HP, badges, cercle vert, voiles, tooltips). Les icônes restent visibles. */
   hideIndicators?: boolean;
   /** true → cercles de portée (2/6/9/12/15/18/24″) autour de la SEULE figurine activée. */
@@ -1415,6 +1435,12 @@ export default function Board({
   measureMode = { kind: "off" },
   onMeasureHexCommit,
   onMeasureJunctionCommit,
+  rectSelectMode = false,
+  onRectSelectionCommit,
+  blockFollow = null,
+  onBlockFollowHex,
+  onFreezeBlock,
+  onCancelBlock,
   hideIndicators = false,
   showRangeRings = false,
   terrainList,
@@ -8290,6 +8316,320 @@ export default function Board({
       canvas.removeEventListener("contextmenu", onContextMenu);
     };
   }, [boardConfig, onMeasureHexCommit, onMeasureJunctionCommit, measureMode.kind]);
+
+  // ── Sélection rectangle (outil barre latérale) ─────────────────────────────────────────────
+  // Contexte relu à chaque event via ref (handlers stables, aucune ré-inscription par render).
+  const rectSelectCtxRef = useRef({
+    phase,
+    mode,
+    currentLevel,
+    current_player,
+    eligibleUnitIds,
+    unitsCache: gameState?.units_cache as
+      | Record<
+          string,
+          {
+            player?: number;
+            occupied_hexes_by_model?: Record<string, [number, number]>;
+            level_by_model?: Record<string, number>;
+          }
+        >
+      | undefined,
+    squadMovePlan,
+    chargeMovePlan,
+    onRectSelectionCommit,
+    onBlockFollowHex,
+    onFreezeBlock,
+    onCancelBlock,
+  });
+  rectSelectCtxRef.current = {
+    phase,
+    mode,
+    currentLevel,
+    current_player,
+    eligibleUnitIds,
+    unitsCache: gameState?.units_cache as typeof rectSelectCtxRef.current.unitsCache,
+    squadMovePlan,
+    chargeMovePlan,
+    onRectSelectionCommit,
+    onBlockFollowHex,
+    onFreezeBlock,
+    onCancelBlock,
+  };
+
+  /** Figurines capturables par le rectangle, en pixels stage (centre + rayon du voile).
+   *  Phase move : figurines de l'escouade du plan par-figurine (positions du plan) ; sans plan,
+   *  figurines des unités ÉLIGIBLES du joueur (positions committées). Phase charge : figurines
+   *  ÉLIGIBLES du plan de charge (non posées → position d'origine). Étage affiché uniquement.
+   *  Rend aussi l'escouade de chaque figurine : un rectangle à cheval sur deux escouades ne
+   *  sélectionne rien (le bloc appartient à UNE escouade activée). */
+  const collectRectSelectableModels = useCallback((): Array<
+    SelectableModel & { unitId: number }
+  > => {
+    const ctx = rectSelectCtxRef.current;
+    if (!boardConfig || !ctx.unitsCache) return [];
+    const HEX_RADIUS_H = boardConfig.hex_radius;
+    const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+    const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+    const MARGIN_H = boardConfig.margin;
+    const center = (c: number, r: number): [number, number] => [
+      c * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
+      r * HEX_HEIGHT_H + ((c % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
+    ];
+    const radiusOf = (uid: number): number => {
+      const u = unitsRef.current.find((x) => String(x.id) === String(uid));
+      const baseSz = u ? resolveBaseSizeForUnitDisplay(u) : 1;
+      return baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+    };
+    const out: Array<SelectableModel & { unitId: number }> = [];
+    if (ctx.phase === "charge") {
+      const plan = ctx.chargeMovePlan;
+      if (!plan) return [];
+      const entry = ctx.unitsCache[String(plan.unitId)];
+      const byModel = entry?.occupied_hexes_by_model;
+      if (!byModel) return [];
+      const radius = radiusOf(plan.unitId);
+      for (const mid of plan.eligibleModels) {
+        const pos = byModel[mid];
+        if (!pos) continue;
+        if ((entry?.level_by_model?.[mid] ?? 0) !== ctx.currentLevel) continue;
+        const [cx, cy] = center(pos[0], pos[1]);
+        out.push({ modelId: mid, cx, cy, radius, unitId: plan.unitId });
+      }
+      return out;
+    }
+    if (ctx.phase !== "move") return [];
+    const plan = ctx.squadMovePlan;
+    if (plan && ctx.mode === "perModelMove") {
+      const radius = radiusOf(plan.unitId);
+      for (const [mid, pos] of Object.entries(plan.models)) {
+        if ((pos.level ?? 0) !== ctx.currentLevel) continue;
+        const [cx, cy] = center(pos.col, pos.row);
+        out.push({ modelId: mid, cx, cy, radius, unitId: plan.unitId });
+      }
+      return out;
+    }
+    for (const [uidStr, entry] of Object.entries(ctx.unitsCache)) {
+      const uid = Number(uidStr);
+      if (entry.player !== ctx.current_player) continue;
+      if (!ctx.eligibleUnitIds.includes(uid)) continue;
+      const byModel = entry.occupied_hexes_by_model;
+      if (!byModel) continue;
+      const radius = radiusOf(uid);
+      for (const [mid, pos] of Object.entries(byModel)) {
+        if ((entry.level_by_model?.[mid] ?? 0) !== ctx.currentLevel) continue;
+        const [cx, cy] = center(pos[0], pos[1]);
+        out.push({ modelId: mid, cx, cy, radius, unitId: uid });
+      }
+    }
+    return out;
+  }, [boardConfig]);
+
+  // Outil actif, aucun bloc en suivi : clic-glisser dessine le rectangle (capture window → ni PIXI,
+  // ni sélection d'unité, ni pan ne voient le pointeur), voile vert en direct sur les socles touchés,
+  // relâchement → onRectSelectionCommit. Rectangle sans figurine → rien.
+  useEffect(() => {
+    if (!rectSelectMode || blockFollow) return;
+    if (!boardConfig) return;
+    const app = appRef.current;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!app || !canvas) return;
+    const overlay = new PIXI.Graphics();
+    overlay.zIndex = 2800;
+    overlay.eventMode = "none";
+    app.stage.addChild(overlay);
+    const GREEN = cssColorToNumber("--veil-green");
+    let start: { x: number; y: number } | null = null;
+    let candidates: Array<SelectableModel & { unitId: number }> = [];
+    let selected: string[] = [];
+    const toStage = (e: PointerEvent): { x: number; y: number } => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    };
+    const drawDashedRect = (r: ReturnType<typeof normalizeRect>) => {
+      const dash = Math.max(4, boardConfig.hex_radius * 0.6);
+      const gap = dash * 0.6;
+      const edge = (x0: number, y0: number, x1: number, y1: number) => {
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        if (len === 0) return;
+        const ux = (x1 - x0) / len;
+        const uy = (y1 - y0) / len;
+        for (let t = 0; t < len; t += dash + gap) {
+          const t2 = Math.min(len, t + dash);
+          overlay.moveTo(x0 + ux * t, y0 + uy * t);
+          overlay.lineTo(x0 + ux * t2, y0 + uy * t2);
+        }
+      };
+      overlay.lineStyle(Math.max(1.5, boardConfig.hex_radius * 0.25), 0xffffff, 0.95);
+      edge(r.x0, r.y0, r.x1, r.y0);
+      edge(r.x1, r.y0, r.x1, r.y1);
+      edge(r.x1, r.y1, r.x0, r.y1);
+      edge(r.x0, r.y1, r.x0, r.y0);
+    };
+    const redraw = (cur: { x: number; y: number }) => {
+      if (!start) return;
+      const r = normalizeRect(start.x, start.y, cur.x, cur.y);
+      selected = selectBlockInRect(candidates, r);
+      overlay.clear();
+      overlay.lineStyle(0);
+      overlay.beginFill(0xffffff, 0.08);
+      overlay.drawRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+      overlay.endFill();
+      drawDashedRect(r);
+      overlay.lineStyle(0);
+      for (const m of candidates) {
+        if (!selected.includes(m.modelId)) continue;
+        overlay.beginFill(GREEN, 0.45);
+        overlay.drawCircle(m.cx, m.cy, m.radius);
+        overlay.endFill();
+      }
+    };
+    /** L'outil ne prend que le clic GAUCHE, et seulement dans les phases où un bloc a un sens
+     *  (move / charge) : ailleurs, ou au clic droit (reset per-fig, désassignation tir), le
+     *  pointeur passe aux handlers habituels — le plateau reste jouable, outil allumé ou non. */
+    const toolTakes = (e: MouseEvent): boolean => {
+      if (e.target !== canvas || e.button !== 0) return false;
+      const ph = rectSelectCtxRef.current.phase;
+      return ph === "move" || ph === "charge";
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!toolTakes(e)) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      start = toStage(e);
+      candidates = collectRectSelectableModels();
+      selected = [];
+      redraw(start);
+    };
+    // click / dblclick sont synthétisés par le navigateur MALGRÉ le preventDefault du pointerdown :
+    // sans ce barrage, deux clics rapides atteignent le dblclick canvas (→ movePreview,
+    // setSquadMovePlan(null)) et le bloc en cours est perdu.
+    const onSynthClick = (e: MouseEvent) => {
+      if (toolTakes(e)) e.stopImmediatePropagation();
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!start) return;
+      e.preventDefault();
+      redraw(toStage(e));
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!start || e.button !== 0) return;
+      e.stopImmediatePropagation();
+      const cur = toStage(e);
+      redraw(cur);
+      const ids = selected;
+      start = null;
+      overlay.clear();
+      if (ids.length === 0) return;
+      const { col, row } = pixelToHex(
+        cur.x,
+        cur.y,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return;
+      void rectSelectCtxRef.current.onRectSelectionCommit?.(ids, col, row);
+    };
+    const onContextMenu = (e: MouseEvent) => {
+      if (e.target === canvas) e.preventDefault();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("click", onSynthClick, true);
+    window.addEventListener("dblclick", onSynthClick, true);
+    canvas.addEventListener("contextmenu", onContextMenu);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("click", onSynthClick, true);
+      window.removeEventListener("dblclick", onSynthClick, true);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+      if (!overlay.destroyed) {
+        overlay.clear();
+        app.stage.removeChild(overlay);
+        overlay.destroy();
+      }
+    };
+  }, [rectSelectMode, blockFollow, boardConfig, collectRectSelectableModels]);
+
+  // Bloc en suivi : le curseur pilote l'ancre (le hook snappe sur le pool moteur et écrit le plan,
+  // dont le rendu suit — miroir du suivi de déploiement). Clic gauche = pose, clic droit /
+  // Échap = abandon. Capture window : rien d'autre ne voit ces clics.
+  useEffect(() => {
+    if (!blockFollow || !boardConfig) return;
+    const app = appRef.current;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!app || !canvas) return;
+    let lastKey = "";
+    const hexUnder = (e: MouseEvent): { col: number; row: number } | null => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return null;
+      return { col, row };
+    };
+    const onMove = (e: MouseEvent) => {
+      const h = hexUnder(e);
+      if (!h) return;
+      const key = `${h.col},${h.row}`;
+      if (key === lastKey) return;
+      lastKey = key;
+      rectSelectCtxRef.current.onBlockFollowHex?.(h.col, h.row);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.target !== canvas) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (e.button === 0) rectSelectCtxRef.current.onFreezeBlock?.();
+      else if (e.button === 2) rectSelectCtxRef.current.onCancelBlock?.();
+    };
+    // Le clic de pose ne doit pas non plus atteindre le dblclick canvas (→ movePreview) : les
+    // click/dblclick synthétisés sont avalés tant que le bloc suit.
+    const onSynthClick = (e: MouseEvent) => {
+      if (e.target === canvas) e.stopImmediatePropagation();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") rectSelectCtxRef.current.onCancelBlock?.();
+    };
+    const onContextMenu = (e: MouseEvent) => {
+      if (e.target === canvas) e.preventDefault();
+    };
+    canvas.addEventListener("mousemove", onMove);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("click", onSynthClick, true);
+    window.addEventListener("dblclick", onSynthClick, true);
+    window.addEventListener("keydown", onKey);
+    canvas.addEventListener("contextmenu", onContextMenu);
+    return () => {
+      canvas.removeEventListener("mousemove", onMove);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("click", onSynthClick, true);
+      window.removeEventListener("dblclick", onSynthClick, true);
+      window.removeEventListener("keydown", onKey);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+    };
+  }, [blockFollow, boardConfig]);
+
+  // L'outil se désactive pendant qu'un bloc suit → abandon du bloc (aucun bloc orphelin).
+  useEffect(() => {
+    if (!rectSelectMode && blockFollow) rectSelectCtxRef.current.onCancelBlock?.();
+  }, [rectSelectMode, blockFollow]);
 
   const isMeasuring = measureMode.kind === "measuring";
 

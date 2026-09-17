@@ -1344,6 +1344,32 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         )
         return True, {"action": "charge_plan_state", "unitId": unit_id, **state}
 
+    elif action_type == "charge_block_destinations":
+        # Sélection rectangle (lecture pure) : pool d'ancres d'un bloc partiel de figurines translaté
+        # rigidement — jumeau charge de ``move_block_destinations`` (api_server).
+        prov_blk: Dict[str, Tuple[int, ...]] = parse_model_plan_as_map(
+            action.get("plan") or [], action_name="charge_block_destinations"
+        )
+        raw_ids = action.get("model_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return False, {"error": "charge_block_destinations requires model_ids", "action": action}
+        _lvl_blk = action.get("level")
+        try:
+            anchors = charge_block_destinations(
+                game_state, unit_id, [str(m) for m in raw_ids], prov_blk,
+                level=int(_lvl_blk) if _lvl_blk is not None else 0,
+            )
+        except ValueError as exc:
+            return False, {"error": str(exc), "action": "charge_block_destinations"}
+        return True, {
+            "action": "charge_block_destinations",
+            "unitId": unit_id,
+            "destinations": [
+                [ac, ar, [[mid, c, r, lv] for mid, (c, r, lv) in placements.items()]]
+                for ac, ar, placements in anchors
+            ],
+        }
+
     elif action_type == "skip":
         # Fin de phase manuelle (API) : forfait charge sans WAIT ni journalisation « wait » par unité
         # (had_valid_destinations=False → end_activation PASS, pas d'entrée action_logs type wait, pas +step).
@@ -2436,6 +2462,9 @@ def _compute_plan_context(
         "dist_by_model": dist_by_model,
         "start_min_by_model": start_min_by_model,
         "other_origins_by_model": other_origins_by_model,
+        # Empreinte d'ORIGINE par fig non posée : sert au bloc rigide (``charge_block_destinations``)
+        # à soulever les coéquipières sélectionnées du terme ``others`` de ``_charge_qualifying``.
+        "origin_fp_by_model": origin_fp,
         "region_by_base": region_by_base,
         "floor_reach_by_model": floor_reach_by_model,
         "floor_dist_by_model": floor_dist_by_model,
@@ -2505,6 +2534,146 @@ def _charge_pool_clip_under_floor(
     return out
 
 
+def _charge_plan_ctx(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    unit_id: str,
+    provisional_plan: Mapping[str, Sequence[int]],
+    level: int,
+    _perf: bool,
+) -> Tuple[Dict[str, Any], int]:
+    """Contexte lourd du plan de charge (``_compute_plan_context``), mémoïsé.
+
+    Mémoïsation (Tâche 1) : signature capturant TOUT ce qui influe sur le ctx. ``_unit_move_version``
+    est incrémenté à chaque commit move/charge → invalidation auto au moindre déplacement. La sig est
+    comparée par égalité (pas de hash requis) ; en cas de doute on invalide plutôt que servir obsolète.
+    ``int(level)`` (niveau de VUE) est dans la sig : le ctx est niveau-conscient (destinations
+    d'étage 3b) → un changement d'étage recalcule le ctx (rare : clic sur le bouton d'étage).
+
+    Précondition : cibles déclarées ET jet de charge présents pour ``unit_id`` (l'appelant l'a vérifié).
+    Retour : ``(ctx, cache_hit)``.
+    """
+    _stored = game_state["charge_target_selections"][unit_id]
+    target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
+    _charge_roll = game_state["charge_roll_values"][unit_id]
+    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
+    roll_subhex = _charge_budget_subhex(game_state, unit_id, _charge_roll, unit=unit)
+    # Take to the skies (21.03) : vol actif → BFS/champ de distance ignorent tout (traversée libre).
+    fly_active = _charge_fly_active(game_state, unit, unit_id)
+    sig = (
+        unit_id,
+        tuple(sorted(provisional_plan.items())),
+        game_state["_unit_move_version"],
+        bool(fly_active),
+        _charge_roll,
+        tuple(sorted(map(str, target_ids))),
+        int(level),
+    )
+    _cache = game_state.get("_charge_plan_state_cache")
+    if _cache is not None and _cache.get("sig") == sig:
+        return _cache["ctx"], 1
+    ctx = _compute_plan_context(
+        game_state, unit, unit_id, provisional_plan, target_ids, roll_subhex, fly_active, _perf,
+        view_level=int(level),
+    )
+    game_state["_charge_plan_state_cache"] = {"sig": sig, "ctx": ctx}
+    return ctx, 0
+
+
+def _charge_model_view_pool(
+    game_state: Dict[str, Any],
+    ctx: Dict[str, Any],
+    model_id: str,
+    level: int,
+    others_override: Optional[Set[Tuple[int, int]]] = None,
+) -> List[List[int]]:
+    """Pool AFFICHABLE d'UNE figurine de charge au niveau de vue ``level`` : ancres ``[col, row, level]``.
+
+    ``others_override`` : remplace le terme « coéquipières encore à l'origine » de
+    ``_charge_qualifying`` (bloc rigide : les sœurs sélectionnées sont soulevées). ``None`` = ctx.
+    """
+    others_by_model = ctx["other_origins_by_model"]
+    if others_override is not None:
+        others_by_model = {model_id: others_override}
+    # Pool = ancres [col, row, level] (sol level 0 + étage level>=1, 3b). Additif : sans étage → level 0.
+    pool: List[List[int]] = _charge_qualifying(
+        ctx["reach_by_model"], ctx["start_min_by_model"], others_by_model,
+        ctx["region_by_base"], ctx["base_of_model"], model_id, ctx["key"],
+        ctx["floor_reach_by_model"], ctx["floor_region_by_base"], int(level),
+    )
+    # Vue sur un étage : le pool de charge AU SOL ne doit pas recouvrir le dessous du bâtiment (miroir
+    # move §13.06). Le clip ne retire QUE les ancres sol (level 0) sous l'empreinte ; les ancres d'étage
+    # (level>=1, 3b) sont conservées. pool_distances / footprint_mask_loops dérivent de ``pool``.
+    if int(level) >= 1 and pool:
+        pool = _charge_pool_clip_under_floor(game_state, model_id, int(level), pool)
+    # Vue MONO-NIVEAU (clarté, ébauche de 6c) : n'AFFICHER que les ancres du niveau de VUE courant. Une
+    # charge qui finit au SOL en engageant une cible surélevée (3a, §03.04 : engagement 3D ≤5" vertical)
+    # est LÉGALE, mais ses ancres sol n'ont de sens qu'en vue sol → elles s'affichent au niveau 0, pas
+    # mélangées à l'étage. La phase/éligibilité (ctx) restent calculées sur TOUS les niveaux (inchangé).
+    return [a for a in pool if int(a[2]) == int(level)]
+
+
+def charge_block_destinations(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    model_ids: List[str],
+    provisional_plan: Mapping[str, Sequence[int]],
+    level: int = 0,
+) -> List[Tuple[int, int, Dict[str, Tuple[int, int, int]]]]:
+    """Pool d'un BLOC PARTIEL de figurines de charge (sélection rectangle) translaté rigidement.
+
+    Jumeau charge de ``movement_build_block_destinations_pool`` : l'ancre est la PREMIÈRE figurine
+    de ``model_ids`` ; une ancre candidate n'est conservée que si CHAQUE figurine du bloc,
+    translatée du même vecteur (offsets CUBE relatifs à l'ancre), tombe dans SON pool de charge
+    (``_charge_model_view_pool`` : atteignable dans le jet, plus près d'une cible, ≤1"/engagée si
+    la phase 11.04 courante l'exige — conditions PAR FIGURINE, non invariantes par translation,
+    donc évaluées ici figurine par figurine, jamais côté front). Les sœurs sélectionnées sont
+    soulevées du terme « coéquipières à l'origine » (elles bougent ensemble ; leur
+    non-chevauchement est invariant par translation). Les figurines POSÉES du plan restent des
+    obstacles (ctx). La validation finale (per_model, cohésion, cibles) reste celle de
+    ``charge_model_plan_state`` à la pose, comme pour toute figurine.
+
+    Toute figurine du bloc doit être éligible dans la phase courante (``eligible_models``) :
+    sinon erreur explicite — le front ne propose au rectangle que les figurines éligibles.
+
+    Retour : ``[(anchor_col, anchor_row, {model_id: (col, row, level)}), ...]``.
+    """
+    if not model_ids:
+        raise ValueError("charge_block_destinations: model_ids vide")
+    ids = [str(m) for m in model_ids]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"charge_block_destinations: model_ids en doublon {ids}")
+    unit = require_unit_by_id(game_state, unit_id)
+    if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
+        raise ValueError(f"charge_block_destinations: unit {unit_id} sans cible de charge déclarée")
+    if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
+        raise ValueError(f"charge_block_destinations: unit {unit_id} sans jet de charge")
+    from engine.perf_timing import perf_timing_enabled
+    ctx, _ = _charge_plan_ctx(
+        game_state, unit, unit_id, provisional_plan, int(level), perf_timing_enabled(game_state)
+    )
+    eligible = set(ctx["eligible_models"])
+    not_eligible = [m for m in ids if m not in eligible]
+    if not_eligible:
+        raise ValueError(
+            f"charge_block_destinations: figurines non éligibles dans la phase courante {not_eligible}"
+        )
+    origin_fp: Dict[str, Set[Tuple[int, int]]] = ctx["origin_fp_by_model"]
+    lifted_fp: Set[Tuple[int, int]] = set()
+    for mid in ids:
+        lifted_fp |= origin_fp[mid]
+    pools: Dict[str, Dict[Tuple[int, int], int]] = {}
+    for mid in ids:
+        others = set(ctx["other_origins_by_model"][mid]) - lifted_fp
+        pools[mid] = {
+            (int(c), int(r)): int(lv)
+            for c, r, lv in _charge_model_view_pool(game_state, ctx, mid, int(level), others)
+        }
+
+    from .shared_utils import rigid_block_anchor_placements
+    return rigid_block_anchor_placements(require_key(game_state, "models_cache"), ids, pools)
+
+
 def charge_model_plan_state(
     game_state: Dict[str, Any],
     unit_id: str,
@@ -2546,56 +2715,20 @@ def charge_model_plan_state(
         return empty
     if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
         return empty
-    _stored = game_state["charge_target_selections"][unit_id]
-    target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
-    _charge_roll = game_state["charge_roll_values"][unit_id]
-    # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
-    roll_subhex = _charge_budget_subhex(game_state, unit_id, _charge_roll, unit=unit)
-    # Take to the skies (21.03) : vol actif → BFS/champ de distance ignorent tout (traversée libre).
-    fly_active = _charge_fly_active(game_state, unit, unit_id)
-
     from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
     _perf = perf_timing_enabled(game_state)
     _ep = game_state.get("episode_number", "?")
     _turn = game_state.get("turn", "?")
     _t0 = time.perf_counter() if _perf else None
 
-    # Mémoïsation (Tâche 1) : signature capturant TOUT ce qui influe sur le ctx. ``_unit_move_version``
-    # est incrémenté à chaque commit move/charge → invalidation auto au moindre déplacement. La sig est
-    # comparée par égalité (pas de hash requis) ; en cas de doute on invalide plutôt que servir obsolète.
-    # ``int(level)`` (niveau de VUE) est dans la sig : le ctx est désormais niveau-conscient (destinations
-    # d'étage 3b) → un changement d'étage recalcule le ctx (rare : clic sur le bouton d'étage).
-    sig = (
-        unit_id,
-        tuple(sorted(provisional_plan.items())),
-        game_state["_unit_move_version"],
-        bool(fly_active),
-        _charge_roll,
-        tuple(sorted(map(str, target_ids))),
-        int(level),
-    )
-    _cache = game_state.get("_charge_plan_state_cache")
-    if _cache is not None and _cache.get("sig") == sig:
-        ctx = _cache["ctx"]
-        _cache_hit = 1
-    else:
-        ctx = _compute_plan_context(
-            game_state, unit, unit_id, provisional_plan, target_ids, roll_subhex, fly_active, _perf,
-            view_level=int(level),
-        )
-        game_state["_charge_plan_state_cache"] = {"sig": sig, "ctx": ctx}
-        _cache_hit = 0
+    ctx, _cache_hit = _charge_plan_ctx(game_state, unit, unit_id, provisional_plan, int(level), _perf)
 
-    reach_by_model = ctx["reach_by_model"]
     dist_by_model = ctx["dist_by_model"]
-    start_min_by_model = ctx["start_min_by_model"]
-    other_origins_by_model = ctx["other_origins_by_model"]
+    reach_by_model = ctx["reach_by_model"]
     region_by_base = ctx["region_by_base"]
-    floor_reach_by_model = ctx["floor_reach_by_model"]
     floor_dist_by_model = ctx["floor_dist_by_model"]
     floor_region_by_base = ctx["floor_region_by_base"]
     base_of_model = ctx["base_of_model"]
-    key = ctx["key"]
     phase = ctx["phase"]
     eligible_models = ctx["eligible_models"]
     unplaced = ctx["unplaced"]
@@ -2609,26 +2742,11 @@ def charge_model_plan_state(
 
     # Partie SÉLECTION-dépendante (cheap) : pool de la fig sélectionnée (zone violette).
     _tsel = time.perf_counter() if _perf else None
-    # Pool = ancres [col, row, level] (sol level 0 + étage level>=1, 3b). Additif : sans étage → level 0.
     pool: List[List[int]] = (
-        _charge_qualifying(
-            reach_by_model, start_min_by_model, other_origins_by_model,
-            region_by_base, base_of_model, str(selected_model), key,
-            floor_reach_by_model, floor_region_by_base, int(level),
-        )
+        _charge_model_view_pool(game_state, ctx, str(selected_model), int(level))
         if selected_model is not None and str(selected_model) in reach_by_model
         else []
     )
-    # Vue sur un étage : le pool de charge AU SOL ne doit pas recouvrir le dessous du bâtiment (miroir
-    # move §13.06). Le clip ne retire QUE les ancres sol (level 0) sous l'empreinte ; les ancres d'étage
-    # (level>=1, 3b) sont conservées. pool_distances / footprint_mask_loops dérivent de ``pool``.
-    if int(level) >= 1 and pool and selected_model is not None:
-        pool = _charge_pool_clip_under_floor(game_state, str(selected_model), int(level), pool)
-    # Vue MONO-NIVEAU (clarté, ébauche de 6c) : n'AFFICHER que les ancres du niveau de VUE courant. Une
-    # charge qui finit au SOL en engageant une cible surélevée (3a, §03.04 : engagement 3D ≤5" vertical)
-    # est LÉGALE, mais ses ancres sol n'ont de sens qu'en vue sol → elles s'affichent au niveau 0, pas
-    # mélangées à l'étage. La phase/éligibilité (ctx) restent calculées sur TOUS les niveaux (inchangé).
-    pool = [a for a in pool if int(a[2]) == int(level)]
     # Distance de mouvement (sous-hex) de la fig sélectionnée vers chaque ancre : sol = profondeur du
     # champ géodésique (détours murs/figs) ; étage = coût climb (montée §13.06 incluse, floor_dist).
     _sel_dist = (

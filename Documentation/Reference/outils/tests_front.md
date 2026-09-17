@@ -584,6 +584,7 @@ NB : `move_squad_unplaced_destinations` (pools de toutes les figs non posées en
 | `move_model_destinations` | ✅ T3 | `squad_shoot_unassign_weapon` | ✅ T4 |
 | (hors liste) `squad_shoot_assign_weapon` | ✅ T4 | (hors liste) `squad_shoot_unassign_weapon_qty` | ✅ T4 |
 | `commit_move_plan` | ✅ T3 | `squad_shoot_validate` | ✅ T4 |
+| `move_block_destinations` (sélection rectangle) | ✅ T3 | `charge_block_destinations` (sélection rectangle) | ✅ T5 |
 | `left_click` | T3 | `squad_shoot_allocate_model` | ✅ T4 |
 | `right_click` | T3/T5 | `move_after_shooting` | T4 — inatteignable (aucune unité ne porte la règle) |
 | `end_phase` | T3 | `shoot` | hors périmètre (chemin gym) |

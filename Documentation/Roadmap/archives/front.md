@@ -2,6 +2,7 @@
 
 | Date | Chantier | Détail |
 |---|---|---|
+| 2026-09-17 | Sélection rectangle — bloc partiel move/charge | Bouton carré pointillé (SharedLayout) ; rectangle + voile vert live (BoardPvp) ; bloc en translation rigide snappé sur un pool MOTEUR (`move_block_destinations` / `charge_block_destinations`, intersection `rigid_block_anchor_placements`, sœurs soulevées) ; règles lues 03.01/03.03/11.04 ; 7 pytest unit + 4 intégration + 14 vitest ; réf. `squad_multi_figurines.md` §4 |
 | 2026-08-17 | LoS chemin refait à chaque survol | `flattenObscuringZones/TerrainZones` mémoïsés ; `key` getter lazy ; 6,9 ms/appel → ~0 ms |
 | 2026-08-17 | `BoardReplay` effet de dessin inévitable | 6 valeurs instables mémoïsées ; `currentState`, `unitsWithGhost`, etc. |
 | 2026-08-17 | Corrections code-review + simplify `BoardReplay` | 6 findings /code-review ; `countActionsInPhase` extrait ; `PHASE_NEUTRAL_TYPES` |

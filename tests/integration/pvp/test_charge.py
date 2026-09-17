@@ -250,3 +250,72 @@ class TestChargeMove:
         assert (after["col"], after["row"]) == (origin["col"], origin["row"])
         assert unit_id in game.pool("charge_activation_pool"), "l'unité a quitté le pool sur un refus"
         assert unit_id not in [str(u) for u in game.state["units_charged"]]
+
+    def test_the_charge_block_pool_is_inside_each_model_pool(self, game):
+        """Sélection rectangle : ``charge_block_destinations`` — bloc partiel de figurines de charge.
+
+        Chaque figurine du bloc translaté atterrit dans SON pool de charge (11.04 : conditions PAR
+        figurine — plus près d'une cible, ≤1"/engagée si possible — évaluées par le moteur).
+        """
+        game.drain_to("charge")
+        unit_id = next(
+            (u for u in game.pool("charge_activation_pool") if len(game.models_of(u)) > 1), None
+        )
+        assert unit_id is not None, "aucune escouade multi-figurines dans le pool de charge"
+        activation = game.act("activate_unit", unitId=unit_id, charge_roll_override=12)["result"]
+        target = str(activation["valid_targets"][0]["id"])
+        game.act("charge", unitId=unit_id, targetId=target)
+
+        state = game.act("charge_plan_state", unitId=unit_id)["result"]
+        eligible = list(state["eligible_models"])
+        assert len(eligible) >= 2, f"il faut deux figurines éligibles, obtenu {eligible}"
+        solo = {
+            mid: {
+                tuple(a[:2])
+                for a in game.act("charge_plan_state", unitId=unit_id, selected_model=mid)["result"]["pool"]
+            }
+            for mid in eligible
+        }
+
+        # En phase « ≤1" » (11.04), les pools par figurine sont étroits : un bloc n'a d'ancre commune
+        # que pour certaines paires — un pool VIDE est une réponse métier légale (pas une erreur).
+        # On cherche une paire qui en a, et on vérifie le contrat dessus.
+        found = None
+        for i, a in enumerate(eligible):
+            for b in eligible[i + 1:]:
+                anchors = game.act(
+                    "charge_block_destinations", unitId=unit_id, model_ids=[a, b], plan=[]
+                )["result"]["destinations"]
+                if anchors:
+                    found = ([a, b], anchors)
+                    break
+            if found:
+                break
+        assert found is not None, "aucune paire de figurines n'a d'ancre commune de charge"
+        block, anchors = found
+        # Le pool solo exclut les cases sous une sœur à l'origine ; soulevée, la sœur les libère :
+        # le pool du bloc peut dépasser le solo, jamais le budget/closer (verrou unitaire
+        # ``test_block_destinations_pool``). Ici : contrat de l'API — figurines du bloc, ancre =
+        # 1re figurine, destinations distinctes, et l'ANCRE reste dans le pool solo de sa figurine
+        # (aucune sœur soulevée ne libère la case d'une ancre : la sœur est ailleurs par construction
+        # du rectangle, sinon l'intersection serait vide).
+        for anchor_col, anchor_row, placements in anchors:
+            by_model = {p[0]: (p[1], p[2]) for p in placements}
+            assert set(by_model) == set(block)
+            assert by_model[block[0]] == (anchor_col, anchor_row)
+            assert len(set(by_model.values())) == len(block), "deux figurines du bloc sur la même case"
+        assert any((a[0], a[1]) in solo[block[0]] for a in anchors), (
+            "aucune ancre du bloc dans le pool solo de l'ancre"
+        )
+
+        # Figurine déjà posée → non éligible → refus explicite (HTTP 200, success false).
+        placed_mid = block[1]
+        placed_dest = next(p for p in anchors[0][2] if p[0] == placed_mid)
+        accepted, body = game.try_act(
+            "charge_block_destinations",
+            unitId=unit_id,
+            model_ids=[placed_mid],
+            plan=[[placed_mid, placed_dest[1], placed_dest[2], placed_dest[3]]],
+        )
+        assert not accepted
+        assert "non éligibles" in body["result"]["error"]

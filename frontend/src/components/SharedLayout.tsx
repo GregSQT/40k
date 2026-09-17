@@ -37,12 +37,18 @@ interface SharedLayoutProps {
   onToggleReplay?: () => void;
   /** true → container de replay actuellement affiché. */
   replayActive?: boolean;
+  /** Bascule l'outil « sélection rectangle » (bloc partiel de figurines à déplacer/charger). */
+  onToggleRectSelect?: () => void;
+  /** true → outil sélection rectangle actif. */
+  rectSelectActive?: boolean;
 }
 
 interface NavigationProps {
   onOpenSettings?: () => void;
   onToggleMeasureMode?: () => void;
   measureModeActive?: boolean;
+  onToggleRectSelect?: () => void;
+  rectSelectActive?: boolean;
   onToggleHideIndicators?: () => void;
   hideIndicatorsActive?: boolean;
   onToggleRangeRings?: () => void;
@@ -73,6 +79,26 @@ function RulerMenuIcon({ active }: { active: boolean }) {
         <rect x="2" y="9" width="20" height="6" rx="1" />
         <path d="M6 9v3M10 9v2M14 9v3M18 9v2" strokeWidth="1.4" />
       </g>
+    </svg>
+  );
+}
+
+/** Carré en pointillés : outil sélection rectangle (comme la sélection de Paint). */
+function RectSelectIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden
+      style={{ display: "block", opacity: active ? 1 : 0.78 }}
+    >
+      <title>Sélection rectangle</title>
+      <rect x="3" y="3" width="18" height="18" rx="1" strokeDasharray="3 2.5" />
     </svg>
   );
 }
@@ -309,6 +335,8 @@ const Navigation: React.FC<NavigationProps> = ({
   onOpenSettings,
   onToggleMeasureMode,
   measureModeActive = false,
+  onToggleRectSelect,
+  rectSelectActive = false,
   onToggleHideIndicators,
   hideIndicatorsActive = false,
   onToggleRangeRings,
@@ -465,6 +493,36 @@ const Navigation: React.FC<NavigationProps> = ({
               </button>
             </TooltipWrapper>
           )}
+          {onToggleRectSelect && (
+            <TooltipWrapper
+              text={
+                rectSelectActive
+                  ? "Sélection rectangle active : clic-glisser sur le plateau capture les figurines de l'escouade activée (voile vert), le bloc suit ensuite le curseur ; clic = pose, clic droit = abandon. Recliquer l'icône pour quitter."
+                  : "Activer la sélection rectangle : clic-glisser sur le plateau pour capturer plusieurs figurines d'une escouade et les déplacer ensemble (move ou charge)."
+              }
+            >
+              <button
+                type="button"
+                onClick={onToggleRectSelect}
+                className="settings-button"
+                aria-pressed={rectSelectActive}
+                aria-label="Sélection rectangle"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  outline: "none",
+                  color: rectSelectActive ? "#22c55e" : "#9ca3af",
+                  padding: "4px",
+                }}
+              >
+                <RectSelectIcon active={rectSelectActive} />
+              </button>
+            </TooltipWrapper>
+          )}
           {onToggleReplay && (
             <TooltipWrapper
               text={
@@ -614,6 +672,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
   onOpenSettings,
   onToggleMeasureMode,
   measureModeActive,
+  onToggleRectSelect,
+  rectSelectActive,
   onToggleHideIndicators,
   hideIndicatorsActive,
   onToggleRangeRings,
@@ -641,6 +701,8 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
               onOpenSettings={onOpenSettings}
               onToggleMeasureMode={onToggleMeasureMode}
               measureModeActive={measureModeActive}
+              onToggleRectSelect={onToggleRectSelect}
+              rectSelectActive={rectSelectActive}
               onToggleHideIndicators={onToggleHideIndicators}
               hideIndicatorsActive={hideIndicatorsActive}
               onToggleRangeRings={onToggleRangeRings}

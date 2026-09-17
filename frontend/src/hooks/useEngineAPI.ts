@@ -29,6 +29,13 @@ import {
   getFightAttackerAttackLeft,
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
+import {
+  type BlockPool,
+  cubeAdd,
+  cubeSub,
+  parseBlockDestinations,
+  snapBlockAnchor,
+} from "../utils/blockSelection";
 import { type EngineActionOutcome, readEngineActionOutcome } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
@@ -4440,6 +4447,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [gameState?.units_cache]
   );
 
+  /** Séquence des dry-runs de plan move : une réponse plus ancienne que la dernière demande est
+   *  ignorée (le suivi de bloc en émet une par hex ; une réponse tardive écraserait la validité
+   *  d'un plan déjà remplacé — annulé, posé ou déplacé). */
+  const movePlanValiditySeqRef = useRef(0);
+
   /** Dry-run du plan provisoire → maj voile rouge / cohesion / can_validate. */
   const refreshSquadMovePlanValidity = useCallback(
     async (
@@ -4450,6 +4462,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // → occupation testée au bon niveau (superposition inter-étage, 13.06) ET voile rouge reflétant
       // le pivot socle par-fig (empreinte orientée). orientation null = inchangée côté moteur.
       const plan = toPlanArrayWithOrientation(models);
+      const seq = ++movePlanValiditySeqRef.current;
       let result: Record<string, unknown> | null = null;
       try {
         result = await postEngineQuery({
@@ -4461,6 +4474,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[SQUAD-MOVE] validity ERROR unit=${unitId}`, err, { plan });
         return;
       }
+      if (seq !== movePlanValiditySeqRef.current) return; // réponse périmée
       const perModelValid = (result?.per_model ?? {}) as Record<string, boolean>;
       const coherencyOk = result?.coherency_ok === true;
       const canValidate = result?.can_validate === true;
@@ -4512,21 +4526,28 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [refreshSquadMovePlanValidity]
   );
 
-  /** Double-clic escouade / simple-clic fig : entre en mode plan provisoire par-figurine. */
+  /** Double-clic escouade / simple-clic fig : entre en mode plan provisoire par-figurine.
+   *  Rend les positions d'entrée du plan (= origines), ou ``null`` si l'entrée est refusée
+   *  (allocation en cours, hazard à résoudre, escouade sans figurine). */
   const handleStartSquadModelMove = useCallback(
-    async (unitId: number | string) => {
+    async (
+      unitId: number | string
+    ): Promise<Record<
+      string,
+      { col: number; row: number; level: number; orientation: number }
+    > | null> => {
       // Desperate Escape : allocation des mortal wounds en cours → ne pas entrer dans le plan.
-      if (manualAllocationRef.current) return;
+      if (manualAllocationRef.current) return null;
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       // Desperate Escape : activer d'abord ; si hazard requis, ne PAS entrer dans le plan
       // par-figurine (le popup ☢️ doit être résolu avant tout déplacement).
-      if (!(await ensureActivatedNoHazard(uid))) return;
+      if (!(await ensureActivatedNoHazard(uid))) return null;
       const models = readSquadModelPositions(uid);
       if (Object.keys(models).length === 0) {
         console.warn(
           `[SQUAD-MOVE] startSquadModelMove ABORT unit=${uid} (aucune fig dans occupied_hexes_by_model)`
         );
-        return;
+        return null;
       }
       squadMoveSessionRef.current += 1;
       squadMoveModelPoolRef.current = new Set();
@@ -4544,6 +4565,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setMode("perModelMove");
       setSelectedUnitId(uid);
       await refreshSquadMovePlanValidity(uid, models);
+      return models;
     },
     [readSquadModelPositions, refreshSquadMovePlanValidity, ensureActivatedNoHazard]
   );
@@ -7087,6 +7109,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     []
   );
 
+  /** Séquence des lectures charge_plan_state — miroir de ``movePlanValiditySeqRef``. */
+  const chargePlanStateSeqRef = useRef(0);
+
   /** Lecture pure : recalcule l'état du plan de charge depuis le backend. ``selectedModel`` → le
    * backend renvoie le pool (zone) de CETTE fig uniquement (la part chère n'est faite que pour elle). */
   const refreshChargePlanState = useCallback(
@@ -7106,8 +7131,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         level: currentLevelRef?.current ?? 0,
       };
       if (selectedModel != null) action.selected_model = selectedModel;
+      const seq = ++chargePlanStateSeqRef.current;
       const result = await postEngineQuery(action);
       if (!result) throw new Error("charge_plan_state: réponse vide");
+      if (seq !== chargePlanStateSeqRef.current) return; // réponse périmée (miroir move)
       applyChargePlanState(result, selectedModel);
     },
     [postEngineQuery, applyChargePlanState, currentLevelRef]
@@ -7358,6 +7385,270 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
     setMode("select");
   }, [executeAction, selectedUnitId, noteActionOutcome]);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // SÉLECTION RECTANGLE — bloc partiel de figurines (move par-fig / charge par-fig).
+  // Le bloc suit le curseur en translation rigide et SNAPPE sur un pool d'ancres calculé par le
+  // moteur (move_block_destinations / charge_block_destinations) : comme le squad move rigide,
+  // jamais de pose hors pool. Le clic pose le bloc dans le plan hôte (squadMovePlan /
+  // chargeMovePlan), puis le flux existant (preview_move_plan / charge_plan_state) juge le plan.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Bloc en cours de suivi. ``grab`` : vecteur cube « origine de l'ancre − hex de relâchement du
+   * rectangle » → le bloc garde sa position relative au curseur au lieu de sauter sous lui. */
+  const [blockFollow, setBlockFollow] = useState<{
+    kind: "move" | "charge";
+    unitId: number;
+    modelIds: string[];
+    anchorModelId: string;
+    grab: { x: number; y: number; z: number };
+  } | null>(null);
+  const blockFollowRef = useRef(blockFollow);
+  blockFollowRef.current = blockFollow;
+  /** Pool d'ancres du bloc (clé "col,row" de l'ancre → destination par fig). */
+  const blockPoolRef = useRef<BlockPool>(new Map());
+  /** Dernière ancre snappée appliquée au plan (null = le bloc n'a pas encore bougé). */
+  const blockAnchorKeyRef = useRef<string | null>(null);
+
+  /** Escouade propriétaire d'une figurine (units_cache.occupied_hexes_by_model). */
+  const findSquadOfModel = useCallback((modelId: string): number | null => {
+    const cache = latestGameStateRef.current?.units_cache as
+      | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+      | undefined;
+    if (!cache) return null;
+    for (const [uid, entry] of Object.entries(cache)) {
+      if (entry.occupied_hexes_by_model && modelId in entry.occupied_hexes_by_model) {
+        return parseInt(uid, 10);
+      }
+    }
+    return null;
+  }, []);
+
+  /** Relâchement du rectangle : ``modelIds`` = figurines capturées (ordre d'escouade, toutes de
+   * la même unité — BoardPvp l'a garanti), ``(releaseCol, releaseRow)`` = hex sous le curseur.
+   * Phase move : entre en plan par-figurine si nécessaire. Phase charge : exige le plan de charge
+   * (cibles déclarées + jet) et des figurines éligibles. Pool vide → refus métier affiché, pas de bloc. */
+  const handleRectSelectionCommit = useCallback(
+    async (modelIds: string[], releaseCol: number, releaseRow: number) => {
+      if (modelIds.length === 0) return;
+      const anchorModelId = modelIds[0];
+      const unitId = findSquadOfModel(anchorModelId);
+      if (unitId === null) {
+        throw new Error(`rect selection: figurine ${anchorModelId} absente de units_cache`);
+      }
+      const level = currentLevelRef?.current ?? 0;
+      let kind: "move" | "charge";
+      let raw: Record<string, unknown> | null;
+      const gsPhase = latestGameStateRef.current?.phase;
+      if (gsPhase === "move") {
+        kind = "move";
+        const plan = squadMovePlanRef.current;
+        let models: Record<
+          string,
+          { col: number; row: number; level?: number; orientation?: number }
+        >;
+        if (plan && plan.unitId === unitId) {
+          models = plan.models;
+        } else {
+          // Entrée en plan par-figurine : les positions rendues sont les origines (pas de lecture
+          // différée de la ref de plan, qui ne suit qu'au render suivant).
+          const entered = await handleStartSquadModelMove(unitId);
+          if (!entered) return; // entrée refusée (hazard à résoudre, allocation en cours)
+          models = entered;
+        }
+        const provisional: Record<string, [number, number, number]> = {};
+        const orientations: Record<string, number> = {};
+        for (const [mid, pos] of Object.entries(models)) {
+          if (modelIds.includes(mid)) {
+            if (pos.orientation !== undefined) orientations[mid] = pos.orientation;
+          } else {
+            provisional[mid] = [pos.col, pos.row, pos.level ?? 0];
+          }
+        }
+        try {
+          raw = await postEngineQuery({
+            action: "move_block_destinations",
+            model_ids: modelIds,
+            provisional_plan: provisional,
+            level,
+            orientations,
+          });
+        } catch (err) {
+          setActionRefusal(
+            `Sélection refusée : ${err instanceof Error ? err.message : String(err)}`
+          );
+          return;
+        }
+      } else if (gsPhase === "charge") {
+        kind = "charge";
+        const plan = chargeMovePlanRef.current;
+        if (!plan || plan.unitId !== unitId) {
+          setActionRefusal(
+            "Sélection refusée : déclare la charge (cibles + jet) avant de sélectionner un bloc."
+          );
+          return;
+        }
+        try {
+          raw = await postEngineQuery({
+            action: "charge_block_destinations",
+            unitId: String(unitId),
+            model_ids: modelIds,
+            plan: toPlanArray(plan.models),
+            level,
+          });
+        } catch (err) {
+          setActionRefusal(
+            `Sélection refusée : ${err instanceof Error ? err.message : String(err)}`
+          );
+          return;
+        }
+      } else {
+        return;
+      }
+      const pool = parseBlockDestinations(raw?.destinations);
+      if (pool.size === 0) {
+        setActionRefusal(
+          "Sélection refusée : aucune position où toutes les figurines sélectionnées peuvent arriver — réduis la sélection."
+        );
+        return;
+      }
+      blockPoolRef.current = pool;
+      blockAnchorKeyRef.current = null;
+      const origin = readSquadModelPositions(unitId)[anchorModelId];
+      if (!origin) {
+        throw new Error(`rect selection: origine de ${anchorModelId} absente de units_cache`);
+      }
+      const grab = cubeSub(
+        offsetToCube(origin.col, origin.row),
+        offsetToCube(releaseCol, releaseRow)
+      );
+      if (kind === "move") {
+        setSquadMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
+        squadMoveModelPoolRef.current = new Set();
+        squadMoveModelMaskLoopsRef.current = null;
+      } else {
+        chargeModelPoolRef.current = new Set();
+        chargeModelMaskLoopsRef.current = null;
+        setChargeMovePlan((prev) => (prev ? { ...prev, activeModelId: null } : prev));
+      }
+      setBlockFollow({ kind, unitId, modelIds, anchorModelId, grab });
+    },
+    [
+      findSquadOfModel,
+      currentLevelRef,
+      handleStartSquadModelMove,
+      postEngineQuery,
+      readSquadModelPositions,
+    ]
+  );
+
+  /** Suivi (mousemove, BoardPvp) : hex brut sous le curseur → ancre voulue (curseur + grab) →
+   * snap sur le pool → placements de CHAQUE fig écrits dans le plan hôte. Pas de setState si
+   * l'ancre snappée n'a pas changé. */
+  const handleBlockFollowHex = useCallback(
+    (col: number, row: number) => {
+      const bf = blockFollowRef.current;
+      if (!bf) return;
+      const desired = cubeAdd(offsetToCube(col, row), bf.grab);
+      const key = snapBlockAnchor(blockPoolRef.current, desired);
+      if (key === null || key === blockAnchorKeyRef.current) return;
+      const placements = blockPoolRef.current.get(key);
+      if (!placements) {
+        throw new Error(`block follow: ancre ${key} absente du pool`);
+      }
+      blockAnchorKeyRef.current = key;
+      // Le pool garantit la légalité par figurine ; la validité re-jugée ici (miroir du suivi de
+      // déploiement) ne peut ajouter que la COHÉSION / les cibles — l'information qu'il manque au joueur.
+      if (bf.kind === "move") {
+        setSquadMovePlan((prev) => {
+          if (!prev) return prev;
+          const models = { ...prev.models };
+          for (const [mid, [c, r, lv]] of Object.entries(placements)) {
+            models[mid] = { col: c, row: r, level: lv, orientation: prev.models[mid]?.orientation };
+          }
+          void refreshSquadMovePlanValidity(prev.unitId, models);
+          return { ...prev, models };
+        });
+      } else {
+        setChargeMovePlan((prev) => {
+          if (!prev) return prev;
+          const models = { ...prev.models };
+          for (const [mid, [c, r, lv]] of Object.entries(placements)) {
+            models[mid] = { col: c, row: r, level: lv };
+          }
+          void refreshChargePlanState(prev.unitId, models, null);
+          return { ...prev, models };
+        });
+      }
+    },
+    [refreshSquadMovePlanValidity, refreshChargePlanState]
+  );
+
+  /** Clic : pose le bloc à l'ancre snappée courante puis re-juge le plan (voile rouge / cohésion /
+   * cibles) par le flux existant. Bloc jamais déplacé (aucune ancre) → simple sortie du suivi. */
+  const handleFreezeBlock = useCallback(() => {
+    const bf = blockFollowRef.current;
+    if (!bf) return;
+    const moved = blockAnchorKeyRef.current !== null;
+    blockPoolRef.current = new Map();
+    blockAnchorKeyRef.current = null;
+    setBlockFollow(null);
+    if (!moved) return;
+    if (bf.kind === "move") {
+      const plan = squadMovePlanRef.current;
+      if (plan) void refreshSquadMovePlanValidity(plan.unitId, plan.models);
+    } else {
+      const plan = chargeMovePlanRef.current;
+      if (plan) void refreshChargePlanState(plan.unitId, plan.models, null);
+    }
+  }, [refreshSquadMovePlanValidity, refreshChargePlanState]);
+
+  /** Clic droit / sortie du mode : abandonne le bloc → figurines remises à leur état d'avant
+   * (origine en move, non posées en charge), plan re-jugé. */
+  const handleCancelBlock = useCallback(() => {
+    const bf = blockFollowRef.current;
+    if (!bf) return;
+    const moved = blockAnchorKeyRef.current !== null;
+    blockPoolRef.current = new Map();
+    blockAnchorKeyRef.current = null;
+    setBlockFollow(null);
+    if (!moved) return;
+    if (bf.kind === "move") {
+      setSquadMovePlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models };
+        // Miroir de handleResetModelInPlan : l'origine porte col/row (+ level/orientation lus à l'entrée).
+        for (const mid of bf.modelIds) {
+          const origin = prev.originModels[mid];
+          if (origin) models[mid] = { ...origin };
+        }
+        void refreshSquadMovePlanValidity(prev.unitId, models);
+        return { ...prev, models };
+      });
+    } else {
+      setChargeMovePlan((prev) => {
+        if (!prev) return prev;
+        const models = { ...prev.models };
+        for (const mid of bf.modelIds) delete models[mid];
+        void refreshChargePlanState(prev.unitId, models, null);
+        return { ...prev, models };
+      });
+    }
+  }, [refreshSquadMovePlanValidity, refreshChargePlanState]);
+
+  // Le plan hôte disparaît (Valider, Annuler, changement de phase) → le bloc n'a plus d'hôte.
+  useEffect(() => {
+    if (!blockFollow) return;
+    const hostAlive =
+      blockFollow.kind === "move"
+        ? mode === "perModelMove" && squadMovePlan?.unitId === blockFollow.unitId
+        : mode === "chargeModelMove" && chargeMovePlan?.unitId === blockFollow.unitId;
+    if (!hostAlive) {
+      blockPoolRef.current = new Map();
+      blockAnchorKeyRef.current = null;
+      setBlockFollow(null);
+    }
+  }, [blockFollow, mode, squadMovePlan?.unitId, chargeMovePlan?.unitId]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // PILE-IN PAR FIGURINE (V11 12.04, mode fin type charge) — contrat backend
@@ -8396,6 +8687,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onFreezeSquadDeploy: () => {},
       onCommitDeploy: async () => {},
       onCancelDeploy: () => {},
+      // Sélection rectangle (bloc partiel)
+      blockFollow: null,
+      onRectSelectionCommit: async () => {},
+      onBlockFollowHex: () => {},
+      onFreezeBlock: () => {},
+      onCancelBlock: () => {},
       // Réserves stratégiques (20.01 / 20.04)
       ingressMaskLoopsRef,
       ingressBlocked: null as null | { unitId: number; reason: string },
@@ -8854,6 +9151,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onFreezeSquadDeploy: handleFreezeSquadDeploy,
     onCommitDeploy: handleCommitDeploy,
     onCancelDeploy: handleCancelDeploy,
+    // Sélection rectangle (bloc partiel)
+    blockFollow,
+    onRectSelectionCommit: handleRectSelectionCommit,
+    onBlockFollowHex: handleBlockFollowHex,
+    onFreezeBlock: handleFreezeBlock,
+    onCancelBlock: handleCancelBlock,
     // Réserves stratégiques (20.01 / 20.04)
     ingressMaskLoopsRef,
     ingressBlocked,

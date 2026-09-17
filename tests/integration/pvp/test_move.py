@@ -275,3 +275,71 @@ def _is_engaged(game, unit_id: str) -> bool:
     engaged = _would_flee(game, unit_id)
     game.act("right_click", unitId=unit_id)
     return engaged
+
+
+class TestBlockDestinations:
+    """Sélection rectangle : ``move_block_destinations`` — bloc partiel translaté rigidement.
+
+    Le bloc suit le curseur comme le squad move rigide : pool d'ancres calculé par le moteur, où
+    CHAQUE figurine du bloc atterrit dans SON pool par-figurine (03.01 : un ou plusieurs modèles
+    d'une unité, chacun dans sa distance maximale ; 03.03 : cohésion jugée en fin de move).
+    """
+
+    def test_every_anchor_places_each_model_within_its_budget(self, game):
+        """Chaque ancre porte la destination de CHAQUE figurine du bloc, bornée par M (09.05).
+
+        Le pool du bloc n'est PAS un sous-ensemble du pool « solo » d'une figurine : ses sœurs
+        sélectionnées sont soulevées (une case libérée par la sœur devient atteignable). L'invariant
+        strict « toute ancre passe la validation d'exécution » est verrouillé par
+        ``tests/unit/engine/test_block_destinations_pool.py`` ; ici on vérifie le contrat de l'API.
+        """
+        unit_id = _multi_model_unit(game)
+        move_budget = game.unit(unit_id)["MOVE"]
+        game.act("activate_unit", unitId=unit_id)
+        block = game.models_of(unit_id)[:2]
+        origins = {mid: _model_position(game, mid) for mid in block}
+
+        anchors = game.act("move_block_destinations", model_ids=block, provisional_plan={})["result"][
+            "destinations"
+        ]
+
+        assert anchors, "aucune ancre de bloc"
+        for anchor_col, anchor_row, placements in anchors:
+            by_model = {p[0]: (p[1], p[2]) for p in placements}
+            assert set(by_model) == set(block), f"ancre {(anchor_col, anchor_row)} : figurines {set(by_model)}"
+            assert by_model[block[0]] == (anchor_col, anchor_row), "l'ancre est la 1re figurine du bloc"
+            assert len(set(by_model.values())) == len(block), "deux figurines du bloc sur la même case"
+            for mid, dest in by_model.items():
+                assert hex_distance(*origins[mid], *dest) <= move_budget, (
+                    f"{mid} posée en {dest} à plus de M={move_budget} de {origins[mid]}"
+                )
+
+    def test_whole_squad_block_previews_and_commits(self, game):
+        """Vrai chemin de production : pool de bloc → preview → commit, escouade entière."""
+        unit_id = _multi_model_unit(game)
+        game.act("activate_unit", unitId=unit_id)
+        block = game.models_of(unit_id)
+        anchors = game.act("move_block_destinations", model_ids=block, provisional_plan={})["result"][
+            "destinations"
+        ]
+        assert anchors, "aucune ancre de bloc"
+        origin = _model_position(game, block[0])
+        # Ancre la plus proche de l'origine : translation d'un pas, formation conservée.
+        _, _, placements = min(anchors, key=lambda a: hex_distance(*origin, a[0], a[1]))
+        plan = [[p[0], p[1], p[2], p[3]] for p in placements]
+
+        preview = game.act("preview_move_plan", unitId=unit_id, plan=plan)["result"]
+        assert all(preview["per_model"].values()), f"placements invalides : {preview['per_model']}"
+        assert preview["coherency_ok"] is True, "translation rigide : la cohésion d'origine est préservée"
+
+        game.act("commit_move_plan", unitId=unit_id, plan=plan)
+        for model_id, col, row, _level in plan:
+            assert _model_position(game, model_id) == (col, row)
+
+    def test_model_ids_are_required(self, game):
+        unit_id = _multi_model_unit(game)
+        game.act("activate_unit", unitId=unit_id)
+        accepted, body = game.try_act("move_block_destinations", model_ids=[])
+        assert not accepted
+        assert body["_status"] == 400
+        assert "model_ids" in body["error"]

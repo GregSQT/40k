@@ -1468,6 +1468,9 @@ export const BoardWithAPI: React.FC = () => {
     });
   }, []);
   const measureModeActive = measureMode.kind !== "off";
+  /** Outil « sélection rectangle » (bloc partiel de figurines) — bouton carré pointillé de la barre. */
+  const [rectSelectMode, setRectSelectMode] = useState(false);
+  const handleToggleRectSelect = useCallback(() => setRectSelectMode((v) => !v), []);
   const [hideIndicators, setHideIndicators] = useState(false);
   const handleToggleHideIndicators = useCallback(() => setHideIndicators((v) => !v), []);
   /** Panneau d'aide contextuelle au-dessus du tracker de phase (bouton « ? »). */
@@ -4922,6 +4925,8 @@ export const BoardWithAPI: React.FC = () => {
         onOpenSettings={handleOpenSettings}
         onToggleMeasureMode={handleToggleMeasureMode}
         measureModeActive={measureModeActive}
+        onToggleRectSelect={handleToggleRectSelect}
+        rectSelectActive={rectSelectMode}
         onToggleHideIndicators={handleToggleHideIndicators}
         hideIndicatorsActive={hideIndicators}
         onToggleRangeRings={handleToggleRangeRings}
@@ -5187,6 +5192,12 @@ export const BoardWithAPI: React.FC = () => {
             measureMode={measureMode}
             onMeasureHexCommit={handleMeasureHexCommit}
             onMeasureJunctionCommit={handleMeasureJunctionCommit}
+            rectSelectMode={rectSelectMode}
+            onRectSelectionCommit={isGameOver ? async () => {} : apiProps.onRectSelectionCommit}
+            blockFollow={apiProps.blockFollow}
+            onBlockFollowHex={isGameOver ? () => {} : apiProps.onBlockFollowHex}
+            onFreezeBlock={isGameOver ? () => {} : apiProps.onFreezeBlock}
+            onCancelBlock={isGameOver ? () => {} : apiProps.onCancelBlock}
             hideIndicators={hideIndicators}
             showRangeRings={showRangeRings}
           />

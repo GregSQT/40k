@@ -4139,12 +4139,18 @@ def movement_build_model_destinations_pool(
     provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
     level: int = 0,
     orientation: Optional[int] = None,
+    lifted_model_ids: Optional[AbstractSet[str]] = None,
 ) -> Dict[str, Any]:
     """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad_multi_figurines.md).
 
     provisional_plan : {model_id: (col, row)} positions provisoires des figs
     déjà déplacées dans le plan. Si fourni, remplace models_cache pour les
     sibling figures (évite que les hexes originaux restent bloqués).
+
+    lifted_model_ids : sœurs « soulevées » (bloc rigide, ``movement_build_block_destinations_pool``) :
+    elles bougent du même vecteur que le mover, donc ni leur origine ni leur position provisoire
+    ne compte — ni pour la traversée, ni pour l'occupation, ni pour la clearance de dépôt. Leur
+    non-chevauchement avec le mover est invariant par translation (garanti par la formation d'origine).
 
     Move normal : budget = MOVE de l'escouade (subhexes). Origine = position
     courante de la figurine dans models_cache (= position de debut de phase, car
@@ -4259,6 +4265,8 @@ def movement_build_model_destinations_pool(
     sibling_states: List[Tuple[Dict[str, Any], int, int, int]] = []  # (model, col, row, eff_level)
     for mid in _squad_models.get(squad_id, []):  # get allowed
         if str(mid) == str(model_id):  # get allowed
+            continue
+        if lifted_model_ids and str(mid) in lifted_model_ids:
             continue
         sibling = _models_cache.get(str(mid))
         if sibling is None:
@@ -4668,6 +4676,69 @@ def movement_build_model_destinations_pool(
     # au bon niveau au lieu de forcer la vue courante (§13.06 : sol et étage sont des placements distincts).
     destinations_with_level = [[c, r, eff_by_dest[(c, r)]] for (c, r) in reachable]
     return {"destinations": destinations_with_level, "footprint_mask_loops": mask_loops}
+
+
+def movement_build_block_destinations_pool(
+    game_state: Dict[str, Any],
+    model_ids: List[str],
+    provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None,
+    level: int = 0,
+    orientations: Optional[Mapping[str, int]] = None,
+) -> List[Tuple[int, int, Dict[str, Tuple[int, int, int]]]]:
+    """Pool d'un BLOC PARTIEL de figurines (sélection rectangle) translaté rigidement.
+
+    Miroir, pour un sous-ensemble de l'escouade, du squad move rigide : l'ancre est la
+    PREMIÈRE figurine de ``model_ids`` et chaque ancre candidate n'est conservée que si CHAQUE
+    figurine du bloc, translatée du même vecteur (offsets CUBE relatifs à l'ancre, invariants
+    par translation rigide), tombe dans SON pool par-figurine — le pool de production
+    ``movement_build_model_destinations_pool`` (budget géodésique depuis SON origine, murs, EZ,
+    occupation, clearance de socle). Aucun prédicat n'est dupliqué ici : l'invariant « masque ⊆
+    exécutable » (T6-g) tient par construction, la cohésion restant jugée sur le plan complet
+    par ``movement_preview_move_plan`` comme pour toute pose par-figurine (03.03 : fin de move).
+
+    Les figurines du bloc sont « soulevées » (``lifted_model_ids``) pour les pools les unes des
+    autres : elles bougent ensemble, leur origine et leur position provisoire ne comptent pas.
+    Les sœurs NON sélectionnées gardent leur position du ``provisional_plan`` (ou d'origine).
+    Le budget se compte depuis l'ORIGINE (models_cache), comme la sélection d'une figurine :
+    une figurine déjà posée dans le plan et reprise dans un bloc repart de son origine.
+
+    Retour : ``[(anchor_col, anchor_row, {model_id: (col, row, level)}), ...]`` — une entrée par
+    ancre légale, avec la destination (niveau effectif inclus) de chaque figurine du bloc.
+    """
+    if not model_ids:
+        raise ValueError("movement_build_block_destinations_pool: model_ids vide")
+    ids = [str(m) for m in model_ids]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"movement_build_block_destinations_pool: model_ids en doublon {ids}")
+    models_cache = require_key(game_state, "models_cache")
+    squads: Set[str] = set()
+    for mid in ids:
+        model = models_cache.get(mid)
+        if model is None:
+            raise KeyError(f"movement_build_block_destinations_pool: model {mid} not in models_cache")
+        squads.add(str(model["squad_id"]))
+    if len(squads) != 1:
+        raise ValueError(
+            f"movement_build_block_destinations_pool: figurines de plusieurs escouades {sorted(squads)}"
+        )
+    lifted = frozenset(ids)
+    # Les positions provisoires des figurines du bloc ne comptent plus : elles repartent de l'origine.
+    prov_others: Optional[Dict[str, Tuple[int, ...]]] = (
+        {k: v for k, v in provisional_plan.items() if str(k) not in lifted}
+        if provisional_plan
+        else None
+    )
+    pools: Dict[str, Dict[Tuple[int, int], int]] = {}
+    for mid in ids:
+        orient = orientations.get(mid) if orientations else None
+        pool = movement_build_model_destinations_pool(
+            game_state, mid, provisional_plan=prov_others, level=level,
+            orientation=(int(orient) if orient is not None else None),
+            lifted_model_ids=lifted - {mid},
+        )
+        pools[mid] = {(int(c), int(r)): int(lv) for c, r, lv in pool["destinations"]}
+    from .shared_utils import rigid_block_anchor_placements
+    return rigid_block_anchor_placements(models_cache, ids, pools)
 
 
 def movement_preview_move_plan(

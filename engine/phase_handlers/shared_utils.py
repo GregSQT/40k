@@ -14662,6 +14662,52 @@ def _mono_model_matches_pool_socle(
     return move_geom_key(entry) == move_geom_key(m)
 
 
+def rigid_block_anchor_placements(
+    models_cache: Dict[str, Any],
+    model_ids: List[str],
+    pools: Dict[str, Dict[Tuple[int, int], int]],
+) -> List[Tuple[int, int, Dict[str, Tuple[int, int, int]]]]:
+    """Ancres d'un BLOC PARTIEL translaté rigidement, à partir des pools PAR FIGURINE.
+
+    Source unique de l'intersection pour le move (``movement_build_block_destinations_pool``) et
+    la charge (``charge_block_destinations``). L'ancre est ``model_ids[0]`` ; les offsets des
+    autres figurines sont pris en CUBE depuis leurs ORIGINES (``models_cache``), invariants par
+    translation rigide. Une ancre candidate (clé du pool de l'ancre) n'est conservée que si
+    chaque autre figurine, translatée du même vecteur, tombe dans SON pool ; le niveau de chaque
+    destination est celui que son pool lui attribue.
+
+    ``pools`` : ``{model_id: {(col, row): level}}``, une entrée par figurine de ``model_ids``.
+    Retour : ``[(anchor_col, anchor_row, {model_id: (col, row, level)}), ...]``.
+    """
+    from engine.hex_utils import cube_to_offset, offset_to_cube
+
+    if not model_ids:
+        raise ValueError("rigid_block_anchor_placements: model_ids vide")
+    anchor_id = model_ids[0]
+    anchor_model = models_cache[anchor_id]
+    ax, ay, az = offset_to_cube(int(anchor_model["col"]), int(anchor_model["row"]))
+    offsets: Dict[str, Tuple[int, int, int]] = {}
+    for mid in model_ids[1:]:
+        m = models_cache[mid]
+        mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
+        offsets[mid] = (mx - ax, my - ay, mz - az)
+
+    out: List[Tuple[int, int, Dict[str, Tuple[int, int, int]]]] = []
+    for (ac, ar), alv in pools[anchor_id].items():
+        cx, cy, cz = offset_to_cube(ac, ar)
+        placements: Dict[str, Tuple[int, int, int]] = {anchor_id: (ac, ar, alv)}
+        for mid, (dx, dy, dz) in offsets.items():
+            dc, dr = cube_to_offset(cx + dx, cy + dy, cz + dz)
+            lv = pools[mid].get((dc, dr))
+            if lv is None:
+                placements = {}
+                break
+            placements[mid] = (dc, dr, lv)
+        if placements:
+            out.append((ac, ar, placements))
+    return out
+
+
 def erode_move_pool_by_squad_block(
     game_state: Dict[str, Any],
     squad_id: str,
