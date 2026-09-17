@@ -1872,7 +1872,7 @@ siège 0,75, échauffement critic 20 updates (table jamais échauffée sur ce zi
 [0,40, 0,60] ; promotion automatique à 30 000 si moyenne de trois sondes ≥ 0,65 contre P0 ET ≥ 0,60
 contre chacune des trois archives ; destruction < 0,50 après 20 000 ; arrêt manuel à 60 000 sinon.
 Au gate : matrice hors famille (entnorm en juge) et **écart de siège contre P0 comparé au miroir
-P0 contre P0** (règle du 16 soir). Sonde d'ouverture : à consigner (4 membres × 300 parties).
+P0 contre P0** (règle du 16 soir). Sonde d'ouverture (10:12, 4 × 300 parties, argmax) : **P0 0,483** (parité tenue, fenêtre [0,40, 0,60]), **P1a 0,563 · P0a 0,750 · P0b 0,693** — identique à la matrice du matin (0,557 / 0,753 / 0,720) : les archives sont montées et jouent bien ce qu'elles sont ; la marge à gagner au gate est de 4 pts contre P1a, 17 contre P0.
 
 ## ÉTAT AU 2026-09-16 08:45 — POUR REPRENDRE SANS CONTEXTE {#etat-2026-09-16}
 
