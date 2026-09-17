@@ -275,6 +275,8 @@ Move réactif : la datasheet conditionne la capacité à « if this unit is not 
 
 Les sept écarts mesurés par la checklist mouvement PvP (x5 et x1) sont corrigés et ses `xfail` retirés — détail dans `ROADMAP_INDEX.md`, suite 134 : fenêtre réactive sur le commit par-figurine et le squad move gym/PvE ; instantané d'adjacence de la réaction sur les empreintes (KeyError x5) ; 13.06 (mot-clé + coût vertical) dans le pool par-figurine en métrique hex ; `move_after_shooting` proposé au siège PvP à D6" × `inches_to_subhex` ; cohérence euclidienne à l'échelle 1,5 du move ; verbes legacy refusés en phase de tir au lieu d'un 500 ; `terrain_ref` en sous-dossier accepté par `/api/config/board`. Sans effet sur les parties x1 de la lignée. **Reste à décider** : fin d'activation du `squad_shoot` gym/PvE (l'agent et le bot ne reçoivent pas la décision `move_after_shooting` ; changerait les parties de la lignée). Le front qui perdait `selectedUnitId` après `move_after_shooting_select_destination` est corrigé le même jour (suite 136).
 
+Suite 138 (2026-09-17) : deux verrous ajoutés à la checklist sans écart moteur — traversée de la bande d'engagement sans y finir (`TestNormalMove0905::test_traverse_la_zone_d_engagement_sans_y_finir`, la doc disait « non traversable » contre config/code/PDF 03.01) et Advance déclaré puis stationnaire qui reste un Advance (`TestAdvance0906::test_advance_puis_stationnaire_reste_un_advance`). Restent non couverts par la checklist : le coût de descente 13.06 sur le pool par-figurine PvP et le jumeau FLY 21.03 depuis un étage (aucune unité FLY à portée de la ruine dans le scénario figé).
+
 ---
 
 ## Replis `unit_by_id` {#unit-by-id}
