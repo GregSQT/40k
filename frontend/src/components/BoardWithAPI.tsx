@@ -5190,7 +5190,7 @@ export const BoardWithAPI: React.FC = () => {
             rectSelectMode={rectSelectMode}
             onRectSelectionCommit={isGameOver ? async () => {} : apiProps.onRectSelectionCommit}
             blockFollow={apiProps.blockFollow}
-            onBlockFollowHex={isGameOver ? () => {} : apiProps.onBlockFollowHex}
+            blockPoolRef={apiProps.blockPoolRef}
             onFreezeBlock={isGameOver ? () => {} : apiProps.onFreezeBlock}
             onCancelBlock={isGameOver ? () => {} : apiProps.onCancelBlock}
             hideIndicators={hideIndicators}

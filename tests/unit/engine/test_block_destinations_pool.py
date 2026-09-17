@@ -164,3 +164,32 @@ class TestChargeBlockPool:
         gs = _charge_state()
         with pytest.raises(ValueError, match="non éligibles"):
             charge_block_destinations(gs, "S", ["S#1"], {"S#1": (6, 10, 0)})
+
+
+class TestBlockFootprintMaskLoops:
+    """Zone d'atterrissage du bloc (contours monde) — ce que le squad move rigide affiche aussi."""
+
+    def test_move_loops_cover_every_destination_of_every_model(self):
+        from engine.phase_handlers.movement_handlers import movement_block_footprint_mask_loops
+        from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+
+        gs = _move_state()
+        anchors = movement_build_block_destinations_pool(gs, ["S#0", "S#2"])
+        loops = movement_block_footprint_mask_loops(gs, anchors)
+        assert loops and all(len(loop) >= 3 for loop in loops)
+        # Socles mono-hex : la zone est exactement l'union des destinations des deux figurines.
+        cells = {(c, r) for _a, _b, pl in anchors for (c, r, _lv) in pl.values()}
+        expected = compute_move_preview_mask_loops_world(cells, gs)
+        assert expected is not None
+        assert loops == [[(float(x), float(y)) for (x, y) in loop] for loop in expected]
+        assert movement_block_footprint_mask_loops(gs, []) == []
+
+    def test_charge_loops_non_empty_for_a_non_empty_block_pool(self):
+        from engine.phase_handlers.charge_handlers import charge_block_footprint_mask_loops
+
+        gs = _charge_state()
+        anchors = charge_block_destinations(gs, "S", ["S#0", "S#1"], {})
+        assert anchors, "vert vacant : aucune ancre"
+        loops = charge_block_footprint_mask_loops(gs, "S", anchors, {})
+        assert loops and all(len(loop) >= 3 for loop in loops)
+        assert charge_block_footprint_mask_loops(gs, "S", [], {}) == []

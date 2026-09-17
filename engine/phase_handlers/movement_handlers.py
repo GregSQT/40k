@@ -4931,6 +4931,50 @@ def movement_build_block_destinations_pool(
     return rigid_block_anchor_placements(models_cache, ids, pools)
 
 
+def movement_block_footprint_mask_loops(
+    game_state: Dict[str, Any],
+    anchors: List[Tuple[int, int, Dict[str, Tuple[int, int, int]]]],
+    orientations: Optional[Mapping[str, int]] = None,
+) -> List[List[Tuple[float, float]]]:
+    """Zone d'atterrissage d'un bloc (sélection rectangle) → boucles de contour monde.
+
+    Miroir de la zone du move par-figurine (``footprint_zone`` de
+    ``movement_build_model_destinations_pool``) pour TOUTES les figurines du bloc : union des
+    empreintes de chaque figurine sur ses destinations du pool de bloc, murs retirés, lissée
+    côté front (Chaikin) comme le squad move rigide. Lecture pure. Vide si aucune ancre.
+    """
+    if not anchors:
+        return []
+    from engine.hex_utils import precompute_footprint_offsets
+    from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+
+    models_cache = require_key(game_state, "models_cache")
+    wall_hexes = game_state.get("wall_hexes", set())
+    offsets_by_model: Dict[str, Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = {}
+    zone: Set[Tuple[int, int]] = set()
+    for _ac, _ar, placements in anchors:
+        for mid, (c, r, _lv) in placements.items():
+            offs = offsets_by_model.get(mid)
+            if offs is None:
+                model = models_cache[mid]
+                shape = require_key(model, "BASE_SHAPE")
+                size = require_key(model, "BASE_SIZE")
+                if socle_is_single_hex(shape, size):
+                    offs = (((0, 0),), ((0, 0),))
+                else:
+                    orient = orientations.get(mid) if orientations else None
+                    offs = precompute_footprint_offsets(
+                        shape, size,
+                        int(orient) if orient is not None else int(require_key(model, "orientation")),
+                    )
+                offsets_by_model[mid] = offs
+            for dc, dr in offs[0] if (c & 1) == 0 else offs[1]:
+                zone.add((c + dc, r + dr))
+    zone -= wall_hexes
+    loops = compute_move_preview_mask_loops_world(zone, game_state)
+    return [[(float(x), float(y)) for (x, y) in loop] for loop in loops] if loops else []
+
+
 def movement_preview_move_plan(
     game_state: Dict[str, Any], squad_id: str, plan: MovePlan
 ) -> Dict[str, Any]:

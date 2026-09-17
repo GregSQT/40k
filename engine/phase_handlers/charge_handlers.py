@@ -1368,6 +1368,11 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
                 [ac, ar, [[mid, c, r, lv] for mid, (c, r, lv) in placements.items()]]
                 for ac, ar, placements in anchors
             ],
+            # Zone d'atterrissage du bloc (même rendu lissé que la figurine sélectionnée).
+            "footprint_mask_loops": charge_block_footprint_mask_loops(
+                game_state, unit_id, anchors, prov_blk,
+                level=int(_lvl_blk) if _lvl_blk is not None else 0,
+            ),
         }
 
     elif action_type == "skip":
@@ -2672,6 +2677,44 @@ def charge_block_destinations(
 
     from .shared_utils import rigid_block_anchor_placements
     return rigid_block_anchor_placements(require_key(game_state, "models_cache"), ids, pools)
+
+
+def charge_block_footprint_mask_loops(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    anchors: List[Tuple[int, int, Dict[str, Tuple[int, int, int]]]],
+    provisional_plan: Mapping[str, Sequence[int]],
+    level: int = 0,
+) -> List[List[List[float]]]:
+    """Zone d'atterrissage d'un bloc de charge → boucles de contour monde.
+
+    Jumeau charge de ``movement_block_footprint_mask_loops`` : union des empreintes
+    (``region[...]["fp"]``, sol ou étage selon le niveau de chaque destination) de chaque figurine
+    du bloc sur ses destinations, via le même helper que la zone de la figurine sélectionnée de
+    ``charge_model_plan_state``. Contexte mémoïsé (aucun recalcul lourd). Vide si aucune ancre.
+    """
+    if not anchors:
+        return []
+    from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
+    from engine.perf_timing import perf_timing_enabled
+
+    unit = require_unit_by_id(game_state, unit_id)
+    ctx, _ = _charge_plan_ctx(
+        game_state, unit, unit_id, provisional_plan, int(level), perf_timing_enabled(game_state)
+    )
+    base_of_model = ctx["base_of_model"]
+    region_by_base = ctx["region_by_base"]
+    floor_region_by_base = ctx["floor_region_by_base"]
+    fp_zone: Set[Tuple[int, int]] = set()
+    for _ac, _ar, placements in anchors:
+        for mid, (c, r, lv) in placements.items():
+            bk = base_of_model.get(mid)  # get allowed (base sans région = vide)
+            region = (floor_region_by_base if int(lv) >= 1 else region_by_base).get(bk, {})  # get allowed
+            rg = region.get((int(c), int(r)))
+            if rg is not None:
+                fp_zone |= rg["fp"]
+    loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
+    return [[[float(x), float(y)] for (x, y) in loop] for loop in loops] if loops else []
 
 
 def charge_model_plan_state(

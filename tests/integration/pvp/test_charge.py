@@ -283,12 +283,15 @@ class TestChargeMove:
         found = None
         for i, a in enumerate(eligible):
             for b in eligible[i + 1:]:
-                anchors = game.act(
+                res = game.act(
                     "charge_block_destinations", unitId=unit_id, model_ids=[a, b], plan=[]
-                )["result"]["destinations"]
-                if anchors:
-                    found = ([a, b], anchors)
+                )["result"]
+                if res["destinations"]:
+                    found = ([a, b], res["destinations"])
+                    # Zone d'atterrissage du bloc : contours monde, comme la figurine sélectionnée.
+                    assert res["footprint_mask_loops"] and all(len(l) >= 3 for l in res["footprint_mask_loops"])
                     break
+                assert res["footprint_mask_loops"] == [], "pool vide → aucune zone"
             if found:
                 break
         assert found is not None, "aucune paire de figurines n'a d'ancre commune de charge"
