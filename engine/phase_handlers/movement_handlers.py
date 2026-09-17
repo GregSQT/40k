@@ -398,6 +398,25 @@ def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit
     return took_to_the_skies(game_state, unit, unit_id, charge=entry.is_charge)
 
 
+def _unit_for_ai_move_decision(
+    game_state: Dict[str, Any], squad_id: str, caller: str
+) -> Optional[Dict[str, Any]]:
+    """Unité si elle est pilotée par l'IA ET appartient au joueur courant, sinon None.
+
+    Factorisé depuis `_fly_declaration_due_unit`, `_ascent_declaration_due_unit` et
+    `_fall_back_mode_due_unit` : les trois partagent exactement ce bloc de trois conditions.
+    Lève KeyError si l'escouade est introuvable (invariant moteur violé).
+    """
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"{caller}: escouade {squad_id} introuvable")
+    if not _unit_is_ai_controlled(game_state, unit):
+        return None
+    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
+        return None
+    return unit
+
+
 def _fly_declaration_due_unit(
     game_state: Dict[str, Any], squad_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -427,14 +446,10 @@ def _fly_declaration_due_unit(
     entry = _fly_phase_entry(game_state)
     if entry is None:
         return None
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = _unit_for_ai_move_decision(game_state, squad_id, "_fly_declaration_due_unit")
     if unit is None:
-        raise KeyError(f"_fly_declaration_due_unit: escouade {squad_id} introuvable")
+        return None
     if not _unit_has_keyword(unit, "fly"):
-        return None
-    if not _unit_is_ai_controlled(game_state, unit):
-        return None
-    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
         return None
     if str(squad_id) in game_state.get(entry.resolved_key, set()):  # get allowed : absent = jamais posée
         return None
@@ -660,14 +675,10 @@ def _ascent_declaration_due_unit(
     """
     if str(require_key(game_state, "phase")) != "move":
         return None
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = _unit_for_ai_move_decision(game_state, squad_id, "_ascent_declaration_due_unit")
     if unit is None:
-        raise KeyError(f"_ascent_declaration_due_unit: escouade {squad_id} introuvable")
+        return None
     if not _squad_can_end_move_elevated(game_state, unit):
-        return None
-    if not _unit_is_ai_controlled(game_state, unit):
-        return None
-    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
         return None
     if str(squad_id) in game_state.get(ASCENT_RESOLVED_KEY, set()):  # get allowed : absent = jamais posée
         return None
@@ -863,12 +874,8 @@ def _fall_back_mode_due_unit(
     """
     if str(require_key(game_state, "phase")) != "move":
         return None
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = _unit_for_ai_move_decision(game_state, squad_id, "_fall_back_mode_due_unit")
     if unit is None:
-        raise KeyError(f"_fall_back_mode_due_unit: escouade {squad_id} introuvable")
-    if not _unit_is_ai_controlled(game_state, unit):
-        return None
-    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
         return None
     if desperate_escape_mode_selected(game_state, str(squad_id)):
         return None

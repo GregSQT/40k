@@ -801,6 +801,17 @@ def _compact_mask_loops_for_api_json(loops: Any) -> list[list[float]]:
     return out
 
 
+def _parse_provisional_plan(raw: Any) -> Optional[Dict[str, Tuple[int, ...]]]:
+    """Convertit provisional_plan JSON → dict str→tuple(int…) ; None si absent ou non-dict."""
+    if not isinstance(raw, dict):
+        return None
+    return {
+        str(k): tuple(int(x) for x in v)
+        for k, v in raw.items()
+        if isinstance(v, (list, tuple)) and len(v) in (2, 3)
+    }
+
+
 def _apply_move_preview_mask_loops_transport_to_gs(
     gs: Dict[str, Any],
     *,
@@ -3630,19 +3641,9 @@ def execute_action():
                 "error": "move_model_destinations requires model_id",
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_model
-        _raw_plan = action.get("provisional_plan")
-        _provisional_plan: Optional[Dict[str, Tuple[int, ...]]] = None
-        if isinstance(_raw_plan, dict):
-            # (col,row) ou (col,row,level) : le niveau par sœur évite qu'une fig d'étage soit
-            # re-dérivée au sol et bloque une fig au sol (superposition inter-étage), comme le déploiement.
-            _provisional_plan = {
-                str(k): tuple(int(x) for x in v)
-                for k, v in _raw_plan.items()
-                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
-            }
+        _provisional_plan = _parse_provisional_plan(action.get("provisional_plan"))
         # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pool niveau-conscient.
-        _mv_level_raw = action.get("level")
-        _mv_level = int(_mv_level_raw) if _mv_level_raw is not None else 0
+        _mv_level = int(action.get("level") or 0)
         # Orientation EN COURS du socle (pivot molette non committé, optionnel) → empreinte du pool
         # calculée à l'orientation réelle (EZ ennemie 2" / collisions honorées pendant le preview).
         _mv_orient_raw = action.get("orientation")
@@ -3674,17 +3675,8 @@ def execute_action():
                 "error": "move_block_destinations requires model_ids",
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_block
-        _raw_plan_blk = action.get("provisional_plan")
-        _provisional_plan_blk: Optional[Dict[str, Tuple[int, ...]]] = None
-        if isinstance(_raw_plan_blk, dict):
-            # (col,row) ou (col,row,level) : niveau par sœur (superposition inter-étage), cf. per-fig.
-            _provisional_plan_blk = {
-                str(k): tuple(int(x) for x in v)
-                for k, v in _raw_plan_blk.items()
-                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
-            }
-        _blk_level_raw = action.get("level")
-        _blk_level = int(_blk_level_raw) if _blk_level_raw is not None else 0
+        _provisional_plan_blk = _parse_provisional_plan(action.get("provisional_plan"))
+        _blk_level = int(action.get("level") or 0)
         # Orientations EN COURS par fig (pivot molette non committé) → empreintes du pool orientées.
         _raw_orients = action.get("orientations")
         _orients: Optional[Dict[str, int]] = (
@@ -3721,18 +3713,9 @@ def execute_action():
                 "error": "move_squad_unplaced_destinations requires unitId",
             }), 400
         from engine.phase_handlers import movement_handlers as _mh_squad
-        _raw_plan_sq = action.get("provisional_plan")
-        _provisional_plan_sq: Optional[Dict[str, Tuple[int, ...]]] = None
-        if isinstance(_raw_plan_sq, dict):
-            # (col,row) ou (col,row,level) : niveau par sœur (superposition inter-étage), cf. déploiement.
-            _provisional_plan_sq = {
-                str(k): tuple(int(x) for x in v)
-                for k, v in _raw_plan_sq.items()
-                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
-            }
+        _provisional_plan_sq = _parse_provisional_plan(action.get("provisional_plan"))
         # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pools niveau-conscients.
-        _sq_level_raw = action.get("level")
-        _sq_level = int(_sq_level_raw) if _sq_level_raw is not None else 0
+        _sq_level = int(action.get("level") or 0)
         _placed_ids = set(_provisional_plan_sq.keys()) if _provisional_plan_sq else set()
         _squad_models = require_key(engine.game_state, "squad_models")
         _models_cache = require_key(engine.game_state, "models_cache")
@@ -3779,19 +3762,9 @@ def execute_action():
                 "error": "deploy_model_destinations requires model_id",
             }), 400
         from engine.phase_handlers import deployment_handlers as _dh_model
-        _raw_plan_dep = action.get("provisional_plan")
-        _provisional_plan_dep: Optional[Dict[str, Tuple[int, ...]]] = None
-        if isinstance(_raw_plan_dep, dict):
-            # (col,row) ou (col,row,level) : le niveau par sœur évite qu'une fig d'étage soit
-            # re-dérivée au sol et bloque une fig au sol (collision inter-étage).
-            _provisional_plan_dep = {
-                str(k): (tuple(int(x) for x in v))
-                for k, v in _raw_plan_dep.items()
-                if isinstance(v, (list, tuple)) and len(v) in (2, 3)
-            }
+        _provisional_plan_dep = _parse_provisional_plan(action.get("provisional_plan"))
         # Étages : niveau de VUE courant (optionnel, défaut 0 = sol) → pool niveau-conscient.
-        _dep_level_raw = action.get("level")
-        _dep_level = int(_dep_level_raw) if _dep_level_raw is not None else 0
+        _dep_level = int(action.get("level") or 0)
         _dep_pool = _dh_model.deployment_build_model_destinations_pool(
             engine.game_state, str(model_id), provisional_plan=_provisional_plan_dep,
             level=_dep_level,

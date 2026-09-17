@@ -1687,6 +1687,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, [clearChargePoolRefs]);
 
   // Effet de phase ORIGINAL (inchangé) : reset au CHANGEMENT de phase uniquement.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: targetPreview?.blinkTimer intentionnellement absent — l'ajouter re-déclenche l'effet à l'entrée en advancePreview et efface le mode orange
   useEffect(() => {
     if (gameState?.phase) {
       if (targetPreview?.blinkTimer) {
@@ -1711,20 +1712,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setActiveUnitEngaged(null);
       setDesperateEscapeUnitId(null);
     }
-  }, [gameState?.phase, targetPreview?.blinkTimer, clearChargePoolRefs]);
-
-  // [SEL-DEBUG] Trace la valeur frontend de current_player / phase à chaque changement.
-  useEffect(() => {
-    console.log(
-      "[SEL-DEBUG] state:",
-      "current_player=",
-      gameState?.current_player,
-      "phase=",
-      gameState?.phase,
-      "turn=",
-      gameState?.turn
-    );
-  }, [gameState?.current_player, gameState?.phase, gameState?.turn]);
+  }, [gameState?.phase, clearChargePoolRefs]);
 
   // Libération du verrou « sortie de move » après commit du render : dès que la phase affichée
   // n'est plus move, onEntryPointerDown est démonté → plus aucun clic figurine ne peut émettre un
@@ -3898,17 +3886,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleSelectUnit = useCallback(
     async (unitId: number | string | null) => {
-      // [SEL-DEBUG] Entrée du hook de sélection : joueur de l'unité vs current_player frontend.
-      {
-        const _u = gameState?.units?.find((x) => String(x.id) === String(unitId));
-        console.log("[SEL-DEBUG] handleSelectUnit:", {
-          unitId,
-          unitPlayer: _u?.player,
-          current_player: gameState?.current_player,
-          phase: gameState?.phase,
-          mode,
-        });
-      }
       // Allocation manuelle des pertes en cours (Desperate Escape) : aucun changement de
       // sélection/activation tant que les mortal wounds ne sont pas attribuées.
       if (manualAllocationRef.current && unitId !== null) return;

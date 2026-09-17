@@ -764,9 +764,6 @@ export const BoardWithAPI: React.FC = () => {
   );
   // Unité "épinglée" via clic sur une unité non-activable : affiche durablement son illustration + logos
   const [displaySelectedUnitId, setDisplaySelectedUnitId] = useState<Unit["id"] | null>(null);
-  // Track UnitStatusTable collapse states
-  const [, setPlayer1Collapsed] = useState(false);
-  const [, setPlayer2Collapsed] = useState(false);
   const [deploymentRosterCollapsed, setDeploymentRosterCollapsed] = useState<
     Record<PlayerId, boolean>
   >({
@@ -1567,15 +1564,13 @@ export const BoardWithAPI: React.FC = () => {
     localStorage.setItem("showAdvanceWarning", JSON.stringify(value));
   };
 
-  const handleToggleDebug = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, showDebug: value }));
-    localStorage.setItem("showDebug", JSON.stringify(value));
+  const makeSettingToggle = (key: string) => (value: boolean) => {
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic key on inferred settings object
+    setSettings((prev) => ({ ...prev, [key]: value }) as any);
+    localStorage.setItem(key, JSON.stringify(value));
   };
-
-  const handleToggleReplayContainer = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, replayContainerEnabled: value }));
-    localStorage.setItem("replayContainerEnabled", JSON.stringify(value));
-  };
+  const handleToggleDebug = makeSettingToggle("showDebug");
+  const handleToggleReplayContainer = makeSettingToggle("replayContainerEnabled");
 
   const handleToggleAutoSave = (value: boolean) => {
     setSettings((prev) => ({ ...prev, autoSaveEnabled: value }));
@@ -1615,20 +1610,9 @@ export const BoardWithAPI: React.FC = () => {
       .catch(console.error);
   }, [isSnapshotMode, apiProps.gameSessionKey]);
 
-  const handleToggleBattleShockTest = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
-    localStorage.setItem("battleShockTestEnabled", JSON.stringify(value));
-  };
-
-  const handleToggleDebugLoS = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, showDebugLoS: value }));
-    localStorage.setItem("showDebugLoS", JSON.stringify(value));
-  };
-
-  const handleToggleShootPoolFastMode = (value: boolean) => {
-    setSettings((prev) => ({ ...prev, shootPoolFastMode: value }));
-    localStorage.setItem("shootPoolFastMode", JSON.stringify(value));
-  };
+  const handleToggleBattleShockTest = makeSettingToggle("battleShockTestEnabled");
+  const handleToggleDebugLoS = makeSettingToggle("showDebugLoS");
+  const handleToggleShootPoolFastMode = makeSettingToggle("shootPoolFastMode");
 
   const handleToggleAutoSelectWeapon = (value: boolean) => {
     if (!canUseAutoWeaponSelection) {
@@ -2586,7 +2570,6 @@ export const BoardWithAPI: React.FC = () => {
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(1)}
           commandPoints={getCommandPointsForPlayer(1)}
-          onCollapseChange={setPlayer1Collapsed}
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
           }
@@ -2638,7 +2621,6 @@ export const BoardWithAPI: React.FC = () => {
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(2)}
           commandPoints={getCommandPointsForPlayer(2)}
-          onCollapseChange={setPlayer2Collapsed}
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
           }

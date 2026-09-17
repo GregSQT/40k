@@ -55,7 +55,7 @@ from engine.constants import (
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
 # `hex_utils` est une FEUILLE (heapq/math/numpy) : import au niveau module, pas dans chaque appel.
-from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, dilate_hex_set
+from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, compute_occupied_hexes, dilate_hex_set
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
 from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED, decision_option_cont_row
@@ -474,7 +474,6 @@ def _compute_unit_occupied_hexes(
     orientation = socle_orientation(unit)
     if base_size == 1:
         return {(col, row)}
-    from engine.hex_utils import compute_occupied_hexes
     return compute_occupied_hexes(col, row, base_shape, base_size, orientation)
 
 
@@ -7059,7 +7058,6 @@ def _synth_model_entry(
     la MEME heritage metier que le socle : une escouade homogene ne stocke pas N fois la
     meme hauteur. La lire au bloc pour un personnage attache mesurait son engagement 3D
     (§03.04, 5\" vertical) avec l intervalle vertical d une autre figurine."""
-    from engine.hex_utils import compute_occupied_hexes
     squad_entry = game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
     shape = require_key(model_entry, "BASE_SHAPE")
     size = require_key(model_entry, "BASE_SIZE")

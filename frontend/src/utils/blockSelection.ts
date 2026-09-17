@@ -16,7 +16,7 @@ export type BlockPlacements = Record<string, [number, number, number]>;
 /** Pool d'ancres du bloc : clé ``"col,row"`` de l'ancre → placements. */
 export type BlockPool = Map<string, BlockPlacements>;
 
-export function cubeKey(col: number, row: number): string {
+function cubeKey(col: number, row: number): string {
   return `${col},${row}`;
 }
 
