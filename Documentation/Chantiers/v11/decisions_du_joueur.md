@@ -1027,7 +1027,7 @@ Ordre par valeur tactique :
    quand cette tranche s'ouvre : c'est une règle manquante, pas une divergence d'interface.
 
    🟢 **(a) « consolider ou non » en mode Engaging — LIVRÉ le 2026-09-18 (B2, lot melee-100).**
-   Type `consolidation_engaging` (14e de `AGENT_DECISION_TYPE_IDS`, ajouté en fin), deux
+   Type `consolidation_engaging` (15e de `AGENT_DECISION_TYPE_IDS`, ajouté en fin), deux
    candidats sans `effect_ids` séparés par `declines` : `CHOICE_0` consolider, `CHOICE_1` rester.
    Armé par `_fight_v11_gym_settle` AVANT `squad_consolidate_plan_with_targets` pour le seul mode
    engaging (ongoing = rester au contact, objective = rejoindre la zone : sans contenu tactique,
