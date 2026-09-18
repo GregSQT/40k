@@ -4799,7 +4799,8 @@ def movement_build_model_destinations_pool(
     # Les cases au SOL (eff 0) sont conservées telles quelles SI le mover part du sol. Si le mover part
     # d'un ÉTAGE (start_level_eff >= 1), le champ planaire sol est FAUX (descente gratuite) : le sol est
     # alors re-dérivé du champ multi-niveaux (descente facturée, §13.06) — indépendant de la vue.
-    # FLY : hors périmètre (fly+étages différé) → inchangé. Métrique hex : branche `elif` ci-dessous.
+    # FLY : hors périmètre (fly+étages différé) → inchangé. Métrique hex : les deux branches
+    # `elif` ci-dessous (départ en hauteur ; montée depuis le sol).
     _floor_start = start_level_eff >= 1
     _can_climb = _squad_can_end_move_elevated(game_state, unit)
     if _mm_use_euclidean and not has_fly and ((view_level >= 1 and floor_hexes_view) or _floor_start):
@@ -4847,6 +4848,48 @@ def movement_build_model_destinations_pool(
         reachable = _ground_dests + _floor_dests
         _floor_set = set(_floor_dests)
         eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
+    elif (not has_fly) and _floor_start:
+        # MÉTRIQUE HEX (x1) — mover DÉJÀ EN HAUTEUR. Jumeau du bloc `_floor_start` euclidien :
+        # 13.06 MOVING VERTICALLY, « add the distance moved vertically up, AND the distance moved
+        # vertically down, to any other distance that model has moved ».
+        #   - SOL : BFS hex de plain-pied amputé de la hauteur de SON plancher (hauteur ×
+        #     `inches_to_subhex`, arrondie au supérieur — la grandeur de `squad_descent_penalty_
+        #     subhex`, trajet au sol depuis la case de départ, l'abstraction du gym). Sans cela le
+        #     sol lui était offert à M plein (mesuré : 6 cases pour M = 6" et un plancher de 3",
+        #     checklist x1).
+        #   - ÉTAGE VU (niveau >= 1) : `ascent_field_for_model`, le champ multi-niveaux seedé à
+        #     SON niveau — rester sur son plancher est horizontal, gagner le plancher d'une AUTRE
+        #     ruine ou un étage plus haut paie descente et montée. Ses cases sont celles dont
+        #     l'empreinte tient sur le plancher au sens du COMMIT (`validate_floor_placement`) :
+        #     une case de bord taguée « étage » par le seul test d'appartenance hex (`_eff_level`)
+        #     mais résolue au sol par `resolve_model_effective_level` est du SOL, donc bornée par
+        #     la descente — le tag planaire seul laissait cet anneau à M plein.
+        # FLY (21.03) ignore toute distance verticale : jamais ici.
+        from engine.terrain_utils import floor_height_at
+        from .shared_utils import ascent_field_for_model
+
+        _descent_subhex = int(math.ceil(
+            floor_height_at(terrain_areas, start_col, start_row, start_level_eff)
+            * int(require_key(game_state, "inches_to_subhex"))
+        ))
+        _ground_after_descent = set(_hex_planar_reach(max(0, budget - _descent_subhex)))
+        _floor_dests = []
+        if view_level >= 1 and floor_hexes_view:
+            _fig_occ_view = fig_occ_by_level.get(view_level, set())
+            for _d, _cost in ascent_field_for_model(
+                game_state, squad_id, player, model, view_level, budget
+            ).items():
+                if _cost > budget or _d in _wall_anchors or _d in ez_anchor_forbidden:
+                    continue
+                if any(c in _fig_occ_view for c in _mover_cells(_d[0], _d[1])):
+                    continue
+                _floor_dests.append(_d)
+        _floor_set = set(_floor_dests)
+        _ground_dests = [
+            _d for _d in reachable if _d not in _floor_set and _d in _ground_after_descent
+        ]
+        reachable = _ground_dests + _floor_dests
+        eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
     elif not has_fly and view_level >= 1 and floor_hexes_view and view_level > start_level_eff:
         # MÉTRIQUE HEX (x1) — MONTÉE vers l'étage vu. Le BFS planaire ci-dessus taguait « étage »
         # toute case dont l'empreinte tient sur le plancher, sans mot-clé ni coût vertical, et
@@ -4879,32 +4922,6 @@ def movement_build_model_destinations_pool(
         _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0 and _d not in _floor_set]
         reachable = _ground_dests + _floor_dests
         eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
-
-    # DESCENTE 13.06 en métrique HEX : « add […] the distance moved vertically down, to any other
-    # distance that model has moved ». Une figurine partie d'un ÉTAGE qui finit au SOL paie la
-    # hauteur de son plancher — même abstraction que le squad move du gym
-    # (`squad_descent_penalty_subhex` : hauteur × `inches_to_subhex` arrondie au supérieur,
-    # retranchée du budget, trajet au sol depuis la case de départ) et même grandeur que la branche
-    # euclidienne ci-dessus facture par le champ multi-niveaux. Sans ce bloc le sol lui était
-    # offert à M plein (mesuré : 6 cases pour M = 6" et un plancher de 3", checklist x1). Les cases
-    # de SON étage restent à M plein : rester sur le plancher est un mouvement horizontal (13.06).
-    # FLY (21.03) ignore toute distance verticale.
-    if (not _mm_use_euclidean) and not has_fly and _floor_start:
-        from engine.terrain_utils import floor_height_at
-
-        _descent_subhex = int(math.ceil(
-            floor_height_at(terrain_areas, start_col, start_row, start_level_eff)
-            * int(require_key(game_state, "inches_to_subhex"))
-        ))
-        if _descent_subhex > 0:
-            _ground_after_descent = set(_hex_planar_reach(max(0, budget - _descent_subhex)))
-            # Seul le SOL (niveau effectif 0) est amputé : les cases d'étage — le sien, ou
-            # celui d'une montée déjà facturée par `ascent_field_for_model` — restent telles quelles.
-            reachable = [
-                _d for _d in reachable
-                if eff_by_dest[_d] != 0 or _d in _ground_after_descent
-            ]
-            eff_by_dest = {_d: eff_by_dest[_d] for _d in reachable}
 
     # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière AU MÊME NIVEAU EFFECTIF
     # (au lieu de le détecter après coup via le voile rouge). Clearance euclidienne par base RÉELLE —

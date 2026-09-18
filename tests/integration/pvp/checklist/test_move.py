@@ -1000,6 +1000,23 @@ class TestTerrainMovement1306:
         # Non vacant : le budget restant est bien dépensé (portée en ligne droite au moins).
         assert reach >= _straight_reach(game, after_descent), (reach, _straight_reach(game, after_descent))
 
+        # VUE ÉTAGE : les cases rendues « niveau 1 » sont celles que le COMMIT résout à l'étage
+        # (`resolve_model_effective_level`) — jamais une case de bord que seule l'appartenance
+        # hex tague « étage » et que le commit poserait au sol à M plein ; le sol reste borné.
+        from engine.phase_handlers.shared_utils import resolve_model_effective_level
+
+        state = _engine_state()
+        model = state["models_cache"]["7#0"]
+        dests_view = _model_dests(game, "7#0", level=1)
+        upper = [d for d in dests_view if d[2] == 1]
+        assert upper, "aucune case d'étage proposée à la figurine qui y est déjà"
+        for d in upper:
+            assert resolve_model_effective_level(state, model, d[0], d[1], 1) == 1, (
+                f"case {d} offerte à l'étage mais résolue au sol par le commit"
+            )
+        ground_view = [d for d in dests_view if d[2] == 0]
+        assert _farthest_reach(game, "7#0", ground_view) <= after_descent
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 20.01–20.04 + 24.09 — réserves stratégiques
