@@ -2589,6 +2589,57 @@ class W40KEngine(gym.Env):
                     totals[f'{key}_positive'] += max(0.0, value)
         totals['penalties'] += reserves_penalty
 
+    @staticmethod
+    def _fight_counters_from_action_logs(
+        action_logs: List[Dict[str, Any]], controlled_player: int
+    ) -> Dict[str, int]:
+        """Compteurs de fin d'episode de la phase de combat (courbes `06_fight/b_` a `e_`), lus
+        dans `action_logs` — meme source que les kills et les charges, jamais un accumulateur
+        tenu a part (cf. le commentaire des distances de charge dans `_build_terminal_info`).
+
+          - `engaging_consolidations_{agent,opponent}` : lignes `consolidation` en mode engaging ;
+          - `new_foes_suffered` : New Foes geles (`newFoesFrozen`, pose par le driver gym) par
+            les consos engaging de l'AGENT — les combats adverses qu'il a ouverts lui-meme ;
+          - `multi_level_fight_activations` : activations (tour, escouade) de l'agent dont les
+            figurines qui frappent et les survivantes de la cible ne sont pas au meme etage
+            (`attackerLevels` / `targetLevels`, exiges sur toute ligne `combat`) ; une cible
+            entierement detruite (liste vide) n'est pas jugee ;
+          - `engaged_idle_models` : figurines de l'agent engagees SANS attaque a une activation
+            (`fight_declaration`, ecrite par `build_manual_fight_allocation`).
+        """
+        engaging_agent = 0
+        engaging_opponent = 0
+        new_foes_suffered = 0
+        multi_level: Set[Tuple[int, str]] = set()
+        engaged_idle = 0
+        for log in action_logs:
+            log_type = log.get("type")
+            if log_type == "consolidation":
+                if require_key(log, "consolidationMode") == "engaging":
+                    if int(require_key(log, "player")) == controlled_player:
+                        engaging_agent += 1
+                        # Absent sur le chemin PvP humain (machine manuelle), qui ne s'entraine pas.
+                        new_foes_suffered += int(log.get("newFoesFrozen", 0))  # get allowed
+                    else:
+                        engaging_opponent += 1
+            elif log_type == "fight_declaration":
+                if int(require_key(log, "player")) == controlled_player:
+                    engaged_idle += int(require_key(log, "engagedIdleModels"))
+            elif log_type == "combat":
+                if int(require_key(log, "player")) != controlled_player:
+                    continue
+                atk_levels = require_key(log, "attackerLevels")
+                tgt_levels = require_key(log, "targetLevels")
+                if atk_levels and tgt_levels and set(atk_levels) != set(tgt_levels):
+                    multi_level.add((int(require_key(log, "turn")), str(require_key(log, "shooterId"))))
+        return {
+            "engaging_consolidations_agent": engaging_agent,
+            "engaging_consolidations_opponent": engaging_opponent,
+            "new_foes_suffered": new_foes_suffered,
+            "multi_level_fight_activations": len(multi_level),
+            "engaged_idle_models": engaged_idle,
+        }
+
     def _build_terminal_info(self) -> Dict[str, Any]:
         """Bilan de FIN D'EPISODE, construit ICI pour TOUTES les portes de terminaison.
 
@@ -2995,6 +3046,10 @@ class W40KEngine(gym.Env):
         self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
         self.episode_tactical_data['shoot_waits'] = shoot_waits
         self.episode_tactical_data['fight_activations'] = len(fight_activations)
+        # 06_fight/ b_ a e_ (lot melee-100), derives de la meme passe sur `action_logs`.
+        self.episode_tactical_data.update(
+            self._fight_counters_from_action_logs(action_logs, controlled_player)
+        )
         self.episode_tactical_data['charge_distance'] = charge_distance_local
 
         # Issues du cache de scoring du deploiement, lues sur le decodeur qui les compte.
@@ -8516,8 +8571,9 @@ class W40KEngine(gym.Env):
         self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int, int]], kind: str,
         *, consolidation_mode: Optional[str] = None,
         consolidation_target_ids: Optional[List[str]] = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """Commit gym d'un move fight groupé (pile-in/consolidation) + log par-figurine.
+        Rend l'entrée d'action_log émise.
 
         Le driver gym résout ces déplacements via ``commit_move`` sans passer par les handlers
         interactifs : le log par-figurine (source du step.log/replay ET du game log PvP) doit donc
@@ -8582,7 +8638,7 @@ class W40KEngine(gym.Env):
                 f"_gym_commit_fight_move: consolidation de {uid!r} sans `consolidation_mode` — "
                 f"le mode 12.08 se constate AVANT le move, l'appelant doit le fournir"
             )
-        _append_fight_move_log(
+        return _append_fight_move_log(
             gs, unit, kind=kind,
             from_col=from_col, from_row=from_row,
             to_col=to_col, to_row=to_row,
@@ -8726,17 +8782,20 @@ class W40KEngine(gym.Env):
                             require_key(gs, "consolidation_done").add(str(uid))
                             continue
                     plan, targets = squad_consolidate_plan_with_targets(gs, str(uid), mode=mode)
+                    _conso_entry: Optional[Dict[str, Any]] = None
                     if plan is not None:
-                        self._gym_commit_fight_move(
+                        _conso_entry = self._gym_commit_fight_move(
                             gs, str(uid), plan, "consolidation", consolidation_mode=mode,
                             consolidation_target_ids=targets,
                         )
                     require_key(gs, "consolidation_done").add(str(uid))
-                    if (
-                        plan is not None and mode == "engaging"
-                        and fight_v11_consolidation_freeze_new_foes(gs, unit)
-                    ):
-                        break  # les New Foes combattent AVANT la conso suivante (§8.C)
+                    if plan is not None and mode == "engaging":
+                        _frozen = fight_v11_consolidation_freeze_new_foes(gs, unit)
+                        # Compteur `06_fight/c_new_foes_subies` : New Foes ouverts par CETTE conso.
+                        if _conso_entry is not None:
+                            _conso_entry["newFoesFrozen"] = len(_frozen)
+                        if _frozen:
+                            break  # les New Foes combattent AVANT la conso suivante (§8.C)
                 continue
 
             raise ValueError(f"fight_subphase inattendu dans le chemin gym: {sub!r}")

@@ -11100,6 +11100,15 @@ def _segment_with_tokens(segment: str, tokens: Sequence[str]) -> str:
     return segment if not tokens else f"{segment} {' '.join(tokens)}"
 
 
+def _levels_of_models(game_state: Dict[str, Any], model_ids: List[str]) -> List[int]:
+    """Étages DISTINCTS (triés) des figurines vivantes de `model_ids`."""
+    models_cache = require_key(game_state, "models_cache")
+    return sorted({
+        int(require_key(models_cache[str(m)], "level"))
+        for m in model_ids if str(m) in models_cache
+    })
+
+
 def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: ManualAllocCtx) -> None:
     """Emet 1 action_log de tir pour un groupe (arme, cible).
 
@@ -11262,6 +11271,14 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "weaponName": weapon_name_g if weapon_name_g else None,
         "targetUnitType": tgt_unit_type_g,
         "player": g["player"],
+        # Étages des figurines qui frappent et des survivantes de la cible (mêlée seulement) :
+        # source du compteur `06_fight/d_fights_multi_niveaux` (A6). Cible entièrement détruite →
+        # liste vide, l'activation n'est pas jugée.
+        "attackerLevels": _levels_of_models(game_state, list(require_key(g, "shooter_mids")))
+        if ctx.log_type == "combat" else None,
+        "targetLevels": _levels_of_models(
+            game_state, list(require_key(game_state, "squad_models").get(target_sid_g, []))  # get allowed
+        ) if ctx.log_type == "combat" else None,
         "shooterCol": ac,
         "shooterRow": ar,
         "targetCol": tc,

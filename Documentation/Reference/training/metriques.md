@@ -459,6 +459,21 @@ Chaque ratio n'est émis **que si son dénominateur est > 0**.
 
 ---
 
+### Phase de combat (`06_fight/`)
+
+Toutes dérivées d'`action_logs` en fin d'épisode (`W40KEngine._fight_counters_from_action_logs`, même passe que les kills), émises par `log_tactical_metrics`. Lot melee-100 (2026-09-18) pour `b_` à `e_`.
+
+| Métrique | Ce qu'elle mesure | Signal attendu |
+|----------|-------------------|----------------|
+| **06_fight/a_activations_per_turn** | Activations de mêlée (paires tour × escouade uniques des lignes `combat`) ÷ tour final | Stable ; monte si l'agent cherche le corps à corps |
+| **06_fight/b_engaging_consolidations_agent** | Consolidations en mode **engaging** (12.08) jouées par l'agent par épisode — depuis B2 c'est un choix (`consolidation_engaging`, `CHOICE_0` / `CHOICE_1`) | Dit si l'agent prend l'option ; à lire avec `c_` |
+| **06_fight/b_engaging_consolidations_opponent** | Idem côté adversaire (le bot de référence répond toujours « Consolider ») | Constante sur un même panel |
+| **06_fight/c_new_foes_subies** | New Foes to Face (12.08 AFTER) ouverts à l'adversaire par les consolidations engaging de l'agent (`newFoesFrozen` du log `consolidation`, posé par le driver gym) | Le prix de `b_` : un `b_` élevé avec `c_` nul est une consolidation sans risque, un `c_` élevé des combats offerts |
+| **06_fight/d_fights_multi_niveaux** | Activations de mêlée de l'agent où les figurines qui frappent et les survivantes de la cible ne sont pas au même étage (`attackerLevels` / `targetLevels` du log `combat` ; cible entièrement détruite = non jugée) | Mesure de A6 : doit rester à 0 tant que le pile-in gym ne change pas d'étage |
+| **06_fight/e_engaged_idle_models** | Figurines de l'agent **engagées sans attaque** à leurs activations de mêlée (`fight_declaration`, écrit par `build_manual_fight_allocation` : engagées 04.02 moins porteuses d'un intent) | **0** — garde de régression de D+ (04.01 / 04.02 / 24.11) ; toute valeur > 0 est un bug |
+
+---
+
 ### Évaluation (`03_eval/`, `bot_eval/`)
 
 | Métrique | Ce que c'est | Cible | Notes |

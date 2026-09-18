@@ -410,8 +410,9 @@ def _append_fight_move_log(  # noqa: PLR0913
     pile_in_target_ids: Optional[List[str]] = None,
     consolidation_mode: Optional[str] = None,
     consolidation_target_ids: Optional[List[str]] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Log par-figurine unique d'un déplacement de phase fight (pile-in / consolidation).
+    Rend l'entrée journalisée (mutable en place : le driver gym y pose `newFoesFrozen`).
 
     Point de vérité UNIQUE partagé par le chemin manuel PvP et le driver gym
     (`_fight_v11_gym_settle` via `commit_move`) : la ligne (PvP game log + step.log/replay)
@@ -464,6 +465,7 @@ def _append_fight_move_log(  # noqa: PLR0913
     if consolidation_target_ids:
         entry["consolidationTargetIds"] = [str(t) for t in consolidation_target_ids]
     append_action_log(game_state, entry)
+    return entry
 
 
 def _fight_effective_level_at(
@@ -5412,8 +5414,40 @@ FIGHT_CTX = ManualAllocCtx(
 )
 
 
+def _log_fight_declaration(game_state: Dict[str, Any], attacker_squad_id: str) -> None:
+    """Journalise (action_logs seulement, pas step.log : type hors `_STEP_LOG_TYPE_MAP`) le bilan
+    04.02 d'une activation de mêlée : figurines ENGAGÉES (`get_fighting_models`, tout ennemi)
+    contre figurines qui FRAPPENT (porteuses d'un intent). Source du compteur TensorBoard
+    `06_fight/e_engaged_idle_models` (garde de régression de D+ : doit valoir 0)."""
+    from .shared_utils import get_fighting_models
+
+    sid = str(attacker_squad_id)
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(sid)
+    if entry is None or not entry_is_on_battlefield(entry):
+        return
+    intents = require_key(game_state, "pending_squad_fight_intents").get(sid, [])  # get allowed
+    engaged = get_fighting_models(game_state, sid, None)
+    striking = {str(i["model_id"]) for i in intents}
+    append_action_log(
+        game_state,
+        {
+            "type": "fight_declaration",
+            "turn": require_key(game_state, "turn"),
+            "phase": "fight",
+            "unitId": sid,
+            "player": int(require_key(entry, "player")),
+            "engagedModels": len(engaged),
+            "strikingModels": len(striking),
+            "engagedIdleModels": len([m for m in engaged if m not in striking]),
+            "timestamp": "server_time",
+        },
+    )
+
+
 def build_manual_fight_allocation(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
     """Allocation manuelle des pertes au COMBAT (defenseur humain). Cf. _build_manual_allocation."""
+    _log_fight_declaration(game_state, attacker_squad_id)
     return _build_manual_allocation(game_state, attacker_squad_id, FIGHT_CTX, _manual_roll_fight_intent)
 
 

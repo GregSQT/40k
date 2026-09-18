@@ -186,6 +186,10 @@ class W40KMetricsTracker:
         'deploy_cache_lookups', 'deploy_cache_full_builds', 'deploy_cache_incremental_failed',
         # Activations de combat par tour (06_fight/a_activations_per_turn).
         'fight_activations', 'fight_final_turn',
+        # Lot melee-100 (06_fight/b_ a e_) : consolidations engaging par camp, New Foes subis,
+        # activations de melee a etages differents, figurines engagees sans attaque.
+        'engaging_consolidations_agent', 'engaging_consolidations_opponent',
+        'new_foes_suffered', 'multi_level_fight_activations', 'engaged_idle_models',
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
@@ -1224,6 +1228,34 @@ class W40KMetricsTracker:
             'fight_final_turn', float(require_key(tactical_data, 'final_turn'))
         )
         self._emit_ratio_of_means('06_fight/a_activations_per_turn', fight_activations_hist, final_turn_hist)
+        # b_ : consolidations ENGAGING (12.08) par episode, les deux camps — depuis B2 c'est un
+        # choix de l'agent (CHOICE_0 / CHOICE_1), la courbe dit s'il le prend.
+        self._emit_game(
+            '06_fight/b_engaging_consolidations_agent', 'engaging_consolidations_agent',
+            float(require_key(tactical_data, 'engaging_consolidations_agent')),
+        )
+        self._emit_game(
+            '06_fight/b_engaging_consolidations_opponent', 'engaging_consolidations_opponent',
+            float(require_key(tactical_data, 'engaging_consolidations_opponent')),
+        )
+        # c_ : New Foes to Face (12.08 AFTER) ouverts a l'adversaire par les consos engaging de
+        # l'agent — le prix de l'agressivite que l'encart du PDF 12 invite a peser.
+        self._emit_game(
+            '06_fight/c_new_foes_subies', 'new_foes_suffered',
+            float(require_key(tactical_data, 'new_foes_suffered')),
+        )
+        # d_ : activations de melee de l'agent ou attaquant et cible ne sont pas au meme etage
+        # (mesure de A6 : sans etage franchissable en pile-in, la courbe doit rester a 0).
+        self._emit_game(
+            '06_fight/d_fights_multi_niveaux', 'multi_level_fight_activations',
+            float(require_key(tactical_data, 'multi_level_fight_activations')),
+        )
+        # e_ : figurines de l'agent engagees SANS attaque a leurs activations de melee — garde de
+        # regression de D+ (04.01 / 04.02 / 24.11), doit valoir 0.
+        self._emit_game(
+            '06_fight/e_engaged_idle_models', 'engaged_idle_models',
+            float(require_key(tactical_data, 'engaged_idle_models')),
+        )
 
     def log_abilities_metrics(self, tactical_data: Dict[str, Any]) -> None:
         """Règles d'unité appliquées — Famille A (action_log) + Famille B (shot_records).
