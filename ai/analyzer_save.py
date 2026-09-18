@@ -25,7 +25,8 @@ Deux compteurs, un par entrée du corpus (bucket §2.3 « dégâts ») :
    si la FIGURINE ALLOUÉE porte `feel_no_pain_near_objective` ET est à portée d'un objectif
    (14.02 : « within range of a terrain objective while it is within that terrain area » — son
    socle recouvre l'aire) ou à 6" du centre. Aucun FNP attendu → tout `[FNP:]` est une faute ;
-   FNP attendu, dégâts appliqués (`Dmg:X>0`) sans `[FNP:]` → faute ; seuil ≠ attendu → faute ;
+   FNP attendu, dégâts appliqués (`Dmg:X>0`) sans `[FNP:]` → faute SEULEMENT en grammaire
+   `FNP_MARKER_GRAMMAR` ou plus (ci-dessous) ; seuil ≠ attendu → faute ;
    `X ≠ tentatives − sauvés` → faute.
 
 « PRÉSENTE » = figurine de l'escouade cible au Select Targets step de l'activation
@@ -33,6 +34,13 @@ Deux compteurs, un par entrée du corpus (bucket §2.3 « dégâts ») :
 last model was destroyed as the result of an attack, the ability applies until the attacking
 unit has resolved all of its attacks » —, et le journal émet les lignes DEAD AVANT les lignes
 d'attaque de l'activation, donc les socles VIVANTS à la ligne sous-estimeraient les sources.
+
+L'ABSENCE du marqueur n'est jugée qu'à partir de `FNP_MARKER_GRAMMAR` : le marqueur est apparu
+en grammaire 7 (2026-08-20) sans incrément, et la branche `Save [DEVASTATING WOUNDS]` l'a omis
+jusqu'à la 16 alors que le moteur y jetait le dé — aucune version antérieure ne le garantit, et
+un journal de 7 à 15 compterait donc une faute INVENTÉE sur chaque ligne de dégâts. Les trois
+autres verdicts (présence sans source, seuil, compte) ne dépendent que de ce que la ligne PORTE
+et restent rendus à toute version.
 
 CE QUI EST DÉLIBÉRÉMENT ÉCARTÉ (abstention, jamais une faute inventée) : segment `Save` sans
 base/AP (journal antérieur, `[DEVASTATING WOUNDS]`, `[NOT ALLOCATED]`) ; figurine allouée ou
@@ -62,6 +70,12 @@ _ALLOC_MODEL_RE = re.compile(r"\[ALLOC_MODEL:\s*(\d+#[^\s\]]+)\s*\]")
 NO_INVUL = 7
 #: Blessures mortelles de source PSYCHIC (tags `HAZARD_CONTEXT_TAGS`) : Da Jump seulement.
 PSYCHIC_MORTAL_TAGS = ("[DA JUMP]",)
+
+#: Grammaire à partir de laquelle `[FNP:]` est GARANTI sur toute ligne d'attaque portant des
+#: dégâts (`ai/step_logger.LOG_GRAMMAR_VERSION`, entrée 16) — donc à partir de laquelle son
+#: absence est jugeable. Ne concerne PAS le miroir `[FNP:n]` de `SUFFERS` : celui-là n'est écrit
+#: que si au moins une blessure est sauvée, son absence reste indécidable à toute version.
+FNP_MARKER_GRAMMAR = 16
 
 SAVE_COUNTER = "save_threshold_mismatch"
 FNP_COUNTER = "fnp_threshold_mismatch"
@@ -256,8 +270,11 @@ def check_fnp(
     defender = int(state.unit_player.get(target_id, attacker_player))  # get allowed
     dmg = int(dmg_m.group(1)) if dmg_m else 0
     if fnp_m is None:
-        # FNP attendu (et sans ambiguïté), dégâts appliqués → le moteur devait jeter.
-        if dmg > 0 and None not in accepted and not ambiguous:
+        # FNP attendu (et sans ambiguïté), dégâts appliqués → le moteur devait jeter. Jugeable
+        # seulement si la grammaire GARANTIT le marqueur : en deçà, son absence ne distingue pas
+        # un moteur en panne d'un producteur qui ne l'écrivait pas encore.
+        if (dmg > 0 and None not in accepted and not ambiguous
+                and state.log_grammar >= FNP_MARKER_GRAMMAR):
             _error(state, stats, FNP_COUNTER, defender, line,
                    f"Dmg:{dmg}HP sans [FNP:] alors qu'un Feel No Pain {min(t for t in accepted if t is not None)}+ "
                    "est porté par une source présente")

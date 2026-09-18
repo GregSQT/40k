@@ -211,8 +211,10 @@ producteur `_log_effects_snapshot` ; Waaagh! actif sans la clé = abstention) ; 
 — `[FNP:s/t+ ×n]` : seuil = meilleur seuil des sources présentes (24.02), Dok's Toolz 5+, Psychic
 Hood 4+ si `[PSYCHIC]` ou Da Jump, Unbreakable Resolve 4+ si l'Ancient alloué est dans une aire
 d'objectif (`state.objective_cells`, entête `Objectives:`) ou à 6" du centre (abstention à x5 :
-le socle déborde de son ancre) ; présence sans source, absence avec source et `Dmg>0`, compte
-`Dmg ≠ n − s` ; miroir `[FNP:n]` sur SUFFERS (présence sans source). Corpus : 24.12 → COUVERT
+le socle déborde de son ancre) ; présence sans source, absence avec source et `Dmg>0`
+(**seulement en grammaire ≥ 16**, `FNP_MARKER_GRAMMAR` — avant, aucune version ne garantissait le
+marqueur et la branche `Save [DEVASTATING WOUNDS]` l'omettait), compte
+`Dmg ≠ n − s` ; miroir `[FNP:n]` sur SUFFERS (présence sans source, jamais l'absence). Corpus : 24.12 → COUVERT
 (la note « jet et seuil absents » était périmée), PROJ.1.9.feel_no_pain/_vs_psychic/_near_objective
 → COUVERT via 24.12, unit.invul_save_override et unit.waaagh → COUVERT, unit.toughness_bonus_while_waaagh
 → COUVERT via PROJ.1.4.blessure (contrôlé depuis `analyzer_wound.target_bodyguard_toughness`).

@@ -211,6 +211,11 @@ sélection 12.04, le moteur ne pose plus le token de lui-même) ; `15` (2026-09-
 `T{tour} OBJECTIVE CONTROL: … ZONES=` porte `:Sec=<1|2|none>` (sécurisée PAR OBJECTIF, 14.03),
 l'instantané est réécrit quand cette sécurisation change, et toute sécurisation laisse une ligne
 `Unit N(c,r) SECURES <zone> [GET DA GOOD BITZ|OBJECTIVE SECURED]` en phase de commandement ;
+`16` (2026-09-18) : toute ligne d'ATTAQUE portant un segment `Dmg:<n>HP` porte aussi
+`[FNP:<sauvés>/<seuil>+ ×<tentatives>]` dès qu'un Feel No Pain a été jeté, sauvegarde SAUTÉE par
+[DEVASTATING WOUNDS] comprise — le marqueur était apparu en grammaire 7 sans incrément, et cette
+branche-là l'omettait alors que le moteur y jette le dé ; la ligne `SUFFERS N Mortal Wounds` reste
+hors garantie (marqueur `[FNP:<sauvés>]`, écrit seulement si au moins une blessure est sauvée) ;
 l'historique complet des versions 6–10 est dans `ai/step_logger.py` (en-tête `LOG_GRAMMAR_VERSION`).
 Ligne absente ⇒ 1.
 

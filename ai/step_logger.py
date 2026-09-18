@@ -125,9 +125,22 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       Verrous : test_step_log_objective_secured.py (producteur),
 #:       test_analyzer_objective_control.py / test_analyzer_objective_secured.py (lecteur).
 #:
+#:  16 — MARQUEUR DE JETS FEEL NO PAIN garanti (24.12) : toute ligne d ATTAQUE (tir ou melee)
+#:       qui porte un segment `Dmg:<n>HP` porte aussi `[FNP:<sauves>/<seuil>+ ×<tentatives>]` des
+#:       qu un Feel No Pain a ete jete — sauvegarde SAUTEE par [DEVASTATING WOUNDS] comprise,
+#:       branche qui l omettait depuis l apparition du marqueur (grammaire 7, 2026-08-20) alors
+#:       que le moteur y jette bien le de. Sur un journal log_grammar>=16, des degats sans
+#:       marqueur contre une escouade porteuse d une source de FNP PRESENTE sont une FAUTE
+#:       (`fnp_threshold_mismatch`) ; en deca, l ABSENCE n est jamais jugee, aucune version
+#:       anterieure ne garantissant le marqueur. La ligne `SUFFERS N Mortal Wounds` n entre PAS
+#:       dans cette garantie : son marqueur a une autre forme (`[FNP:<sauves>]`, sans seuil ni
+#:       tentatives) et n est ecrit que si au moins une blessure est sauvee — son absence y reste
+#:       indecidable, et l analyzer ne juge que sa PRESENCE. Verrous : test_step_log_fnp.py
+#:       (producteur), test_analyzer_fnp.py (lecteur).
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 15
+LOG_GRAMMAR_VERSION = 16
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -282,7 +295,9 @@ def _save_segments(
     1. `Save [DEVASTATING WOUNDS]` — 24.10, « no saving throw can be made » : le moteur a SAUTE
        la sauvegarde, il le dit (`save_skipped` + motif). Ecrire un jet ici serait decrire un de
        qui n a jamais ete lance. La branche existait au TIR seulement : la melee imprimait
-       `Save None(<seuil>+)`, c est-a-dire un jet inexistant sous un seuil reel.
+       `Save None(<seuil>+)`, c est-a-dire un jet inexistant sous un seuil reel. Le SEUL de
+       absent est celui de la sauvegarde : les degats passent par `_damage_segment` comme ceux
+       d une sauvegarde ratee, marqueur Feel No Pain compris (grammaire 16).
 
     2. `Save [NOT ALLOCATED]` — l attaque n a jamais ete ALLOUEE a une figurine. Le seuil de
        sauvegarde n est ecrit qu a l allocation (`_resolve_one_manual_wound`) : sans elle, ni
@@ -322,7 +337,13 @@ def _save_segments(
                 "attendu 'DEVASTATING_WOUNDS'"
             )
         prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
-        return prefix + ["Save [DEVASTATING WOUNDS]", f"Dmg:{damage}HP"]
+        # 24.12 s applique a TOUTE blessure perdue, sauvegarde sautee comprise : le moteur jette
+        # bien le Feel No Pain sur cette branche (`_resolve_one_manual_wound` ne quitte pas avant
+        # le bloc de degats), et taire le marqueur ici rendait l application du FNP sur les
+        # blessures devastatrices invisible — et la comptait en faute cote analyzer.
+        return prefix + ["Save [DEVASTATING WOUNDS]", _damage_segment(
+            damage, fnp_saves=fnp_saves, fnp_attempts=fnp_attempts, fnp_threshold=fnp_threshold,
+        )]
     if details.get("save_target") is None:
         return ["Save [NOT ALLOCATED]"]
     # L4 : affichage etendu quand base Sv et AP de l arme sont dans le record.
@@ -340,12 +361,23 @@ def _save_segments(
     prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
     segments = prefix + [save_part]
     if save_result == "FAIL":
-        _dmg_str = f"Dmg:{damage}HP"
-        # L12 — FNP:saves/seuil+ ×tentatives (24.12) ; absent si pas de FNP.
-        if fnp_saves is not None and fnp_attempts is not None:
-            _dmg_str += f" [FNP:{fnp_saves}/{fnp_threshold}+ ×{fnp_attempts}]"
-        segments.append(_dmg_str)
+        segments.append(_damage_segment(
+            damage, fnp_saves=fnp_saves, fnp_attempts=fnp_attempts, fnp_threshold=fnp_threshold,
+        ))
     return segments
+
+
+def _damage_segment(damage, *, fnp_saves, fnp_attempts, fnp_threshold) -> str:
+    """`Dmg:<n>HP` + `[FNP:<sauves>/<seuil>+ ×<tentatives>]` (L12, 24.12) quand un FNP a ete jete.
+
+    Site UNIQUE des deux branches qui impriment des degats (sauvegarde ratee et sauvegarde
+    SAUTEE par [DEVASTATING WOUNDS]) : elles divergeaient, et seule la premiere portait le
+    marqueur alors que le moteur jette le de dans les deux cas.
+    """
+    seg = f"Dmg:{damage}HP"
+    if fnp_saves is not None and fnp_attempts is not None:
+        seg += f" [FNP:{fnp_saves}/{fnp_threshold}+ ×{fnp_attempts}]"
+    return seg
 
 
 def _rerolled_token(details, field_name: str) -> str:

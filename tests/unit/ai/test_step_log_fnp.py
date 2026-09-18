@@ -120,3 +120,38 @@ def test_l12_fnp_save_success_no_tag(tmp_path: Path) -> None:
     _log_shoot(logger, details)
     content = _read(log)
     assert "[FNP:" not in content
+
+
+def _devastating_details(**fnp: Optional[int]) -> Dict[str, Any]:
+    """Sauvegarde SAUTÉE (24.10) : le moteur pose le drapeau puis applique les dégâts, FNP
+    compris (`_resolve_one_manual_wound`, engine/phase_handlers/shared_utils.py)."""
+    d = _shoot_fail_details(**fnp)
+    d["save_skipped"] = True
+    d["save_skip_reason"] = "DEVASTATING_WOUNDS"
+    return d
+
+
+def test_grammaire_16_marqueur_fnp_sur_sauvegarde_sautee(tmp_path: Path) -> None:
+    """24.12 s'applique à toute blessure perdue : une blessure DEVASTATING qui a subi un jet
+    FNP porte le marqueur, comme une sauvegarde ratée.
+
+    Cycle rouge→vert : rendre à la branche `save_skipped` de `_save_segments` son ancien
+    `f"Dmg:{damage}HP"` en dur (au lieu de `_damage_segment`) fait rougir ce test.
+    """
+    log = tmp_path / "step.log"
+    logger = _logger(log)
+    _log_shoot(logger, _devastating_details(fnp_saves=2, fnp_attempts=5, fnp_threshold=5))
+    content = _read(log)
+    assert "Save [DEVASTATING WOUNDS]" in content, f"prémisse : sauvegarde sautée : {content}"
+    assert "Dmg:3HP [FNP:2/5+ ×5]" in content, f"Marqueur FNP absent sur 24.10 : {content}"
+
+
+def test_grammaire_16_pas_de_marqueur_sans_fnp_sur_sauvegarde_sautee(tmp_path: Path) -> None:
+    """Aucun FNP jeté → aucun marqueur, sur la branche sautée comme sur l'autre : la garantie
+    porte sur « jeté ⇒ écrit », jamais sur un token inconditionnel."""
+    log = tmp_path / "step.log"
+    logger = _logger(log)
+    _log_shoot(logger, _devastating_details())
+    content = _read(log)
+    assert "Save [DEVASTATING WOUNDS] - Dmg:3HP" in content, content
+    assert "[FNP:" not in content

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from ai.analyzer_save import FNP_MARKER_GRAMMAR
 from tests.unit.ai._fabriques import entete_step_log
 
 _OBJECTIVES = ";".join(f"(50,{r})" for r in range(50, 53))
@@ -41,23 +42,24 @@ _END = ("[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b N
         "Total=0, Duration=1.000s\n")
 
 
-def _shot(target: str, pos: str, mid: str, tail: str, sec: int = 3) -> str:
+def _shot(target: str, pos: str, mid: str, tail: str, sec: int = 3, wound: int = 5) -> str:
     """Un tir de 1#0 sur `target`, alloué à `mid` ; `tail` = segment Save/Dmg/FNP."""
     return (
         f"[10:00:{sec:02d}] E1 T1 P1 SHOOT : Unit 1(20,20) SHOT [DESIGNATED:{target}] Unit {target}{pos} with [Bolt Rifle]"
-        f" - Hit 4(3+) - Wound 5(4+) - → {mid} - {tail} [MODELS: 1#0@(20,20,z0)]"
+        f" - Hit 4(3+) - Wound {wound}(4+) - → {mid} - {tail} [MODELS: 1#0@(20,20,z0)]"
         f" [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: {mid}] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
     )
 
 
-def _stats(tmp_path, body: str, units: str = _UNITS, setup: str = _SETUP) -> dict:
+def _stats(tmp_path, body: str, units: str = _UNITS, setup: str = _SETUP,
+           log_grammar: int = FNP_MARKER_GRAMMAR) -> dict:
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         setup + body + _END, units=units, objectives=_OBJECTIVES, inches_to_subhex=1,
         board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
-        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=14,
+        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -156,3 +158,46 @@ def test_blessures_mortelles_avec_fnp_sans_source_sont_une_faute(tmp_path):
     stats = _stats(tmp_path, body)
     assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
     assert "blessures mortelles" in _first(stats)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grammaire 16 : le marqueur est GARANTI sur toute ligne de dégâts, 24.10 comprise
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 24.10 « no saving throw can be made » : le moteur saute la sauvegarde, puis applique les
+#: dégâts — et jette le Feel No Pain comme sur une sauvegarde ratée.
+_DEVASTATING = "Save [DEVASTATING WOUNDS] - Dmg:1HP"
+
+
+def test_sauvegarde_sautee_avec_marqueur_ne_compte_aucune_faute(tmp_path):
+    """Ce que le producteur écrit depuis la grammaire 16 : le PainBoy vit, le dé a été jeté."""
+    stats = _stats(tmp_path, _shot("101", "(30,20)", "101#0", _DEVASTATING + " [FNP:0/5+ ×1]", wound=6))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
+    assert stats["rule_usage"]["PROJ.2.3.fnp"][1] == 1
+
+
+def test_sauvegarde_sautee_sans_marqueur_reste_une_faute(tmp_path):
+    """Le contrôle n'est PAS suspendu sur 24.10 : sans marqueur, l'application du Feel No Pain
+    aux blessures dévastatrices serait invérifiable — c'est exactement ce qu'il contrôle."""
+    stats = _stats(tmp_path, _shot("101", "(30,20)", "101#0", _DEVASTATING, wound=6))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans [FNP:]" in _first(stats)
+
+
+@pytest.mark.parametrize("tail", [_DEVASTATING, "Save 2(5+ AP-1 → 6+) - Dmg:1HP"])
+def test_journal_anterieur_a_la_garantie_n_invente_aucune_faute(tmp_path, tail):
+    """Le marqueur est apparu en grammaire 7 sans incrément, et la branche 24.10 l'a omis
+    jusqu'à la 16 : aucune version antérieure ne le garantit, donc son absence n'y est pas
+    jugeable — ni sur une sauvegarde sautée, ni sur une sauvegarde ratée."""
+    stats = _stats(tmp_path, _shot("101", "(30,20)", "101#0", tail, wound=6),
+                   log_grammar=FNP_MARKER_GRAMMAR - 1)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
+
+
+def test_journal_anterieur_juge_toujours_ce_que_la_ligne_porte(tmp_path):
+    """La garde ne couvre QUE l'absence : un `[FNP:]` sans source reste une faute à toute
+    version, sa présence ne dépendant d'aucune garantie de grammaire."""
+    stats = _stats(tmp_path, _shot("103", "(30,40)", "103#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/5+ ×1]"),
+                   log_grammar=FNP_MARKER_GRAMMAR - 1)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans aucun Feel No Pain" in _first(stats)
