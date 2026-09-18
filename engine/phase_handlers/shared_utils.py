@@ -7621,7 +7621,7 @@ def charge_target_edge_distance_subhex(
 
 def charge_engage_memo(
     game_state: Dict[str, Any], key: Tuple[Any, ...]
-) -> Dict[Tuple[str, int, int], bool]:
+) -> Dict[Tuple[str, int, int], int]:
     """Tranche de mémo d'engagement pour UN plan de charge, partagée par ses cinq intentions.
 
     Une seule tranche est conservée à la fois : `arm_charge_placement_decision` enchaîne ses cinq
@@ -15459,15 +15459,15 @@ def squad_consolidate_plan_with_targets(
 
     selection = list(target_ids)
     for _ in range(len(target_ids) + 1):
-        plan, engaged = _plan_toward(selection)
+        plan_sel, engaged = _plan_toward(selection)
         # Validation finale : coherency + ER (au moins 1 fig dans la zone d engagement des cibles).
-        if plan is None or not engaged:
+        if plan_sel is None or not engaged:
             return None, []
         if mode == "ongoing" or len(engaged) == len(selection):
             # Ongoing : la sélection est imposée (12.08 « select every enemy unit it is engaged
             # with »), le plan n'y touche pas ; la clause AFTER (engagements de départ conservés)
             # est portée par `_assign_cells_toward_enemies`.
-            return plan, (list(target_ids) if mode == "ongoing" else engaged)
+            return plan_sel, (list(target_ids) if mode == "ongoing" else engaged)
         selection = engaged  # 12.08 AFTER : sélection = ce que le plan engage ; on replanifie
     raise RuntimeError(
         f"squad_consolidate_plan: la sélection engaging de {squad_id!r} n'a pas convergé "
