@@ -165,6 +165,31 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-18, 12:50 — P0′ TERMINÉ (règle tenue), ligne de référence mesurée ; paire option 2 en attente du feu vert utilisateur.**
+Run `run_20260918-055931` (graine 27182, 50 000 parties, 6 h 03, `training_x1_08-p00-prime.log`) :
+robuste **0,892** (règle ≥ 0,85 tenue, pas de relance ; P0c : 0,903), holdout final 1 800 parties
+**90,9 %** (P0c 92,3 %) — alpha 87,3 · attrition 89,3 · decapitation 92,0 · endgame 97,3 · racer 90,0 ·
+scorer 89,3 ; courbe 0,63 / 0,77 / 0,85 / 0,93 / 0,92 à 10–50 000 (P0c 0,62 / 0,80 / 0,90 / 0,88 /
+0,94) ; 0 troncature. `model_ArmageddonAgent_x1_P0.zip` = canonique = instantané robuste (même md5),
+ligne `curriculum.log`, 26 checkpoints conservés (rétention 64). **Écart de siège 14,0 pts** (0,99
+en premier / 0,85 en second, entraîné à 0,75 en second) contre 4,8 pour P0c : P0′ est nettement
+plus faible en second — à suivre sur P1′ (référence d'écart = le miroir, pas zéro).
+**Ligne de référence de P0′** (`logs/matrix_p0prime_20260918/`, 300 parties argmax par case,
+sièges 50/50 via l'agent expl / `x1_lineage`) : **vs P0c 0,513** (deux P0 à froid du même moteur
+font jeu égal : le jeu appris est le même, la graine ne classe pas), **vs P0a 0,77** (P0c : 0,753),
+**vs entnorm 0,61** (P0c : 0,770 — 16 pts de moins contre le témoin sans parenté, hors bruit :
+P0′ a un style que entnorm punit mieux ; c'est le juge qui départagera P1′), **miroir P0′/P0′
+0,493** (référence d'écart de siège ; miroir P0c/P0c du 18 : 0,493). Réserve : les trois juges
+répondent à `move_after_shooting` de façon arbitraire mais déterministe = biais fixe.
+**Ordre de la paire, décidé avec l'utilisateur (12:15)** : le TRAITÉ (T autorégulée) d'abord,
+puis le TÉMOIN (T = 2) ; chacun est arrêté à la main au plateau (patience 4 sondes sans +2 pts sur
+le meilleur lissé, au plus tôt à 30 000 — un exploiteur n'a pas de détecteur de plateau) ou à
+60 000 ; verdict sur l'écart traité − témoin **à parties égales** (les 3 sondes de chaque run
+autour du point d'arrêt du plus court), moyenne de 3 : ≥ +5 tient, ±5 nul, < −5 nuit ; sous 10 pts,
+seconde graine des deux runs. Si T reste à 1 sur le traité, le mécanisme n'a pas joué : non
+concluant quel que soit le score. Lancement du traité : sur feu vert utilisateur (tâche en cours de
+son côté).
+
 **2026-09-18, 06:00 — cycle 3 lancé : moteur re-gelé `6fe25c341`, P0′ à froid en cours, règle de lecture écrite avant ([dossier §10 option 2](../Chantiers/backlog/plafonnement_p1.md#exploration-2026-09-16), [§5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
 Session autonome (utilisateur absent) ; chaque choix est consigné ici avec ses alternatives.
 - **Gel** : `main` = `6fe25c341` au lancement (et non `880a5175b` : trois commits de plus, analyzer
