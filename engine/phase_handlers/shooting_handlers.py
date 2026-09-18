@@ -3838,8 +3838,8 @@ def batch_ground_hex_can_see(
       donc le chemin 3D de ``_los_line_segment_clear`` n'est pas pris ;
     - pas de clé ``level`` → niveau 0 → ``_walls_around_occupied_floor`` rend l'ensemble vide,
       donc le wall_set effectif est le wall_set complet ;
-    - exclusion obscuring (13.10) = area de la cellule SOURCE (``excluded_base``) ∪ area de la
-      cellule CIBLE, les seules empreintes en jeu.
+    - exclusion obscuring (13.10) = area de la cellule SOURCE (portée par l'unique figurine
+      tireuse) ∪ area de la cellule CIBLE, les seules empreintes en jeu.
     Reste donc : « un mur, ou une case obscuring dont l'area n'est ni celle de la source ni
     celle de la cible, sur les cellules intermédiaires ». C'est ce qui est écrit ci-dessous.
 
@@ -4310,20 +4310,31 @@ def _resolve_target_models_for_los(
     )
 
 
+#: Une figurine tireuse prête pour la LoS : (anchor, footprint, wall_set_effectif, z_s, occ_s,
+#: excluded_areas) — cf. ``_resolve_shooter_models_with_walls``.
+ShooterLosModel = Tuple[
+    Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any, Set[str]
+]
+
+
 def _resolve_shooter_models_with_walls(
     game_state: Dict[str, Any],
     shooter: Dict[str, Any],
     gym_training: bool,
-) -> Tuple[List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]], List[Tuple[int, int]]]:
+) -> List[ShooterLosModel]:
     """Décompose le TIREUR par figurine vivante pour la LoS (règle 06.01, tracée PAR figurine).
 
-    Retourne (shooter_models, shooter_hexes_all) où chaque shooter_model est
-    (anchor, footprint, wall_set_effectif, z_s, occ_s) : le wall_set effectif de CETTE figurine est le mur du
-    plateau MOINS les murs de la ruine qu'elle occupe si elle est sur un étage (niveau >= 1) —
-    sinon le mur complet. Ainsi une figurine au sol reste bloquée par un mur même si une figurine
-    de la même escouade, sur l'étage, ne l'est plus. ``shooter_hexes_all`` = union des empreintes
-    (sert au calcul des obscuring areas occupées par le tireur, règle 13.10, inchangé au niveau
-    unité). Repli non-découpé (gym / dict coordonnées-seules) : une seule figurine = l'unité, niveau
+    Retourne la liste des shooter_models, chacun
+    (anchor, footprint, wall_set_effectif, z_s, occ_s, excluded_areas) :
+    - wall_set effectif de CETTE figurine = murs du plateau MOINS les murs de la ruine qu'elle
+      occupe si elle est sur un étage (niveau >= 1), sinon le mur complet. Ainsi une figurine au
+      sol reste bloquée par un mur même si une figurine de la même escouade, sur l'étage, ne l'est
+      plus ;
+    - ``excluded_areas`` = obscuring areas que CETTE figurine occupe (règle 13.10 : « excluding
+      obscuring terrain areas that one or both of those MODELS are within »). L'exclusion est une
+      propriété de la paire de figurines, jamais de l'escouade : une figurine hors de l'area X ne
+      voit pas à travers X même si une camarade est dedans.
+    Repli non-découpé (gym / dict coordonnées-seules) : une seule figurine = l'unité, niveau
     ``unit["level"]``.
 
     Résultat mémoïsé par (shooter_id, _unit_move_version) : les empreintes/niveaux des figurines
@@ -4342,14 +4353,14 @@ def _resolve_shooter_models_with_walls(
             game_state["_shooter_los_models_cache"] = holder
         hit = holder.get(cache_key)
         if hit is not None and hit[0] == version:
-            return hit[1], hit[2]
+            return hit[1]
     base_wall_set = _get_wall_set(game_state)
+    obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
     # MODEL_HEIGHT du tireur (pouces) : présent sur toute vraie unité roster. Absent des stubs 2D
     # (gym) → z_s = None → LoS 3D désactivée pour ce tireur (tracé 2D). Requis pour interpoler la
     # hauteur même quand le tireur est au sol mais la cible à l'étage (z_s = 0 + MODEL_HEIGHT).
     shooter_mh = float(shooter["MODEL_HEIGHT"]) if "MODEL_HEIGHT" in shooter else None
-    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]] = []
-    shooter_hexes_all: List[Tuple[int, int]] = []
+    shooter_models: List[ShooterLosModel] = []
     if not gym_training and shooter_id is not None:
         model_ids = require_key(game_state, "squad_models").get(str(shooter_id))
         if model_ids:
@@ -4383,8 +4394,10 @@ def _resolve_shooter_models_with_walls(
                     z_s, occ_s = None, None
                 else:
                     z_s, occ_s = _fig_z_and_occluder(game_state, m_level, footprint, shooter_mh)
-                shooter_models.append((anchor, footprint, wall_eff, z_s, occ_s))
-                shooter_hexes_all.extend(footprint)
+                shooter_models.append((
+                    anchor, footprint, wall_eff, z_s, occ_s,
+                    _excluded_obscuring_areas(obscuring_by_hex, footprint),
+                ))
     if not shooter_models:
         anchor, footprint = _resolve_unit_anchor_and_footprint(
             game_state, shooter, gym_training=gym_training
@@ -4397,20 +4410,20 @@ def _resolve_shooter_models_with_walls(
             z_s, occ_s = None, None
         else:
             z_s, occ_s = _fig_z_and_occluder(game_state, s_level, footprint, shooter_mh)
-        shooter_models.append(((int(anchor[0]), int(anchor[1])), footprint, wall_eff, z_s, occ_s))
-        shooter_hexes_all.extend(footprint)
+        shooter_models.append((
+            (int(anchor[0]), int(anchor[1])), footprint, wall_eff, z_s, occ_s,
+            _excluded_obscuring_areas(obscuring_by_hex, footprint),
+        ))
     if cache_key is not None:
-        game_state["_shooter_los_models_cache"][cache_key] = (
-            version, shooter_models, shooter_hexes_all
-        )
-    return shooter_models, shooter_hexes_all
+        game_state["_shooter_los_models_cache"][cache_key] = (version, shooter_models)
+    return shooter_models
 
 
 def _target_model_visible_cells(
-    shooter_models: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]],
+    shooter_models: List[ShooterLosModel],
     target_model_hexes: List[Tuple[int, int]],
     obscuring_by_hex: Dict[Tuple[int, int], str],
-    excluded_areas: Set[str],
+    target_excluded_areas: Set[str],
     *,
     z_target: Optional[float] = None,
     occ_target: "Optional[Tuple[Set[Tuple[int, int]], float]]" = None,
@@ -4418,7 +4431,9 @@ def _target_model_visible_cells(
     """Cases du socle cible vues depuis AU MOINS une figurine tireuse (règle 06.01, binaire).
 
     Chaque figurine tireuse utilise son propre wall_set effectif (murs ignorés si elle est sur un
-    étage). Une case cible est vue dès qu'une figurine tireuse a une ligne dégagée vers elle.
+    étage) et sa propre exclusion 13.10 : areas exclues de la PAIRE = areas de CETTE figurine
+    tireuse (portées par le 6-tuple) ∪ ``target_excluded_areas`` (areas de CE modèle cible).
+    Une case cible est vue dès qu'une figurine tireuse a une ligne dégagée vers elle.
 
     LoS 3D : ``z_target``/``occ_target`` = sommet vertical + dalle occultante de CE modèle cible.
     Combinés PAR figurine tireuse à ses propres ``z_s``/``occ_s`` (portés par le 5-tuple). Sol↔sol
@@ -4426,21 +4441,23 @@ def _target_model_visible_cells(
     # Précalculé une fois par figurine tireuse, hors de la boucle des cases :
     # ``floor_occ`` (dalles occultantes) + proj_cache (projections du socle tireur) évitent de
     # recalculer ces valeurs pour chaque case cible × figurine tireuse → O(N×M) au lieu de O(N×M×footprint).
-    # Chaque entrée : (anchor, footprint, wall_eff, z_s, floor_occ, proj_cache, anchor_proj).
-    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any, Optional[List[Tuple[float, float]]], Optional[Tuple[float, float]]]] = []
-    for s_anchor, s_footprint, s_wall, z_s, occ_s in shooter_models:
+    # Chaque entrée : (anchor, footprint, wall_eff, z_s, floor_occ, proj_cache, anchor_proj, excluded).
+    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any, Optional[List[Tuple[float, float]]], Optional[Tuple[float, float]], Set[str]]] = []
+    for s_anchor, s_footprint, s_wall, z_s, occ_s, s_excluded in shooter_models:
         if (z_s is not None) and (z_target is not None):
             occs = [o for o in (occ_s, occ_target) if o is not None]
             floor_occ = occs or None
         else:
             floor_occ = None
         s_anchor_proj, s_proj_cache = _build_shooter_proj_cache(s_anchor, s_footprint)
-        prepared.append((s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj))
+        # Exclusion 13.10 de la PAIRE : areas de cette figurine tireuse ∪ areas du modèle cible.
+        pair_excluded = (s_excluded | target_excluded_areas) if s_excluded else target_excluded_areas
+        prepared.append((s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj, pair_excluded))
     vset: Set[Tuple[int, int]] = set()
     for tc, tr in target_model_hexes:
-        for s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj in prepared:
+        for s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj, pair_excluded in prepared:
             if _los_hex_visible(
-                s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, excluded_areas,
+                s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, pair_excluded,
                 floor_occluders=floor_occ, z_start=z_s, z_end=z_target,
                 _shooter_proj_cache=s_proj_cache, _shooter_anchor_proj=s_anchor_proj,
             ):
@@ -4476,18 +4493,17 @@ def _unit_can_see_any(game_state: Dict[str, Any], shooter: Dict[str, Any], targe
         game_state.get("gym_training_mode", False)
         or require_key(game_state, "config").get("gym_training_mode", False)
     )
-    shooter_models, shooter_hexes_all = _resolve_shooter_models_with_walls(
-        game_state, shooter, gym_training
-    )
+    shooter_models = _resolve_shooter_models_with_walls(game_state, shooter, gym_training)
     (
         target_model_footprints, _centers, _bshape, _bsize, _borient, target_model_levels
     ) = _resolve_target_models_for_los(game_state, target, gym_training)
     obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
-    excluded_base = _excluded_obscuring_areas(obscuring_by_hex, shooter_hexes_all)
     # LoS 3D : MODEL_HEIGHT cible (None sur stubs 2D → z_t None → tracé 2D).
     target_mh = float(target["MODEL_HEIGHT"]) if "MODEL_HEIGHT" in target else None
     for idx, model_hexes in enumerate(target_model_footprints):
-        excluded = excluded_base | _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
+        # 13.10 : areas de CE modèle cible ; celles de chaque figurine tireuse sont portées par
+        # ``shooter_models`` et combinées PAR PAIRE dans ``_target_model_visible_cells``.
+        excluded = _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
         if target_mh is None:
             z_t, occ_t = None, None
         else:
@@ -4610,14 +4626,13 @@ def _compute_unit_los_uncached(
     # Règle 06.01 : la LoS est tracée PAR figurine tireuse. Chaque figurine tireuse a son propre
     # wall_set effectif (murs de sa ruine ignorés si elle est sur un étage) → une figurine au sol
     # reste bloquée par un mur même si une figurine de la même escouade, sur l'étage, ne l'est plus.
-    shooter_models, shooter_hexes_all = _resolve_shooter_models_with_walls(
-        game_state, shooter, gym_training
-    )
+    shooter_models = _resolve_shooter_models_with_walls(game_state, shooter, gym_training)
 
     # Règles 06.01 + 13.10 : visibilité binaire évaluée PAR MODÈLE cible. Un modèle est
     # visible si >= 1 cellule de son socle a une ligne dégagée depuis >= 1 figurine tireuse ;
-    # l'unité est visible si >= 1 modèle l'est. Chaque test exclut les areas obscuring du tireur
-    # (union de l'escouade) et celles que CE modèle cible occupe.
+    # l'unité est visible si >= 1 modèle l'est. Chaque tracé exclut les areas obscuring de la
+    # PAIRE : celles de la figurine tireuse (portées par ``shooter_models``) et celles que CE
+    # modèle cible occupe — jamais l'union de l'escouade.
     (
         target_model_footprints,
         target_model_centers,
@@ -4628,7 +4643,6 @@ def _compute_unit_los_uncached(
     ) = _resolve_target_models_for_los(game_state, target, gym_training)
 
     obscuring_by_hex = _get_obscuring_hex_to_area(game_state)
-    excluded_base = _excluded_obscuring_areas(obscuring_by_hex, shooter_hexes_all)
     # LoS 3D : MODEL_HEIGHT cible (None sur stubs 2D → z_t None → tracé 2D inchangé).
     target_mh = float(target["MODEL_HEIGHT"]) if "MODEL_HEIGHT" in target else None
 
@@ -4640,7 +4654,7 @@ def _compute_unit_los_uncached(
     # socle de CETTE figurine est vu par le tireur. Base du test (b) par-figurine du couvert (13.08).
     model_full_vis: List[bool] = []
     for idx, model_hexes in enumerate(target_model_footprints):
-        excluded = excluded_base | _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
+        excluded = _excluded_obscuring_areas(obscuring_by_hex, model_hexes)
         if target_mh is None:
             z_t, occ_t = None, None
         else:

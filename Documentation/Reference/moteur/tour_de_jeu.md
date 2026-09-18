@@ -618,8 +618,12 @@ visibilité cohérente partout. `_has_line_of_sight()` est une enveloppe fine au
 squad-shoot utilise la même primitive via `_attacker_model_can_reach_squad`.
 
 **Ce qui bloque une ligne (hex, à la demande)** : un **mur dense** (toujours) OU une **zone de
-terrain obscurante** que NI le tireur NI la cible n'occupe (rule 13.10 — obscuring intermédiaire,
-zones occupées exclues). Les figurines ne bloquent jamais la LoS, seul le terrain. Les zones
+terrain obscurante** que NI la figurine tireuse NI la figurine cible n'occupe (rule 13.10 —
+« excluding obscuring terrain areas that one or both of those **models** are within »). L'exclusion
+est une propriété de la **paire de figurines**, jamais de l'escouade : chaque figurine tireuse
+porte ses propres zones exclues (`_resolve_shooter_models_with_walls`), combinées par paire avec
+celles du modèle cible dans `_target_model_visible_cells` ; une figurine hors d'une zone X ne voit
+pas à travers X même si une camarade y est. Les figurines ne bloquent jamais la LoS, seul le terrain. Les zones
 obscurantes sont des polygones rastérisés en hex au chargement (`terrain_areas` sur le
 game_state, chacune `{id, obscuring, polygon_vertices, hexes}`).
 
