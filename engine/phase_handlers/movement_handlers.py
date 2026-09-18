@@ -4637,6 +4637,39 @@ def movement_build_model_destinations_pool(
     _mm_cache_hit = False
     _mm_cells_n = 0
     _mm_obstacles_n = 0
+    def _hex_planar_reach(bfs_budget: int) -> List[Tuple[int, int]]:
+        """BFS hex de plain-pied depuis la case de départ, borné à ``bfs_budget`` pas (métrique
+        hex). Appelé au budget du move, puis au budget amputé de la descente 13.06 pour une
+        figurine partie d'un étage (voir le bloc multi-niveaux plus bas)."""
+        visited: Set[Tuple[int, int]] = {start_pos}
+        out: List[Tuple[int, int]] = []
+        queue: deque = deque([(start_col, start_row, 0)])
+        while queue:
+            c, r, d = queue.popleft()
+            if d >= bfs_budget:
+                continue
+            for nc, nr in get_hex_neighbors(c, r):
+                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                    continue
+                cell = (nc, nr)
+                if cell in visited:
+                    continue
+                if not has_fly:
+                    if cell in wall_hexes:
+                        continue
+                    if cell in _enemy_blocked or cell in _friendly_traverse:
+                        continue
+                    if not (desperate_escape or thru_ez) and cell in ez_anchor_forbidden:
+                        continue
+                visited.add(cell)
+                queue.append((nc, nr, d + 1))
+                # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi
+                # (ez_anchor_forbidden = EZ au niveau ancre).
+                if cell in dest_blocked or cell in ez_anchor_forbidden:
+                    continue
+                out.append(cell)
+        return out
+
     if _mm_use_euclidean:
         # Cache du CHAMP (sans les filtres de destination) : valide tant que les obstacles ne
         # changent pas. Les sœurs ne sont des obstacles que si NON thru_friendly → cache seulement
@@ -4709,33 +4742,7 @@ def movement_build_model_destinations_pool(
             if cell != start_pos and cell not in dest_blocked and cell not in ez_anchor_forbidden
         ]
     else:
-        visited: Set[Tuple[int, int]] = {start_pos}
-        reachable = []
-        queue: deque = deque([(start_col, start_row, 0)])
-        while queue:
-            c, r, d = queue.popleft()
-            if d >= budget:
-                continue
-            for nc, nr in get_hex_neighbors(c, r):
-                if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-                    continue
-                cell = (nc, nr)
-                if cell in visited:
-                    continue
-                if not has_fly:
-                    if cell in wall_hexes:
-                        continue
-                    if cell in _enemy_blocked or cell in _friendly_traverse:
-                        continue
-                    if not (desperate_escape or thru_ez) and cell in ez_anchor_forbidden:
-                        continue
-                visited.add(cell)
-                queue.append((nc, nr, d + 1))
-                # Validite destination : murs + toutes figs occupant la cellule + engagement ennemi
-                # (ez_anchor_forbidden = EZ au niveau ancre).
-                if cell in dest_blocked or cell in ez_anchor_forbidden:
-                    continue
-                reachable.append(cell)
+        reachable = _hex_planar_reach(budget)
 
     # Empreinte du mover (offsets pré-calculés) : sert au filtre destination par niveau ET à la zone.
     # Socle de LA FIGURINE, comme le champ géodésique, le masque EZ, les sœurs et
@@ -4872,6 +4879,32 @@ def movement_build_model_destinations_pool(
         _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0 and _d not in _floor_set]
         reachable = _ground_dests + _floor_dests
         eff_by_dest = {_d: (view_level if _d in _floor_set else 0) for _d in reachable}
+
+    # DESCENTE 13.06 en métrique HEX : « add […] the distance moved vertically down, to any other
+    # distance that model has moved ». Une figurine partie d'un ÉTAGE qui finit au SOL paie la
+    # hauteur de son plancher — même abstraction que le squad move du gym
+    # (`squad_descent_penalty_subhex` : hauteur × `inches_to_subhex` arrondie au supérieur,
+    # retranchée du budget, trajet au sol depuis la case de départ) et même grandeur que la branche
+    # euclidienne ci-dessus facture par le champ multi-niveaux. Sans ce bloc le sol lui était
+    # offert à M plein (mesuré : 6 cases pour M = 6" et un plancher de 3", checklist x1). Les cases
+    # de SON étage restent à M plein : rester sur le plancher est un mouvement horizontal (13.06).
+    # FLY (21.03) ignore toute distance verticale.
+    if (not _mm_use_euclidean) and not has_fly and _floor_start:
+        from engine.terrain_utils import floor_height_at
+
+        _descent_subhex = int(math.ceil(
+            floor_height_at(terrain_areas, start_col, start_row, start_level_eff)
+            * int(require_key(game_state, "inches_to_subhex"))
+        ))
+        if _descent_subhex > 0:
+            _ground_after_descent = set(_hex_planar_reach(max(0, budget - _descent_subhex)))
+            # Seul le SOL (niveau effectif 0) est amputé : les cases d'étage — le sien, ou
+            # celui d'une montée déjà facturée par `ascent_field_for_model` — restent telles quelles.
+            reachable = [
+                _d for _d in reachable
+                if eff_by_dest[_d] != 0 or _d in _ground_after_descent
+            ]
+            eff_by_dest = {_d: eff_by_dest[_d] for _d in reachable}
 
     # Empêche le DÉPÔT sur un chevauchement de socle avec une coéquipière AU MÊME NIVEAU EFFECTIF
     # (au lieu de le détecter après coup via le voile rouge). Clearance euclidienne par base RÉELLE —

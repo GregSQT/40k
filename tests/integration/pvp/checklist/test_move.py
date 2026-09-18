@@ -969,6 +969,37 @@ class TestTerrainMovement1306:
         assert int(game.state["models_cache"]["8#0"]["level"]) == 0
         assert not [d for d in _model_dests(game, "8#0", level=1) if d[2] == 1]
 
+    def test_infanterie_redescend_en_payant_la_descente(self, checklist_game):
+        """13.06 MOVING VERTICALLY : « Add the distance moved vertically up, AND the distance
+        moved vertically DOWN, to any other distance that model has moved ». Les Intercessors
+        ``7`` montent à l'étage au round 1 (plan de `test_infanterie_finit_en_hauteur…`), puis au
+        round 2 le sol offert à ``7#0`` est borné par M − hauteur, jamais par M : la descente est
+        payée sur le chemin par-figurine PvP, dans les DEUX métriques (x5 euclidien par le champ
+        multi-niveaux, x1 hex par le BFS amputé de la descente).
+
+        ROUGE avant le fix à x1 : 6 cases pour M = 6" et un plancher de 3" — le sol à M plein."""
+        game = checklist_game
+        floor_cells, height_inches = _floor_cells_and_height(game)
+        budget_inches = _datasheet_move_inches(game, "7")
+        game.act("activate_unit", unitId="7")
+        elevated = [d for d in _model_dests(game, "7#0", level=1) if d[2] == 1]
+        assert elevated, "aucune case d'étage proposée à l'INFANTRY"
+        plan = [["7#0", elevated[0][0], elevated[0][1], 1]] + [_placement(game, m) for m in game.models_of("7")[1:]]
+        game.act("commit_move_plan", unitId="7", plan=plan)
+        assert int(game.state["models_cache"]["7#0"]["level"]) == 1
+
+        _at_round(game, 2)
+        assert int(game.state["models_cache"]["7#0"]["level"]) == 1, "la figurine a quitté l'étage avant le round 2"
+        game.act("activate_unit", unitId="7")
+        ground = [d for d in _model_dests(game, "7#0") if d[2] == 0]
+        assert ground, "aucune case de sol proposée à la figurine en hauteur"
+        after_descent = _inches(game, budget_inches - height_inches)
+        reach = _farthest_reach(game, "7#0", ground)
+        assert reach <= after_descent, (reach, after_descent)
+        assert reach < _inches(game, budget_inches), "descente non facturée : le sol est offert à M plein"
+        # Non vacant : le budget restant est bien dépensé (portée en ligne droite au moins).
+        assert reach >= _straight_reach(game, after_descent), (reach, _straight_reach(game, after_descent))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 20.01–20.04 + 24.09 — réserves stratégiques
