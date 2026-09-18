@@ -46,12 +46,13 @@ def _partial_wall(enemy_col: int) -> List[List[int]]:
 
 
 def _area_around(enemy: Tuple[int, int]) -> Dict[str, Any]:
-    """Zone obscurante englobant tout le socle de la cible ET son mur partiel (13.09 : la zone
-    contient un terrain dense ; 13.10 : la cible dedans reste visible depuis l'extérieur)."""
+    """Zone DENSE (donc obscurante) englobant tout le socle de la cible ET son mur partiel (13.09 :
+    la zone contient un terrain dense — drapeau `dense` dérivé des murs typés au chargement, posé
+    ici à la main comme le mur ; 13.10 : la cible dedans reste visible depuis l'extérieur)."""
     c, r = enemy
     hexes = [[x, y] for x in range(c - 12, c + 10) for y in range(r - 10, r + 11)]
     poly = [[c - 12, r - 10], [c + 9, r - 10], [c + 9, r + 10], [c - 12, r + 10]]
-    return {"id": "zone", "obscuring": True, "polygon_vertices": poly, "hexes": hexes}
+    return {"id": "zone", "obscuring": True, "dense": True, "polygon_vertices": poly, "hexes": hexes}
 
 
 #: Portée d'arme 24", écrite directement en SUBHEX : dans ce fixture (config inline, plateau
@@ -122,7 +123,7 @@ def _make_engine(enemy: Tuple[int, int], *, wall: bool) -> W40KEngine:
     for key in (
         "_unit_los_pair_cache", "_obscuring_area_sets_cache", "_obscuring_hex_to_area_cache",
         "_wall_set_cache", "_dense_wall_set_cache", "_shooter_los_models_cache",
-        "_elevated_ignored_walls_cache", "_obs_solid_terrain_areas",
+        "_elevated_ignored_walls_cache",
     ):
         gs.pop(key, None)
     return eng
