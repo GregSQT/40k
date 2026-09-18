@@ -696,3 +696,25 @@ def test_la_sonde_applique_la_temperature_du_profil_au_checkpoint():
     assert apply_run_temperature(other, {}, messages.append) == 1.0
     assert other.logits_temperature == 1.0
 
+
+def test_apply_run_temperature_refuse_un_profil_a_temperature_autoregulee() -> None:
+    """Option 2 : la T du run n'est pas dans le zip (elle a bougé à chaque update) — poser la T de
+    départ du profil en annonçant « comme le run » serait faux. Refus explicite (T1) ; `null`
+    (T fixe) passe comme avant."""
+    from types import SimpleNamespace
+
+    import pytest
+
+    from scripts.grad_signal_probe import apply_run_temperature
+
+    model = SimpleNamespace(logits_temperature=1.0)
+    spec = {"entropy_target": 1.0, "gain": 0.1, "t_min": 1.0, "t_max": 4.0}
+    with pytest.raises(ValueError, match="logits_temperature_regulation"):
+        apply_run_temperature(
+            model, {"logits_temperature": 2.0, "logits_temperature_regulation": spec}, lambda _m: None
+        )
+    assert model.logits_temperature == 1.0, "aucune T posée sur un refus"
+    assert apply_run_temperature(
+        model, {"logits_temperature": 2.0, "logits_temperature_regulation": None}, lambda _m: None
+    ) == 2.0
+

@@ -136,6 +136,31 @@ def test_la_spec_ne_voyage_pas_dans_le_zip(tmp_path) -> None:
     assert loaded.logits_temperature == 1.0
 
 
+def test_apres_reprise_t_repart_de_la_t_du_profil_et_la_boucle_reprend(tmp_path) -> None:
+    """Reprise (`--resume-from`, `--append`) d'un run régulé : la T ATTEINTE n'est pas dans le zip
+    (régime de run, comme T fixe), donc le profil repose sa T de départ et la boucle reconverge
+    depuis là — comportement CHOISI (persister T dans le zip contredirait « un zip rechargé joue
+    T = 1 » : sondes, holdout, PvE, adversaires figés), transitoire de quelques dizaines d'updates
+    dans un run de la paire, documenté dans entrainement.md."""
+    spec = {**SPEC, "entropy_target": 20.0, "gain": 0.01}
+    model = _model(logits_temperature=2.0, logits_temperature_regulation=spec)
+    _run_one_update(model)
+    reached = model.logits_temperature
+    assert reached > 2.0
+    path = str(tmp_path / "t.zip")
+    model.save(path)
+
+    resumed = PatchedMaskablePPO.load(path, env=_ToyEnv(), device="cpu")
+    train_module._apply_curriculum_model_params(
+        resumed, {"logits_temperature": 2.0, "logits_temperature_regulation": spec},
+        log=lambda *_: None,
+    )
+    assert resumed.logits_temperature == 2.0, "la T du profil, pas la T atteinte"
+    assert resumed.logits_temperature_regulation == spec
+    _run_one_update(resumed)
+    assert resumed.logits_temperature > 2.0, "la boucle reprend dès la première update"
+
+
 def test_le_profil_pose_la_spec_en_append_et_null_la_retire() -> None:
     model = _model()
     train_module._apply_curriculum_model_params(
