@@ -1606,6 +1606,9 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('torrent_wrong_hit')
             + _pair('lethal_hits_wrong_wound')
             + _pair('blast_x_mismatch')
+            # Primitive F : suppression sans touche, malus [SUPPRESSED] sans suppression en
+            # vigueur, ou suppression en vigueur sans malus (tir ET mêlée, un seul compteur).
+            + _pair('suppression_without_hit')
             # 05.03 / 06.02 / 24.28 : CHARACTER allouée avant ses bodyguards (tir).
             + _pair('alloc_character_over_bodyguard', 'shooting')
         ),
@@ -2026,6 +2029,8 @@ def parse_step_log(filepath: str) -> Dict:
         'lethal_hits_wrong_wound_fight': {1: 0, 2: 0},
         # 24.05 [BLAST] tir — valeur X du marqueur différente de celle déclarée dans l'armurerie.
         'blast_x_mismatch': {1: 0, 2: 0},
+        # Primitive F — suppression sans touche / malus [SUPPRESSED] incohérent (ai/analyzer_suppression.py).
+        'suppression_without_hit': {1: 0, 2: 0},
         # 05.03 / 06.02 / 24.28 — attaque allouée à un CHARACTER alors qu'un bodyguard de
         # l'unité est vivant (`[ALLOC_MODEL:]`), hors override [PRECISION] légal. Par PHASE de
         # la ligne : chaque bucket d'`error_totals` porte le sien (chantier chaîne d'attaque
@@ -2286,6 +2291,7 @@ def parse_step_log(filepath: str) -> Dict:
             'lethal_hits_wrong_wound': {1: None, 2: None},
             'lethal_hits_wrong_wound_fight': {1: None, 2: None},
             'blast_x_mismatch': {1: None, 2: None},
+            'suppression_without_hit': {1: None, 2: None},
             'alloc_character_over_bodyguard': {
                 'move': {1: None, 2: None}, 'shooting': {1: None, 2: None},
                 'charge': {1: None, 2: None}, 'fight': {1: None, 2: None},

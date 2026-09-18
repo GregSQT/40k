@@ -298,6 +298,8 @@ _MW_ABILITY_SUFFERS_RE = re.compile(
 #: quand le candidat joue est celui qui PASSE. Le libelle n'est pas capture : c'est du texte
 #: libre venu du moteur, et le TYPE + l'INDEX suffisent a compter un taux de choix.
 _AGENT_DECISION_RE = re.compile(r'DECISION\s+\[([A-Za-z0-9_]+)\]\s+CHOICE_(\d+)')
+from ai import analyzer_suppression as _suppression
+
 #: « Unit N(c,r) ABILITY CALL <Nom> [USED|DECLINED] » (`engine/ability_calls.py`).
 _ABILITY_CALL_RE = re.compile(r'ABILITY CALL (.+?) \[(USED|DECLINED)\]')
 
@@ -2151,6 +2153,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 if phase != state.last_phase and not _is_engine_event:
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
+                        # Primitive F : les suppressions posées par ce joueur expirent au début
+                        # de SA phase de commandement, et son relevé de touches repart.
+                        _suppression.on_command_phase(state, int(player))
                     if phase == 'MOVE':
                         # Reset snapshot at the start of each MOVE phase
                         state.positions_at_move_phase_start = {}
@@ -2447,6 +2452,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
+                elif _suppression.SUPPRESSES_LINE_RE.search(action_desc):
+                        # Primitive F, grammaire 12 : « SUPPRESSES Unit M [SUPPRESSED→M] ».
+                        # Branche AVANT le tir : la ligne nomme deux unités comme un SHOT.
+                        action_type = 'suppress_target'
+                        _suppression.handle_suppresses_line(state, stats, line, action_desc, player)
                 elif _ABILITY_CALL_RE.search(action_desc):
                         # Appel de capacite (`engine/ability_calls.py`) : « Unit N(c,r) ABILITY
                         # CALL <Nom> [USED|DECLINED] ». Branche AVANT les verbes de jeu, pour la

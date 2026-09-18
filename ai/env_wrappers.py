@@ -154,6 +154,27 @@ def _ability_call_slot_for_bot(
     return pending_decision_decline_slot(game_state, action_mask, "rule_choice")
 
 
+def _suppress_target_slot_for_bot(
+    game_state: Dict[str, Any], action_mask: Any, wrapper: str
+) -> Optional[int]:
+    """Le `CHOICE_i` que la politique déclarée du bot joue sur `suppress_target`, ou ``None``."""
+    from engine.phase_handlers.shared_utils import require_unit_by_id
+    from engine.phase_handlers.shooting_handlers import select_bot_suppress_target
+
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != "suppress_target":
+        return None
+    unit = require_unit_by_id(game_state, str(require_key(decision, "unit_id")))
+    hit_targets = [
+        str(require_key(require_key(o, "payload"), "target_eid"))
+        for o in require_key(decision, "options")
+    ]
+    slot = int(mi.CHOICE_BASE + hit_targets.index(select_bot_suppress_target(game_state, unit, hit_targets)))
+    if not bool(action_mask[slot]):
+        raise RuntimeError(f"{wrapper}: suppress_target en attente sans CHOICE_{slot - mi.CHOICE_BASE} ouvert.")
+    return slot
+
+
 def bot_action_for_pending_choice(
     game_state: Dict[str, Any], action_mask: Any, wrapper: str
 ) -> Optional[int]:
@@ -214,6 +235,12 @@ def bot_action_for_pending_choice(
     ability_call_slot = _ability_call_slot_for_bot(game_state, action_mask, wrapper)
     if ability_call_slot is not None:
         return ability_call_slot
+    # `suppress_target` (Indiscriminate Detonations, Primitive F) : la politique DÉCLARÉE
+    # `select_bot_suppress_target` — la même qu'au siège PvE —, jamais un tirage sur l'escouade
+    # touchée à supprimer, qui ferait bouger la baseline du WarTrakk adverse une fois sur deux.
+    suppress_slot = _suppress_target_slot_for_bot(game_state, action_mask, wrapper)
+    if suppress_slot is not None:
+        return suppress_slot
     # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de
     # LISTE, jamais une decision de bot ». Le bot ne declare donc jamais de reserves de sa propre
     # initiative — invariant que portait auparavant le retrait de `SQUAD_ACTION_WAIT` du pool

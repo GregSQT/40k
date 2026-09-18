@@ -426,6 +426,22 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.1.2.suppression",
+      "section": "1.2",
+      "label": "Suppression — escouade TOUCHÉE, malus [SUPPRESSED] en vigueur (Primitive F)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "suppress_target_on_shooting"
+      },
+      "controls": [
+        [
+          "suppression_without_hit"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Trois faces d'un invariant, un compteur (ai/analyzer_suppression.py) : une ligne SUPPRESSES sans tir du suppresseur ayant TOUCHÉ la supprimée depuis sa dernière phase de commandement ; un tir ou une mêlée avec le malus [SUPPRESSED] sans suppression en vigueur ; une attaque SANS le malus alors qu'une suppression est en vigueur (le -1 contrôlé au tir comme en mêlée). Journal antérieur à la grammaire 12 : abstention."
+    },
+    {
       "id": "PROJ.1.2.oath_target",
       "section": "1.2",
       "label": "Oath of Moment — cible blessée doit être la cible jurée (08.04)",
@@ -4003,8 +4019,8 @@
         "rule_id": "suppress_target_on_shooting"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : après tir, la cible est supprimée (-1 touche) jusqu'au début de la prochaine phase de commandement du tireur. Porté par WarTrakk (Indiscriminate Detonations)."
+      "status": "COUVERT",
+      "status_note": "Primitive F, refonte du 2026-09-18 : après ses attaques, le tireur choisit UNE escouade TOUCHÉE (aucune touche → rien ; une seule → elle ; plusieurs → décision `suppress_target`, trois sièges) ; supprimée (-1 touche) jusqu'au début de sa prochaine phase de commandement. Ligne `SUPPRESSES Unit M [SUPPRESSED→M]` (grammaire 12). Aucun compteur propre : contrôlé par PROJ.1.2.suppression (`suppression_without_hit`, bucket §1.2). Porté par WarTrakk (Indiscriminate Detonations)."
     },
     {
       "id": "unit.return_destroyed_models",

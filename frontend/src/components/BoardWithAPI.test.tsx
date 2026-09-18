@@ -1103,6 +1103,92 @@ describe("BoardWithAPI — mode de fall-back (09.07)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// T_BoardWithAPI_SuppressTarget — Indiscriminate Detonations (WarTrakk). Le moteur arrête la fin
+// d'activation de tir sur le choix de l'escouade TOUCHÉE à supprimer (`suppress_target`, plusieurs
+// touchées) et refuse toute autre action tant qu'il n'est pas fait : un bouton par escouade
+// touchée, nommée, et c'est l'INDEX qui est joué (`agent_decision` + `option_index`). Le siège IA
+// ne voit pas le panneau (le moteur tranche le bot par sa politique déclarée).
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — panneau de suppression (Indiscriminate Detonations)", () => {
+  const SUPPRESS_TARGET_DECISION = {
+    type: "suppress_target",
+    player: 1,
+    unit_id: "1",
+    options: [{ label: "2" }, { label: "3" }],
+  };
+  const UNITS = [
+    { ...makeUnit(1, 1), DISPLAY_NAME: "WarTrakk", col: 5, row: 5 },
+    { ...makeUnit(2, 2), DISPLAY_NAME: "Intercessors", col: 12, row: 5 },
+    { ...makeUnit(3, 2), col: 5, row: 12 },
+  ];
+
+  function renderWithDecision(mode: "pvp" | "pve", seat2: "human" | "ai") {
+    if (mode === "pve") {
+      localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);
+      window.history.replaceState({}, "", "/game?mode=pve");
+    }
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            phase: "shoot",
+            player_types: { "1": "human", "2": seat2 },
+            units: UNITS,
+            pending_agent_decision: {
+              ...SUPPRESS_TARGET_DECISION,
+              player: seat2 === "ai" ? 2 : 1,
+            },
+          }),
+        })
+      )
+    );
+    renderBoard(mode === "pve" ? "/game?mode=pve" : "/");
+  }
+
+  it("siège humain → un bouton par escouade touchée, nommée, et le clic joue l'INDEX", async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post("/api/game/action", async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          result: { action: "wait" },
+          game_state: makeGameState({ phase: "shoot", units: UNITS }),
+        });
+      })
+    );
+    renderWithDecision("pvp", "human");
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Indiscriminate Detonations — unit 1 — player 1/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.getByRole("button", { name: "Intercessors #2" })).toBeTruthy();
+    const second = screen.getByRole("button", { name: "Squad 3 #3" });
+    fireEvent.click(second);
+    await waitFor(() => {
+      expect(posted.length).toBeGreaterThan(0);
+    });
+    expect(posted[0]).toMatchObject({ action: "agent_decision", option_index: 1 });
+  });
+
+  it("siège IA → le panneau n'est PAS rendu", async () => {
+    renderWithDecision("pve", "ai");
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("board-pvp")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.queryByText(/Indiscriminate Detonations — unit 1/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // T_BoardWithAPI_AbilityCall — appel de capacité (`engine/ability_calls.push_ability_call`).
 //
 // Le moteur pose un prompt `rule_choice` de `kind: "ability_call"` à deux candidats — [activer la

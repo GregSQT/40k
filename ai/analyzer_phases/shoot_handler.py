@@ -483,6 +483,11 @@ def handle_shoot(
         from ai.analyzer_hit import check_hit_result, check_indirect_fire_rule
         check_hit_result(state, stats, line, action_desc, player, is_melee=False)
         check_indirect_fire_rule(state, stats, line, action_desc, player)
+        # Primitive F : relevé de la TOUCHE (ce contre quoi une suppression est jugée) et
+        # cohérence du malus [SUPPRESSED] du tireur. Cf. ai/analyzer_suppression.py.
+        from ai import analyzer_suppression as _suppression
+        _suppression.record_shot(state, player, shooter_id, target_id, action_desc)
+        _suppression.check_attack_malus(state, stats, line, action_desc, shooter_id, player)
         # §22.05 PLUNGING FIRE : présence du token [PLUNGING FIRE] dans le segment Hit.
         if "[PLUNGING FIRE]" in action_desc:
             note_rule_usage(stats, "22.05", player)

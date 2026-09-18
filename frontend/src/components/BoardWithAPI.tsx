@@ -2371,6 +2371,12 @@ export const BoardWithAPI: React.FC = () => {
   // qu'il n'est pas fait (`mortal_wounds_target_pending`) : sans ce panneau, la partie PvP se
   // figerait. La cible PRÉCÈDE le dé — aucun résultat n'est connu quand le joueur choisit.
   const mortalWoundsTargetDecision = pendingDecisionForHumanSeat("mortal_wounds_target");
+  // Indiscriminate Detonations (datasheet WarTrakk) — « when this unit has resolved its attacks,
+  // select one enemy unit HIT by one or more of those attacks. That enemy unit is suppressed ».
+  // Posée à la fin de l'activation de tir quand PLUSIEURS escouades ont été touchées ; le moteur
+  // diffère la fin d'activation et refuse toute autre action (`suppress_target_pending`) : sans ce
+  // panneau, la partie PvP se figerait. Un bouton par escouade touchée, l'INDEX est joué.
+  const suppressTargetDecision = pendingDecisionForHumanSeat("suppress_target");
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   const oathTargets =
     oathSelectionPlayer === null
@@ -4572,6 +4578,26 @@ export const BoardWithAPI: React.FC = () => {
           title={`Exhortation of Rage — unit ${mortalWoundsTargetDecision.unit_id} — player ${mortalWoundsTargetDecision.player}`}
           tooltip={
             "This unit has been selected to fight. Select one enemy unit it is engaged with, then roll one D6: on a 4-5 that unit suffers D3 mortal wounds, on a 6 it suffers 3 mortal wounds.\n\nThe target is chosen BEFORE the dice is rolled."
+          }
+          onChoose={(index) => {
+            void apiProps.onCallWaaagh(index);
+          }}
+          labelOf={(option) => {
+            const target = unitsById.get(option.label);
+            return target?.DISPLAY_NAME
+              ? `${target.DISPLAY_NAME} #${target.id}`
+              : `Unit #${option.label}`;
+          }}
+        />
+      )}
+      {/* Indiscriminate Detonations : un bouton par escouade TOUCHÉE par le tir qui vient d'être
+          résolu ; le libellé nomme l'unité — le moteur n'envoie que son id, qui EST le `label`. */}
+      {suppressTargetDecision && (
+        <AgentDecisionPicker
+          decision={suppressTargetDecision}
+          title={`Indiscriminate Detonations — unit ${suppressTargetDecision.unit_id} — player ${suppressTargetDecision.player}`}
+          tooltip={
+            "This unit has resolved its attacks. Select one enemy unit HIT by one or more of those attacks: it is suppressed (-1 to hit rolls) until the start of your next Command phase."
           }
           onChoose={(index) => {
             void apiProps.onCallWaaagh(index);
