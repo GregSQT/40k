@@ -10672,6 +10672,7 @@ class W40KEngine(gym.Env):
             return
         from engine.game_state import (
             OATH_WOUND_ROLL_BONUS,
+            WAAAGH_INVUL_SAVE,
             WAAAGH_MELEE_BONUS,
             oath_target_id,
             waaagh_is_active,
@@ -10688,6 +10689,10 @@ class W40KEngine(gym.Env):
                 entries.append(("waaagh", "on"))
                 entries.append(("waaagh_melee_str", f"+{WAAAGH_MELEE_BONUS}"))
                 entries.append(("waaagh_melee_atk", f"+{WAAAGH_MELEE_BONUS}"))
+                # Troisième volet de la règle (« a 5+ invulnerable save »), écrit pour la même
+                # raison que les deux autres : le contrôle du seuil de sauvegarde
+                # (`ai/analyzer_save.py`) le LIT au lieu de le redeviner.
+                entries.append(("waaagh_invul", f"{WAAAGH_INVUL_SAVE}+"))
             _oath = oath_target_id(self.game_state, player)
             if _oath is not None:
                 entries.append(("oath_target", _oath))

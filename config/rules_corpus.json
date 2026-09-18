@@ -1063,6 +1063,36 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.2.3.save_threshold",
+      "section": "2.3",
+      "label": "Seuil de sauvegarde de la figurine allouée (05.04) — Sv/AP, InSv de datasheet, InSv conférée 19.04, Waaagh! 5++",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "save_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 7) : `Save R(<base>+ AP<n> → <eff>+)` recalculé par ai/analyzer_save.check_save_threshold — attendu = save_threshold du moteur (min(Sv − AP, InSv)), InSv effective = meilleure entre datasheet de la figurine allouée, invul_save_override des sources PRÉSENTES au Select Targets step (Waaagh! Banner 5+, Mental Fortress 4+) et waaagh_invul lu dans `T{tour} EFFECTS:` quand le Waaagh! est actif pour le camp défenseur. Abstention : segment sans base/AP, figurine ou datasheet inconnue, Sv symbolique, Waaagh! actif sans clé waaagh_invul (journal antérieur)."
+    },
+    {
+      "id": "PROJ.2.3.fnp",
+      "section": "2.3",
+      "label": "Feel No Pain 24.12 — seuil, présence, compte (tir, mêlée, blessures mortelles)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fnp_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 7) : `[FNP:s/t+ ×n]` jugé par ai/analyzer_save.check_fnp — seuil attendu = meilleur seuil (24.02) porté par une source PRÉSENTE au Select Targets step (Dok's Toolz 5+ ; Psychic Hood 4+ si l'arme est [PSYCHIC] ou la source Da Jump ; Unbreakable Resolve 4+ si la FIGURINE allouée est l'Ancient dans une aire d'objectif 14.02 ou à 6\" du centre). Aucune source → tout [FNP:] est une faute ; source présente et Dmg>0 sans [FNP:] → faute ; Dmg ≠ n − s → faute. Miroir SUFFERS ([FNP:n] sans seuil) : présence sans source seulement. Abstention à x5 sur la clause positionnelle (le socle déborde de son ancre)."
+    },
+    {
       "id": "PROJ.2.8.fantome",
       "section": "2.8",
       "label": "État reconstruit — unité morte non vue par l'analyzer",
@@ -1171,8 +1201,8 @@
         "rule_id": "feel_no_pain"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : FNP générique (Dok's Toolz 5+), FNP vs PSYCHIC (Psychic Hood 4+), FNP near objective (Unbreakable Resolve 4+) câblés dans shared_utils._collect_fnp_thresholds / _collect_fnp_thresholds_mortal. Jets journalisés dans step.log (fnpSaves, fnpThreshold, fnp_saves_mortal)."
+      "status": "COUVERT",
+      "status_note": "Via 24.12 (fnp_threshold_mismatch, PROJ.2.3.fnp), aucun compteur propre — même forme que PROJ.1.4.hit_roll_bonus_fight. Passe 3/6 : FNP générique (Dok's Toolz 5+) câblé dans shared_utils._collect_fnp_thresholds ; seuil attendu 5+ tant qu'un PainBoy est présent (19.04)."
     },
     {
       "id": "PROJ.1.9.feel_no_pain_vs_psychic",
@@ -1183,8 +1213,8 @@
         "rule_id": "feel_no_pain_vs_psychic"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : activé seulement si l'arme ou la source porte le mot-clé PSYCHIC (weapon_has_rule). Porté par Librarian. Hookable pour les blessures mortelles de Da Jump (is_psychic=True) en passe D."
+      "status": "COUVERT",
+      "status_note": "Via 24.12 (fnp_threshold_mismatch, PROJ.2.3.fnp), aucun compteur propre. Activé seulement si l'arme porte [PSYCHIC] ou si la source de blessures mortelles est Da Jump (is_psychic=True). Porté par Librarian."
     },
     {
       "id": "PROJ.1.9.feel_no_pain_near_objective",
@@ -1195,8 +1225,8 @@
         "rule_id": "feel_no_pain_near_objective"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : activé si le socle de la FIGURINE recouvre l'aire d'un objectif (14.02, _model_is_near_objective_or_center) OU est à ≤6\" du centre (inches_to_subhex). Porté par Ancient."
+      "status": "COUVERT",
+      "status_note": "Via 24.12 (fnp_threshold_mismatch, PROJ.2.3.fnp), aucun compteur propre. Activé si le socle de la FIGURINE allouée (Ancient) recouvre l'aire d'un objectif (14.02) OU est à ≤6\" du centre ; l'analyzer s'abstient sur cette clause à x5 (socle plus grand que son ancre)."
     },
     {
       "id": "01.01",
@@ -2798,8 +2828,11 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Jet FNP et seuil absents du journal."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.2.3.fnp"
+      ],
+      "status_note": "2026-09-18 : `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` (attaques) et `[FNP:<sauvés>]` (blessures mortelles) sont journalisés depuis la passe 3 ; le seuil, la présence et le compte sont contrôlés par fnp_threshold_mismatch (PROJ.2.3.fnp). La note « jet FNP et seuil absents du journal » était périmée."
     },
     {
       "id": "24.13",
@@ -3750,8 +3783,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "PARTIEL",
-      "status_note": "§1.7 + waaagh_melee_atk dans le plafond de mêlée + waaagh_melee_str dans le seuil de blessure. waaagh_invul (5++) journalisé sans alimenter aucun contrôle."
+      "status": "COUVERT",
+      "status_note": "§1.7 + waaagh_melee_atk dans le plafond de mêlée + waaagh_melee_str dans le seuil de blessure + waaagh_invul (5++) dans le seuil de sauvegarde (PROJ.2.3.save_threshold, lu dans `T{tour} EFFECTS:` depuis le 2026-09-18) — un 5++ sans Waaagh! actif est une faute."
     },
     {
       "id": "unit.deep_strike",
@@ -4020,8 +4053,8 @@
         "rule_id": "invul_save_override"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : confère une InSv value+ à TOUTE l'unité via 19.04 (effective_invul_save). Porté par BannerNob (5+) et LibrarianTerminator (4+)."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.2.3.save_threshold (save_threshold_mismatch) : InSv value+ conférée à TOUTE l'escouade tant que le porteur est PRÉSENT (19.04, effective_invul_save) — Waaagh! Banner (BannerNob 5+), Mental Fortress (Librarian / LibrarianTerminator 4+). Un 5++ sur des Boyz après la mort du BannerNob est une faute."
     },
     {
       "id": "unit.toughness_bonus_while_waaagh",
@@ -4033,8 +4066,8 @@
         "rule_id": "toughness_bonus_while_waaagh"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : +1 T à l'unité cible pendant que le Waaagh! est actif, via _target_highest_bodyguard_toughness (point unique tir+mêlée). Porté par BannerNob."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.1.4.blessure / PROJ.1.2.blessure (fight/shoot_wound_threshold_mismatch) : ai/analyzer_wound.target_bodyguard_toughness ajoute toughness_bonus_waaagh_by_type à l'E cible quand le Waaagh! est actif pour le camp cible (test_analyzer_waaagh_toughness.py). Passe 6 chantier 06 (Primitive F) : +1 T via _target_highest_bodyguard_toughness (point unique tir+mêlée). Porté par BannerNob."
     },
     {
       "id": "unit.suppress_target_on_shooting",

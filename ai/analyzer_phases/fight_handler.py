@@ -394,6 +394,11 @@ def handle_fight(
                 state, config, stats, line, action_desc, player, fighter_id, fighter_unit_type,
                 weapon_display_name, target_id, _parsed_shooter_models, is_melee=True,
             )
+            # Effets défensifs 05.04 / 24.12 — JUMEAU du tir (`ai/analyzer_save.py`).
+            from ai.analyzer_save import check_fnp, check_save_threshold
+            _present_models = frozen_target.models.keys() if frozen_target.models is not None else None
+            check_save_threshold(state, config, stats, line, action_desc, target_id, player, _present_models)
+            check_fnp(state, config, stats, line, action_desc, target_id, player, weapon_display_name, _present_models)
             # 08.04 Oath of Moment — JUMEAU du tir : la règle joue aussi en mêlée.
             _oath_carriers = config.rule_to_units.get("oath_of_moment", set())
             if fighter_unit_type in _oath_carriers and wound_bonus_applies(action_desc):

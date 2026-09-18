@@ -209,6 +209,10 @@ class AnalyzerState:
     # `objective_hexes` / `objective_controllers` ont disparu avec le recalcul du contrôle
     # d'objectif côté analyzer (par ancre, sans battle-shock). L'état 14.02 est celui du moteur,
     # lu dans la ligne `T{tour} OBJECTIVE CONTROL:` du step.log — cf. Replay.md §2.3.
+    #: Cases des AIRES d'objectif (entête `Objectives:`), sans nom ni contrôle : sert à la seule
+    #: question « ce socle recouvre-t-il une aire ? » (Unbreakable Resolve, `ai/analyzer_save.py`,
+    #: 14.02 « within range of a terrain objective while it is within that terrain area »).
+    objective_cells: Set[Tuple[int, int]] = field(default_factory=set)
 
     #: IDs de socles retirés de `unit_model_hp` par `_resync_living_models` (log DEAD ou [MODELS:]
     #: montrant les survivants) AVANT que la ligne d'attaque correspondante ne soit traitée.

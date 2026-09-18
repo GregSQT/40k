@@ -301,6 +301,7 @@ _MW_ABILITY_SUFFERS_RE = re.compile(
 _AGENT_DECISION_RE = re.compile(r'DECISION\s+\[([A-Za-z0-9_]+)\]\s+CHOICE_(\d+)')
 from ai import analyzer_suppression as _suppression
 from ai import analyzer_da_jump as _da_jump
+from ai import analyzer_save as _save
 
 #: « Unit N(c,r) ABILITY CALL <Nom> [USED|DECLINED] » (`engine/ability_calls.py`).
 _ABILITY_CALL_RE = re.compile(r'ABILITY CALL (.+?) \[(USED|DECLINED)\]')
@@ -1296,6 +1297,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         f"Objectives line missing payload in episode {state.current_episode_num}: {line.strip()[:200]}"
                     )
                 state.objectives_declared = objectives_payload != 'none'
+                # Cases des aires (`name:(c,r);(c,r)|…`) : la seule géométrie d'objectif que
+                # l'analyzer garde, pour Unbreakable Resolve (`ai/analyzer_save.py`).
+                state.objective_cells = {
+                    (int(c), int(r)) for c, r in re.findall(r'\((\d+),(\d+)\)', objectives_payload)
+                }
                 continue
 
             # Ligne `Attached: lid→bid` de l'entête d'épisode (règle 19.01 : personnage attaché).
@@ -2437,7 +2443,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Sur l'acteur de LA ligne (préfixe « Unit N( »), jamais `action_unit_id` qui est
                 # le dernier ID de HEADER/DEPLOYED, pas celui de la ligne.
                 if _dmg_actor_id is not None:
-                    _da_jump.check_unit_action_while_off_table(state, stats, line, _dmg_actor_id, int(player))
+                    _da_jump.check_unit_action_while_off_table(
+                        state, stats, line, _dmg_actor_id, int(player), action_desc,
+                    )
                 is_shoot_action = re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
                     r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+\d+',
@@ -2661,6 +2669,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             _hz_mw = net_mortal_wounds(int(_hz_match.group(1)), action_desc)
                             # Cible = acteur, nommé par le préfixe de la ligne (cf. garde ci-dessus).
                             _hz_unit_id = _dmg_actor_id
+                            # 24.12 : `[FNP:n]` sur ces blessures exige une source présente.
+                            _save.check_fnp_mortal(state, config, stats, line, action_desc, _hz_unit_id, player)
                             # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
                             # `state.unit_model_hp` ne contient que les socles VIVANTS : si la MW
                             # tue le porteur de l'arme HAZARDOUS (ex. VanguardVeteranSquadJumpPackPlasma)
@@ -2763,6 +2773,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if _de_match:
                             _de_mw = net_mortal_wounds(int(_de_match.group(1)), action_desc)
                             _de_unit_id = _dmg_actor_id
+                            if _de_unit_id is not None:
+                                # 24.12 : `[FNP:n]` sur ces blessures exige une source présente.
+                                _save.check_fnp_mortal(state, config, stats, line, action_desc, _de_unit_id, player)
                             if _de_unit_id is None:
                                 _parse_error(
                                     "ligne DESPERATE ESCAPE : ID unité introuvable "
@@ -2819,6 +2832,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             if _mwa_rule == "da_jump":
                                 _da_jump.handle_suffers_da_jump(
                                     state, stats, line, _mwa_unit_id, player, int(_mwa_match.group(1)),
+                                )
+                            # 24.12 sur des blessures mortelles : `[FNP:n]` exige une source
+                            # présente chez la VICTIME (Psychic Hood si la source est PSYCHIC).
+                            _mwa_victim_player = state.unit_player.get(_mwa_unit_id)  # get allowed
+                            if _mwa_victim_player is not None:
+                                _save.check_fnp_mortal(
+                                    state, config, stats, line, action_desc, _mwa_unit_id, int(_mwa_victim_player),
                                 )
                             # §1.7 : l'usage se compte sur l'unité SOURCE et son camp. Type ou
                             # camp inconnus = unité jamais vue en en-tête (journal tronqué) :

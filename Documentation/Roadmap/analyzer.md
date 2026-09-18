@@ -198,6 +198,31 @@ Demise repositionnée après les attaques (`dead_models_since_explosion`).
 
 ---
 
+## ✅ Effets défensifs — 05.04 / 24.12 / InSv conférées (2026-09-18) {#effets-defensifs}
+
+Livré avec le lot « Capacités Armageddon → décisions d'agent » (prompt 7, `moteur.md#capacites-decisions-agent`).
+Module `ai/analyzer_save.py`, deux compteurs du bucket §2.3 « dégâts », un par entrée du corpus :
+`save_threshold_mismatch` (PROJ.2.3.save_threshold) — `Save R(<base>+ AP<n> → <eff>+)` recalculé
+par le `save_threshold` du moteur, InSv effective = meilleure entre datasheet de la figurine allouée,
+`invul_save_override` des sources PRÉSENTES au Select Targets step (`SelectTargetsFreeze.models`,
+donc 19.04 avec sa dernière clause) et `waaagh_invul` LU dans `T{tour} EFFECTS:` (clé ajoutée au
+producteur `_log_effects_snapshot` ; Waaagh! actif sans la clé = abstention) ; pas de plafond à 6+
+(un 5+ sous AP−4 s'imprime 9+, insauvable, et c'est exact) ; `fnp_threshold_mismatch` (PROJ.2.3.fnp)
+— `[FNP:s/t+ ×n]` : seuil = meilleur seuil des sources présentes (24.02), Dok's Toolz 5+, Psychic
+Hood 4+ si `[PSYCHIC]` ou Da Jump, Unbreakable Resolve 4+ si l'Ancient alloué est dans une aire
+d'objectif (`state.objective_cells`, entête `Objectives:`) ou à 6" du centre (abstention à x5 :
+le socle déborde de son ancre) ; présence sans source, absence avec source et `Dmg>0`, compte
+`Dmg ≠ n − s` ; miroir `[FNP:n]` sur SUFFERS (présence sans source). Corpus : 24.12 → COUVERT
+(la note « jet et seuil absents » était périmée), PROJ.1.9.feel_no_pain/_vs_psychic/_near_objective
+→ COUVERT via 24.12, unit.invul_save_override et unit.waaagh → COUVERT, unit.toughness_bonus_while_waaagh
+→ COUVERT via PROJ.1.4.blessure (contrôlé depuis `analyzer_wound.target_bodyguard_toughness`).
+Nouveau : `_counter_row` du rapport imprime aussi `reserves_too_early`, `da_jump_invalid` et
+`suppression_without_hit`, qui entraient dans les totaux sans ligne. 18 verrous
+(`test_analyzer_fnp.py`, `test_analyzer_save_threshold.py`) ; 0 erreur sur un journal réel du moteur
+(4 puis 14 épisodes à actions aléatoires, rosters Armageddon, 229 seuils et 159 FNP jugés, 32 instantanés Waaagh! actif ; scratch `gen_step_log.py`).
+
+---
+
 ## Champs manquants `step.log` {#champs-step-log}
 
 **6** entrées restantes (L6–L28, hors L1/L2/L3/L4/L9/L10/L11/L12/L13/L14/L15/L16/L17/L18/L19/L22/L24/L25/L26/L27/L28 résolues). Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».

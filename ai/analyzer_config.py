@@ -258,6 +258,20 @@ class AnalyzerConfig:
     #: Sert à évaluer les conditions cible des règles Primitive B : Dakkablitz
     #: (`weapon_attacks_bonus_vs_keyword`) vérifie que la cible ne porte pas `excluded_keywords`.
     unit_upper_keywords_by_type: Dict[str, FrozenSet[str]]
+    #: Sv et InSv de DATASHEET par type de figurine (05.04), entiers seulement — une valeur
+    #: symbolique au registre est ignorée ici, comme pour l'Endurance, et le contrôle de seuil
+    #: de sauvegarde (`ai/analyzer_save.py`) s'abstient sur la figurine concernée. InSv 7 = aucune.
+    unit_armor_save_by_type: Dict[str, int]
+    unit_invul_save_by_type: Dict[str, int]
+    #: `value` de `invul_save_override` par type porteur (Waaagh! Banner 5, Mental Fortress 4) :
+    #: InSv conférée à TOUTE l'escouade tant que le porteur est présent (19.04).
+    invul_override_by_type: Dict[str, int]
+    #: `threshold` des trois Feel No Pain (24.12) par type porteur : générique (Dok's Toolz),
+    #: contre PSYCHIC (Psychic Hood), à portée d'un objectif ou du centre (Unbreakable Resolve —
+    #: « this model », la figurine allouée seulement).
+    fnp_threshold_by_type: Dict[str, int]
+    fnp_vs_psychic_by_type: Dict[str, int]
+    fnp_near_objective_by_type: Dict[str, int]
 
 
 def _rng_weapon_display_name(
@@ -356,6 +370,12 @@ def load_analyzer_config() -> AnalyzerConfig:
     # portent les capacités de faction, absentes des `UNIT_RULES` (cf. plus bas).
     unit_faction_keywords_by_type: Dict[str, frozenset] = {}
     unit_toughness_by_type: Dict[str, int] = {}
+    unit_armor_save_by_type: Dict[str, int] = {}
+    unit_invul_save_by_type: Dict[str, int] = {}
+    invul_override_by_type: Dict[str, int] = {}
+    fnp_threshold_by_type: Dict[str, int] = {}
+    fnp_vs_psychic_by_type: Dict[str, int] = {}
+    fnp_near_objective_by_type: Dict[str, int] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
     effect_display_tokens: Dict[str, Set[str]] = {}
 
@@ -479,6 +499,13 @@ def load_analyzer_config() -> AnalyzerConfig:
         _t_raw = require_key(unit_data, "T")
         if _numeric(_t_raw) is not None:
             unit_toughness_by_type[unit_type] = int(_t_raw)
+        # Sv / InSv (05.04), même traitement des entrées symboliques que l'Endurance ci-dessus.
+        _sv_raw = require_key(unit_data, "ARMOR_SAVE")
+        if _numeric(_sv_raw) is not None:
+            unit_armor_save_by_type[unit_type] = int(_sv_raw)
+        _insv_raw = require_key(unit_data, "INVUL_SAVE")
+        if _numeric(_insv_raw) is not None:
+            unit_invul_save_by_type[unit_type] = int(_insv_raw)
         unit_attack_limits[unit_type] = {
             "rng_nb_by_weapon": rng_nb_by_weapon,
             "cc_nb_by_weapon": cc_nb_by_weapon,
@@ -738,6 +765,29 @@ def load_analyzer_config() -> AnalyzerConfig:
                     _ambiguous_display_names,
                 )
                 blast_per5_nonmv_weapons.add(_dn)
+            # Effets DÉFENSIFS (Primitive F, `ai/analyzer_save.py`) : InSv conférée et les trois
+            # Feel No Pain, lus dans `rule_args` — jamais redevinés d'après le nom de la datasheet.
+            for _def_effect, _def_arg, _def_table in (
+                ("invul_save_override", "value", invul_override_by_type),
+                ("feel_no_pain", "threshold", fnp_threshold_by_type),
+                ("feel_no_pain_vs_psychic", "threshold", fnp_vs_psychic_by_type),
+                ("feel_no_pain_near_objective", "threshold", fnp_near_objective_by_type),
+            ):
+                if _def_effect not in rule_effect_ids:
+                    continue
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict) or _def_arg not in rule_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing rule_args.{_def_arg} "
+                        f"for {_def_effect}"
+                    )
+                _def_val = int(rule_args[_def_arg])
+                _def_prev = _def_table.get(unit_type)
+                if _def_prev is not None and _def_prev != _def_val:
+                    raise ValueError(
+                        f"Unit '{unit_type}' has conflicting {_def_effect} values: {_def_prev} vs {_def_val}"
+                    )
+                _def_table[unit_type] = _def_val
             if "toughness_bonus_while_waaagh" in rule_effect_ids:
                 rule_args = rule.get("rule_args")
                 if not isinstance(rule_args, dict):
@@ -900,5 +950,11 @@ def load_analyzer_config() -> AnalyzerConfig:
         once_per_battle_melee_bonus_by_type=once_per_battle_melee_bonus_by_type,
         melee_atk_bonus_waaagh_by_type=melee_atk_bonus_waaagh_by_type,
         toughness_bonus_waaagh_by_type=toughness_bonus_waaagh_by_type,
+        unit_armor_save_by_type=unit_armor_save_by_type,
+        unit_invul_save_by_type=unit_invul_save_by_type,
+        invul_override_by_type=invul_override_by_type,
+        fnp_threshold_by_type=fnp_threshold_by_type,
+        fnp_vs_psychic_by_type=fnp_vs_psychic_by_type,
+        fnp_near_objective_by_type=fnp_near_objective_by_type,
         squadmates_by_type=squadmates_by_type,
     )

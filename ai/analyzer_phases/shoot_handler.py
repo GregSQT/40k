@@ -498,6 +498,13 @@ def handle_shoot(
             state, config, stats, line, action_desc, player, shooter_id, shooter_unit_type,
             weapon_display_name, target_id, _parsed_shooter_models, is_melee=False,
         )
+        # Effets défensifs 05.04 / 24.12 (`ai/analyzer_save.py`) : seuil de sauvegarde de la
+        # figurine allouée (Sv/AP/InSv conférées, Waaagh! 5++) et Feel No Pain, jugés sur les
+        # sources PRÉSENTES au Select Targets step (19.04, dernière clause comprise).
+        from ai.analyzer_save import check_fnp, check_save_threshold
+        _present_models = frozen_target.models.keys() if frozen_target.models is not None else None
+        check_save_threshold(state, config, stats, line, action_desc, target_id, player, _present_models)
+        check_fnp(state, config, stats, line, action_desc, target_id, player, weapon_display_name, _present_models)
         # 08.04 Oath of Moment : quand [OATH OF MOMENT] est dans le segment de blessure, la cible
         # DOIT être l'unité jurée. Erreur si target_id ≠ oath_target pour ce joueur.
         # oath_of_moment est une CAPACITÉ DE FACTION : elle est dans `rule_to_units`, pas dans
