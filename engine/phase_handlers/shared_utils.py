@@ -14998,7 +14998,8 @@ def overrun_pile_in_plan_for_slot(
     target_slot: Optional[int],
     *,
     unit: Dict[str, Any],
-    plan_cache: Optional[Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]]] = None,
+    enemy_slot_ids: Optional[List[Optional[str]]] = None,
+    memo: Optional[Dict[str, Any]] = None,
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan du pile-in additionnel de l overrun 12.06 pour ``target_slot`` — ORACLE UNIQUE.
 
@@ -15027,10 +15028,16 @@ def overrun_pile_in_plan_for_slot(
     ``unit`` : l entree d unite, que les deux appelants tiennent deja — la redemander par slot
     ferait 20 resolutions par construction de masque pour un objet invariant.
 
-    ``plan_cache`` : memo {cle de selection -> plan} partage par les appels d une MEME
-    construction de masque. Le masque interroge un slot par cible ; sans memo il recalculerait
-    le plan groupe a chaque slot alors qu il n existe qu autant de plans distincts que de
-    selections distinctes (cibles a 5" + 1).
+    ``enemy_slot_ids`` : le mapping slot -> ennemi de l APPELANT. Le masque enumere SON mapping
+    (parametre de `build_squad_action_mask`) ; le resoudre ici par `get_enemy_slot_mapping`
+    ferait designer a `target_slot` une autre escouade que celle du slot teste des que
+    l appelant passe un mapping different du mapping stable. ``None`` = `get_enemy_slot_mapping`,
+    exactement celui que le commit utilise (`_commit_enemy_slots`).
+
+    ``memo`` : cache d etat partage par les appels d une MEME construction de masque. Le masque
+    interroge un slot par cible, et TOUT ce que cette fonction lit est invariant sur la
+    construction : eligibilite overrun, unites engagees, cibles a 5", mapping, et les plans
+    (il n en existe qu autant que de selections distinctes, cibles a 5" + 1).
     """
     from engine.phase_handlers.fight_handlers import (
         _fight_units_engaged_with,
@@ -15038,28 +15045,39 @@ def overrun_pile_in_plan_for_slot(
         pile_in_targets_within_range,
     )
 
-    if not fight_v11_can_overrun_pile_in(game_state, unit):
+    cache: Dict[str, Any] = {} if memo is None else memo
+
+    def _memo(key: str, compute: Callable[[], Any]) -> Any:
+        if key not in cache:
+            cache[key] = compute()
+        return cache[key]
+
+    if not _memo("can_overrun", lambda: fight_v11_can_overrun_pile_in(game_state, unit)):
         return None
 
-    cache: Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]] = (
-        plan_cache if plan_cache is not None else {}
+    plans: Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]] = _memo(
+        "plans", dict
     )
 
     def _plan(selection: Optional[Tuple[str, ...]]) -> Optional[List[Tuple[str, int, int, int]]]:
-        if selection not in cache:
-            cache[selection] = fight_pile_in_plan(
+        if selection not in plans:
+            plans[selection] = fight_pile_in_plan(
                 game_state, str(squad_id),
                 target_ids=None if selection is None else list(selection),
             )
-        return cache[selection]
+        return plans[selection]
 
     designated: Optional[str] = None
     # Unite engagee : 12.03 impose ses cibles, la designation de l action n y change rien.
-    if target_slot is not None and not _fight_units_engaged_with(game_state, unit):
-        slots = get_enemy_slot_mapping(game_state, int(require_key(unit, "player")))
+    if target_slot is not None and not _memo(
+        "engaged", lambda: _fight_units_engaged_with(game_state, unit)
+    ):
+        slots = enemy_slot_ids if enemy_slot_ids is not None else _memo(
+            "slots", lambda: get_enemy_slot_mapping(game_state, int(require_key(unit, "player")))
+        )
         if 0 <= int(target_slot) < len(slots) and slots[int(target_slot)] is not None:
             _d = str(slots[int(target_slot)])
-            if _d in pile_in_targets_within_range(game_state, unit):
+            if _d in _memo("within", lambda: pile_in_targets_within_range(game_state, unit)):
                 designated = _d
 
     if designated is not None:
@@ -17178,9 +17196,10 @@ def build_squad_action_mask(
             # (12.03 BEFORE MOVING, `overrun_pile_in_plan_for_slot` — l'oracle que le commit
             # appelle aussi). Le plan groupe seul n'ouvrait que la cible la plus proche alors que
             # le commit frappait n'importe quelle cible a 5".
-            _plan_cache: Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]] = {}
+            _overrun_memo: Dict[str, Any] = {}
             ov_plan = overrun_pile_in_plan_for_slot(
-                game_state, squad_id, None, unit=unit, plan_cache=_plan_cache
+                game_state, squad_id, None, unit=unit,
+                enemy_slot_ids=enemy_slot_ids, memo=_overrun_memo,
             )
             if ov_plan is None:
                 # Aucune selection n'aboutit (ou plus de pile-in disponible) : le commit ne bouge
@@ -17215,7 +17234,8 @@ def build_squad_action_mask(
                         continue
                     # Jamais None ici : le repli de l'oracle rend `ov_plan`, deja non-None.
                     slot_plan = overrun_pile_in_plan_for_slot(
-                        game_state, squad_id, _slot_i, unit=unit, plan_cache=_plan_cache
+                        game_state, squad_id, _slot_i, unit=unit,
+                        enemy_slot_ids=enemy_slot_ids, memo=_overrun_memo,
                     )
                     if slot_plan is None:
                         raise RuntimeError(
