@@ -11286,8 +11286,9 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
             atk_unit is not None
             and str(require_key(atk_unit, "id")) in {str(uid) for uid in game_state.get("units_charged", [])}
         ) if ctx.log_type == "combat" else None,
-        # L15 — [FINEST HOUR] once_per_battle_melee_buff : l'escouade a declenche Finest Hour cette
-        # phase. Lu de `finest_hour_active_this_phase` pose par le roller fight a chaque activation ;
+        # L15 — [FINEST HOUR] once_per_battle_melee_buff : l'escouade a APPELE Finest Hour cette
+        # phase. Lu de `finest_hour_active_this_phase` pose par `apply_finest_hour_call` (appel
+        # accepte a la selection 12.04) ;
         # le token figure sur CHAQUE dé d'une telle activation pour que l'analyzer puisse lever le
         # plafond par attaque individuelle, sans etat inter-lignes.
         "finestHour": (
@@ -15128,17 +15129,16 @@ def squad_declare_fight(
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
     _attacker_sq_id_str = str(attacker_squad_id)
-    # Lookup squad-level : constant sur toute la boucle, calculé une seule fois.
-    _sq_fh_available = (
-        _attacker_sq_id_str not in game_state.get("finest_hour_used", set())
-        or _attacker_sq_id_str in game_state.get("finest_hour_active_this_phase", set())
-    )
+    # Lookup squad-level : constant sur toute la boucle, calculé une seule fois. Finest Hour est
+    # un APPEL répondu à la sélection 12.04 (`apply_finest_hour_call`) : seule
+    # `finest_hour_active_this_phase` fait foi, ici comme au roller — plus jamais « pas encore
+    # dépensée », qui scorait DEVASTATING WOUNDS sur une capacité que le joueur n'a pas appelée.
+    _sq_fh_available = _attacker_sq_id_str in game_state.get("finest_hour_active_this_phase", set())  # get allowed : jamais activée
     for mid in fighting:
         m = models_cache.get(mid)
         if m is None:
             continue
-        # once_per_battle_melee_buff : si l'abilité n'a pas encore été consommée cette partie
-        # (pas dans finest_hour_used) OU est déjà active cette phase (finest_hour_active_this_phase),
+        # once_per_battle_melee_buff : active cette phase (finest_hour_active_this_phase) →
         # le scoring arme doit inclure DEVASTATING WOUNDS — identique au chemin de résolution.
         _fig_finest_hour_active = (
             _unit_get_primitive_b_rule_args(m, "once_per_battle_melee_buff") is not None

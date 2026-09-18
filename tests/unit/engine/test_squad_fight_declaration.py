@@ -521,3 +521,54 @@ class TestSplittingMeleeAttacksSousWaaagh:
         whole = squad_declare_fight_weapon_qty(gs, "1", PF_CODE, 1, "2")
         entire = _manual_roll_fight_intent(gs, whole[0], meta)
         assert entire is not None and int(entire["roll_spec"]["n_attacks"]) == 4
+
+
+class TestSplittingMeleeAttacksSousFinestHour:
+    """04.02 sous Finest Hour ACCEPTÉE à la sélection (`apply_finest_hour_call`) : « this model's
+    melee weapons have +3 A » est une caractéristique connue à la déclaration — le total réparti
+    est A + 3 pour la figurine PORTEUSE seulement, et le roller ne rajoute rien aux parts."""
+
+    def _gs(self):
+        from engine.phase_handlers.fight_handlers import apply_finest_hour_call
+
+        units = [_atk_squad(), _target2(),
+                 _unit(4, 2, [_m(7, 5, [CCW]), _m(7, 6, [CCW])], [CCW])]
+        gs = _make_gs(units)
+        _activate(gs, "1")
+        gs["models_cache"]["1#2"]["UNIT_RULES"] = [
+            {"ruleId": "once_per_battle_melee_buff", "displayName": "Finest Hour", "rule_args": {"attacks_bonus": 3}}
+        ]
+        gs["finest_hour_active_this_phase"] = set()
+        apply_finest_hour_call(gs, "1", True)
+        return gs
+
+    def test_la_somme_repartie_vaut_a_plus_trois_pour_la_porteuse(self):
+        gs = self._gs()
+        assert int(PF["NB"]) == 3
+        with pytest.raises(ValueError, match=r"caracteristique A de l arme \(6\)"):
+            squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 2, "4": 1})
+        created = squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 4, "4": 2})
+        assert [(i["target_unit_id"], i["n_attacks_resolved"]) for i in created] == [("2", 4), ("4", 2)]
+        # Sa soeur sans la regle reste a A3 : « this model's », pas l'escouade.
+        with pytest.raises(ValueError, match=r"caracteristique A de l arme \(3\)"):
+            squad_fight_split_weapon_attacks(gs, "1", "1#3", PF_CODE, {"2": 4, "4": 2})
+
+    def test_le_roller_ne_rajoute_pas_le_bonus_aux_parts_reparties(self):
+        from engine.phase_handlers.fight_handlers import _manual_roll_fight_intent
+        gs = self._gs()
+        created = squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 4, "4": 2})
+        gs["objectives"] = []
+        meta: Dict[str, Any] = {}
+        prepared = [_manual_roll_fight_intent(gs, i, meta) for i in created]
+        assert [int(p["roll_spec"]["n_attacks"]) for p in prepared if p is not None] == [4, 2]
+        # Jumeau de controle, etat neuf : intents ENTIERS des deux porteurs de power fist —
+        # la porteuse de Finest Hour jette 6, sa soeur 3.
+        fresh = self._gs()
+        fresh["objectives"] = []
+        whole = squad_declare_fight_weapon_qty(fresh, "1", PF_CODE, 2, "2")
+        rolled = {
+            i["model_id"]: int(p["roll_spec"]["n_attacks"])
+            for i in whole
+            if (p := _manual_roll_fight_intent(fresh, i, meta)) is not None
+        }
+        assert rolled == {"1#2": 6, "1#3": 3}

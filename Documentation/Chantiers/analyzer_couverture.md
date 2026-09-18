@@ -204,7 +204,7 @@ l'écriture directe de `rule_choice`) :
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
 | `da_jump` | `Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED\|MISCAST]` | Da Jump, grammaire 13 (2026-09-18) : jet du WeirdBoy ; contrôle `da_jump_invalid` (`ai/analyzer_da_jump.py`, PROJ.1.1.da_jump) + dés du MISCAST par `mw_ability_dice_mismatch` — **COUVERT** |
 | `suppress_target` | `Unit N(c,r) SUPPRESSES Unit M(c,r) [SUPPRESSED→M]` | Primitive F, grammaire 12 (2026-09-18) : l'escouade TOUCHÉE que le tireur supprime en fin d'activation ; contrôle `suppression_without_hit` (`ai/analyzer_suppression.py`, PROJ.1.2.suppression) — **COUVERT** |
-| `ability_call` | `Unit N(c,r) ABILITY CALL <Nom> [USED\|DECLINED]` | appel de capacité (`engine/ability_calls.py`, 2026-09-18) : « you can … » rendu au joueur ; DECLINED distingue « refusé » de « jamais proposé » ; compté par `ability_call_counts` (§1.6) et relevé dans `state.ability_calls` |
+| `ability_call` | `Unit N(c,r) ABILITY CALL <Nom> [USED\|DECLINED]` | appel de capacité (`engine/ability_calls.py`, 2026-09-18) : « you can … » rendu au joueur ; DECLINED distingue « refusé » de « jamais proposé » ; compté par `ability_call_counts` (§1.6) et relevé dans `state.ability_calls` (acteur = préfixe `Unit N(` de la ligne). Grammaire 14 : `[FINEST HOUR]` sur une ligne `combat` n'élève le plafond (`_cc_cap_for_line`) que si un `ABILITY CALL Finest Hour [USED]` de la même escouade précède ce tour en FIGHT ; sinon `parse_error` et plafond non levé (`fight_over_cc_nb`) |
 
 **Formateurs sans producteur** (code mort côté moteur) : `skip`.
 Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`

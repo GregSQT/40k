@@ -105,9 +105,17 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       ou moins d un ennemi apres Da Jump aussi (`da_jump_invalid`). Verrous :
 #:       test_da_jump.py (producteur), test_analyzer_da_jump.py (lecteur).
 #:
+#:  14 — Finest Hour (Captain, `once_per_battle_melee_buff`) est un APPEL DE CAPACITE repondu a
+#:       la selection 12.04 : toute activation dont les lignes portent `[FINEST HOUR]` est
+#:       precedee, le MEME tour en phase FIGHT, d une ligne « Unit N(c,r) ABILITY CALL Finest
+#:       Hour [USED] » de la meme escouade. Sur un journal log_grammar>=14, un `[FINEST HOUR]`
+#:       sans appel USED est une FAUTE (parse_error, plafond NON leve → `fight_over_cc_nb`),
+#:       jamais un vieux format. Verrous : test_finest_hour_call.py (producteur),
+#:       test_analyzer_finest_hour_cap.py (lecteur).
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 13
+LOG_GRAMMAR_VERSION = 14
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :

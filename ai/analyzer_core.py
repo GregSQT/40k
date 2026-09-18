@@ -2490,12 +2490,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'ability_call'
                         _ac_match = _ABILITY_CALL_RE.search(action_desc)
                         assert _ac_match is not None
+                        # L'acteur de LA ligne (préfixe « Unit N( »), jamais `action_unit_id`
+                        # qui est le dernier ID de HEADER/DEPLOYED.
                         state.ability_calls.append({
                             "episode": state.current_episode_num,
                             "turn": turn,
                             "phase": phase,
                             "player": player,
-                            "unit_id": action_unit_id,
+                            "unit_id": _dmg_actor_id if _dmg_actor_id is not None else action_unit_id,
                             "ability": _ac_match.group(1).strip(),
                             "used": _ac_match.group(2) == "USED",
                         })

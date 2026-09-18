@@ -43,6 +43,8 @@ from engine.phase_handlers.fight_handlers import (
     EXHORTATION_REGIME_MANUAL,
     FIGHT_CTX,
     FIGHT_SELECTION_EXHORTATION_KEY,
+    FIGHT_SELECTION_FINEST_HOUR_KEY,
+    fight_arm_finest_hour_call,
     ExhortationRegime,
     exhortation_regime_of,
     fight_exhortation_engaged_targets,
@@ -1810,6 +1812,7 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_pending_exhortation_resume", None)
         self.game_state.pop("_pending_exhortation_fight", None)
         self.game_state.pop(FIGHT_SELECTION_EXHORTATION_KEY, None)
+        self.game_state.pop(FIGHT_SELECTION_FINEST_HOUR_KEY, None)
         # Les intents en attente (tir et combat) ne sont jamais purgés par game_state.update() ci-
         # dessous : un dict stale de l'épisode N déroute declare_attack_weapon_qty et
         # _build_manual_allocation au N+1. Remise à zéro explicite, identique à _fight_v11_phase_complete.
@@ -5027,6 +5030,10 @@ class W40KEngine(gym.Env):
         }
         if self._ability_call_closes_command_phase(prompt):
             return True, self._resume_command_phase_after_faction_decision(result)
+        if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
+            # Appel Finest Hour répondu : le combat suspendu à la sélection reprend, et c'est
+            # SON résultat (squad_fight) que le step rend.
+            return self._resume_fight_after_finest_hour()
         return True, result
 
     def _ability_call_closes_command_phase(self, prompt: Dict[str, Any]) -> bool:
@@ -5900,6 +5907,9 @@ class W40KEngine(gym.Env):
         # n'a aucun verbe de sortie de la phase de commandement.
         if self._ability_call_closes_command_phase(selected_prompt):
             return True, self._resume_command_phase_after_faction_decision(result)
+        if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
+            # Même reprise que le chemin gym : l'unité reste active, le joueur déclare.
+            return self._resume_fight_after_finest_hour()
         return True, result
     
     
@@ -7406,6 +7416,32 @@ class W40KEngine(gym.Env):
                 "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": [], "expected_damage_by_target": {}},
             }
         return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
+
+    def _resume_fight_after_finest_hour(self) -> Tuple[bool, Dict[str, Any]]:
+        """Reprise du combat suspendu à la sélection par l'appel Finest Hour, une fois répondu.
+
+        Jumeau de `_continue_fight_after_exhortation`, sans jet ni cascade : la réponse a posé
+        (ou non) `finest_hour_active_this_phase`, et le combat reprend par le régime enregistré
+        à l'armement — gym : `_continue_squad_fight_after_selection` (overrun → cible → arme) ;
+        manuel : l'unité reste ACTIVE, `_fight_v11_manual_state` la présente au joueur qui
+        déclare ses attaques. Appelée par les trois chemins de réponse (gym `CHOICE_i`, humain
+        `select_rule_choice`, bot dans la file) : la clé est CONSOMMÉE ici, une seule fois.
+        """
+        from engine.phase_handlers.fight_handlers import _fight_v11_manual_state
+
+        pending = self.game_state.pop(FIGHT_SELECTION_FINEST_HOUR_KEY, None)
+        if pending is None:
+            raise RuntimeError(
+                "_resume_fight_after_finest_hour: aucun combat suspendu par un appel Finest Hour"
+            )
+        regime = exhortation_regime_of(require_key(pending, "regime"), "_resume_fight_after_finest_hour")
+        squad_id = str(require_key(pending, "squad_id"))
+        if regime == EXHORTATION_REGIME_MANUAL:
+            return _fight_v11_manual_state(self.game_state)
+        target_slot = pending.get("target_slot")  # get allowed : None = cible par la politique
+        return self._continue_squad_fight_after_selection(
+            squad_id, int(target_slot) if target_slot is not None else None, skip_pool_check=True
+        )
 
     def _check_and_trigger_exhortation_de_rage(
         self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int],
@@ -9692,6 +9728,18 @@ class W40KEngine(gym.Env):
             target_slot_from_semantic: Optional[int] = (
                 int(semantic["target_slot"]) if "target_slot" in semantic else None
             )
+            # Finest Hour (once_per_battle_melee_buff) : « Once per battle … when this unit is
+            # selected to fight » — APPEL DE CAPACITÉ posé ICI, même moment que l'Exhortation
+            # (les deux sur une même escouade lèvent, 19.01). Gym : la file émet la décision et
+            # le combat attend la réponse (`_resume_fight_after_finest_hour`) ; bot PvE : la
+            # politique déclarée répond dans la file, le combat reprend tout de suite.
+            if fight_arm_finest_hour_call(
+                self.game_state, squad_id, target_slot_from_semantic, EXHORTATION_REGIME_GYM
+            ):
+                served = self._emit_next_rule_choice_prompt_if_needed()
+                if served is not None:
+                    return True, served
+                return self._resume_fight_after_finest_hour()
             _exhort = self._check_and_trigger_exhortation_de_rage(
                 squad_id, unit, target_slot_from_semantic, regime=EXHORTATION_REGIME_GYM
             )
@@ -10331,6 +10379,14 @@ class W40KEngine(gym.Env):
         # pendant du site gym (`_process_squad_action`, juste après `_fight_v11_register_selection`).
         armed = self.game_state.pop(FIGHT_SELECTION_EXHORTATION_KEY, None)
         if armed is None:
+            # Finest Hour armée par le handler à la même sélection : servir l'appel au siège
+            # (humain : prompt actif, toute autre action attend ; bot : politique déclarée, le
+            # combat reprend dans la même requête). Le pendant du site gym (`squad_fight`).
+            if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
+                served = self._emit_next_rule_choice_prompt_if_needed()
+                if served is not None:
+                    return True, served
+                return self._resume_fight_after_finest_hour()
             return success, result
         armed_squad_id = str(armed)
         # Régime MANUEL par construction : la machine manuelle est celle du siège humain (PvP

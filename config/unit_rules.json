@@ -271,10 +271,10 @@
   "once_per_battle_melee_buff": {
     "id": "once_per_battle_melee_buff",
     "obs_id": 28,
-    "name": "Once per battle melee buff",
+    "name": "Finest Hour",
     "has_parameter": true,
     "parameter_name": "attacks_bonus",
-    "description": "Primitive B (chantier 06) : une fois par bataille en phase de corps a corps, les armes de melee de CE MODELE gagnent +attacks_bonus A et [DEVASTATING WOUNDS] jusqu'a la fin de la phase. Portee par Finest Hour (CaptainRelicShield)."
+    "description": "Finest Hour (Once per battle) : In the Fight phase, when this unit is selected to fight, this model's melee weapons have +attacks_bonus A and [DEVASTATING WOUNDS] until the end of the phase. Appel de capacite (engine/ability_calls) pose a la selection 12.04 (gym et flux manuel), refus = rien consomme ; les sites de resolution ne lisent que finest_hour_active_this_phase. Portee par Finest Hour (CaptainRelicShield)."
   },
   "feel_no_pain_vs_psychic": {
     "id": "feel_no_pain_vs_psychic",

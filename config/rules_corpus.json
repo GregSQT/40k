@@ -3982,7 +3982,7 @@
       },
       "controls": [],
       "status": "COUVERT",
-      "status_note": "Implémenté dans _manual_roll_fight_intent (flag finest_hour_used) et build_weapon_attack_profile (finest_hour_active). Testé dans test_primitive_b_granted_weapon_effects."
+      "status_note": "Refondu le 2026-09-18 (capacités-agent, prompt 6) : « Once per battle … when this unit is selected to fight » = APPEL DE CAPACITÉ posé à la sélection 12.04 (fight_handlers.fight_arm_finest_hour_call, deux sites : squad_fight gym/bot et _fight_v11_manual_activate humain), répondu par CHOICE_0/1, la politique bot _bot_finest_hour_policy ou select_rule_choice ; acceptation = finest_hour_used + finest_hour_active_this_phase (apply_finest_hour_call), refus = rien consommé. Le +N A entre dans melee_attacks_characteristic_bonus (connu à la déclaration, réparti 04.02), DEVASTATING WOUNDS lu sur finest_hour_active_this_phase seulement. Journal : ABILITY CALL Finest Hour [USED|DECLINED] puis [FINEST HOUR] sur chaque attaque ; grammaire 14 : l'analyzer ne lève le plafond qu'après USED (fight_handler._finest_hour_call_used). Tests : test_finest_hour_call.py, test_primitive_b_granted_weapon_effects, test_squad_fight_declaration (04.02), test_analyzer_finest_hour_call."
     },
     {
       "id": "unit.secure_objective_on_control",
