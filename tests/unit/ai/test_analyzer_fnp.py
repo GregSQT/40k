@@ -73,7 +73,8 @@ def _stats_x5(tmp_path, body: str) -> dict:
     log.write_text(entete_step_log(
         _SETUP + body + _END, units=_UNITS, objectives=_OBJECTIVES, inches_to_subhex=5,
         board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
-        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=14,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)",
+        log_grammar=FNP_MARKER_GRAMMAR,
     ))
     return an.parse_step_log(str(log))
 
