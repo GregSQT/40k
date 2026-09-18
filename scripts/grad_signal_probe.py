@@ -850,7 +850,21 @@ def apply_run_temperature(model: Any, model_params: Mapping[str, Any], log: Call
     cette étape la sonde mesurerait un gradient que le run n'applique pas, et le contrôle
     « checkpoint ≠ profil » ne peut pas le voir (la clé n'est pas dans le zip). Même source que
     `ai/train.py::_apply_curriculum_model_params` : la valeur du profil, 1,0 si absente.
+
+    REFUS sous température AUTORÉGULÉE (`logits_temperature_regulation` non nul, option 2) : la
+    T réelle du run à ce checkpoint est un état de run que le zip ne porte pas (elle a bougé à
+    chaque update) ; poser la T de départ du profil décomposerait un gradient que le run n'a
+    jamais appliqué en annonçant « comme le run ». La T atteinte se lit sur le tag
+    `train/logits_temperature` du run, pas ici.
     """
+    regulation = model_params.get("logits_temperature_regulation")  # get allowed: clé optionnelle
+    if regulation is not None:
+        raise ValueError(
+            "grad_signal_probe : le profil porte logits_temperature_regulation (température "
+            "autorégulée) ; la T du run à ce checkpoint n'est pas dans le zip et ne peut pas "
+            "être posée « comme le run ». Sonder un checkpoint d'un run à T fixe, ou relire "
+            "train/logits_temperature du run."
+        )
     temperature = float(model_params.get("logits_temperature", 1.0))  # get allowed: clé optionnelle
     model.logits_temperature = temperature
     if temperature != 1.0:

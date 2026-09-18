@@ -258,6 +258,7 @@ _PLAIN_CURRICULUM_KEYS = (
     "ent_coef", "normalize_advantage", "target_kl", "gamma", "gae_lambda",
     "batch_size", "n_epochs", "vf_coef", "max_grad_norm", "entropy_normalize_by_legal",
     "value_warmup_updates", "advantage_source", "q_coef", "logits_temperature",
+    "logits_temperature_regulation",
 )
 
 
