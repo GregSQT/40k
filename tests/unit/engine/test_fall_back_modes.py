@@ -148,7 +148,9 @@ def _logs_of_type(gs: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
 
 
 def test_the_type_consumes_a_reserved_slot_and_leaves_obs_size_untouched():
-    assert AGENT_DECISION_TYPE_IDS[-1] == "fall_back_mode", "ajouté en FIN, jamais inséré"
+    # Ajouté en FIN, jamais inséré : son index est figé (les types suivants s'ajoutent après lui,
+    # `consolidation_engaging` le 2026-09-18).
+    assert AGENT_DECISION_TYPE_IDS.index("fall_back_mode") == 12, "ajouté en FIN, jamais inséré"
     assert len(AGENT_DECISION_TYPE_IDS) <= AGENT_DECISION_TYPE_SLOTS
 
 

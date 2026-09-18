@@ -2227,6 +2227,8 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state[FIGHT_PASS_STREAK_KEY] = 0
     game_state[FIGHT_STEP_PASSED_KEY] = False
     game_state[UNITS_ELIGIBLE_WHEN_PASSED_KEY] = set()
+    # B2 — réponses de l'agent aux consolidations engaging de la phase (12.07 « choose to move »).
+    game_state[CONSOLIDATION_ENGAGING_ANSWERS_KEY] = {}
     game_state["fight_subphase"] = "pile_in"
 
 
@@ -2246,6 +2248,72 @@ def fight_v11_enter_fight_step(game_state: Dict[str, Any]) -> None:
         f"{sorted(k for k, v in game_state['engaged_at_fight_step_start'].items() if v)}, "
         f"selector=P{game_state['fight_selector']})",
     )
+
+
+#: B2 — `{squad_id: bool}` : réponse de l'agent à la question « consolider en engaging ? »
+#: (12.07 « Both players make consolidation moves with all of their eligible units they CHOOSE
+#: to move » ; 12.08 Engaging expose aux New Foes). Écrite par
+#: `apply_consolidation_engaging_decision`, lue par le driver gym (`_fight_v11_gym_settle`), qui
+#: pose la question (`arm_consolidation_engaging_decision`) tant qu'elle est absente.
+CONSOLIDATION_ENGAGING_ANSWERS_KEY = "consolidation_engaging_answers"
+
+
+def consolidation_engaging_answer(game_state: Dict[str, Any], squad_id: str) -> Optional[bool]:
+    """Réponse déjà donnée par l'agent pour `squad_id` (True = consolider), ou None."""
+    answers = require_key(game_state, CONSOLIDATION_ENGAGING_ANSWERS_KEY)
+    return answers.get(str(squad_id))  # get allowed : None = question pas encore posée
+
+
+def arm_consolidation_engaging_decision(game_state: Dict[str, Any], squad_id: str) -> Dict[str, Any]:
+    """Pose le point de choix « consolidation engaging » (12.07 / 12.08) de `squad_id` — B2.
+
+    POURQUOI un point de choix et pas une constante moteur : 12.07 dit « with all of their
+    eligible units they CHOOSE to move » et l'encart New Foes to Face prévient « think carefully
+    about how aggressively you want to move your unit using this mode » — consolider vers un
+    ennemi à 3" l'engage, donc lui ouvre un combat (12.08 AFTER). Le driver gym consolidait
+    TOUJOURS : une décision de jeu jouée par une heuristique (J2). Ongoing (engagée : rester au
+    contact) et Objective (rejoindre la zone) n'ont pas ce contenu tactique et restent automatiques.
+
+    ORDRE CONTRACTUEL des candidats (`_binary_declaration_options`) : `CHOICE_0` = consolider,
+    `CHOICE_1` = rester (`declines`). Le propriétaire de la décision est le propriétaire de
+    l'unité — en seconde moitié de 12.07 c'est le joueur NON actif qui consolide.
+    """
+    from engine.agent_decision import set_pending_agent_decision
+    from engine.phase_handlers.movement_handlers import _binary_declaration_options
+
+    unit = require_unit_by_id(game_state, str(squad_id))
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="consolidation_engaging",
+        player=int(require_key(unit, "player")),
+        unit_id=str(squad_id),
+        options=_binary_declaration_options("Consolider", "Rester", "consolidate"),
+    )
+
+
+def apply_consolidation_engaging_decision(
+    game_state: Dict[str, Any], squad_id: str, consolidate: bool
+) -> None:
+    """Applique le candidat choisi pour `consolidation_engaging` et EFFACE la décision : la
+    réponse est mémorisée pour la phase (`CONSOLIDATION_ENGAGING_ANSWERS_KEY`), le driver gym la
+    lit au step suivant pour jouer (ou non) le plan. `player` vient de l'UNITÉ, source
+    indépendante de la décision (cf. `consume_pending_agent_decision`)."""
+    from engine.agent_decision import consume_pending_agent_decision
+
+    if str(require_key(game_state, "phase")) != "fight" or game_state.get("fight_subphase") != "consolidate":
+        raise RuntimeError(
+            f"apply_consolidation_engaging_decision: hors de l'étape CONSOLIDATE "
+            f"(phase={game_state.get('phase')!r}, sous-phase={game_state.get('fight_subphase')!r}) "
+            "— la decision a survecu a son etape."
+        )
+    unit = require_unit_by_id(game_state, str(squad_id))
+    consume_pending_agent_decision(
+        game_state,
+        decision_type="consolidation_engaging",
+        player=int(require_key(unit, "player")),
+        unit_id=str(squad_id),
+    )
+    require_key(game_state, CONSOLIDATION_ENGAGING_ANSWERS_KEY)[str(squad_id)] = bool(consolidate)
 
 
 def fight_v11_enter_consolidate(game_state: Dict[str, Any]) -> None:

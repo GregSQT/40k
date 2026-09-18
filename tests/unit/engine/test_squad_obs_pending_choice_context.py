@@ -523,3 +523,41 @@ def test_two_weapons_on_the_same_target_mark_two_bits():
     assert float(obs["enemies_bin"][target_slot][BIN_PRESENT]) == 1.0
     assert _bits_of(obs, target_slot) == [0, 1], "les deux armes assignées doivent être lisibles"
     assert _bits_of(obs, _enemy_slot_of(eng, "1", "3")) == []
+
+
+# ── Volet consolidation : la décision `consolidation_engaging` (B2, 12.07 / 12.08) ─────────
+
+
+def test_consolidation_engaging_decision_is_observed_by_its_owner_with_the_declining_option():
+    """Décision armée par le driver gym sur l'unité 1 (P1) : l'observation de P1 porte
+    `decision_pending`, le one-hot du type `consolidation_engaging`, deux candidats présents dont
+    le second `declines` ; l'observation de l'adversaire (P2) ne porte aucune décision."""
+    import json
+    import tempfile
+
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.observation_entities import decision_ctx_bin_index, decision_option_bin_index
+    from tests.unit.engine._melee_scenario import MELEE_SCENARIO
+    from tests.unit.engine.test_consolidation_engaging_decision import _engine_at_consolidation
+
+    with tempfile.TemporaryDirectory() as td:
+        path = f"{td}/melee.json"
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(MELEE_SCENARIO))
+        eng = _engine_at_consolidation(path)
+    gs = eng.game_state
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "consolidation_engaging"
+
+    obs = eng.obs_builder.build_squad_observation(gs, "1")
+    ctx = obs["decision_ctx_bin"]
+    assert float(ctx[decision_ctx_bin_index("decision_pending")]) == 1.0
+    assert float(ctx[decision_ctx_bin_index("decision_type_consolidation_engaging")]) == 1.0
+    opts = obs["decision_options_bin"]
+    present = decision_option_bin_index("present")
+    declines = decision_option_bin_index("declines")
+    assert [float(opts[i][present]) for i in range(3)] == [1.0, 1.0, 0.0]
+    assert [float(opts[i][declines]) for i in range(2)] == [0.0, 1.0], "« Rester » est le refus"
+
+    obs_p2 = eng.obs_builder.build_squad_observation(gs, "4")
+    assert float(obs_p2["decision_ctx_bin"][decision_ctx_bin_index("decision_pending")]) == 0.0

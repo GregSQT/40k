@@ -4696,6 +4696,30 @@ class W40KEngine(gym.Env):
                 "success": True,
             }
 
+        if decision_type == "consolidation_engaging":
+            # B2 (12.07 / 12.08) : consolider en engaging, ou rester. Jumeau de `fall_back_mode`
+            # (deux candidats sans `effect_ids`, `declines` sur « Rester »). La réponse est
+            # mémorisée pour la phase, puis le driver gym reprend l'étape CONSOLIDATE là où il
+            # s'était arrêté (plan et New Foes pour « Consolider », rien pour « Rester »).
+            consolidate = bool(
+                require_key(require_key(selected_option, "payload"), "consolidate")
+            )
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            fight_handlers.apply_consolidation_engaging_decision(
+                self.game_state, decision_squad_id, consolidate
+            )
+            self._fight_v11_gym_settle()
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "consolidate": consolidate,
+                "success": True,
+            }
+
         if decision_type == "allocation_model":
             # P3-4 : le défenseur gym choisit quelle figurine encaisse la prochaine blessure (05.04).
             # Le payload porte `model_id` (la figurine choisie) et `alloc_ctx_key` (le contexte
@@ -8625,6 +8649,8 @@ class W40KEngine(gym.Env):
         """
         from engine.phase_handlers.fight_handlers import (
             _fight_v11_consolidation_clear_new_foes,
+            arm_consolidation_engaging_decision,
+            consolidation_engaging_answer,
             fight_v11_advance_selection,
             fight_v11_consolidation_freeze_new_foes,
             fight_v11_consolidation_mode,
@@ -8687,6 +8713,18 @@ class W40KEngine(gym.Env):
                     unit = require_unit_by_id(gs, str(uid))
                     # Mode 12.08 constate AVANT le move : apres, une engaging reussie est engagee.
                     mode = fight_v11_consolidation_mode(gs, unit)
+                    if mode == "engaging":
+                        # B2 : consolider vers un ennemi a 3" est un CHOIX du joueur (12.07 « they
+                        # choose to move », New Foes to Face) — pose a l'agent proprietaire de
+                        # l'unite, jouee au step suivant. « Rester » = consolidation consommee
+                        # sans mouvement.
+                        answer = consolidation_engaging_answer(gs, str(uid))
+                        if answer is None:
+                            arm_consolidation_engaging_decision(gs, str(uid))
+                            return  # la main revient au siege proprietaire (CHOICE_0 / CHOICE_1)
+                        if answer is False:
+                            require_key(gs, "consolidation_done").add(str(uid))
+                            continue
                     plan, targets = squad_consolidate_plan_with_targets(gs, str(uid), mode=mode)
                     if plan is not None:
                         self._gym_commit_fight_move(

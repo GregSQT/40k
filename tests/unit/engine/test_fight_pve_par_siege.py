@@ -333,7 +333,12 @@ def test_le_selecteur_des_new_foes_est_l_adversaire_du_consolidant_pas_du_joueur
 def test_la_consolidation_engaging_du_bot_arme_les_new_foes_de_l_humain(monkeypatch):
     # Unité 1 (humain) jamais éligible au combat (ni engagée ni chargée) ; le bot 2 a combattu
     # et consolide : 1 est à 3" → mode engaging (12.08) → 1 devient un New Foe de l'humain.
-    eng = _engine([_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 23, 20)], current_player=2)
+    # B2 : consolider en engaging est une DÉCISION du bot (12.07 « choose to move ») — la
+    # politique répond `CHOICE_0` (« Consolider »), comme le bot de référence.
+    eng = _engine(
+        [_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 23, 20)], current_player=2,
+        actions=[{"action": "agent_decision", "option_index": 0}],
+    )
     gs = _fight_step(eng)
     gs["units_selected_to_fight"] = {"2"}
     gs["units_fought"] = {"2"}
@@ -341,8 +346,10 @@ def test_la_consolidation_engaging_du_bot_arme_les_new_foes_de_l_humain(monkeypa
     assert fight_v11_current_pool(gs) == ["2"]
 
     ok, out = _ai_turn(eng)
-    assert ok is False and out["reason"] == "no_eligible_ai_units_in_pool", out
+    assert ok is True and out["decision_type"] == "consolidation_engaging", out
     assert "2" in gs["consolidation_done"]
+    ok, out = _ai_turn(eng)
+    assert ok is False and out["reason"] == "no_eligible_ai_units_in_pool", out
     assert gs["consolidation_new_foes_pending"] == ["1"]
     assert gs["consolidation_new_foes_selector"] == 1 and fight_v11_expected_seat(gs) == 1
     assert gs["fight_eligible_units"] == ["1"]

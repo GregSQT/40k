@@ -180,6 +180,17 @@ def bot_action_for_pending_choice(
     ordered_retreat = pending_decision_decline_slot(game_state, action_mask, "fall_back_mode")
     if ordered_retreat is not None:
         return ordered_retreat
+    # `consolidation_engaging` (12.07 / 12.08, B2) : MEME raison de baseline. Le driver gym
+    # consolidait TOUJOURS pour le bot jusqu'a ce que ce mouvement devienne une decision du
+    # joueur ; `CHOICE_0` (« Consolider », `_binary_declaration_options`) est exactement
+    # l'ancien comportement. Le laisser tomber dans le tirage ferait rester l'adversaire de
+    # reference une fois sur deux, donc bouger la baseline de win-rate.
+    if decision is not None and require_key(decision, "type") == "consolidation_engaging":
+        if not bool(action_mask[mi.CHOICE_BASE]):
+            raise RuntimeError(
+                f"{wrapper}: decision consolidation_engaging en attente sans CHOICE_0 ouvert."
+            )
+        return int(mi.CHOICE_BASE)
     # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de
     # LISTE, jamais une decision de bot ». Le bot ne declare donc jamais de reserves de sa propre
     # initiative — invariant que portait auparavant le retrait de `SQUAD_ACTION_WAIT` du pool

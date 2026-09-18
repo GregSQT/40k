@@ -380,6 +380,14 @@ def _engine_at_new_foes(scenario_file: str):
     )
     assert "4" not in {str(x) for x in gs["units_selected_to_fight"]}
     eng._fight_v11_gym_settle()
+    # B2 (2026-09-18) : la consolidation engaging est une DÉCISION de l'agent — le settle s'arrête
+    # sur la question ; « Consolider » (CHOICE_0) rejoue exactement l'ancien déroulé automatique.
+    from engine.agent_decision import read_pending_agent_decision
+
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "consolidation_engaging", decision
+    ok, _ = eng._process_squad_action({"action": "agent_decision", "option_index": 0})
+    assert ok is True
     return eng
 
 
