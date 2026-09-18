@@ -242,3 +242,45 @@ def test_deux_combats_de_la_meme_paire_dans_le_meme_round_sont_deux_lots(tmp_pat
         _fought("102#2") + _fought("102#0") + _fought("102#0") + _fought("102#1") + _fought("102#1"),
     )
     assert _errors(stats_contigu, "fight") == 0
+
+
+# ─── DEAD-before-SHOT/FOUGHT (lot fatal, ordre de flush moteur) ─────────────────────────────
+
+
+def _dead_event(mid: str, phase: str = "SHOOT") -> str:
+    """Ligne DEAD journalisée par le moteur avant les lignes d'attaque du lot fatal."""
+    return (
+        f"[10:00:01] E1 T1 P1 {phase} : Unit 102{T} DEAD model={mid} reason=combat [SUCCESS]\n"
+    )
+
+
+def test_dead_event_avant_shot_aucune_erreur(tmp_path):
+    """DEAD-before-SHOT (lot fatal) : unité anéantie par ses DEAD avant les lignes SHOT → 0 faute.
+
+    Mesuré 2026-09-18 : 22/22 erreurs alloc_character_over_bodyguard étaient ce cas.
+    Remettre la garde return-sans-pop dans _apply_damage_and_handle_death rend ce test ROUGE.
+    """
+    dead_prefix = _dead_event("102#0") + _dead_event("102#1") + _dead_event("102#2")
+    body = (
+        dead_prefix
+        + _shot("102#0") + _shot("102#0")
+        + _shot("102#1") + _shot("102#1")
+        + _shot("102#2")
+    )
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "shooting") == 0
+
+
+def test_dead_event_avant_fought_aucune_erreur(tmp_path):
+    """Jumeau mêlée : DEAD-before-FOUGHT → 0 faute."""
+    dead_prefix = (
+        _dead_event("102#0", "FIGHT") + _dead_event("102#1", "FIGHT") + _dead_event("102#2", "FIGHT")
+    )
+    body = (
+        dead_prefix
+        + _fought("102#0") + _fought("102#0")
+        + _fought("102#1") + _fought("102#1")
+        + _fought("102#2")
+    )
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "fight") == 0

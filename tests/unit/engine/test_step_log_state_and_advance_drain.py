@@ -347,3 +347,49 @@ def test_la_ligne_de_move_a_deux_tokens_est_lue_par_ses_deux_lecteurs() -> None:
     # Un seul token, et zero token, restent lus des deux cotes.
     assert move_verb_present("MOVED", "Unit 3(5,48) MOVED [FLY] from (3,58) to (5,48)")
     assert move_verb_present("MOVED", "Unit 3(5,48) MOVED from (3,58) to (5,48)")
+
+
+# ── 5. Traduction move_after_shooting → step.log ────────────────────────────────────────────
+
+def test_build_step_log_details_move_after_shooting_traduit_source_rule_id(tmp_path) -> None:
+    """Verrou producteur ↔ formateur : _build_step_log_details traduit source_rule_id.
+
+    Sans le mapping ("source_rule_id", "source_rule_id") dans la boucle, step_logger lève
+    KeyError("Move_after_shooting action missing required source_rule_id") au premier épisode
+    portant Purgation Run, et l'évaluation --step tombe entièrement.
+    Remettre la boucle sans ce tuple rend ce test ROUGE.
+    """
+    logger = _logger(tmp_path)
+    eng = _engine({"turn": 1}, logger)
+    raw_log = {
+        "type": "move_after_shooting",
+        "turn": 1,
+        "unitId": "10",
+        "player": 1,
+        "fromCol": 5, "fromRow": 5,
+        "toCol": 6, "toRow": 5,
+        "ability_display_name": "PURGATION RUN",
+        "source_rule_id": "purgation_run",
+    }
+    details = eng._build_step_log_details(raw_log, pre_action_turn=1)
+    assert details["source_rule_id"] == "purgation_run"
+    assert details["ability_display_name"] == "PURGATION RUN"
+
+
+def test_step_logger_log_action_move_after_shooting_ne_leve_pas(tmp_path) -> None:
+    """StepLogger.log_action avec action_type move_after_shooting ne lève pas KeyError."""
+    logger = _logger(tmp_path)
+    details = {
+        "current_turn": 1,
+        "reward": 0.0,
+        "start_pos": (5, 5),
+        "end_pos": (6, 5),
+        "ability_display_name": "PURGATION RUN",
+        "source_rule_id": "purgation_run",
+        "models_segment": "",
+    }
+    logger.log_action(
+        unit_id="10", action_type="move_after_shooting",
+        phase="shoot", player=1, success=True, step_increment=0,
+        action_details=details,
+    )

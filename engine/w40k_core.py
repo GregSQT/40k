@@ -8137,12 +8137,14 @@ class W40KEngine(gym.Env):
         # mapping, `step_logger` n'écrit jamais `MOVED [FLY]` et l'analyzer pathfinde une
         # escouade volante comme de l'infanterie.
         details["is_fly_move"] = bool(raw_log.get("is_fly_move", False))  # get allowed
-        # Champs propres au move REACTIF, exiges par son formateur (`require_key`) : sans eux
-        # `log_action` avale l'exception et la ligne disparait en silence.
+        # Champs propres au move REACTIF et au repositionnement post-tir, exiges par leur
+        # formateur (`require_key`) : sans eux `log_action` leve et l'episode tombe.
         for _src, _dst in (
             ("triggered_by_unit_id", "triggered_by_unit_id"),
             ("range_roll", "range_roll"),
             ("ability_display_name", "ability_display_name"),
+            # `source_rule_id` exige par le formateur `move_after_shooting` ; absent = KeyError.
+            ("source_rule_id", "source_rule_id"),
         ):
             _val = raw_log.get(_src)  # get allowed
             if _val is not None:
