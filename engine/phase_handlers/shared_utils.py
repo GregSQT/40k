@@ -14717,9 +14717,15 @@ def _max_b2b_matching(
 
 
 def fight_pile_in_plan(
-    game_state: Dict[str, Any], squad_id: str
+    game_state: Dict[str, Any], squad_id: str, *, target_ids: Optional[List[str]] = None
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan Pile In multi-figurines (transaction atomique, aucune ecriture cache).
+
+    ``target_ids`` (B3, 2026-09-18) : cibles de pile-in CHOISIES par le joueur pour une unite
+    NON engagee (12.03 BEFORE MOVING « Otherwise, select one or more enemy units within 5" of
+    your unit » — c'est un choix, pas une heuristique). Validees par
+    `pile_in_select_targets_12_03` ; pour une unite engagee la selection est imposee et
+    l'argument est ignore, comme sur le chemin PvP. ``None`` = toutes les unites a ≤ 5".
 
     Regle officielle (spec §"Pile In") :
     Chaque figurine non-B2B avec un ennemi peut se deplacer jusqu a 3" pour
@@ -14769,7 +14775,11 @@ def fight_pile_in_plan(
     # le double pile_in_targets_within_range (engagé : appel gaspillé ; non engagé : double scan).
     engaged = _fight_units_engaged_with(game_state, unit_ref)
     if engaged:
-        target_ids: List[str] = engaged
+        target_ids = engaged
+    elif target_ids is not None:
+        from engine.phase_handlers.fight_handlers import pile_in_select_targets_12_03
+
+        target_ids = pile_in_select_targets_12_03(game_state, unit_ref, [str(t) for t in target_ids])
     else:
         within_ids = pile_in_targets_within_range(game_state, unit_ref)
         if not within_ids:

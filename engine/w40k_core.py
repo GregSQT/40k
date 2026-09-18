@@ -6871,8 +6871,17 @@ class W40KEngine(gym.Env):
         # le premier cas : l'unité engagée par l'adversaire restait où il l'avait mise. MÊME plan
         # que le pile-in 12.02 (`fight_pile_in_plan`) : les cibles sont celles de 12.03 BEFORE
         # MOVING (engagée → ses ennemis engagés ; sinon ≤ pile_in_target_range).
+        #
+        # B3 (2026-09-18) : pour une unité NON engagée, la cible désignée par l'agent EST le choix
+        # 12.03 « select one or more enemy units within 5" » — le pile-in additionnel la vise,
+        # au lieu de viser tous les ennemis à 5" puis de redemander la cible quand elle n'est
+        # plus frappable. Repli sur toutes les cibles à 5" seulement si la désignée n'y est pas
+        # (`_overrun_pile_in_target_ids`).
         if fight_v11_can_overrun_pile_in(self.game_state, unit):
-            _ov_plan = fight_pile_in_plan(self.game_state, squad_id)
+            _ov_plan = fight_pile_in_plan(
+                self.game_state, squad_id,
+                target_ids=self._overrun_pile_in_target_ids(squad_id, unit, target_slot),
+            )
             if _ov_plan is not None:
                 self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
                 require_key(self.game_state, OVERRUN_PILE_IN_DONE_KEY).add(str(squad_id))
@@ -6940,6 +6949,30 @@ class W40KEngine(gym.Env):
                 )
             best_target_id = None
         return self._fight_resolve_with_target(squad_id, best_target_id)
+
+    def _overrun_pile_in_target_ids(
+        self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int]
+    ) -> Optional[List[str]]:
+        """Cibles du pile-in overrun 12.06 : la cible désignée par l'action si l'unité n'est pas
+        engagée et que cette cible est à ≤ 5" (`pile_in_targets_within_range`) ; sinon ``None``
+        (toutes les cibles à 5", comportement d'origine). Une unité engagée a ses cibles
+        imposées (12.03) : ``None`` aussi, `fight_pile_in_plan` les prend lui-même."""
+        from engine.phase_handlers.fight_handlers import (
+            _fight_units_engaged_with,
+            pile_in_targets_within_range,
+        )
+        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+        if target_slot is None or _fight_units_engaged_with(self.game_state, unit):
+            return None
+        cache_entry = require_key(require_key(self.game_state, "units_cache"), str(squad_id))
+        slots = get_enemy_slot_mapping(self.game_state, int(require_key(cache_entry, "player")))
+        if not (0 <= int(target_slot) < len(slots)) or slots[int(target_slot)] is None:
+            return None
+        designated = str(slots[int(target_slot)])
+        if designated not in pile_in_targets_within_range(self.game_state, unit):
+            return None
+        return [designated]
 
     def _fight_target_after_designated_death(
         self, squad_id: str, targets: List[str], enemy_slot_ids: List[Optional[str]]
