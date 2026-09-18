@@ -382,7 +382,7 @@
     {
       "id": "PROJ.1.2.indirect",
       "section": "1.2",
-      "label": "Tir indirect — détection (règle non implémentée)",
+      "label": "Tir indirect — [COVER] obligatoire sur [INDIRECT FIRE:X+] (10.07)",
       "applicability": {
         "kind": "weapon_rule_in_roster",
         "rule_id": "INDIRECT_FIRE",
@@ -424,6 +424,38 @@
         ]
       ],
       "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.1.da_jump",
+      "section": "1.1",
+      "label": "Da Jump — once per turn, phase de mouvement, issue ⇔ D6, ingress > 8\" le même tour, D6 MW sur 1",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "da_jump"
+      },
+      "controls": [
+        [
+          "da_jump_invalid"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Grammaire 13 (ai/analyzer_da_jump.py) : ligne `DA JUMP (D6=n) [REPOSITIONED|MISCAST]` — second jet du même joueur au même tour, hors phase MOVE, issue incohérente avec le D6 ; après REPOSITIONED, l'escouade est hors table (aucune action) jusqu'à sa ligne d'ingress du même tour, dont chaque socle est à plus de 8\" (inches_to_subhex, métrique hex) de tout socle ennemi vivant, zone adverse et round 1 permis (exemption de `reserves_too_early`) ; après MISCAST, une ligne SUFFERS [DA JUMP] (≤ 6, dés contrôlés par `mw_ability_dice_mismatch` : Trigger:1 + un D6) sur la même escouade. FNP 4+ (Psychic Hood) : contrôle générique de 24.12. Journal antérieur : abstention."
+    },
+    {
+      "id": "PROJ.1.2.suppression",
+      "section": "1.2",
+      "label": "Suppression — escouade TOUCHÉE, malus [SUPPRESSED] en vigueur (Primitive F)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "suppress_target_on_shooting"
+      },
+      "controls": [
+        [
+          "suppression_without_hit"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Trois faces d'un invariant, un compteur (ai/analyzer_suppression.py) : une ligne SUPPRESSES sans tir du suppresseur ayant TOUCHÉ la supprimée depuis sa dernière phase de commandement ; un tir ou une mêlée avec le malus [SUPPRESSED] sans suppression en vigueur ; une attaque SANS le malus alors qu'une suppression est en vigueur (le -1 contrôlé au tir comme en mêlée). Journal antérieur à la grammaire 12 : abstention."
     },
     {
       "id": "PROJ.1.2.oath_target",
@@ -1838,8 +1870,19 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Poser le token annoncerait un effet qui n'a pas lieu."
+      "co_verified_by": [
+        "PROJ.1.2.indirect"
+      ],
+      "log_evidence": [
+        {
+          "id": "10.07-IF",
+          "description": "Le token [INDIRECT FIRE:X+] (plancher d'échec posé par le moteur, `indirect_fire_fail_below`) apparaît sur la ligne shoot, accompagné du [COVER] obligatoire (couvert accordé inconditionnellement à la cible d'un tir indirect).",
+          "log_field": "action_desc contient [INDIRECT FIRE:X+] et [COVER]",
+          "check_type": "presence"
+        }
+      ],
+      "status": "COUVERT",
+      "status_note": "Implémentée dans le moteur (`indirect_fire_fail_below`, shared_utils) et contrôlée par `check_indirect_fire_rule` (analyzer_hit) : [COVER] obligatoire sur toute ligne [INDIRECT FIRE:X+], compteurs indirect_fire_checked / indirect_fire_mismatch (exercice PROJ.1.2.indirect). Le plancher X+ n'est pas répercuté dans `hit_target` : le seuil affiché peut être < X sans faute, seul le [COVER] est jugé. [IGNORES COVER] court-circuite le couvert (24.18 prime). Statut corrigé le 2026-09-18 : l'ancienne note déclarait la règle absente du moteur, à tort."
     },
     {
       "id": "11.01",
@@ -3928,14 +3971,14 @@
     {
       "id": "PROJ.1.5.grant_weapon_rule_vs_designated_target",
       "section": "1.5",
-      "label": "Overlapping Detonations — BLAST (dés extra/5 figs) vs non-MONSTER/VEHICLE (Primitive B)",
+      "label": "Overlapping Detonations — BLAST (dés extra/5 figs) vs non-MONSTER/VEHICLE, seulement sur la cible DÉSIGNÉE (Primitive B)",
       "applicability": {
         "kind": "unit_rule_in_roster",
         "rule_id": "grant_weapon_rule_vs_designated_target"
       },
       "controls": [],
       "status": "COUVERT",
-      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B) : bonus seulement si la cible de l'intent est la désignée de l'activation (`designated_shoot_target_id`, cible prioritaire — décision 2026-09-18, capacites.md §Primitive B). Contrôlé via PROJ.1.2.surcharge_atk (shoot_over_rng_nb, aucun compteur propre) : sur un journal grammaire ≥ 11, [DESIGNATED:<id>] borne le plafond aux tirs sur la désignée ; journal antérieur → abstention. Tests : test_primitive_b_granted_weapon_effects (moteur, deux cibles), test_analyzer_overlapping_detonations (analyzer)."
     },
     {
       "id": "PROJ.1.5.weapon_attacks_bonus_vs_keyword",
@@ -3952,14 +3995,14 @@
     {
       "id": "PROJ.1.5.weapon_attacks_bonus_vs_designated_target",
       "section": "1.5",
-      "label": "Hail of Bolts — +N A sur une arme spécifique vs cible désignée (Primitive B)",
+      "label": "Hail of Bolts — +N A sur une arme spécifique, seulement sur la cible DÉSIGNÉE (Primitive B)",
       "applicability": {
         "kind": "unit_rule_in_roster",
         "rule_id": "weapon_attacks_bonus_vs_designated_target"
       },
       "controls": [],
       "status": "COUVERT",
-      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B) : bonus seulement si la cible de l'intent est la désignée de l'activation (`designated_shoot_target_id`, cible prioritaire — décision 2026-09-18, capacites.md §Primitive B). Contrôlé via PROJ.1.2.surcharge_atk (shoot_over_rng_nb, aucun compteur propre) : sur un journal grammaire ≥ 11, [DESIGNATED:<id>] borne le plafond aux tirs sur la désignée ; journal antérieur → abstention. Tests : test_primitive_b_granted_weapon_effects (moteur, reproduction deux cibles), test_analyzer_hail_of_bolts (analyzer)."
     },
     {
       "id": "PROJ.1.5.weapon_profile_scaling_by_model_count",
@@ -4059,8 +4102,21 @@
         "rule_id": "suppress_target_on_shooting"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : après tir, la cible est supprimée (-1 touche) jusqu'au début de la prochaine phase de commandement du tireur. Porté par WarTrakk (Indiscriminate Detonations)."
+      "status": "COUVERT",
+      "status_note": "Primitive F, refonte du 2026-09-18 : après ses attaques, le tireur choisit UNE escouade TOUCHÉE (aucune touche → rien ; une seule → elle ; plusieurs → décision `suppress_target`, trois sièges) ; supprimée (-1 touche) jusqu'au début de sa prochaine phase de commandement. Ligne `SUPPRESSES Unit M [SUPPRESSED→M]` (grammaire 12). Aucun compteur propre : contrôlé par PROJ.1.2.suppression (`suppression_without_hit`, bucket §1.2). Porté par WarTrakk (Indiscriminate Detonations)."
+    },
+    {
+      "id": "unit.da_jump",
+      "source": "config/unit_rules.json",
+      "label": "da_jump",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "da_jump"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Livré le 2026-09-18 (appel de capacité `push_ability_call` au début de la phase de mouvement, escouade du WeirdBoy vivant, once per turn per army par `once_claim(\"da_jump\")` ; 1 → D6 MW psychiques allouées par le défenseur ; 2-6 → 20.02 + Deep Strike ACCORDÉ par registre jusqu'à la fin de la phase, ingress le même tour dès le round 1). Aucun compteur propre : contrôlé par PROJ.1.1.da_jump (`da_jump_invalid`) et, pour les dés du MISCAST, par `mw_ability_dice_mismatch` (MW_ABILITY_DICE_CHECKS[\"da_jump\"])."
     },
     {
       "id": "unit.return_destroyed_models",

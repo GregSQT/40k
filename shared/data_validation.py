@@ -81,6 +81,9 @@ HAZARD_CONTEXT_DESPERATE_ESCAPE = "Desperate Escape"
 # d'armurerie [HAZARDOUS] que sur le tag de 24.15, et compter ces blessures là fausserait §1.8.
 HAZARD_CONTEXT_HOLD_STILL = "Hold Still and Say Aargh"
 HAZARD_CONTEXT_EXHORTATION = "Exhortation de Rage"
+# Da Jump raté (D6 = 1) : « This unit suffers D6 mortal wounds » — source PSYCHIC (Psychic Hood
+# 24.12 s'applique), infligée à l'escouade du WeirdBoy elle-même.
+HAZARD_CONTEXT_DA_JUMP = "Da Jump"
 
 #: `hazardContext` -> tag écrit dans step.log. Table UNIQUE : l'émetteur (moteur) pose le
 #: contexte, le formateur (step_logger) y lit le tag et l'analyzer y lit la liste des tags
@@ -90,6 +93,7 @@ HAZARD_CONTEXT_TAGS = {
     HAZARD_CONTEXT_DESPERATE_ESCAPE: "[DESPERATE ESCAPE]",
     HAZARD_CONTEXT_HOLD_STILL: "[HOLD STILL AND SAY AARGH]",
     HAZARD_CONTEXT_EXHORTATION: "[EXHORTATION DE RAGE]",
+    HAZARD_CONTEXT_DA_JUMP: "[DA JUMP]",
 }
 
 

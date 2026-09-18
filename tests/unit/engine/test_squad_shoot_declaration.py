@@ -461,10 +461,10 @@ class TestModelsStatus:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# suppress_target_on_shooting : _last_shoot_target_id settée sur les 3 chemins PvP
+# cible désignée : designated_shoot_target_id posée sur les 3 chemins PvP (suppression + Primitive B)
 # ─────────────────────────────────────────────────────────────────────────────
 class TestLastShootTargetIdPvP:
-    """Finding F1 : _last_shoot_target_id doit être settée dans les 3 fonctions PvP de déclaration
+    """Finding F1 : designated_shoot_target_id doit être settée dans les 3 fonctions PvP de déclaration
     (squad_declare_shoot_model, squad_declare_shoot_weapon, squad_declare_shoot_weapon_qty) afin
     que suppress_target_on_shooting fonctionne en PvP (non plus seulement en gym)."""
 
@@ -479,13 +479,13 @@ class TestLastShootTargetIdPvP:
         gs = self._gs()
         squad_declare_shoot_model(gs, "1", "1#0", "2")
         unit = gs["unit_by_id"]["1"]
-        assert unit.get("_last_shoot_target_id") == "2"
+        assert unit.get("designated_shoot_target_id") == "2"
 
     def test_declare_weapon_sets_last_shoot_target(self):
         gs = self._gs()
         squad_declare_shoot_weapon(gs, "1", 0, "2")
         unit = gs["unit_by_id"]["1"]
-        assert unit.get("_last_shoot_target_id") == "2"
+        assert unit.get("designated_shoot_target_id") == "2"
 
     def test_declare_weapon_qty_sets_last_shoot_target(self):
         atk = _unit(1, 1, [_m(5, 5, [STORM]), _m(5, 6, [STORM])], [STORM])
@@ -494,7 +494,7 @@ class TestLastShootTargetIdPvP:
         _activate(gs, "1")
         squad_declare_shoot_weapon_qty(gs, "1", "storm_bolter", 1, "2")
         unit = gs["unit_by_id"]["1"]
-        assert unit.get("_last_shoot_target_id") == "2"
+        assert unit.get("designated_shoot_target_id") == "2"
 
     def test_first_target_wins_no_overwrite(self):
         """Deuxième déclaration vers cible différente ne doit pas écraser la première."""
@@ -506,7 +506,7 @@ class TestLastShootTargetIdPvP:
         squad_declare_shoot_model(gs, "1", "1#0", "2")
         squad_declare_shoot_model(gs, "1", "1#1", "3")
         unit = gs["unit_by_id"]["1"]
-        assert unit.get("_last_shoot_target_id") == "2"  # première cible conservée
+        assert unit.get("designated_shoot_target_id") == "2"  # première cible conservée
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -381,11 +381,11 @@ géométrie LoS restant unité→unité (13.09 = distance, pas ligne de vue — 
 la LoS par tireur). Implémentation : `def compute_hidden_statuses`,
 `def hidden_enemy_out_of_detection`, `def preview_hidden_models_from_position`
 ([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py)).
-**Invariant de config à préserver** : toute terrain area marquée `obscuring` contient au
-moins une *dense feature* — `def hexes_in_obscuring_terrain`
-([terrain_utils.py](../../../engine/terrain_utils.py)) teste le flag `obscuring` comme
-proxy de « dense » pour 13.09 ; une zone obscuring *light-only* déclencherait `hidden` à
-tort, sans erreur visible.
+**Invariant de config (fermé le 2026-09-18)** : les catégories d'une zone sont DÉRIVÉES de ses
+murs typés au chargement (`area["obscuring"]` ⇔ mur light ou dense, `area["dense"]` ⇔ mur dense —
+`def derive_area_categories`, [terrain_utils.py](../../../engine/terrain_utils.py)) et 13.09 teste
+`dense` (`def compute_models_in_dense_terrain`) : une zone obscuring *light-only* donne le couvert
+et coupe la LoS mais ne déclenche plus `hidden`. La clé JSON `obscuring` est refusée.
 
 ### Verdict de revue (2026-06-14) — NO-GO initial, GO sur l'approche en couches
 

@@ -147,8 +147,11 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
 #: EXACTEMENT ZÉRO scalaire. Ce n'était pas vrai avant le 2026-08-04 : le registre de candidats
 #: de décision (`DECISION_OPTION_BIN_FIELDS`) était bâti sur CE tuple, donc chaque entrée y
 #: coûtait 6 bits positionnels (un par slot de candidat) — la promesse « une capacité est
-#: gratuite » du chantier 01 était fausse d'un facteur 6. Les deux registres sont séparés depuis
-#: (cf. `DECISION_GRANTABLE_EFFECT_IDS`).
+#: gratuite » du chantier 01 était fausse d'un facteur 6. Un registre intermédiaire des seuls
+#: effets ACCORDABLES (`DECISION_GRANTABLE_EFFECT_IDS`, 2026-08-04) l'a réduite sans la tenir : une
+#: capacité ACTIVABLE y coûtait encore 6 bits. Depuis le 2026-09-18 le candidat porte l'`obs_id`
+#: de son effet (`decision_options_effect_ids`), lu par la même table que les capacités : ce
+#: tuple est le SEUL vocabulaire, pour les entités comme pour les candidats.
 UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "charge_after_advance",
     "charge_after_flee",
@@ -158,6 +161,9 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     # jet mais sur les CP. Observée parce que l'agent doit pouvoir ATTRIBUER le gain à l'unité
     # qui tient l'objectif ; ses CP seuls ne disent pas d'où ils viennent.
     "cp_gain_on_objective",
+    # Da Jump (WeirdBoy, chantier Armageddon 2026-09-18) : capacité ACTIVABLE — observée sur
+    # l'escouade tant que le WeirdBoy vit, proposée en candidat par `push_ability_call`.
+    "da_jump",
     # Deep Strike (24.09, chantier 04) : la SEULE capacité du vocabulaire qui ne change ni un
     # jet ni un mouvement, mais l'AIRE DE MISE EN PLACE d'un ingress move (20.04). Deux escouades
     # en réserves sont indiscernables sans elle, alors que l'une arrive dans la bande de 6" au
@@ -322,39 +328,16 @@ if _phaseless_still_in_effect:
         f"hors de la phase ou elle agit : {_phaseless_still_in_effect}"
     )
 
-#: Effets qu'un CANDIDAT DE DÉCISION peut accorder — sous-ensemble STRICT de
-#: `UNIT_RULE_EFFECT_IDS`, et registre PROPRE du bloc `decision_options_bin`.
-#:
-#: POURQUOI SÉPARÉ. Un candidat de `rule_choice` est décrit POSITIONNELLEMENT (un bit par effet
-#: accordable, × `MAX_DECISION_OPTIONS` slots). Tant que ce registre était le vocabulaire ENTIER,
-#: toute capacité ajoutée à l'observation payait 6 bits qui restaient nuls à vie — mesuré le
-#: 2026-08-04 : 6 des 13 effets n'étaient accordables par AUCUN `grantsRuleIds` de roster, soit
-#: 36 scalaires morts. Séparer rend `obs_size` insensible au vocabulaire observé, ce qui est
-#: précisément ce que le gel du chantier 01 existe pour garantir.
-#:
-#: SOURCE. Les effets TECHNIQUES atteignables depuis les `grantsRuleIds` déclarés dans les
-#: rosters (`frontend/src/roster/**`), après résolution des sources composites par
-#: `_resolve_unit_rule_entry_effect_rule_ids`. Recopié ici et non calculé, pour la MÊME raison
-#: que `OBS_PHASE_IDS` : ce module est une FEUILLE, lire le registre y créerait un cycle. La
-#: dérive est interdite par un test de contrat qui recalcule le tuple depuis les rosters —
-#: déclarer un `grantsRuleIds` vers un effet absent d'ici fait échouer ce test ET lève au
-#: moment de poser la décision (`agent_decision.normalize_decision_options`).
-DECISION_GRANTABLE_EFFECT_IDS: Tuple[str, ...] = (
-    "charge_after_flee",
-    "reroll_1_save_fight",
-    "reroll_1_tohit_fight",
-    "reroll_1_towound",
-    "reroll_towound_target_on_objective",
-    "shoot_after_advance",
-    "shoot_after_flee",
-)
-
-_extra_grantable = set(DECISION_GRANTABLE_EFFECT_IDS) - set(UNIT_RULE_EFFECT_IDS)
-if _extra_grantable:
-    raise ValueError(
-        f"DECISION_GRANTABLE_EFFECT_IDS contient des effets absents de UNIT_RULE_EFFECT_IDS "
-        f"(le moteur ne les appliquerait jamais) : {sorted(_extra_grantable)}"
-    )
+#: Nombre d'`obs_id` d'EFFET par candidat de décision — le tenseur `decision_options_effect_ids`
+#: (refonte du 2026-09-18). Un candidat accorde UN effet (`rule_choice` : la règle qu'il accorde,
+#: `_resolve_rule_id_to_technical` rend un id unique ; un appel de capacité : l'effet activé) ou
+#: aucun (`declines`, décisions d'armée). L'id est lu par la MÊME table d'embedding que les
+#: capacités d'unité (`ability_embedding`) : « ce que je gagne » et « ce que j'ai » vivent dans le
+#: même espace. C'est ce qui rend l'ouverture d'une capacité activable GRATUITE en `obs_size` —
+#: l'ancien registre positionnel `DECISION_GRANTABLE_EFFECT_IDS` (un bit `grants_<id>` par effet
+#: accordable × 6 slots) était le dernier endroit où une règle coûtait des scalaires.
+#: Slot vide = `OBS_ID_PADDING` (0), ignoré par le sac.
+DECISION_OPTION_EFFECT_SLOTS = 1
 
 #: Drapeaux d'une unité, dans l'ordre d'émission.
 #: CONVENTION (uniforme depuis §0.37) : le masque `present` est le DERNIER champ de CHAQUE
@@ -801,10 +784,9 @@ def self_model_bin_index(field: str) -> int:
 #: et L10 (placement de charge) ouvrent chacun un type, et aucun ne coûtera de retrain.
 #:
 #: ⚠️ `waaagh_call` est le premier type dont les DEUX candidats portent un `effect_ids` VIDE :
-#: `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters (verrouillé par
-#: test de contrat), or aucun roster n'accorde les effets du Waaagh! — ils viennent de la
-#: faction, pas d'une datasheet. Ce qui les distingue est le drapeau `declines` du bloc candidat
-#: (`DECISION_OPTION_BIN_FIELDS`), et surtout PAS leur index.
+#: aucun roster n'accorde les effets du Waaagh! — ils viennent de la faction, pas d'une
+#: datasheet, et n'ont donc pas d'`obs_id` de capacité d'unité. Ce qui les distingue est le
+#: drapeau `declines` du bloc candidat (`DECISION_OPTION_BIN_FIELDS`), et surtout PAS leur index.
 #:
 #: Ce fut écrit ici le contraire — « ce qui les distingue est le couple (type, INDEX) » — et
 #: c'était FAUX, mesuré : l'index n'est écrit dans AUCUN scalaire d'observation, et la tête
@@ -834,13 +816,18 @@ def self_model_bin_index(field: str) -> int:
 #: retient Desperate Escape (traversée des ennemis contre hazard 06.03 + battle-shock 01.07),
 #: `CHOICE_1` garde Ordered Retreat — le mode par défaut, qui « ne fait rien ». Posé par
 #: `arm_fall_back_mode_decision` à l'escouade engagée et saine désignée, AVANT son pool.
+#: ⚠️ `suppress_target` (Indiscriminate Detonations, Primitive F) : « select one enemy unit HIT by
+#: one or more of those attacks » — posée en fin d'activation de tir quand PLUSIEURS escouades
+#: ennemies ont été touchées (une seule = aucune décision, doctrine §9.0bis). Candidats = les
+#: escouades touchées, entités ennemies désignées par `CHOICE_k` comme `mortal_wounds_target`.
+#: Déclaré le 2026-09-18 avec la refonte du bloc candidat, EN FIN de tuple.
 #: ⚠️ `consolidation_engaging` (12.07 « with all of their eligible units they CHOOSE to move » ;
 #: 12.08 Engaging + New Foes to Face, B2 2026-09-18) est le CINQUIÈME type à deux candidats sans
 #: `effect_ids`, séparés par `declines` : `CHOICE_0` consolide vers les ennemis à 3" (et subit les
 #: New Foes), `CHOICE_1` reste sur place. Posé par `arm_consolidation_engaging_decision` depuis le
 #: driver gym (`_fight_v11_gym_settle`) AVANT le plan ; les modes ongoing et objective restent
-#: automatiques (sans contenu tactique). Ajouté en FIN, comme les précédents.
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move", "fall_back_mode", "consolidation_engaging")
+#: automatiques (sans contenu tactique). Ajouté en FIN, après `suppress_target` (merge du lot melee-100 dans `main`, 2026-09-18).
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move", "fall_back_mode", "suppress_target", "consolidation_engaging")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
@@ -859,13 +846,14 @@ MAX_DECISION_OPTIONS = 6
 #: comme `OBS_ID_VOCAB_SIZE` la rend gratuite pour une capacité. Les colonnes en trop restent à
 #: zéro et ne reçoivent aucun gradient.
 #:
-#: 16 et non 8 : 8 types actuels (P3 complet, Grot Orderly) + 8 réservés pour J4/J5. Estimé :
-#: fire_overwatch + heroic_intervention + da_jump_target (3) + 5 de marge. Le coût par type
-#: ajouté est 1 scalaire par observation ; le coût d'un --new est plusieurs dizaines d'heures
-#: à x1 et plusieurs centaines à x5 — la marge large est délibérée.
+#: 24 depuis le 2026-09-18 (16 auparavant : 8 types + 8 réservés, puis 14 types déclarés dont
+#: `suppress_target`) : 14 types actuels + 10 réservés pour J4/J5. Estimé : fire_overwatch +
+#: heroic_intervention (2) + 8 de marge. Le coût par colonne est 1 scalaire par observation ; le
+#: coût d'un --new est plusieurs dizaines d'heures à x1 et plusieurs centaines à x5 — la marge
+#: large est délibérée, et ce passage à 24 est payé par le `--new` de la refonte du bloc candidat.
 #: Dépasser ce nombre LÈVE ci-dessous — jamais de troncature, un type non observé serait une
 #: décision que l'agent prend sans savoir laquelle on lui demande.
-AGENT_DECISION_TYPE_SLOTS = 16
+AGENT_DECISION_TYPE_SLOTS = 24
 
 if len(AGENT_DECISION_TYPE_IDS) > AGENT_DECISION_TYPE_SLOTS:
     raise ValueError(
@@ -889,18 +877,11 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = (
 #: ce qui permet à un encodeur PARTAGÉ de le lire et à la tête pointeur de le scorer, donc au
 #: réseau de généraliser d'un slot de candidat à l'autre.
 #:
-#: Pour `rule_choice`, un candidat EST la règle qu'il accorde : le décrire par le one-hot de son
-#: effet (`DECISION_GRANTABLE_EFFECT_IDS`) dit à l'agent CE QU'IL GAGNE. Un index de candidat,
-#: lui, ne dit rien : l'ordre des options dépend du prompt.
-#:
-#: ⚠️ Ce bloc reste POSITIONNEL — un bit par effet ACCORDABLE — là où les capacités d'unité sont
-#: passées aux ensembles d'`obs_id` (chantier 01). Ce n'est PAS un oubli de migration : un
-#: candidat de décision accorde UN effet, jamais un ensemble, et il n'y a que
-#: `MAX_DECISION_OPTIONS = 6` candidats. Ce qui a changé le 2026-08-04, c'est sa SOURCE : elle
-#: était le vocabulaire observé ENTIER, si bien que le bloc grossissait à chaque capacité
-#: ajoutée à l'observation, pour des bits jamais mis à 1 (6 effets sur 13 dans ce cas, 36
-#: scalaires). Il ne grossit désormais que si une datasheet accorde un effet NOUVEAU par
-#: `grantsRuleIds` — la seule condition sous laquelle un bit de plus porte de l'information.
+#: Pour `rule_choice`, un candidat EST la règle qu'il accorde : la décrire dit à l'agent CE QU'IL
+#: GAGNE. Un index de candidat, lui, ne dit rien : l'ordre des options dépend du prompt. Depuis le
+#: 2026-09-18, l'effet accordé n'est plus un one-hot de ce bloc mais l'`obs_id` porté par
+#: `decision_options_effect_ids` (cf. `DECISION_OPTION_EFFECT_SLOTS`) : ce bloc binaire ne garde
+#: que les deux drapeaux communs à tout candidat.
 #:
 #: Aucun champ CONTINU n'existe aujourd'hui : `rule_choice` n'a aucune grandeur continue à
 #: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.
@@ -928,9 +909,7 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = (
 #:
 #: Il vaut 0 pour les DEUX candidats de `rule_choice` : ce choix-là n'a pas d'option « ne rien
 #: faire », et c'est une information juste, pas un remplissage.
-DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = tuple(
-    f"grants_{rule_id}" for rule_id in DECISION_GRANTABLE_EFFECT_IDS
-) + (
+DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = (
     "declines",  # ce candidat n'applique AUCUN effet : il passe (cf. bloc ci-dessus)
     "present",  # masque de candidat (0 = slot vide) — DERNIER, convention uniforme §0.37
 )
@@ -951,8 +930,8 @@ DECISION_OPTION_BIN_SIZE = len(DECISION_OPTION_BIN_FIELDS)
 #: candidat PARTAGÉ (§3.3) : il ne voit pas le type de décision, seulement la ligne, et une
 #: colonne au sens variable lui demanderait de deviner laquelle on lui présente.
 #:
-#: Les colonnes qu'un type ne remplit pas restent à zéro — même convention que les bits
-#: `grants_*` d'un candidat qui n'accorde rien, et non une valeur par défaut inventée : c'est le
+#: Les colonnes qu'un type ne remplit pas restent à zéro — même convention que l'`obs_id` de
+#: padding d'un candidat qui n'accorde rien, et non une valeur par défaut inventée : c'est le
 #: motif des colonnes remplies qui identifie la famille.
 #:
 #: ⚠️ TOUTES sont normalisées dans [0, 1] À LA SOURCE, et ce n'est pas une préférence de style :

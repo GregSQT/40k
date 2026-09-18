@@ -59,6 +59,7 @@ def field_names() -> Dict[str, List[str]]:
         DECISION_CTX_BIN_FIELDS,
         DECISION_OPTION_BIN_FIELDS,
         DECISION_OPTION_CONT_FIELDS,
+        DECISION_OPTION_EFFECT_SLOTS,
         DEPLOY_CAND_BIN_FIELDS,
         DEPLOY_CAND_CONT_FIELDS,
         GLOBAL_BIN_FIELDS,
@@ -109,6 +110,9 @@ def field_names() -> Dict[str, List[str]]:
         # toutes les cles suivantes (deploy_cand, enemies, global, grid, self_models) sortaient
         # donc du rapport sans que rien ne le dise.
         "decision_options_cont": list(DECISION_OPTION_CONT_FIELDS),
+        # Refonte du 2026-09-18 : l'effet accorde par un candidat, en obs_id (une table d'ids,
+        # comme `*_ability_ids` ci-dessous).
+        "decision_options_effect_ids": [f"slot{i}" for i in range(DECISION_OPTION_EFFECT_SLOTS)],
         "deploy_cand_cont": list(DEPLOY_CAND_CONT_FIELDS),
         "deploy_cand_bin": list(DEPLOY_CAND_BIN_FIELDS),
         # LUS depuis `spatial_grid`, jamais recopiés : le seul livrable de cet audit est de NOMMER
@@ -295,6 +299,7 @@ def collect(eng, stats: Dict[str, FieldStats], reservoir: Reservoir, seed: int) 
 ID_KEYS = {
     "allies_ability_ids": "ability_embedding",
     "enemies_ability_ids": "ability_embedding",
+    "decision_options_effect_ids": "ability_embedding",
     "allies_status_ids": "status_embedding",
     "enemies_status_ids": "status_embedding",
     "allies_wpn_rule_ids": "weapon_rule_embedding",

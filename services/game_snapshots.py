@@ -51,6 +51,15 @@ _GS_STATIC_KEYS = frozenset({
     # listées, elles se feraient deepcopy à CHAQUE capture — 330 Ko de décor immuable par
     # snapshot sur un plateau x5.
     "_los_blocking_grids_cache",
+    # Tableaux memoises des canaux statiques de la grille d'observation (murs, objectifs,
+    # couvert, zones denses) : derives des seuls `wall_hexes` / `objectives` / `terrain_areas`,
+    # tous statiques ci-dessus, donc invariants pendant une partie. Mutable jusqu'au 2026-09-18,
+    # une row antérieure le porte encore avec sa sous-clé d'alors (`obscuring`, devenue `dense`
+    # quand le canal 9 est passé aux zones denses 13.09) : ré-attaché du live, il ne peut plus
+    # être réinjecté périmé ni faire lever `static["dense"]`. Purgé au reset (`W40KEngine.reset`)
+    # comme les autres caches de terrain. Non listé, il se faisait deepcopy à chaque capture —
+    # 195 Ko mesurés (services/api_server.py, filtre des clés `_`).
+    "_grid_static_hex_arrays",
     "_cache_instance_id",
 })
 

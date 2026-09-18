@@ -295,29 +295,41 @@ def test_cover_channel_paints_terrain_areas(engine):
     assert grid[GRID_CH_WALL, wy, wx] == 1.0
 
 
-def test_obscuring_channel_paints_only_obscuring_areas(engine):
-    """13.08 vs 13.10 : le couvert prend TOUTES les zones, l'obscurant seulement les obscurantes.
+def test_dense_channel_paints_only_dense_areas(engine):
+    """13.08 vs 13.09 : le couvert prend TOUTES les zones, le canal dense seulement les DENSES.
 
-    Contre-épreuve du défaut corrigé : `_static_hex_arrays` empilait toutes les zones dans le
-    seul ensemble « couvert » sans jamais lire `area["obscuring"]`. La grille ne distinguait
-    donc pas une zone où l'on peut devenir `hidden` (13.09 — intirable au-delà de la portée de
-    détection) d'une zone qui se contente de dégrader la BS de 1.
+    Contre-épreuve de deux défauts corrigés :
+    - `_static_hex_arrays` empilait toutes les zones dans le seul ensemble « couvert » sans lire
+      la catégorie de zone. La grille ne distinguait donc pas une zone où l'on peut devenir
+      `hidden` (13.09 — intirable au-delà de la portée de détection) d'une zone qui se contente
+      de dégrader la BS de 1 ;
+    - le canal peignait ensuite `area["obscuring"]` (13.10 : mur light OU dense) alors que le
+      moteur n'accorde `hidden` que dans une zone `dense` (13.09, `compute_models_in_dense_terrain`).
+      Une zone à mur light seul — obscurante, non dense — était annoncée « hidden possible »
+      sans jamais cacher personne (terrain-mc1 : 4 zones sur 15).
     """
-    from engine.spatial_grid import GRID_CH_COVER, GRID_CH_OBSCURING
+    from engine.spatial_grid import GRID_CH_COVER, GRID_CH_DENSE
 
     gs = engine.game_state
-    obscurante = (22, 20)
+    dense = (22, 20)
     ordinaire = (22, 22)
+    light_seul = (22, 24)
     gs["terrain_areas"] = [
         {
-            "id": "obscurante", "obscuring": True,
+            "id": "dense", "obscuring": True, "dense": True,
             "polygon_vertices": [[21, 19], [23, 19], [23, 21], [21, 21]],
-            "hexes": [list(obscurante)],
+            "hexes": [list(dense)],
         },
         {
-            "id": "ordinaire", "obscuring": False,
+            "id": "ordinaire", "obscuring": False, "dense": False,
             "polygon_vertices": [[21, 21], [23, 21], [23, 23], [21, 23]],
             "hexes": [list(ordinaire)],
+        },
+        {
+            # Mur light seul : obscurante (13.10) mais PAS dense — hidden impossible (13.09).
+            "id": "light_seul", "obscuring": True, "dense": False,
+            "polygon_vertices": [[21, 23], [23, 23], [23, 25], [21, 25]],
+            "hexes": [list(light_seul)],
         },
     ]
     gs.pop("_grid_static_hex_arrays", None)  # les statiques sont memoises
@@ -330,28 +342,34 @@ def test_obscuring_channel_paints_only_obscuring_areas(engine):
         assert cell is not None, f"{hexe} doit tomber dans la grille"
         return cell[1], cell[0]  # (gy, gx)
 
-    gy_o, gx_o = _cell(obscurante)
+    gy_d, gx_d = _cell(dense)
     gy_n, gx_n = _cell(ordinaire)
-    assert (gy_o, gx_o) != (gy_n, gx_n), (
-        "fixture creuse : les deux zones tombent dans la MEME cellule, le test ne distingue rien"
+    gy_l, gx_l = _cell(light_seul)
+    assert len({(gy_d, gx_d), (gy_n, gx_n), (gy_l, gx_l)}) == 3, (
+        "fixture creuse : deux zones tombent dans la MEME cellule, le test ne distingue rien"
     )
-    # Le couvert prend les deux (13.08 « within a terrain area », sans condition d'obscurité).
-    assert grid[GRID_CH_COVER, gy_o, gx_o] == 1.0
+    # Le couvert prend les trois (13.08 « within a terrain area », sans condition de catégorie).
+    assert grid[GRID_CH_COVER, gy_d, gx_d] == 1.0
     assert grid[GRID_CH_COVER, gy_n, gx_n] == 1.0
-    # L'obscurant ne prend que la première.
-    assert grid[GRID_CH_OBSCURING, gy_o, gx_o] == 1.0
-    assert grid[GRID_CH_OBSCURING, gy_n, gx_n] == 0.0
+    assert grid[GRID_CH_COVER, gy_l, gx_l] == 1.0
+    # Le canal dense ne prend que la première : ni l'ordinaire, ni l'obscurante à mur light seul.
+    assert grid[GRID_CH_DENSE, gy_d, gx_d] == 1.0
+    assert grid[GRID_CH_DENSE, gy_n, gx_n] == 0.0
+    assert grid[GRID_CH_DENSE, gy_l, gx_l] == 0.0, (
+        "zone obscurante NON dense peinte : l'agent y lirait « hidden possible » alors que le "
+        "moteur (13.09) ne l'accorde jamais"
+    )
 
 
-def test_obscuring_channel_is_dilated_like_its_cover_twin():
+def test_dense_channel_is_dilated_like_its_cover_twin():
     """13.09 se tranche par CHEVAUCHEMENT DE SOCLE, comme 13.08 — donc même dilatation.
 
-    Le moteur évalue « caché » via `compute_models_in_obscuring_terrain`, qui délègue à
+    Le moteur évalue « caché » via `compute_models_in_dense_terrain`, qui délègue à
     `compute_models_within_terrain`, c'est-à-dire au même test disque↔polygone que le couvert.
-    Un canal obscurant brut à côté d'un couvert dilaté décrirait un prédicat que le moteur
+    Un canal dense brut à côté d'un couvert dilaté décrirait un prédicat que le moteur
     n'applique nulle part, et ferait diverger deux canaux voisins sur leurs bords.
     """
-    from engine.spatial_grid import GRID_CH_COVER, GRID_CH_OBSCURING, cover_dilation_cells
+    from engine.spatial_grid import GRID_CH_COVER, GRID_CH_DENSE, cover_dilation_cells
 
     cfg = _config([], [{"id": "obj1", "name": "Alpha", "hexes": [[22, 22]]}])
     for unit in cfg["units"]:
@@ -362,7 +380,7 @@ def test_obscuring_channel_is_dilated_like_its_cover_twin():
     eng.reset()
     gs = eng.game_state
     gs["terrain_areas"] = [{
-        "id": "area1", "obscuring": True,
+        "id": "area1", "obscuring": True, "dense": True,
         "polygon_vertices": [[21, 19], [23, 19], [23, 21], [21, 21]],
         "hexes": [[22, 20]],
     }]
@@ -373,10 +391,10 @@ def test_obscuring_channel_is_dilated_like_its_cover_twin():
     )
 
     grid = eng.obs_builder.build_squad_grid(gs, "1")
-    obscurant = float(grid[GRID_CH_OBSCURING].sum())
-    assert obscurant > 1.0, "la couronne de socle doit être peinte, pas la seule case de la zone"
-    # Zone UNIQUE et obscurante : les deux canaux décrivent alors exactement le même ensemble.
-    assert np.array_equal(grid[GRID_CH_OBSCURING], grid[GRID_CH_COVER])
+    dense = float(grid[GRID_CH_DENSE].sum())
+    assert dense > 1.0, "la couronne de socle doit être peinte, pas la seule case de la zone"
+    # Zone UNIQUE et dense : les deux canaux décrivent alors exactement le même ensemble.
+    assert np.array_equal(grid[GRID_CH_DENSE], grid[GRID_CH_COVER])
 
 
 def test_cover_channel_is_empty_without_terrain_areas(engine):

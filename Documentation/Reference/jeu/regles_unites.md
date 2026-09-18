@@ -73,11 +73,12 @@ Regles:
 
 Depuis le 2026-08-04, allonger `UNIT_RULE_EFFECT_IDS` coute **exactement zero scalaire**. Ce
 n'etait pas vrai avant : le bloc `decision_options_bin` (candidats de `rule_choice`) etait bati
-sur ce meme tuple, donc chaque entree y ajoutait 6 bits positionnels — souvent morts a vie. Les
-deux registres sont separes (`DECISION_GRANTABLE_EFFECT_IDS` = les seuls effets qu'un candidat
-peut accorder), et un test de contrat recalcule le second depuis les `grantsRuleIds` des rosters.
-Consequence pratique : une capacite nouvelle entre dans le vocabulaire observe **sans arbitrage
-de cout** ; seul un effet ACCORDABLE nouveau fait bouger `obs_size`. Ce sont les
+sur ce meme tuple, donc chaque entree y ajoutait 6 bits positionnels — souvent morts a vie. Un
+registre separe des seuls effets ACCORDABLES (`DECISION_GRANTABLE_EFFECT_IDS`) a servi du
+2026-08-04 au 2026-09-18 ; depuis, un candidat porte l'`obs_id` de son effet
+(`decision_options_effect_ids`, meme table d'embedding que les entites) et il n'y a plus qu'UNE
+liste. Consequence pratique : une capacite nouvelle entre dans le vocabulaire observe **sans
+arbitrage de cout**, qu'elle soit observee OU proposee en candidat (activable). Ce sont les
   EFFETS qui sont observes, jamais les capacites nommees : `unit_has_rule_effect` resout les
   sources vers eux.
 - Domaine `[1, 127]`. `0` est reserve au padding des slots vides.
@@ -311,9 +312,10 @@ Comportement IA:
    (il re-execute le schema d'entites avec une capacite fictive de plus et exige que toutes les
    tailles restent identiques) : il etait faux jusqu'au 2026-08-04, ou le registre des candidats
    de decision etait bati sur le vocabulaire observe, a 6 scalaires par capacite ajoutee.
-   Si la regle peut etre ACCORDEE par un candidat de `rule_choice` (`grantsRuleIds`), l'ajouter
-   EN PLUS a `DECISION_GRANTABLE_EFFECT_IDS` — la, ce n'est pas gratuit (1 bit x 6 slots), et
-   l'omettre fait lever `set_pending_agent_decision`.
+   Si la regle peut etre ACCORDEE par un candidat de `rule_choice` (`grantsRuleIds`) ou ACTIVEE
+   par un appel de capacite (`engine/ability_calls.push_ability_call`), rien de plus : le
+   candidat est decrit par l'`obs_id` de l'effet (refonte du 2026-09-18) — gratuit lui aussi ;
+   un effet hors vocabulaire fait lever `set_pending_agent_decision`.
 2. Si besoin de choix joueur, ajouter une (ou plusieurs) regles d'affichage avec:
    - `name`
    - `alias` vers la regle technique

@@ -618,8 +618,12 @@ visibilité cohérente partout. `_has_line_of_sight()` est une enveloppe fine au
 squad-shoot utilise la même primitive via `_attacker_model_can_reach_squad`.
 
 **Ce qui bloque une ligne (hex, à la demande)** : un **mur dense** (toujours) OU une **zone de
-terrain obscurante** que NI le tireur NI la cible n'occupe (rule 13.10 — obscuring intermédiaire,
-zones occupées exclues). Les figurines ne bloquent jamais la LoS, seul le terrain. Les zones
+terrain obscurante** que NI la figurine tireuse NI la figurine cible n'occupe (rule 13.10 —
+« excluding obscuring terrain areas that one or both of those **models** are within »). L'exclusion
+est une propriété de la **paire de figurines**, jamais de l'escouade : chaque figurine tireuse
+porte ses propres zones exclues (`_resolve_shooter_models_with_walls`), combinées par paire avec
+celles du modèle cible dans `_target_model_visible_cells` ; une figurine hors d'une zone X ne voit
+pas à travers X même si une camarade y est. Les figurines ne bloquent jamais la LoS, seul le terrain. Les zones
 obscurantes sont des polygones rastérisés en hex au chargement (`terrain_areas` sur le
 game_state, chacune `{id, obscuring, polygon_vertices, hexes}`).
 
@@ -1240,9 +1244,10 @@ le tue, tir 2 annulé, fin d'activation.
    `units_cannot_charge` si elle bouge). L'humain garde son prompt
    `move_after_shooting_select_destination`. Le bot PvE répond dans la même requête, par sa
    politique (`_resolve_move_after_shooting_decision_for_ai_seat`, prédicat de siège partagé
-   `move_after_shooting_seat_is_model_driven`). Suppression : cible principale = PREMIÈRE
-   déclarée (`_last_shoot_target_id`, `setdefault`), sans contrôle « hit by one or more of those
-   attacks » — écart connu, non couvert. Tests `test_move_after_shooting_gym_path.py`.
+   `move_after_shooting_seat_is_model_driven`). Cible désignée de l'activation = PREMIÈRE
+   déclarée au siège humain, prioritaire en gym (`designate_shoot_target`, clé unique
+   `designated_shoot_target_id`, première écriture gagnante) — lue par Hail of Bolts /
+   Overlapping Detonations et par la suppression. Tests `test_move_after_shooting_gym_path.py`.
 
 ### Flux d'exécution complet (récapitulatif)
 

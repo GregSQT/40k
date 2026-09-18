@@ -55,8 +55,9 @@ from tests._state_invariants import turn_state_invariants, unit_invariants
 
 #: Le SEUL choix de règle du jeu aujourd'hui (Tyranid Warrior mêlée) : `adrenalised_onslaught`
 #: accorde `aggression_imperative` (alias de `reroll_1_tohit_fight`) OU `preservation_imperative`
-#: (alias de `reroll_1_save_fight`). Les deux effets techniques appartiennent au registre des
-#: ACCORDABLES `DECISION_GRANTABLE_EFFECT_IDS` — c'est ce qui rend les candidats descriptibles.
+#: (alias de `reroll_1_save_fight`). Les deux effets techniques appartiennent au vocabulaire
+#: observé `UNIT_RULE_EFFECT_IDS`, donc portent un `obs_id` — c'est ce qui rend les candidats
+#: descriptibles (`decision_options_effect_ids`, refonte du 2026-09-18).
 CHOICE_RULE = {
     "ruleId": "adrenalised_onslaught",
     "displayName": "Adrenalised Onslaught",
@@ -273,83 +274,67 @@ def test_unknown_decision_type_raises():
 
 
 def test_effect_outside_the_observation_vocabulary_raises():
-    """Un candidat que l'agent ne pourrait pas percevoir LÈVE — il n'est pas décrit par un zéro."""
+    """Un candidat que l'agent ne pourrait pas percevoir LÈVE — il n'est pas décrit par le padding.
+
+    Une SEULE liste depuis la refonte du 2026-09-18 : l'effet doit être dans `UNIT_RULE_EFFECT_IDS`
+    (chaque entrée y porte un `obs_id`). L'ancien registre des accordables
+    `DECISION_GRANTABLE_EFFECT_IDS` est supprimé.
+    """
     gs = _game_state([_unit(1, 1, 5, 10, [])])
     options = _two_options()
     options[0]["effect_ids"] = ("some_unobserved_rule",)
-    with pytest.raises(KeyError, match="DECISION_GRANTABLE_EFFECT_IDS"):
+    with pytest.raises(KeyError, match="UNIT_RULE_EFFECT_IDS"):
         _push(gs, options=options)
 
 
-def test_effect_observable_but_not_grantable_raises():
-    """Garde RESSERRÉE (2026-08-04) : être dans le vocabulaire observé ne suffit plus.
+def test_any_observed_effect_can_be_proposed_as_candidate():
+    """Refonte du 2026-09-18 : être dans le vocabulaire observé SUFFIT — et coûte 0 colonne.
 
-    `cp_gain_on_objective` est une capacité observée (l'agent la voit sur l'unité) mais elle
-    n'est accordable par aucun choix, donc le bloc candidat n'a PAS de bit `grants_*` pour elle :
-    un candidat qui la porterait serait décrit par un vecteur nul, indiscernable d'un autre.
-    Avant le resserrage, la garde large l'acceptait — c'est le trou que ce test ferme.
+    `cp_gain_on_objective` n'est accordable par aucun `grantsRuleIds` de roster : la garde
+    resserrée de 2026-08-04 le REFUSAIT (aucun bit `grants_*` pour lui). Désormais le candidat
+    porte l'`obs_id` de l'effet, lu par la même table que les capacités d'unité : tout effet
+    observé est proposable, et l'observation le décrit par son id, pas par le padding.
     """
-    from engine.observation_entities import (
-        DECISION_GRANTABLE_EFFECT_IDS, UNIT_RULE_EFFECT_IDS,
-    )
+    from engine.observation_builder import unit_ability_obs_ids
+    from engine.observation_entities import UNIT_RULE_EFFECT_IDS
 
     assert "cp_gain_on_objective" in UNIT_RULE_EFFECT_IDS
-    assert "cp_gain_on_objective" not in DECISION_GRANTABLE_EFFECT_IDS
-
-    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    gs = _game_state([_unit(1, 1, 5, 10, []), _unit(2, 2, 15, 10, [])])
+    engine = _engine(gs)
     options = _two_options()
     options[0]["effect_ids"] = ("cp_gain_on_objective",)
-    with pytest.raises(KeyError, match="DECISION_GRANTABLE_EFFECT_IDS"):
+    _push(gs, options=options)
+
+    effects = engine.obs_builder.build_squad_observation(gs, "1")["decision_options_effect_ids"]
+    assert effects[0, 0] == float(unit_ability_obs_ids()["cp_gain_on_objective"])
+    assert effects[1, 0] == float(unit_ability_obs_ids()["reroll_1_save_fight"])
+    assert (effects[2:] == 0.0).all(), "slots vides = padding 0"
+
+
+def test_a_candidate_grants_at_most_one_effect():
+    """`decision_options_effect_ids` porte UN id par candidat : deux effets seraient tronqués
+    en silence — le contrat LÈVE à la pose."""
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    options = _two_options()
+    options[0]["effect_ids"] = ("reroll_1_tohit_fight", "reroll_1_towound")
+    with pytest.raises(ValueError, match="UN effet"):
         _push(gs, options=options)
 
 
-def test_le_registre_des_accordables_ne_derive_pas_des_rosters():
-    """CONTRAT : `DECISION_GRANTABLE_EFFECT_IDS` == les effets réellement accordables par un roster.
-
-    Le tuple est RECOPIÉ dans `observation_entities` (module feuille : lire le registre de règles
-    y créerait un cycle d'import), donc rien dans le code ne l'empêche de dériver. Ce test le
-    recalcule depuis la SOURCE — les `grantsRuleIds` déclarés dans `frontend/src/roster/**`,
-    résolus vers leurs effets techniques — et échoue dans les deux sens :
-
-    - un effet accordable ABSENT du tuple → le candidat qui l'accorde n'a pas de bit `grants_*`,
-      `set_pending_agent_decision` lèverait en pleine partie ;
-    - un effet du tuple que PLUS AUCUN roster n'accorde → un bit mort par slot de candidat,
-      exactement les 36 scalaires que le découplage du 2026-08-04 a supprimés.
-
-    ⚠️ Le test échoue AUSSI si aucun `grantsRuleIds` n'est trouvé : un balayage vide rendrait
-    l'ensemble attendu vide et ferait passer n'importe quel tuple (vert vacant).
-    """
-    import re
-    from pathlib import Path
-
-    from engine.observation_entities import DECISION_GRANTABLE_EFFECT_IDS
-    from engine.phase_handlers.shared_utils import (
-        _resolve_unit_rule_entry_effect_rule_ids,
+def test_the_decision_block_no_longer_depends_on_the_vocabulary():
+    """Le bloc candidat ne porte plus AUCUN registre positionnel d'effets : ses formes ne
+    dépendent pas de `UNIT_RULE_EFFECT_IDS`. C'est ce qui rend gratuite l'ouverture d'une
+    capacité ACTIVABLE — le verrou complet (mesure d'obs_size avec une capacité fictive de plus)
+    vit dans `test_squad_obs_unit_rules.test_adding_an_observed_capability_costs_zero_scalar`."""
+    from engine.observation_entities import (
+        DECISION_OPTION_BIN_FIELDS, DECISION_OPTION_EFFECT_SLOTS,
     )
 
-    roster_dir = Path(__file__).resolve().parents[3] / "frontend" / "src" / "roster"
-    granted_source_ids: set[str] = set()
-    for path in roster_dir.rglob("*.ts"):
-        text = path.read_text(encoding="utf-8")
-        for match in re.finditer(r"grants(?:_r|R)ule[_i]?[iI]ds\s*:\s*\[(.*?)\]", text, re.S):
-            granted_source_ids.update(re.findall(r'"([^"]+)"', match.group(1)))
-
-    assert granted_source_ids, (
-        "aucun `grantsRuleIds` trouvé dans les rosters : le balayage ne regarde rien, et "
-        "l'ensemble attendu serait vide (vert vacant)"
-    )
-
-    expected: set[str] = set()
-    for source_id in granted_source_ids:
-        expected.update(_resolve_unit_rule_entry_effect_rule_ids({"ruleId": source_id}))
-
-    assert set(DECISION_GRANTABLE_EFFECT_IDS) == expected, (
-        f"DECISION_GRANTABLE_EFFECT_IDS a dérivé des rosters.\n"
-        f"  accordables et non déclarés : {sorted(expected - set(DECISION_GRANTABLE_EFFECT_IDS))}\n"
-        f"  déclarés et plus accordables : {sorted(set(DECISION_GRANTABLE_EFFECT_IDS) - expected)}\n"
-        f"Mettre le tuple à jour fait bouger obs_size (retrain --new) : le reporter dans les "
-        f"profils de config d'agent et dans AI_OBSERVATION.md."
-    )
+    assert DECISION_OPTION_BIN_FIELDS == ("declines", "present")
+    assert DECISION_OPTION_EFFECT_SLOTS == 1
+    shapes = ObservationBuilder.squad_obs_shapes()
+    assert shapes["decision_options_effect_ids"] == (MAX_DECISION_OPTIONS, 1)
+    assert shapes["decision_options_bin"] == (MAX_DECISION_OPTIONS, 2)
 
 
 def test_second_decision_never_overwrites_the_first():
@@ -422,14 +407,19 @@ def test_observation_describes_the_type_and_every_candidate():
     assert ctx[decision_ctx_bin_index("decision_pending")] == 1.0
     assert ctx[decision_ctx_bin_index("decision_type_rule_choice")] == 1.0
 
+    from engine.observation_builder import unit_ability_obs_ids
+
     options = obs["decision_options_bin"]
-    assert options[0, decision_option_bin_index("grants_reroll_1_tohit_fight")] == 1.0
-    assert options[1, decision_option_bin_index("grants_reroll_1_save_fight")] == 1.0
-    # Un candidat ne porte QUE son propre effet.
-    assert options[0, decision_option_bin_index("grants_reroll_1_save_fight")] == 0.0
+    effects = obs["decision_options_effect_ids"]
+    ids = unit_ability_obs_ids()
+    assert effects[0, 0] == float(ids["reroll_1_tohit_fight"])
+    assert effects[1, 0] == float(ids["reroll_1_save_fight"])
+    # Un candidat ne porte QUE son propre effet — et les deux ids diffèrent.
+    assert effects[0, 0] != effects[1, 0]
     # Le masque `present` porte le NOMBRE de candidats.
     present = options[:, decision_option_bin_index("present")]
     assert list(present) == [1.0, 1.0] + [0.0] * (MAX_DECISION_OPTIONS - 2)
+    assert (effects[2:] == 0.0).all()
 
 
 def test_deux_candidats_presents_ne_sortent_jamais_la_meme_ligne():
@@ -519,6 +509,7 @@ def test_observation_of_the_other_camp_stays_empty():
     obs = engine.obs_builder.build_squad_observation(gs, "1")
     assert obs["decision_ctx_bin"].sum() == 0.0
     assert obs["decision_options_bin"].sum() == 0.0
+    assert obs["decision_options_effect_ids"].sum() == 0.0
 
 
 def test_observation_is_empty_without_a_decision():
@@ -527,6 +518,7 @@ def test_observation_is_empty_without_a_decision():
     obs = engine.obs_builder.build_squad_observation(gs, "1")
     assert obs["decision_ctx_bin"].sum() == 0.0
     assert obs["decision_options_bin"].sum() == 0.0
+    assert obs["decision_options_effect_ids"].sum() == 0.0
 
 
 def test_observation_shapes_are_part_of_the_contract():
@@ -1090,3 +1082,293 @@ def test_consume_accepts_the_right_owner():
         gs, decision_type="fly_declaration", player=2, unit_id="7"
     )
     assert read_pending_agent_decision(gs) is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Appel de capacité (`engine/ability_calls.py`, refonte du 2026-09-18) — TROIS sièges
+#
+# `push_ability_call` pose un `rule_choice` à deux candidats [accorde `effet`] / [declines] par la
+# file `pending_rule_choice_queue`, que le moteur sert déjà au gym (décision + CHOICE_i), au bot
+# (politique DÉCLARÉE de la capacité) et à l'humain (`waiting_for_rule_choice`). L'application est
+# déléguée au gestionnaire de la capacité. L'effet d'essai est un effet OBSERVÉ quelconque du
+# vocabulaire (`cp_gain_on_objective`, obs_id 14) : ce qui est testé est le socle, pas une règle.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TEST_EFFECT = "cp_gain_on_objective"
+_TEST_RULE = {"ruleId": _TEST_EFFECT, "displayName": "Effet d'essai"}
+
+
+class _Recorder:
+    """Gestionnaire + politique d'essai : note ce qu'on lui demande, rend ce qu'on lui dit."""
+
+    def __init__(self, *, bot_accepts: bool = True, handler_result=None) -> None:
+        self.calls: List[tuple] = []
+        self.bot_accepts = bot_accepts
+        self.handler_result = {} if handler_result is None else handler_result
+
+    def handler(self, gs, squad_id, accepted):
+        self.calls.append((squad_id, accepted))
+        return dict(self.handler_result)
+
+    def policy(self, gs, squad_id):
+        return self.bot_accepts
+
+
+@pytest.fixture
+def ability(monkeypatch) -> _Recorder:
+    """Enregistre l'effet d'essai dans les DEUX registres, sans polluer la session."""
+    from engine import ability_calls as ac
+
+    rec = _Recorder()
+    monkeypatch.setitem(ac.ABILITY_CALL_HANDLERS, _TEST_EFFECT, rec.handler)
+    monkeypatch.setitem(ac.ABILITY_CALL_BOT_POLICIES, _TEST_EFFECT, rec.policy)
+    return rec
+
+
+def _gs_ability(phase: str = "command") -> Dict[str, Any]:
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(_TEST_RULE)]), _unit(2, 2, 15, 10, [])])
+    gs["phase"] = phase
+    return gs
+
+
+def test_push_ability_call_poses_a_two_candidate_rule_choice_to_the_gym_seat(ability, tmp_path):
+    """Gym : la file émet une décision `rule_choice` à deux candidats — [accorde l'effet, par son
+    obs_id] puis [declines] — et `CHOICE_0` ACTIVE : le gestionnaire reçoit `accepted=True`."""
+    from engine.ability_calls import push_ability_call
+    from engine.observation_builder import unit_ability_obs_ids
+    from ai.step_logger import StepLogger
+
+    gs = _gs_ability()
+    engine = _engine(gs)
+    out = tmp_path / "step.log"
+    engine.step_logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
+    engine.step_logger.episode_number = 1
+    engine._initialize_rule_choice_runtime_state()
+    prompt = push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    assert prompt["kind"] == "ability_call" and prompt["display_name"] == "CP gain on controlled objective"
+
+    result = engine._emit_next_rule_choice_prompt_if_needed()
+    assert result is not None and result["action"] == "waiting_for_agent_decision"
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "rule_choice" and decision["unit_id"] == "1"
+    assert [o["effect_ids"] for o in decision["options"]] == [(_TEST_EFFECT,), ()]
+    assert [o["declines"] for o in decision["options"]] == [False, True]
+    effects = engine.obs_builder.build_squad_observation(gs, "1")["decision_options_effect_ids"]
+    assert effects[0, 0] == float(unit_ability_obs_ids()[_TEST_EFFECT]) and effects[1, 0] == 0.0
+    assert ability.calls == [], "rien n'est appliqué avant la réponse de l'agent"
+
+    success, applied = engine._process_squad_action(
+        engine.action_decoder.convert_squad_action(CHOICE_BASE, gs)
+    )
+    assert success is True and applied["selectedRuleId"] == _TEST_EFFECT
+    assert ability.calls == [("1", True)]
+    assert read_pending_agent_decision(gs) is None and gs["pending_rule_choice_queue"] == []
+    engine.step_logger._flush_buffer()
+    lines = [l for l in out.read_text().splitlines() if "ABILITY CALL" in l]
+    assert len(lines) == 1 and "ABILITY CALL CP gain on controlled objective [USED]" in lines[0], lines
+
+
+def test_gym_choice_1_declines_and_consumes_nothing(ability, tmp_path):
+    """`CHOICE_1` = passer : le gestionnaire est appelé avec `accepted=False` (il ne consomme
+    rien — c'est au poseur de reproposer) et la ligne DECLINED distingue « refusé » de « jamais
+    proposé »."""
+    from engine.ability_calls import push_ability_call
+    from ai.step_logger import StepLogger
+
+    gs = _gs_ability()
+    engine = _engine(gs)
+    out = tmp_path / "step.log"
+    engine.step_logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
+    engine.step_logger.episode_number = 1
+    engine._initialize_rule_choice_runtime_state()
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    engine._emit_next_rule_choice_prompt_if_needed()
+
+    engine._process_squad_action(engine.action_decoder.convert_squad_action(CHOICE_BASE + 1, gs))
+    assert ability.calls == [("1", False)]
+    engine.step_logger._flush_buffer()
+    assert any("ABILITY CALL CP gain on controlled objective [DECLINED]" in l
+               for l in out.read_text().splitlines())
+
+
+@pytest.mark.parametrize("bot_accepts", [True, False])
+def test_bot_seat_answers_by_the_declared_policy(ability, bot_accepts: bool):
+    """Bot (PvE hors gym) : la POLITIQUE déclarée de la capacité répond, sans décision d'agent
+    ni prompt humain — jamais un tirage."""
+    from engine.ability_calls import push_ability_call
+
+    ability.bot_accepts = bot_accepts
+    gs = _gs_ability()
+    gs["player_types"] = {"1": "ai", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine.is_pve_mode = True
+    engine._initialize_rule_choice_runtime_state()
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+
+    result = engine._emit_next_rule_choice_prompt_if_needed()
+
+    assert result is None
+    assert ability.calls == [("1", bot_accepts)]
+    assert gs["pending_rule_choice_queue"] == [] and read_pending_agent_decision(gs) is None
+
+
+def test_bot_seat_without_declared_policy_raises(monkeypatch):
+    """Un effet sans politique de bot ne peut pas être PROPOSÉ : erreur à la pose, jamais un
+    tirage silencieux au siège bot."""
+    from engine.ability_calls import push_ability_call
+
+    gs = _gs_ability()
+    with pytest.raises(KeyError, match="sans gestionnaire ni politique"):
+        push_ability_call(gs, "1", _TEST_EFFECT, "command")
+
+
+@pytest.mark.parametrize("selected,accepted", [(_TEST_EFFECT, True), ("decline", False)])
+def test_human_seat_answers_through_select_rule_choice(ability, selected: str, accepted: bool):
+    """Humain : `waiting_for_rule_choice` (panneau rule_choice du front), réponse par
+    `select_rule_choice` avec l'id de l'effet (activer) ou `decline` (passer)."""
+    from engine.ability_calls import push_ability_call
+
+    gs = _gs_ability()
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine._initialize_rule_choice_runtime_state()
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+
+    waiting = engine._emit_next_rule_choice_prompt_if_needed()
+    assert waiting is not None and waiting["action"] == "waiting_for_rule_choice"
+    assert gs["active_rule_choice_prompt"]["kind"] == "ability_call"
+    assert [o["declines"] for o in gs["active_rule_choice_prompt"]["options"]] == [False, True]
+    # Toute autre action est refusée tant que la décision attend : en phase de commandement
+    # c'est la garde de 08.04 (`faction_decision_is_pending`, une seule source) qui répond.
+    blocked_ok, blocked = engine._process_squad_action({"action": "wait", "unitId": "1"})
+    assert blocked_ok is False and blocked["error"] == "faction_decision_pending"
+
+    success, result = engine._handle_select_rule_choice_action(
+        {"action": "select_rule_choice", "unitId": "1", "player": 1, "selectedRuleId": selected}
+    )
+    assert success is True and result["selectedRuleId"] == selected
+    assert ability.calls == [("1", accepted)]
+    assert gs["active_rule_choice_prompt"] is None and gs["pending_rule_choice_queue"] == []
+
+
+def test_human_answer_outside_the_two_candidates_is_refused(ability):
+    from engine.ability_calls import push_ability_call
+
+    gs = _gs_ability()
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine._initialize_rule_choice_runtime_state()
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    engine._emit_next_rule_choice_prompt_if_needed()
+    with pytest.raises(ValueError, match="Invalid selected display rule"):
+        engine._handle_select_rule_choice_action(
+            {"action": "select_rule_choice", "unitId": "1", "player": 1, "selectedRuleId": "autre"}
+        )
+    assert ability.calls == [] and len(gs["pending_rule_choice_queue"]) == 1, (
+        "un choix invalide ne consomme ni la file ni la capacité"
+    )
+
+
+@pytest.mark.parametrize("phase", ["command", "move", "fight"])
+def test_ability_call_is_answered_in_every_phase_it_is_posed(ability, phase: str):
+    """Le socle ne dépend pas du moment : commandement (Grot Orderly), mouvement (Da Jump),
+    sélection en combat (Finest Hour) posent le même prompt et reçoivent la même réponse."""
+    from engine.ability_calls import push_ability_call
+
+    gs = _gs_ability(phase)
+    engine = _engine(gs)
+    engine._initialize_rule_choice_runtime_state()
+    prompt = push_ability_call(gs, "1", _TEST_EFFECT, phase)
+    assert prompt["phase"] == phase
+    engine._emit_next_rule_choice_prompt_if_needed()
+    engine._process_squad_action(engine.action_decoder.convert_squad_action(CHOICE_BASE, gs))
+    assert ability.calls == [("1", True)]
+
+
+def test_command_phase_waits_for_a_queued_ability_call(ability):
+    """`faction_decision_is_pending` — UNE source : un appel posé en phase de commandement
+    arrête la phase (comme le Waaagh!), un appel d'une autre phase ne l'arrête pas."""
+    from engine.ability_calls import push_ability_call
+    from engine.phase_handlers.command_handlers import faction_decision_is_pending
+
+    gs = _gs_ability()
+    engine = _engine(gs)
+    engine._initialize_rule_choice_runtime_state()
+    assert faction_decision_is_pending(gs, 1) is False
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    assert faction_decision_is_pending(gs, 1) is True
+    assert faction_decision_is_pending(gs, 2) is False, "la décision appartient au joueur 1"
+    engine._emit_next_rule_choice_prompt_if_needed()
+    assert faction_decision_is_pending(gs, 1) is True, "posée à l'agent, toujours en attente"
+    engine._process_squad_action(engine.action_decoder.convert_squad_action(CHOICE_BASE + 1, gs))
+    assert faction_decision_is_pending(gs, 1) is False
+
+    gs2 = _gs_ability("move")
+    push_ability_call(gs2, "1", _TEST_EFFECT, "move")
+    assert faction_decision_is_pending(gs2, 1) is False
+
+
+def test_handler_may_pose_its_own_decision_and_hand_back(ability):
+    """Un gestionnaire qui pose une décision d'agent (Grot Orderly → profil des figurines
+    rendues) rend `waiting_for_player` : la file est vidée AVANT l'application, donc la nouvelle
+    décision survit, et c'est elle que le moteur rend."""
+    from engine.ability_calls import push_ability_call
+
+    def posing_handler(gs, squad_id, accepted):
+        set_pending_agent_decision(
+            gs, decision_type="fly_declaration", player=1, unit_id=squad_id,
+            options=[
+                {"label": "Vol", "effect_ids": (), "declines": False, "payload": {}},
+                {"label": "Sol", "effect_ids": (), "declines": True, "payload": {}},
+            ],
+        )
+        return {"action": "waiting_for_agent_decision", "waiting_for_player": True}
+
+    from engine import ability_calls as ac
+
+    ac.ABILITY_CALL_HANDLERS[_TEST_EFFECT] = posing_handler  # remplacé par la fixture au teardown
+    gs = _gs_ability()
+    engine = _engine(gs)
+    engine._initialize_rule_choice_runtime_state()
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    engine._emit_next_rule_choice_prompt_if_needed()
+
+    success, result = engine._process_squad_action(
+        engine.action_decoder.convert_squad_action(CHOICE_BASE, gs)
+    )
+    assert success is True and result["waiting_for_player"] is True
+    nested = read_pending_agent_decision(gs)
+    assert nested is not None and nested["type"] == "fly_declaration"
+    assert gs["pending_rule_choice_queue"] == []
+
+
+def test_push_ability_call_refuses_a_squad_without_the_effect_and_duplicates(ability):
+    from engine.ability_calls import push_ability_call
+
+    gs = _gs_ability()
+    with pytest.raises(ValueError, match="ne porte pas l'effet"):
+        push_ability_call(gs, "2", _TEST_EFFECT, "command")
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    with pytest.raises(RuntimeError, match="déjà en attente"):
+        push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    with pytest.raises(ValueError, match="phase"):
+        push_ability_call(gs, "1", _TEST_EFFECT, "deployment")
+
+
+@pytest.mark.parametrize("bot_accepts,expected_slot", [(True, 0), (False, 1)])
+def test_gym_bot_seat_answers_an_ability_call_by_the_declared_policy(ability, bot_accepts, expected_slot):
+    """Bot ADVERSAIRE en gym (`env_wrappers.bot_action_for_pending_choice`) : la politique déclarée
+    de la capacité répond — `CHOICE_0` (activer) ou le candidat `declines` — jamais le tirage
+    « choix non modélisé », qui ferait bouger la baseline une fois sur deux."""
+    from ai.env_wrappers import bot_action_for_pending_choice
+    from engine.ability_calls import push_ability_call
+
+    ability.bot_accepts = bot_accepts
+    gs = _gs_ability()
+    engine = _engine(gs)
+    engine._initialize_rule_choice_runtime_state()
+    push_ability_call(gs, "1", _TEST_EFFECT, "command")
+    engine._emit_next_rule_choice_prompt_if_needed()
+    mask, _ = engine.action_decoder.get_squad_action_mask_and_eligible_units(gs)
+
+    assert bot_action_for_pending_choice(gs, mask, "test") == CHOICE_BASE + expected_slot

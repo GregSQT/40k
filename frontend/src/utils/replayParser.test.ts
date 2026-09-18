@@ -26,6 +26,38 @@ describe("replayParser", () => {
     expect(parsed.episodes[0].states.length).toBeGreaterThan(0);
   });
 
+  // Appel de capacité (engine/ability_calls.py) : la ligne « ABILITY CALL <Nom> [USED|DECLINED] »
+  // est une action du replay, comme « chose [...] ». Sans cette branche elle était IGNORÉE en
+  // silence — le replay ne disait pas que Grot Orderly avait été proposé puis refusé.
+  it("parse une ligne ABILITY CALL en action ability_call (USED et DECLINED)", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Boyz) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] E1 T2 P1 COMMAND : Unit 1(0,0) ABILITY CALL Grot Orderly [DECLINED] [SUCCESS]",
+      "[12:00:02] E1 T3 P1 COMMAND : Unit 1(0,0) ABILITY CALL Grot Orderly [USED] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    const calls = parsed.episodes[0].actions.filter((a) => a.type === "ability_call");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({
+      unit_id: 1,
+      player: 1,
+      turn: "T2",
+      pos: { col: 0, row: 0 },
+      selected_rule_name: "Grot Orderly [DECLINED]",
+    });
+    expect(calls[1].selected_rule_name).toBe("Grot Orderly [USED]");
+    expect(calls[1].log_message).toContain("ABILITY CALL Grot Orderly [USED]");
+  });
+
   // T1 socle : le parseur ne produit JAMAIS de BASE_SIZE non fini. Le motif `base=(\\w+)\\/(\\d+)`
   // ne capture que des chiffres (parseInt fini), et un socle ovale (`base=oval/[41, 27]`) ou une
   // valeur corrompue ne matchent pas le groupe optionnel : BASE_SIZE reste ABSENT, le cas métier

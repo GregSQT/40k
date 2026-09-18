@@ -88,16 +88,15 @@ modèles** (ennemis, MONSTER/VEHICLE inclus) et **toutes les catégories de terr
 - **Hidden** — §13.09 : terrain area contenant du dense + unité **n'ayant pas tiré ce tour ni le
   précédent** → visible seulement à ≤ **15"** (detection range). Très pertinent pour la LoS en ruines.
 
-  > **Décision de conception (voulue, pas un bug de conformité) :** le texte §13.09 exige une area
-  > contenant un terrain **dense** ; le moteur teste à la place l'appartenance à une area
-  > **obscuring** (`compute_models_in_obscuring_terrain` → `model_within_terrain(obscuring_only=True)`).
-  > Le flag `obscuring` est **posé manuellement** par le concepteur de terrain sur chaque area
-  > (`config/board/{board}/terrain/terrain-*.json`, champ `"obscuring": true`) — il n'existe volontairement
-  > **aucun marqueur dense/light au niveau de l'area** (seuls les `walls` sont typés `light`/`dense`,
-  > pour le blocage de LoS / Solid §13.11). L'`obscuring` manuel **fait donc foi** pour Hidden : une area
-  > marquée obscuring accorde Hidden, par choix. Conséquence assumée : le moteur ne distingue pas une
-  > area obscuring dense d'une light-only pour Hidden (c'est au concepteur de ne flaguer `obscuring` que
-  > les areas qui doivent cacher).
+  > **Catégories dérivées des features (option A, 2026-09-18) :** la catégorie appartient à la
+  > FEATURE (§13.02) — ici le champ `type` ∈ {light, dense} de chaque groupe de `walls` du fichier
+  > terrain (`config/board/{board}/terrain/terrain-*.json`), obligatoire. La zone en hérite au
+  > chargement (`terrain_utils.derive_area_categories`, partagé moteur / API front) :
+  > `obscuring` ⇔ elle contient un mur light ou dense (§13.10), `dense` ⇔ un mur dense. Hidden teste
+  > `dense` (`compute_models_in_dense_terrain` → `model_within_terrain(category="dense")`) : une zone
+  > à murs light seuls donne le couvert et coupe la LoS, mais ne cache pas. La clé JSON `obscuring`
+  > saisie à la main est **refusée** au chargement (elle contredisait les murs : 4 zones light-only
+  > de terrain-mc1 accordaient Hidden, 6 zones à murs typés de terrain-mc2 ne coupaient pas la LoS).
 
 ### 2.5 Multi-niveaux : cohésion & engagement (verticalité déjà chiffrée)
 - Coherency — `03 Moving.pdf` §03.03 : **deux conditions simultanées** pour chaque fig :
@@ -218,8 +217,18 @@ Conséquences : une charge vers un étage doit couvrir la montée avec le 2D6 et
 - Découpe cible en empreintes par-figurine ; visible si ≥1 modèle a ≥1 cellule à ligne dégagée.
 - Primitive de tracé `_los_line_segment_clear` : trace `hex_line` ([hex_utils.py](../../../engine/hex_utils.py),
   cube-lerp) et inspecte chaque cellule intermédiaire.
-- **Bloque** : un **mur** (`wall_set`, toujours) ; une **area obscuring**
-  (sauf si elle appartient au tireur ou à la cible, règle 13.10).
+- **Bloque** : un **mur** (`wall_set`) ; une **area obscuring** (sauf si la **figurine** tireuse ou
+  la **figurine** cible de la paire l'occupe, règle 13.10 — exclusion par paire de figurines, jamais
+  par escouade).
+- **Murs ignorés (§13.11, étage)** : le wall_set effectif d'une **paire** = murs du plateau − murs de
+  l'étage occupé par la figurine tireuse − murs de l'étage occupé par la figurine cible
+  (`_walls_around_occupied_floor`, granularité floor, cache par figurine « m:<mid> », côté tireur
+  dans `_resolve_shooter_models_with_walls`, côté cible dans `_resolve_target_models_for_los`).
+  La LoS est une ligne entre deux points, donc **symétrique** : le mur d'une ruine franchissable
+  pour la figurine à l'étage l'est dans les deux sens (illustration 13.11 « Units A and C are
+  visible to each other »). Même wall_set de paire pour Gone to Ground
+  (`_model_footprint_not_fully_visible_due_to_solid`) et le chemin par figurine de
+  `declare_attack_model` (`_attacker_model_can_reach_squad`, shared_utils).
 - "Peek de coin" déjà géré : vantages latéraux du socle (`_shooter_lateral_vantage_hexes`).
 - Miroir WASM frontend `has_los_fast` que la primitive Python doit refléter (docstring de
   `_los_line_segment_clear`). Le miroir est en **Rust** ([lib.rs](../../../frontend/wasm-los/src/lib.rs)) : toute

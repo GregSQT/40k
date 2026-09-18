@@ -3,9 +3,17 @@
 Terrain areas are polygon zones rasterized to board hexes at load time
 (see ``game_state._load_terrain_areas_from_ref``). Each area dict holds:
   - ``id``: str
-  - ``obscuring``: bool
+  - ``obscuring``: bool — DÉRIVÉ (13.10) : la zone contient ≥ 1 hex de mur ``light`` ou ``dense``
+    du même fichier terrain. Jamais saisi à la main (clé JSON refusée au chargement).
+  - ``dense``: bool — DÉRIVÉ (13.02/13.05) : la zone contient ≥ 1 hex de mur ``dense``. Porte la
+    règle Hidden (13.09 : « terrain area that contains one or more dense terrain features »).
   - ``polygon_vertices``: list[[col, row]]
   - ``hexes``: list[[col, row]]  (rasterized membership, odd-q projection)
+
+La catégorie (13.02) appartient à la FEATURE — ici le ``type`` de chaque groupe de murs — et la
+zone hérite des catégories des features qu'elle contient. Source unique : le champ ``type`` des
+groupes ``walls`` du fichier terrain (``terrain_wall_hexes_by_type`` / ``derive_area_categories``),
+partagée par le loader moteur et l'API front.
 
 Membership is answered by testing hex appartenance against the precomputed
 ``hexes`` sets — same odd-q projection as objectives and the frontend renderer,
@@ -16,6 +24,14 @@ from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, NamedTuple,
 
 from shared.data_validation import require_key
 
+#: Catégories de terrain portées par un groupe de murs (13.04 light, 13.05 dense). L'exposed
+#: (13.03) n'a pas de mur : il n'existe pas comme feature bloquante.
+WALL_CATEGORIES: FrozenSet[str] = frozenset({"light", "dense"})
+
+#: Filtres de zone acceptés par ``filter_terrain_areas`` : ``None`` = toute zone (13.08 volet
+#: « within a terrain area »), ``"obscuring"`` (13.10), ``"dense"`` (13.09 hidden).
+AreaCategory = Optional[str]
+
 
 def _area_hex_set(area: Dict[str, Any]) -> Set[Tuple[int, int]]:
     """Return the area's rasterized hexes as a set of (col, row).
@@ -23,6 +39,72 @@ def _area_hex_set(area: Dict[str, Any]) -> Set[Tuple[int, int]]:
     Built inline (no mutation of the area dict) so terrain areas stay JSON-serializable.
     """
     return {(int(h[0]), int(h[1])) for h in require_key(area, "hexes")}
+
+
+def wall_group_type(group: Dict[str, Any], *, path_hint: str = "wall group") -> str:
+    """Catégorie (13.02) d'un groupe de murs d'un fichier TERRAIN : ``type`` ∈ {light, dense}.
+
+    Obligatoire : c'est la seule source des catégories de zone (obscuring 13.10, dense 13.09). Un
+    groupe sans type ou d'un type inconnu lève — pas de catégorie par défaut. Les fichiers de murs
+    PARTAGÉS (``wall_ref``, hors zones) ne passent pas par ici et gardent leur format libre."""
+    wall_type = group.get("type")
+    if wall_type not in WALL_CATEGORIES:
+        raise ValueError(
+            f"{path_hint}: wall group 'type' must be one of {sorted(WALL_CATEGORIES)}, got "
+            f"{wall_type!r} — la catégorie de zone (obscuring/dense) en dérive, aucun défaut"
+        )
+    return str(wall_type)
+
+
+def terrain_wall_hexes_by_type(
+    walls: Any, *, path_hint: str = "terrain walls"
+) -> Dict[str, Set[Tuple[int, int]]]:
+    """Hexes de murs d'un fichier terrain, groupés par catégorie : ``{"light": {...}, "dense": {...}}``.
+
+    Chaque groupe est validé par ``wall_group_type`` et étendu par ``expand_wall_group_to_hex_list``
+    (segments + hexes explicites). Les deux clés sont toujours présentes (ensembles vides possibles).
+    """
+    from engine.hex_utils import expand_wall_group_to_hex_list
+    by_type: Dict[str, Set[Tuple[int, int]]] = {cat: set() for cat in sorted(WALL_CATEGORIES)}
+    if walls is None:
+        return by_type
+    if not isinstance(walls, list):
+        raise ValueError(f"{path_hint}: 'walls' must be a list, got {type(walls).__name__}")
+    for gi, group in enumerate(walls):
+        if not isinstance(group, dict):
+            continue
+        hint = f"{path_hint} walls[{gi}]"
+        cat = wall_group_type(group, path_hint=hint)
+        by_type[cat].update(
+            (int(h[0]), int(h[1])) for h in expand_wall_group_to_hex_list(group, path_hint=hint)
+        )
+    return by_type
+
+
+def derive_area_categories(
+    area_hexes: List[List[int]], walls_by_type: Mapping[str, AbstractSet[Tuple[int, int]]]
+) -> Tuple[bool, bool]:
+    """``(obscuring, dense)`` d'une zone à partir des murs typés qu'elle contient.
+
+    13.10 : obscuring ⇔ la zone contient ≥ 1 feature light OU dense ; 13.09/13.05 : dense ⇔ elle
+    contient ≥ 1 feature dense. Un mur est « contenu » dès qu'un de ses hexes est dans l'empreinte
+    rasterisée de la zone."""
+    cells = {(int(h[0]), int(h[1])) for h in area_hexes}
+    has_dense = bool(cells & walls_by_type["dense"])
+    has_light = bool(cells & walls_by_type["light"])
+    return (has_light or has_dense), has_dense
+
+
+def filter_terrain_areas(
+    terrain_areas: List[Dict[str, Any]], category: AreaCategory
+) -> List[Dict[str, Any]]:
+    """Zones d'une catégorie : ``None`` → toutes (13.08), ``"obscuring"`` (13.10), ``"dense"``
+    (13.09 hidden). Source unique du filtrage par catégorie (couvert, hidden, LoS)."""
+    if category is None:
+        return list(terrain_areas)
+    if category not in ("obscuring", "dense"):
+        raise ValueError(f"filter_terrain_areas: unknown category {category!r}")
+    return [a for a in terrain_areas if a.get(category)]  # get allowed (absence = pas cette catégorie)
 
 
 def resolve_unit_hexes(unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Tuple[int, int]]:
@@ -66,8 +148,8 @@ def hexes_in_obscuring_terrain(
 ) -> bool:
     """True if the unit's footprint touches at least one obscuring terrain area."""
     unit_set = {(int(c), int(r)) for c, r in unit_hexes}
-    for area in terrain_areas:
-        if area.get("obscuring") and (unit_set & _area_hex_set(area)):
+    for area in filter_terrain_areas(terrain_areas, "obscuring"):
+        if unit_set & _area_hex_set(area):
             return True
     return False
 
@@ -577,7 +659,7 @@ def model_within_terrain(
     base_size: "int | list[int]",
     orientation: int,
     terrain_areas: List[Dict[str, Any]],
-    obscuring_only: bool,
+    category: AreaCategory,
 ) -> bool:
     """True si le socle d'un modèle est « within a terrain area » (règles 13.08 / 13.09).
 
@@ -588,9 +670,10 @@ def model_within_terrain(
     Base OVAL/SQUARE : méthode empreinte hex (intersection cellules), exactement la même
     convention hybride que l'engagement (round=euclidien, autres=hex).
 
-    ``obscuring_only=True`` restreint aux zones obscurantes (hidden 13.09) ; ``False`` = toute
-    zone de terrain (cover 13.08, volet « within terrain area »)."""
-    areas = [a for a in terrain_areas if (not obscuring_only or a.get("obscuring"))]
+    ``category`` (cf. ``filter_terrain_areas``) : ``"dense"`` = zones contenant un terrain dense
+    (hidden 13.09) ; ``"obscuring"`` = zones obscurantes (13.10) ; ``None`` = toute zone de terrain
+    (cover 13.08, volet « within terrain area »)."""
+    areas = filter_terrain_areas(terrain_areas, category)
     if not areas:
         return False
     if base_shape == "round":

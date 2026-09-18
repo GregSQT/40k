@@ -202,6 +202,14 @@ from engine.macro_intents import (
     action_family,
     open_placement_slots,
 )
+from engine.ability_calls import (
+    ABILITY_CALL_DECLINE_ID,
+    ability_call_effect_id,
+    ability_call_selection_is_accept,
+    apply_ability_call,
+    bot_accepts_ability_call,
+    is_ability_call_prompt,
+)
 from engine.agent_decision import (
     clear_pending_agent_decision,
     consume_pending_agent_decision,
@@ -524,6 +532,16 @@ class _StepOutcome(NamedTuple):
     terminal_info: Dict[str, Any]
     out_mask: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]]
     actor: int
+
+
+#: Décisions posées EN COURS D'ACTIVATION à un siège humain, qui refusent toute autre action tant
+#: qu'elles attendent (`_reject_action_while_exhortation_pending`) : type -> phase du refus. Le
+#: gym n'en a pas besoin (masque exclusif) ; sans ce refus, `advance_phase` finirait la phase
+#: sous la question. `move_after_shooting` n'y est pas : le siège humain reçoit son propre prompt.
+_ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS: Dict[str, str] = {
+    "mortal_wounds_target": "fight",
+    "suppress_target": "shoot",
+}
 
 
 class W40KEngine(gym.Env):
@@ -1711,13 +1729,6 @@ class W40KEngine(gym.Env):
         # PRECEDENT. Trouve le 2026-07-29 en verifiant §0.40 point 3, qui LIT ce cache pour
         # decrire les candidats a l'agent : la corruption y serait devenue une observation.
         self.game_state.pop(ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY, None)
-        # Zones de terrain contenant un mur DENSE (Solid 13.11), memoisees par
-        # `_squad_terrain_flags` pour le drapeau « gone to ground pret » (13.5). Elles derivent
-        # de `terrain_areas` ET de `dense_wall_hexes`, que `_reload_scenario` remplace : sans
-        # purge, un episode joue sur un autre terrain lisait les zones du precedent. Trouve le
-        # 2026-07-28 — les tests d'observation la faisaient a la main, c'est ICI qu'elle
-        # manquait (meme motif que §0.26).
-        self.game_state.pop("_obs_solid_terrain_areas", None)
         # Cartes de cellules de move (T3) : elles portent les destinations du pool de l'episode
         # precedent. Leur tampon (ancre, phase) NE protege PAS ici — au nouvel episode l'escouade
         # peut se redeployer sur la meme ancre en phase move, le tampon coincide, et une carte
@@ -4393,19 +4404,10 @@ class W40KEngine(gym.Env):
                 },
             )
 
-    def _apply_rule_choice_selection(
-        self,
-        prompt: Dict[str, Any],
-        selected_display_rule_id: str,
-        consumes_gym_step: bool = False,
-    ) -> None:
-        """Apply one selected option to unit rule runtime state.
-
-        `consumes_gym_step` : cf. `_record_rule_choice_action_log` — True uniquement quand le
-        choix vient d'une action gym `CHOICE_i` (V11 §9.3 P2).
-        """
-        unit_id = str(require_key(prompt, "unit_id"))
-        rule_id = require_key(prompt, "rule_id")
+    @staticmethod
+    def _validate_rule_choice_selection(prompt: Dict[str, Any], selected_display_rule_id: str) -> None:
+        """Le candidat choisi est l'un des candidats du prompt — contrôlé AVANT de retirer le
+        prompt de la file, pour qu'un choix invalide ne laisse pas un état à moitié consommé."""
         options = require_key(prompt, "options")
         allowed_display_rule_ids = {require_key(opt, "display_rule_id") for opt in options}
         if selected_display_rule_id not in allowed_display_rule_ids:
@@ -4413,6 +4415,85 @@ class W40KEngine(gym.Env):
                 f"Invalid selected display rule '{selected_display_rule_id}' for prompt {prompt}"
             )
 
+    def _record_ability_call_action_log(
+        self, prompt: Dict[str, Any], accepted: bool, consumes_gym_step: bool
+    ) -> None:
+        """Ligne « Unit N(c,r) ABILITY CALL <Nom> [USED|DECLINED] » — Game Log ET step.log.
+
+        Sans la ligne DECLINED, l'analyzer ne distinguerait pas « pas proposé » de « refusé ».
+        Même régime que `_record_rule_choice_action_log` : écrite directement (le choix est
+        appliqué hors de la fenêtre de flush des action_logs).
+        """
+        unit_id = str(require_key(prompt, "unit_id"))
+        prompt_player = int(require_key(prompt, "player"))
+        ability_name = str(require_key(prompt, "display_name"))
+        unit = self._get_unit_by_id(unit_id)
+        if unit is None:
+            raise KeyError(f"Cannot record ability call log: unit {unit_id} not found")
+        unit_col, unit_row = require_unit_position(unit, self.game_state)
+        verdict = "USED" if accepted else "DECLINED"
+        append_action_log(
+            self.game_state,
+            {
+                "type": "ability_call",
+                "message": f"Unit {unit_id}({unit_col},{unit_row}) ABILITY CALL {ability_name} [{verdict}]",
+                "unitId": unit_id,
+                "player": prompt_player,
+                "col": unit_col,
+                "row": unit_row,
+                "abilityName": ability_name,
+                "ruleId": ability_call_effect_id(prompt),
+                "accepted": bool(accepted),
+                "phase": prompt.get("phase"),
+            },
+        )
+        if self.step_logger and self.step_logger.enabled:
+            phase_raw = prompt.get("phase")
+            phase_for_log = (
+                phase_raw.strip() if isinstance(phase_raw, str) and phase_raw.strip()
+                else str(require_key(self.game_state, "phase"))
+            )
+            self.step_logger.log_action(
+                unit_id=unit_id,
+                action_type="ability_call",
+                phase=phase_for_log,
+                player=prompt_player,
+                success=True,
+                step_increment=consumes_gym_step,
+                action_details={
+                    "current_turn": require_key(self.game_state, "turn"),
+                    "current_episode": require_key(self.game_state, "episode_number"),
+                    "unit_with_coords": f"{unit_id}({unit_col},{unit_row})",
+                    "ability_name": ability_name,
+                    "ability_used": bool(accepted),
+                    "reward": 0.0,
+                },
+            )
+
+    def _apply_rule_choice_selection(
+        self,
+        prompt: Dict[str, Any],
+        selected_display_rule_id: str,
+        consumes_gym_step: bool = False,
+    ) -> Dict[str, Any]:
+        """Apply one selected option to unit rule runtime state.
+
+        `consumes_gym_step` : cf. `_record_rule_choice_action_log` — True uniquement quand le
+        choix vient d'une action gym `CHOICE_i` (V11 §9.3 P2).
+
+        Rend le payload de l'application : `{}` pour un `rule_choice` de datasheet (un drapeau
+        posé, rien d'autre), celui du GESTIONNAIRE pour un appel de capacité (`ability_calls`) —
+        qui peut lui-même poser une décision d'agent et rendre la main. L'appelant l'a donc
+        déjà retiré de la file et effacé la décision AVANT cet appel.
+        """
+        self._validate_rule_choice_selection(prompt, selected_display_rule_id)
+        unit_id = str(require_key(prompt, "unit_id"))
+        if is_ability_call_prompt(prompt):
+            accepted = ability_call_selection_is_accept(prompt, selected_display_rule_id)
+            self._record_ability_call_action_log(prompt, accepted, consumes_gym_step)
+            return apply_ability_call(self.game_state, prompt, accepted)
+
+        rule_id = require_key(prompt, "rule_id")
         unit = self._get_unit_by_id(unit_id)
         if unit is None:
             raise KeyError(f"Cannot apply rule choice: unit {unit_id} not found")
@@ -4423,7 +4504,7 @@ class W40KEngine(gym.Env):
                 self._record_rule_choice_action_log(
                     prompt, selected_display_rule_id, consumes_gym_step=consumes_gym_step
                 )
-                return
+                return {}
         raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
 
     def _push_rule_choice_agent_decision(self, prompt: Dict[str, Any]) -> Dict[str, Any]:
@@ -4443,18 +4524,24 @@ class W40KEngine(gym.Env):
         decision_options: List[Dict[str, Any]] = []
         for option in options:
             display_rule_id = require_key(option, "display_rule_id")
-            technical_rule_id = require_key(option, "technical_rule_id")
+            # Un candidat qui PASSE n'existe que sur un appel de capacité (`ability_calls`) :
+            # un `rule_choice` de datasheet naît d'une règle en « usage: or », chaque candidat
+            # ACCORDE quelque chose et ne porte pas le drapeau. `declines` est EXIGÉ par le
+            # mécanisme de décision, jamais déduit d'un effet vide.
+            declines = bool(option.get("declines", False))  # get allowed : absent = candidat qui accorde
+            if declines:
+                effect_ids: Tuple[str, ...] = ()
+            else:
+                technical_rule_id = require_key(option, "technical_rule_id")
+                # Ce que le candidat ACCORDE, dans le vocabulaire d'observation des règles
+                # d'unité (§0.31) : c'est la seule description qui ait un sens pour l'agent —
+                # son `obs_id` est écrit dans `decision_options_effect_ids`.
+                effect_ids = (str(technical_rule_id),)
             decision_options.append(
                 {
                     "label": require_key(option, "label"),
-                    # Ce que le candidat ACCORDE, dans le vocabulaire d'observation des règles
-                    # d'unité (§0.31) : c'est la seule description qui ait un sens pour l'agent.
-                    "effect_ids": (str(technical_rule_id),),
-                    # `rule_choice` n'a pas de candidat « ne rien faire » : le prompt naît d'une
-                    # règle en « usage: or », chaque candidat ACCORDE quelque chose. Déclaré et
-                    # non omis — le champ est exigé, pour qu'un futur type de décision optionnel
-                    # ne puisse pas passer en silence.
-                    "declines": False,
+                    "effect_ids": effect_ids,
+                    "declines": declines,
                     "payload": {"display_rule_id": str(display_rule_id)},
                 }
             )
@@ -4895,6 +4982,30 @@ class W40KEngine(gym.Env):
                 "option_index": option_index,
             }
 
+        if decision_type == "suppress_target":
+            # Indiscriminate Detonations (Primitive F) : « select one enemy unit HIT by one or
+            # more of those attacks ». Le candidat désigne l'escouade TOUCHÉE à supprimer ; la
+            # fin d'activation différée reprend dans le même handler que le siège humain.
+            # `player` vient de l'ÉTAT ; l'unité est contrôlée par `_suppress_target_pending`.
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            decision_player = int(require_key(self.game_state, "current_player"))
+            payload = require_key(selected_option, "payload")
+            consume_pending_agent_decision(
+                self.game_state, decision_type="suppress_target", player=decision_player,
+            )
+            success, result = shooting_handlers.apply_suppress_target_decision(
+                self.game_state, require_unit_by_id(self.game_state, decision_squad_id), payload,
+            )
+            if result.get("action") not in ("move_after_shooting_select_destination",
+                                            "waiting_for_agent_decision"):
+                result["action"] = "squad_shoot"
+            return success, {
+                **result,
+                "decision_type": decision_type,
+                "player": decision_player,
+                "option_index": option_index,
+            }
+
         if decision_type == "reactive_move":
             # Mouvement réactif : la seule décision qui n'appartient PAS au joueur courant. Elle
             # se prend pendant le tour de l'adversaire, et 01.03 le dit — « each time a unit is
@@ -4968,15 +5079,23 @@ class W40KEngine(gym.Env):
         selected_display_rule_id = require_key(
             require_key(selected_option, "payload"), "display_rule_id"
         )
+        # Contrôle, PUIS retrait de la file et effacement de la décision, PUIS application : un
+        # appel de capacité peut poser sa propre décision d'agent (Grot Orderly : profil des
+        # figurines rendues) — effacer APRÈS l'application l'aurait supprimée.
+        self._validate_rule_choice_selection(prompt, selected_display_rule_id)
+        queue.pop(0)
+        clear_pending_agent_decision(self.game_state)
         # L'action `CHOICE_i` a consommé un step gym complet : la ligne de step.log doit
         # l'incrémenter, sinon elle compte un appel à `step()` de moins qu'il n'y en a eu.
         # Ce n'est PAS ce qui ferait coïncider `Steps=` et `Total=` — ils comptent deux choses
         # différentes et divergent par construction, cf. `_record_rule_choice_action_log`.
-        self._apply_rule_choice_selection(
+        applied = self._apply_rule_choice_selection(
             prompt, selected_display_rule_id, consumes_gym_step=True
         )
-        queue.pop(0)
-        clear_pending_agent_decision(self.game_state)
+        if applied.get("waiting_for_player"):  # get allowed : {} pour un rule_choice de datasheet
+            # Le gestionnaire a posé une décision d'agent (ou une attente humaine) : c'est elle
+            # que le moteur rend, les prompts suivants de la file attendront sa résolution.
+            return True, applied
 
         # Un même événement peut avoir empilé plusieurs prompts : le suivant repose immédiatement
         # une décision, et le moteur rend de nouveau la main.
@@ -4984,6 +5103,7 @@ class W40KEngine(gym.Env):
         if next_prompt_result is not None:
             return True, next_prompt_result
         return True, {
+            **applied,
             "action": "agent_decision",
             "waiting_for_player": False,
             "decision_type": decision_type,
@@ -5107,6 +5227,17 @@ class W40KEngine(gym.Env):
                 return
             if self._is_player_human(current_player):
                 return
+            # Appel de capacité de phase de commandement (Grot Orderly) encore dans la file
+            # `rule_choice` : la file sert elle-même le siège bot (politique déclarée de la
+            # capacité). Un prompt qui reste en attente ici serait un siège humain, déjà exclu.
+            if command_handlers._command_phase_ability_call_is_pending(self.game_state, current_player):
+                waiting = self._emit_next_rule_choice_prompt_if_needed()
+                if waiting is not None:
+                    raise RuntimeError(
+                        "_resolve_faction_decisions_for_ai_seats: un appel de capacité attend un "
+                        f"siège qui n'est pas humain — {waiting!r}"
+                    )
+                continue
             decision = read_pending_agent_decision(self.game_state)
             if decision is not None and str(
                 require_key(decision, "type")
@@ -5143,6 +5274,64 @@ class W40KEngine(gym.Env):
             "08.04 : plus de decisions de capacite de faction enchainees qu'il n'existe de "
             "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
+
+    def _serve_queued_prompts_after_decision(
+        self, success: bool, result: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Sert la file `rule_choice` quand la réponse à une décision a fait CHANGER de phase.
+
+        Une décision de phase de commandement (Waaagh!, Grot Orderly) résolue reprend la phase et
+        ouvre celle de mouvement, dont le début EMPILE des prompts (Da Jump, `push_ability_call`).
+        Les deux branches `agent_decision` rendent la main AVANT la cascade post-transition qui
+        sert la file pour les actions ordinaires : sans ce service, le prompt attendait l'action
+        suivante — et si celle-ci terminait la phase, il était servi dans la MAUVAISE phase.
+        Rien à faire si la réponse attend déjà quelqu'un ou si une décision est encore posée.
+        """
+        if not success or not isinstance(result, dict) or result.get("waiting_for_player"):
+            return success, result
+        if read_pending_agent_decision(self.game_state) is not None:
+            return success, result
+        queued = self._emit_next_rule_choice_prompt_if_needed()
+        if queued is not None:
+            return True, queued
+        return success, result
+
+    def _resolve_suppress_target_decision_for_ai_seat(self) -> Optional[Dict[str, Any]]:
+        """Répond, dans la MÊME requête, au choix de suppression posé au bot PvE.
+
+        Jumeau de `_resolve_move_after_shooting_decision_for_ai_seat` : trois sièges — gym (sortie
+        immédiate, la politique répond au step suivant), humain (la décision reste posée, l'UI la
+        montre), bot PvE (tranché ICI par la politique DÉCLARÉE `select_bot_suppress_target`, la
+        même que celle du bot adversaire du gym — jamais un tirage).
+        """
+        if self.gym_training_mode:
+            return None
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None or str(require_key(decision, "type")) != "suppress_target":
+            return None
+        player = int(require_key(decision, "player"))
+        if self._is_player_human(player):
+            return None
+        unit = require_unit_by_id(self.game_state, str(require_key(decision, "unit_id")))
+        options = require_key(decision, "options")
+        hit_targets = [str(require_key(require_key(o, "payload"), "target_eid")) for o in options]
+        chosen = shooting_handlers.select_bot_suppress_target(self.game_state, unit, hit_targets)
+        option_index = hit_targets.index(chosen)
+        success, result = self._handle_agent_decision_action(
+            {"action": "agent_decision", "option_index": option_index}
+        )
+        if not success:
+            raise RuntimeError(f"suppress_target : réponse du bot PvE refusée — {result!r}")
+        return result
+
+    def _settle_shooting_decisions_for_ai_seat(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Les deux décisions de fin d'activation de tir posables au bot PvE, dans l'ordre où le
+        handler les pose : la suppression (Indiscriminate Detonations) PUIS le repositionnement
+        (Purgation Run) — la première reprend la fin d'activation, qui peut poser la seconde."""
+        settled = self._resolve_suppress_target_decision_for_ai_seat()
+        if settled is not None and isinstance(result, dict):
+            result = {**result, **settled}
+        return self._settle_move_after_shooting_for_ai_seat(result)
 
     def _settle_move_after_shooting_for_ai_seat(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """`_resolve_move_after_shooting_decision_for_ai_seat`, puis le payload rendu au client
@@ -5357,7 +5546,9 @@ class W40KEngine(gym.Env):
     def _reject_action_while_exhortation_pending(
         self, action: Dict[str, Any]
     ) -> Optional[Tuple[bool, Dict[str, Any]]]:
-        """Refuse toute action tant que le choix de cible d'Exhortation of Rage est en attente.
+        """Refuse toute action tant qu'une décision d'ACTIVATION du siège humain est en attente
+        (`_ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS` : cible d'Exhortation of Rage, escouade
+        touchée à supprimer). Généralisée le 2026-09-18 ; le nom garde son premier cas.
 
         Posée à la sélection 12.04 dans le flux manuel (`mortal_wounds_target`, plusieurs
         ennemis engagés), la décision arrête le moteur AVANT les attaques de l'unité. Sans ce
@@ -5367,12 +5558,15 @@ class W40KEngine(gym.Env):
         masque est exclusif. Refus INERTE, même forme que `faction_decision_pending`.
         """
         decision = read_pending_agent_decision(self.game_state)
-        if decision is None or str(require_key(decision, "type")) != "mortal_wounds_target":
+        if decision is None:
+            return None
+        decision_type = str(require_key(decision, "type"))
+        if decision_type not in _ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS:
             return None
         return False, {
-            "error": "mortal_wounds_target_pending",
+            "error": f"{decision_type}_pending",
             "action": action.get("action"),
-            "phase": "fight",
+            "phase": _ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS[decision_type],
             "player": int(require_key(self.game_state, "current_player")),
         }
 
@@ -5635,6 +5829,14 @@ class W40KEngine(gym.Env):
         if not isinstance(options, list) or not options:
             raise ValueError(f"AI rule choice requires non-empty options list, got: {options!r}")
 
+        # Appel de capacité : la politique DÉCLARÉE de la capacité (`register_ability_call`),
+        # jamais un tirage ni la valeur de la politique — celle-ci ne peut pas simuler « activer »
+        # (l'effet est appliqué par un gestionnaire, pas par `_selected_granted_rule_id`).
+        if is_ability_call_prompt(prompt):
+            if bot_accepts_ability_call(self.game_state, prompt):
+                return ability_call_effect_id(prompt)
+            return ABILITY_CALL_DECLINE_ID
+
         if not hasattr(self, "pve_controller"):
             raise RuntimeError("AI rule choice requires pve_controller to be initialized")
         if not self.pve_controller.is_ready_for_decision():
@@ -5678,11 +5880,17 @@ class W40KEngine(gym.Env):
                 self.game_state["active_rule_choice_prompt"] = None
                 return self._push_rule_choice_agent_decision(prompt)
 
-            # AI side: policy-based option selection (no heuristic default behavior).
+            # AI side: policy-based option selection (no heuristic default behavior) — or, for
+            # an ability call, the capability's DECLARED bot policy.
             selected_display_rule_id = self._select_ai_rule_choice_option(prompt)
-            self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+            self._validate_rule_choice_selection(prompt, selected_display_rule_id)
             queue.pop(0)
             self.game_state["active_rule_choice_prompt"] = None
+            applied = self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+            if applied.get("waiting_for_player"):  # get allowed : {} pour un rule_choice de datasheet
+                # Le gestionnaire attend un joueur (défenseur humain d'un lot mortel, …) : rendre
+                # cette attente, les prompts suivants de la file attendront sa résolution.
+                return applied
 
         self.game_state["active_rule_choice_prompt"] = None
         return None
@@ -5727,19 +5935,25 @@ class W40KEngine(gym.Env):
                 "received_player": int(action["player"]),
             }
 
-        self._apply_rule_choice_selection(selected_prompt, selected_display_rule_id)
+        # Même ordre que le chemin gym : contrôle, retrait de la file, puis application — le
+        # gestionnaire d'un appel de capacité peut poser une attente à son tour.
+        self._validate_rule_choice_selection(selected_prompt, selected_display_rule_id)
         selected_prompt_unit_id = str(require_key(selected_prompt, "unit_id"))
         if queue and queue[0] == selected_prompt:
             queue.pop(0)
         else:
             queue[:] = [prompt for prompt in queue if prompt != selected_prompt]
         self.game_state["active_rule_choice_prompt"] = None
+        applied = self._apply_rule_choice_selection(selected_prompt, selected_display_rule_id)
+        if applied.get("waiting_for_player"):  # get allowed : {} pour un rule_choice de datasheet
+            return True, applied
 
         next_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
         if next_prompt_result is not None:
             return True, next_prompt_result
 
         return True, {
+            **applied,
             "action": "select_rule_choice",
             "waiting_for_player": False,
             "unitId": selected_prompt_unit_id,
@@ -5928,6 +6142,16 @@ class W40KEngine(gym.Env):
             if hazard_origin == "shoot":
                 return True, self._end_squad_shoot_activation(attacker_sid, outcome.get("shoot_result"))
             return _fight_v11_manual_state(self.game_state)
+        if hazard_origin == "da_jump":
+            # Da Jump raté (D6 = 1), blessures mortelles attribuées par le défenseur HUMAIN : rien
+            # à reprendre — l'appel est consommé, l'escouade reste sur la table (ou est détruite),
+            # la phase de mouvement continue là où elle en était.
+            return True, {
+                "action": "da_jump_resolved",
+                "unitId": sid,
+                "waiting_for_player": False,
+                "unit_destroyed": not is_unit_alive(sid, self.game_state),
+            }
         if hazard_origin == "charge":
             # Impact de charge (`charge_impact`) attribue par le defenseur humain : l activation
             # de charge est deja terminee, le resultat de la charge garde est rendu maintenant.
@@ -6021,9 +6245,10 @@ class W40KEngine(gym.Env):
             # La réponse peut relancer la fenêtre réactive sur l'unité SUIVANTE de la file, qui
             # peut appartenir à un siège sans canal de réponse : la résolution suit la reprise.
             decision_success, decision_result = self._handle_agent_decision_action(action)
+            self._resolve_suppress_target_decision_for_ai_seat()
             self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
-            return decision_success, decision_result
+            return self._serve_queued_prompts_after_decision(decision_success, decision_result)
         if action.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(action)
         # Choix de l'escouade à activer (V11 §0.48 L2) : MÊME rang — le moteur est arrêté sur un
@@ -6271,7 +6496,7 @@ class W40KEngine(gym.Env):
                     f"step_logger_block_s={_t_pre_cascade - _t_after_handlers:.6f}"
                 )
 
-        result = self._settle_move_after_shooting_for_ai_seat(result)
+        result = self._settle_shooting_decisions_for_ai_seat(result)
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 
@@ -7278,31 +7503,11 @@ class W40KEngine(gym.Env):
         return True, result
 
     def _mortal_wounds_target_metrics(self, target_squad_id: str) -> Tuple[float, float]:
-        """(santé de la figurine la plus entamée, VALUE vivante) d'une cible de 1-3 MW.
+        """(santé de la figurine la plus entamée, VALUE vivante) d'une cible de 1-3 MW — lecture
+        UNIQUE partagée avec `suppress_target` (`shared_utils.target_health_and_value`)."""
+        from engine.phase_handlers.shared_utils import target_health_and_value
 
-        La première grandeur est celle de `wounded_hp_ratio` (`UNIT_CONT_FIELDS`), lue à
-        l'identique : en 40K les pertes s'allouent une figurine à la fois, donc au plus une est
-        partiellement blessée et le `min` est une lecture exacte, pas un repli. Proche de 0, les
-        blessures mortelles achèvent quelqu'un ; à 1.0, elles entament seulement.
-
-        La seconde reste BRUTE — c'est l'appelant qui la rapporte à la cible la plus chère
-        proposée, parce que la borne de normalisation n'existe qu'à l'échelle du choix.
-        """
-        models_cache = require_key(self.game_state, "models_cache")
-        squad_models = require_key(self.game_state, "squad_models")
-        alive = [m for m in squad_models.get(str(target_squad_id), []) if m in models_cache]  # get allowed
-        if not alive:
-            raise KeyError(
-                f"_mortal_wounds_target_metrics: escouade {target_squad_id!r} sans figurine "
-                f"vivante — le pool de cibles engagees ne doit contenir que des unites vivantes."
-            )
-        wounded = min(
-            int(require_key(models_cache[m], "HP_CUR"))
-            / float(int(require_key(models_cache[m], "HP_MAX")))
-            for m in alive
-        )
-        value = float(sum(int(require_key(models_cache[m], "VALUE")) for m in alive))
-        return wounded, value
+        return target_health_and_value(self.game_state, target_squad_id)
 
     def _apply_exhortation_de_rage(
         self, squad_id: str, target_eid: str,
@@ -7625,6 +7830,12 @@ class W40KEngine(gym.Env):
         "skip",
         # 08.03 / 01.07 — jet de commandement : pas une action d'agent.
         "battle_shock",
+        # Primitive F — effet de fin d'activation de tir, pas une action d'agent (le step du tir
+        # est deja compte par ses lignes SHOT).
+        "suppress_target",
+        # Da Jump : le step gym est celui de la decision (`CHOICE_0`, ligne ABILITY CALL) ; la
+        # ligne DA JUMP est le jet, pas une seconde action.
+        "da_jump",
         # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
         # actions d'agent au sens step gym, ce sont des décisions hors-step.
         "waaagh_call", "oath_selection",
@@ -7730,6 +7941,11 @@ class W40KEngine(gym.Env):
         # n est pas une action d agent. Le formateur StepLogger produit la ligne :
         # « Unit N(c,r) BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED|OK ».
         "battle_shock": "battle_shock",
+        # Primitive F — suppression (Indiscriminate Detonations) : « Unit N(c,r) SUPPRESSES
+        # Unit M(c,r) [SUPPRESSED→M] », fin d'activation de tir (grammaire 12).
+        "suppress_target": "suppress_target",
+        # Da Jump (WeirdBoy) : « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] » (grammaire 13).
+        "da_jump": "da_jump",
         # L25 — 08.04 : déclaration Waaagh! (Orks) et désignation Oath of Moment (SM).
         # Non-incrementants : décisions hors-step de command phase, pas des actions gym.
         "waaagh_call": "waaagh_call",
@@ -8118,6 +8334,10 @@ class W40KEngine(gym.Env):
         _shoot_type = raw_log.get("shootType")  # get allowed : absent sur les logs de combat
         if _shoot_type is not None:
             details["shoot_type"] = str(_shoot_type)
+        # Cible DESIGNEE de l activation (grammaire 11, `[DESIGNATED:<id>]`) ; None au combat.
+        _designated = raw_log.get("designatedTargetId")  # get allowed : absent sur les logs de combat
+        if _designated is not None:
+            details["designated_target_id"] = str(_designated)
         return details
 
     def _flush_squad_action_logs_to_step_logger(
@@ -8501,6 +8721,9 @@ class W40KEngine(gym.Env):
             # L1 — jet de battle-shock (01.07 / 08.03) : seuil Ld, jet 2D6, resultat.
             ("ld", "ld"),
             ("roll", "roll"),
+            # Da Jump : le D6 et son issue (REPOSITIONED | FAILED).
+            ("daJumpRoll", "da_jump_roll"),
+            ("daJumpOutcome", "da_jump_outcome"),
             ("battle_shocked", "battle_shocked"),
             # Mort par-figurine (type "dead", emit par destroy_model). Sans ces deux mappings,
             # `_format_replay_style_message` leve KeyError("Dead action missing required model_id")
@@ -8877,9 +9100,10 @@ class W40KEngine(gym.Env):
             # Jumeau du chemin PvP : la reprise de fenêtre peut reposer la question à un siège
             # sans canal de réponse (bot PvE).
             decision_success, decision_result = self._handle_agent_decision_action(semantic)
+            self._resolve_suppress_target_decision_for_ai_seat()
             self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
-            return decision_success, decision_result
+            return self._serve_queued_prompts_after_decision(decision_success, decision_result)
 
         # Désignation d'Oath of Moment (chantier 03) : même rang que les deux ci-dessus — la
         # phase de commandement est arrêtée dessus, aucune action de phase n'a de sens tant
@@ -10074,7 +10298,7 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
 
-        result = self._settle_move_after_shooting_for_ai_seat(result)
+        result = self._settle_shooting_decisions_for_ai_seat(result)
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 

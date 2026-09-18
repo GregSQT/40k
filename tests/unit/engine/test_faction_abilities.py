@@ -158,7 +158,7 @@ def _shoot_state(
     squad_models = {"1": ["A1"]}
     squad_cache = {"1": {"model_count_at_start": 1}}
     units_cache = {"1": _uc(0, 0, player=1)}
-    units = [_unit("1", 1, attacker_faction)]
+    units = [_unit("1", 1, attacker_faction, designated_shoot_target_id="2")]
 
     for sid, col, row in (("2", 9, 9), ("3", 12, 12)) if extra_enemy else (("2", 9, 9),):
         mid = f"T{sid}"

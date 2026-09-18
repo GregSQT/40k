@@ -30,7 +30,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `allies_types_cont` / `_bin` | (12, 6, 5) / (12, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 3) / (20, 9) | ce qui est irréductiblement individuel : position relative, **PV courants (`hp_ratio` + bit `wounded`)**, **rôle d'allocation en one-hot (règle 19)**, éligibilité au combat, engagement, hauteur, **bit de présence**. Les PV et le rôle y sont revenus avec P3-0 : `COHERENCY_SLOT_i` désigne la LIGNE `i` de ce bloc et la tête pointeur la score sur son seul embedding, sans biais de slot — sans eux, un personnage attaché et une figurine de base sortaient des logits égaux |
-| `grid` | (12, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Deux canaux terminaux : **zones obscurantes** (13.10) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien |
+| `grid` | (12, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Deux canaux terminaux : **zones denses** (13.09 : zones contenant un mur **dense**, `area["dense"]` dérivé des murs typés depuis le 2026-09-18) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_dense_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Pas les zones **obscurantes** 13.10 (mur light OU dense) : une zone à mur light seul coupe la LoS entre deux autres figurines sans jamais cacher personne, et cet effet-là est déjà porté par paire par l'exposition ci-dessous (canal `dense`, ex-`obscuring` jusqu'au 2026-09-18 — contrat d'entraînement rompu sciemment : `ai/training_contract.py`). Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien |
 
 ### Vue d'ensemble
 
@@ -39,7 +39,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 269 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 241 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
@@ -72,15 +72,16 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    self_models_bin        (20, 9)              =     180               │
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
-│    decision_ctx_bin       (17,)                =      17               │
-│    decision_options_bin   (6, 9)               =      54               │
+│    decision_ctx_bin       (25,)                =      25               │
+│    decision_options_bin   (6, 2)               =      12               │
 │    decision_options_cont  (6, 8)               =      48               │
+│    decision_options_effect_ids (6, 1)          =       6               │
 │                                                                        │
 │  DÉPLOIEMENT — candidats des actions 4-11        N_DEPLOY_SLOTS = 8    │
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      18 269              │
+│  TOTAL vectoriel (= obs_size)                      18 241              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -531,7 +532,7 @@ Convention du marqueur (`observation_weapon_profiles.COMBI_GROUP_MARKER_NAMES`, 
 
 Cout : **zero scalaire d'observation et zero parametre** — le marqueur se pose dans les
 `WEAPON_RULE_ID_SLOTS` deja reserves, et `OBS_ID_VOCAB_SIZE` (128) est pre-dimensionne. `obs_size`
-reste **18269**.
+reste **18269** (valeur du jour ; 18241 depuis la refonte du bloc candidat du 2026-09-18).
 
 Pourquoi des ids ici (V11 §0.48, arbitrage 2) : un drapeau positionnel coutait **560 scalaires**
 (28 entites x 20 profils), et une regle de plus en coutait 560 de plus — la conformite aux regles
@@ -622,14 +623,23 @@ decision_ctx_bin[10]     = decision_type_move_after_shooting        # 0.0 / 1.0 
 decision_ctx_bin[11]     = decision_type_reserves_declaration       # 0.0 / 1.0 — Declare Battle Formations 20.01
 decision_ctx_bin[12]     = decision_type_reactive_move              # 0.0 / 1.0 — move réactif (L5) : accepter ou refuser la fenêtre
 decision_ctx_bin[13]     = decision_type_fall_back_mode             # 0.0 / 1.0 — mode de fall-back 09.07 : CHOICE_0 Desperate Escape, CHOICE_1 Ordered Retreat (declines)
-# RÉSERVÉ J4 — AGENT_DECISION_TYPE_SLOTS 8→16 ; slots restants nuls jusqu'à implémentation.
-# Candidats prévus : decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention
-# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). Plus aucune marge au-delà
-# (cinq des huit réservés ont été consommés par `ascent_declaration` 13.06,
-# `move_after_shooting`, `reserves_declaration` 20.01, `reactive_move` et `fall_back_mode` 09.07).
-decision_ctx_bin[14]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
-decision_ctx_bin[15]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
-decision_ctx_bin[16]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
+decision_ctx_bin[14]     = decision_type_suppress_target            # 0.0 / 1.0 — Indiscriminate Detonations : quelle escouade TOUCHÉE supprimer (candidats = entités ennemies, CHOICE_k)
+# RÉSERVÉ J4/J5 — AGENT_DECISION_TYPE_SLOTS 16→24 le 2026-09-18 (payé par le `--new` de la
+# refonte du bloc candidat) ; slots restants nuls jusqu'à implémentation. Candidats prévus :
+# decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention (§15.11) ; le reste
+# est de la marge. ⚠️ Da Jump n'ouvre PAS de type : c'est un appel de capacité (`rule_choice`
+# posé par `push_ability_call`, candidats [accorde `da_jump`] / [declines]) — comme Grot Orderly
+# et Finest Hour, il coûte 0 colonne — livré ainsi le 2026-09-18 (obs_id 39 sur l'escouade du WeirdBoy).
+decision_ctx_bin[15]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
+decision_ctx_bin[16]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
+decision_ctx_bin[17]     = decision_type_reserved_2    # marge
+decision_ctx_bin[18]     = decision_type_reserved_3    # marge
+decision_ctx_bin[19]     = decision_type_reserved_4    # marge
+decision_ctx_bin[20]     = decision_type_reserved_5    # marge
+decision_ctx_bin[21]     = decision_type_reserved_6    # marge
+decision_ctx_bin[22]     = decision_type_reserved_7    # marge
+decision_ctx_bin[23]     = decision_type_reserved_8    # marge
+decision_ctx_bin[24]     = decision_type_reserved_9    # marge
 
 # UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui décrivent
 # la MÊME grandeur partagent la colonne ; les colonnes qu'un type ne remplit pas restent à zéro, et
@@ -651,31 +661,37 @@ decision_options_cont[c][6] = target_wounded_hp_norm # [0,1] PV de la figurine l
 decision_options_cont[c][7] = target_value_norm      # [0,1] VALUE vivante de la cible / la plus forte — mortal_wounds_target
                                                      #       parmi les cibles proposées
 # Bloc NUL pour `rule_choice`, `waaagh_call`, `fly_declaration`, `ascent_declaration` et
-# `fall_back_mode` : leurs candidats se distinguent par le one-hot de l'effet accordé ou par le
+# `fall_back_mode` : leurs candidats se distinguent par l'`obs_id` de l'effet accordé ou par le
 # bit `declines`.
 
-decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
-decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0
-decision_options_bin[c][ 2] = grants_reroll_1_tohit_fight                  # 0.0 / 1.0
-decision_options_bin[c][ 3] = grants_reroll_1_towound                      # 0.0 / 1.0
-decision_options_bin[c][ 4] = grants_reroll_towound_target_on_objective    # 0.0 / 1.0
-decision_options_bin[c][ 5] = grants_shoot_after_advance                   # 0.0 / 1.0
-decision_options_bin[c][ 6] = grants_shoot_after_flee                      # 0.0 / 1.0
-decision_options_bin[c][ 7] = declines                                      # 0.0 / 1.0 — ce candidat NE FAIT RIEN
-decision_options_bin[c][ 8] = present                                        # 0.0 / 1.0 — masque de candidat
+decision_options_bin[c][ 0] = declines                                      # 0.0 / 1.0 — ce candidat NE FAIT RIEN
+decision_options_bin[c][ 1] = present                                        # 0.0 / 1.0 — masque de candidat
+
+decision_options_effect_ids[c][0] = obs_id de l'effet que le candidat ACCORDE   # entier, 0 = aucun (padding)
 ```
 
-**Ce registre n'est PAS le vocabulaire observé** (`UNIT_RULE_EFFECT_IDS`), et c'est délibéré
-depuis le 2026-08-04. La source est désormais `DECISION_GRANTABLE_EFFECT_IDS` — les 7 effets
-réellement accordables, recalculés depuis les rosters par un test de contrat
-(`test_agent_decision_mechanism.py`), qui échoue **dans les deux sens** : un accordable non déclaré,
-ou un déclaré que plus aucun roster n'accorde.
+**L'effet accordé est un `obs_id` du vocabulaire observé** (`UNIT_RULE_EFFECT_IDS`, le MÊME que
+`allies_ability_ids`), lu par la **même table d'embedding** (`ability_embedding`) : « ce que je
+gagne » et « ce que j'ai » vivent dans le même espace. Refonte du 2026-09-18 : l'ancien one-hot
+positionnel `grants_<id>` (registre `DECISION_GRANTABLE_EFFECT_IDS`, 7 bits × 6 slots) était le
+dernier endroit où une règle coûtait des scalaires — chaque capacité ACTIVABLE (Da Jump, Grot
+Orderly, Finest Hour, suppression) y aurait ajouté 6 colonnes et un `--new`. Désormais **toute
+capacité ou stratagème activable coûte 0 colonne et 0 scalaire** : un candidat porte l'`obs_id`
+de son effet, et `agent_decision.normalize_decision_options` refuse un effet hors vocabulaire (un
+effet sans `obs_id` ne peut pas être proposé — erreur explicite, jamais le padding).
+
+**Appel de capacité** (`push_ability_call(game_state, squad_id, effect_id, phase)`) : une décision
+`rule_choice` à deux candidats — [accorde `effect_id`] / [`declines`] — posée à l'escouade
+observatrice par la file `pending_rule_choice_queue`, donc répondue par les trois sièges (gym
+`CHOICE_0/1`, bot par une heuristique DÉCLARÉE par effet dans `ABILITY_CALL_BOT_POLICIES`, humain
+par le panneau rule_choice). L'application de l'effet est déléguée à la capacité
+(`ABILITY_CALL_HANDLERS`), jamais au chemin de grant de tour.
 
 **L'ordre des candidats est CONTRACTUEL** (invariant D1) : `decision_options_bin[i]` décrit le
 candidat que joue `CHOICE_i`. Le producteur du prompt garantit un ordre STABLE d'un step à l'autre.
 
-**Un candidat est décrit par ce qu'il ACCORDE**, dans le même vocabulaire que les drapeaux
-`rule_<id>` d'unité, pas par son index. C'est ce qui rend légitime l'encodeur **partagé**
+**Un candidat est décrit par ce qu'il ACCORDE**, dans le même vocabulaire que les capacités
+d'unité (`obs_id`), pas par son index. C'est ce qui rend légitime l'encodeur **partagé**
 (`decision_encoder`) et la tête **pointeur** qui score les candidats (`ai/pointer_policy.py`).
 
 **Un candidat qui ne fait RIEN est décrit par `declines`** (le dernier drapeau avant `present`).
@@ -910,11 +926,21 @@ VALIDITÉ HORS CORPUS : la table « profil → Ld » que le réseau peut mémori
 clause de parité de 25, elle, n'y est pour rien : mesuré par mutation, `restant / départ <= 0,5`
 lui est équivalent sur un effectif en figurines. Au passage, l'en-tête du bloc de drapeaux
 annonçait 37 pour 38 index réels ; il est rétabli à 39).
+→ **18241** (refonte du bloc candidat de décision, 2026-09-18 : le one-hot positionnel
+`grants_<id>` de `decision_options_bin` — 7 effets accordables × 6 slots, −42 — est remplacé par
+`decision_options_effect_ids`, l'`obs_id` de l'effet que chaque candidat accorde, 6 × 1 entier
++6, lu par la MÊME table d'embedding que les capacités d'unité ; `AGENT_DECISION_TYPE_SLOTS`
+16 → 24, +8, avec le type `suppress_target` déclaré en 14e position. C'était le dernier endroit
+où une règle coûtait des scalaires : chaque capacité ACTIVABLE du lot Armageddon (Da Jump, Grot
+Orderly, Finest Hour, suppression) aurait ajouté 6 bits et un `--new` ; désormais 0 colonne.
+`TOTAL_ACTION_SIZE` inchangé (1389), prouvé par `test_action_space_mirror.py`. Les modèles
+archivés sont incompatibles — un seul `--new` pour tout le lot, après le chantier 8 ;
+cf. `Documentation/Roadmap/training.md`).
 
-**C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
-Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de
-plus dans un registre : ni `obs_size`, ni le nombre de paramètres du réseau, ni
-`TOTAL_ACTION_SIZE` ne bougent.
+**C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité,
+qu'elle soit observée OU activable.** Depuis le chantier 01 puis cette refonte, une capacité, un
+statut ou une faction entière n'est qu'un `obs_id` de plus dans un registre : ni `obs_size`, ni
+le nombre de paramètres du réseau, ni `TOTAL_ACTION_SIZE` ne bougent.
 
 ---
 
@@ -1004,7 +1030,7 @@ absents. L'agent ne percevait pas le terrain sur lequel il évoluait.
 **Observation** : ajout d'une **grille locale égocentrique 32×32** autour de l'escouade active,
 avec **11 canaux** : murs/obstacles, occupation alliée, occupation ennemie, zone d'engagement,
 objectifs, niveau, couvert, escouade active seule (T-L), coût géodésique du pool de move (T-K),
-zones obscurantes et exposition à la vue ennemie.
+zones denses (hidden possible, 13.09) et exposition à la vue ennemie.
 
 La demi-étendue de la grille = budget Advance **MAXIMAL** (`M + 6" × inches_to_subhex`), et **non**
 le budget du jet effectivement tiré. La géométrie de la grille doit être **identique entre l'obs,

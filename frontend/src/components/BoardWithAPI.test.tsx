@@ -1101,3 +1101,178 @@ describe("BoardWithAPI — mode de fall-back (09.07)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// T_BoardWithAPI_SuppressTarget — Indiscriminate Detonations (WarTrakk). Le moteur arrête la fin
+// d'activation de tir sur le choix de l'escouade TOUCHÉE à supprimer (`suppress_target`, plusieurs
+// touchées) et refuse toute autre action tant qu'il n'est pas fait : un bouton par escouade
+// touchée, nommée, et c'est l'INDEX qui est joué (`agent_decision` + `option_index`). Le siège IA
+// ne voit pas le panneau (le moteur tranche le bot par sa politique déclarée).
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — panneau de suppression (Indiscriminate Detonations)", () => {
+  const SUPPRESS_TARGET_DECISION = {
+    type: "suppress_target",
+    player: 1,
+    unit_id: "1",
+    options: [{ label: "2" }, { label: "3" }],
+  };
+  const UNITS = [
+    { ...makeUnit(1, 1), DISPLAY_NAME: "WarTrakk", col: 5, row: 5 },
+    { ...makeUnit(2, 2), DISPLAY_NAME: "Intercessors", col: 12, row: 5 },
+    { ...makeUnit(3, 2), col: 5, row: 12 },
+  ];
+
+  function renderWithDecision(mode: "pvp" | "pve", seat2: "human" | "ai") {
+    if (mode === "pve") {
+      localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);
+      window.history.replaceState({}, "", "/game?mode=pve");
+    }
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            phase: "shoot",
+            player_types: { "1": "human", "2": seat2 },
+            units: UNITS,
+            pending_agent_decision: {
+              ...SUPPRESS_TARGET_DECISION,
+              player: seat2 === "ai" ? 2 : 1,
+            },
+          }),
+        })
+      )
+    );
+    renderBoard(mode === "pve" ? "/game?mode=pve" : "/");
+  }
+
+  it("siège humain → un bouton par escouade touchée, nommée, et le clic joue l'INDEX", async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post("/api/game/action", async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          result: { action: "wait" },
+          game_state: makeGameState({ phase: "shoot", units: UNITS }),
+        });
+      })
+    );
+    renderWithDecision("pvp", "human");
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Indiscriminate Detonations — unit 1 — player 1/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.getByRole("button", { name: "Intercessors #2" })).toBeTruthy();
+    const second = screen.getByRole("button", { name: "Squad 3 #3" });
+    fireEvent.click(second);
+    await waitFor(() => {
+      expect(posted.length).toBeGreaterThan(0);
+    });
+    expect(posted[0]).toMatchObject({ action: "agent_decision", option_index: 1 });
+  });
+
+  it("siège IA → le panneau n'est PAS rendu", async () => {
+    renderWithDecision("pve", "ai");
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("board-pvp")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.queryByText(/Indiscriminate Detonations — unit 1/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T_BoardWithAPI_AbilityCall — appel de capacité (`engine/ability_calls.push_ability_call`).
+//
+// Le moteur pose un prompt `rule_choice` de `kind: "ability_call"` à deux candidats — [activer la
+// capacité] / [passer, `declines: true`] — servi au siège humain par `active_rule_choice_prompt`,
+// donc par le panneau rule_choice existant. Ce que ce test verrouille : le panneau rend les DEUX
+// boutons, le candidat « Passer » n'est PAS résolu contre `unit_rules.json` (il n'y est pas — sans
+// la branche `declines`, `getRuleDescription` lève au survol), et le clic joue `select_rule_choice`
+// avec l'id du candidat (`decline` pour passer).
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — appel de capacité (rule_choice kind=ability_call)", () => {
+  const ABILITY_CALL_PROMPT = {
+    kind: "ability_call",
+    trigger: "ability_call",
+    phase: "command",
+    player: 1,
+    unit_id: "1",
+    rule_id: "return_destroyed_models",
+    display_name: "Grot Orderly",
+    usage: "unique",
+    options: [
+      {
+        display_rule_id: "return_destroyed_models",
+        technical_rule_id: "return_destroyed_models",
+        label: "Grot Orderly",
+        declines: false,
+      },
+      {
+        display_rule_id: "decline",
+        technical_rule_id: null,
+        label: "Passer (Grot Orderly)",
+        declines: true,
+      },
+    ],
+  };
+  const UNITS = [{ ...makeUnit(1, 1), DISPLAY_NAME: "Boyz", col: 5, row: 5 }];
+
+  it("siège humain → deux boutons, survol de « Passer » sans erreur, clic = select_rule_choice decline", async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            phase: "command",
+            units: UNITS,
+            active_rule_choice_prompt: ABILITY_CALL_PROMPT,
+            pending_rule_choice_queue: [ABILITY_CALL_PROMPT],
+          }),
+        })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          result: { action: "select_rule_choice" },
+          game_state: makeGameState({ phase: "command", units: UNITS }),
+        });
+      })
+    );
+    renderBoard();
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Ability call - Command Phase/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    const activate = screen.getByRole("button", { name: "Grot Orderly" });
+    const pass = screen.getByRole("button", { name: "Passer (Grot Orderly)" });
+    expect(activate).toBeTruthy();
+    // Le survol du candidat « Passer » ne résout AUCUNE règle : sa description est la sienne.
+    fireEvent.mouseEnter(pass);
+    expect(screen.getByText(/Ne pas activer la capacité maintenant/)).toBeTruthy();
+
+    fireEvent.click(pass);
+    await waitFor(() => {
+      expect(posted.length).toBeGreaterThan(0);
+    });
+    expect(posted[0]).toMatchObject({
+      action: "select_rule_choice",
+      unitId: "1",
+      player: 1,
+      selectedRuleId: "decline",
+    });
+  });
+});

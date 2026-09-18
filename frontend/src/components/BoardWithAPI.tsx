@@ -306,19 +306,32 @@ function ManualOrderPicker({
   );
 }
 
+/** Un candidat d'un prompt de la file `pending_rule_choice_queue`. `declines` : candidat « Passer »
+ *  d'un appel de capacité (`engine/ability_calls.py`) — pas une règle du registre. */
+type RuleChoiceOption = {
+  display_rule_id: string;
+  technical_rule_id: string | null;
+  label: string;
+  declines?: boolean;
+};
+
 type RuleChoicePrompt = {
-  trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+  /** `ability_call` : « you can … » rendu au joueur, deux candidats [activer] / [passer]. */
+  kind?: "ability_call";
+  trigger:
+    | "on_deploy"
+    | "turn_start"
+    | "player_turn_start"
+    | "phase_start"
+    | "activation_start"
+    | "ability_call";
   phase?: "command" | "move" | "shoot" | "charge" | "fight";
   player: number;
   unit_id: string;
   rule_id: string;
   display_name: string;
   usage: "or" | "unique";
-  options: Array<{
-    display_rule_id: string;
-    technical_rule_id: string;
-    label: string;
-  }>;
+  options: RuleChoiceOption[];
 };
 
 type EndlessDutySlotProfiles = {
@@ -1270,6 +1283,14 @@ export const BoardWithAPI: React.FC = () => {
       throw new Error(`Missing description for rule id '${ruleId}' in config/unit_rules.json`);
     }
     return description;
+  };
+  /** Description d'un CANDIDAT : le candidat « Passer » d'un appel de capacité n'est pas une
+   *  règle du registre — il se décrit par lui-même. Tout autre candidat est une règle. */
+  const getRuleChoiceOptionDescription = (option: RuleChoiceOption): string => {
+    if (option.declines === true) {
+      return "Ne pas activer la capacité maintenant. Rien n'est consommé.";
+    }
+    return getRuleDescription(option.display_rule_id);
   };
 
   useEffect(() => {
@@ -2350,6 +2371,12 @@ export const BoardWithAPI: React.FC = () => {
   // qu'il n'est pas fait (`mortal_wounds_target_pending`) : sans ce panneau, la partie PvP se
   // figerait. La cible PRÉCÈDE le dé — aucun résultat n'est connu quand le joueur choisit.
   const mortalWoundsTargetDecision = pendingDecisionForHumanSeat("mortal_wounds_target");
+  // Indiscriminate Detonations (datasheet WarTrakk) — « when this unit has resolved its attacks,
+  // select one enemy unit HIT by one or more of those attacks. That enemy unit is suppressed ».
+  // Posée à la fin de l'activation de tir quand PLUSIEURS escouades ont été touchées ; le moteur
+  // diffère la fin d'activation et refuse toute autre action (`suppress_target_pending`) : sans ce
+  // panneau, la partie PvP se figerait. Un bouton par escouade touchée, l'INDEX est joué.
+  const suppressTargetDecision = pendingDecisionForHumanSeat("suppress_target");
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   const oathTargets =
     oathSelectionPlayer === null
@@ -2515,6 +2542,7 @@ export const BoardWithAPI: React.FC = () => {
     if (prompt.trigger === "player_turn_start") return "Player Turn Start";
     if (prompt.trigger === "phase_start") return "Phase Start";
     if (prompt.trigger === "activation_start") return "Activation Start";
+    if (prompt.trigger === "ability_call") return "Ability Call";
     throw new Error(`Unknown rule choice trigger context: ${JSON.stringify(prompt)}`);
   };
   const onRuleChoiceTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -4564,6 +4592,26 @@ export const BoardWithAPI: React.FC = () => {
           }}
         />
       )}
+      {/* Indiscriminate Detonations : un bouton par escouade TOUCHÉE par le tir qui vient d'être
+          résolu ; le libellé nomme l'unité — le moteur n'envoie que son id, qui EST le `label`. */}
+      {suppressTargetDecision && (
+        <AgentDecisionPicker
+          decision={suppressTargetDecision}
+          title={`Indiscriminate Detonations — unit ${suppressTargetDecision.unit_id} — player ${suppressTargetDecision.player}`}
+          tooltip={
+            "This unit has resolved its attacks. Select one enemy unit HIT by one or more of those attacks: it is suppressed (-1 to hit rolls) until the start of your next Command phase."
+          }
+          onChoose={(index) => {
+            void apiProps.onCallWaaagh(index);
+          }}
+          labelOf={(option) => {
+            const target = unitsById.get(option.label);
+            return target?.DISPLAY_NAME
+              ? `${target.DISPLAY_NAME} #${target.id}`
+              : `Unit #${option.label}`;
+          }}
+        />
+      )}
       {returnedProfileDecision && (
         <AgentDecisionPicker
           decision={returnedProfileDecision}
@@ -4697,7 +4745,7 @@ export const BoardWithAPI: React.FC = () => {
               className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
               onMouseDown={onRuleChoiceTitleMouseDown}
             >
-              {`Capacity choice - ${getRuleChoiceMomentLabel(activeRuleChoicePrompt)}${isDraggingRuleChoicePopup ? " (drag...)" : ""}`}
+              {`${activeRuleChoicePrompt.kind === "ability_call" ? "Ability call" : "Capacity choice"} - ${getRuleChoiceMomentLabel(activeRuleChoicePrompt)}${isDraggingRuleChoicePopup ? " (drag...)" : ""}`}
             </button>
             <div className="deployment-panel__picker-content deployment-panel__picker-content--rule-choice">
               <div className="deployment-panel__picker-list deployment-panel__picker-list--rule-choice">
@@ -4733,7 +4781,7 @@ export const BoardWithAPI: React.FC = () => {
                                   className="deployment-panel__picker-item rule-choice-group__option"
                                   onMouseEnter={() =>
                                     setRuleChoiceHoveredDescription(
-                                      getRuleDescription(option.display_rule_id)
+                                      getRuleChoiceOptionDescription(option)
                                     )
                                   }
                                   onMouseLeave={() => setRuleChoiceHoveredDescription("")}

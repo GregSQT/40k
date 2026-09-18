@@ -1576,6 +1576,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             # 06.02 : blessure mortelle (Desperate Escape 09.07) allouée à un CHARACTER avant
             # les bodyguards — même compteur que les autres phases, bucket de la phase.
             + _pair('alloc_character_over_bodyguard', 'move')
+            # Da Jump (WeirdBoy) : action de la phase de mouvement (ai/analyzer_da_jump.py).
+            + _pair('da_jump_invalid')
         ),
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
@@ -1606,6 +1608,9 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('torrent_wrong_hit')
             + _pair('lethal_hits_wrong_wound')
             + _pair('blast_x_mismatch')
+            # Primitive F : suppression sans touche, malus [SUPPRESSED] sans suppression en
+            # vigueur, ou suppression en vigueur sans malus (tir ET mêlée, un seul compteur).
+            + _pair('suppression_without_hit')
             # 05.03 / 06.02 / 24.28 : CHARACTER allouée avant ses bodyguards (tir).
             + _pair('alloc_character_over_bodyguard', 'shooting')
         ),
@@ -2033,6 +2038,10 @@ def parse_step_log(filepath: str) -> Dict:
         'lethal_hits_wrong_wound_fight': {1: 0, 2: 0},
         # 24.05 [BLAST] tir — valeur X du marqueur différente de celle déclarée dans l'armurerie.
         'blast_x_mismatch': {1: 0, 2: 0},
+        # Primitive F — suppression sans touche / malus [SUPPRESSED] incohérent (ai/analyzer_suppression.py).
+        'suppression_without_hit': {1: 0, 2: 0},
+        # Da Jump (ai/analyzer_da_jump.py) : once per turn, phase, issue ⇔ D6, ingress > 8", SUFFERS après FAILED.
+        'da_jump_invalid': {1: 0, 2: 0},
         # 05.03 / 06.02 / 24.28 — attaque allouée à un CHARACTER alors qu'un bodyguard de
         # l'unité est vivant (`[ALLOC_MODEL:]`), hors override [PRECISION] légal. Par PHASE de
         # la ligne : chaque bucket d'`error_totals` porte le sien (chantier chaîne d'attaque
@@ -2151,6 +2160,10 @@ def parse_step_log(filepath: str) -> Dict:
         # disait si l'agent declarait ou declinait systematiquement.
         'agent_decision_totals': defaultdict(lambda: {1: 0, 2: 0}),  # decision_type -> {1,2}
         'agent_decision_options': defaultdict(lambda: {1: 0, 2: 0}),  # (decision_type, i) -> {1,2}
+        # Appels de capacite (« ABILITY CALL <Nom> [USED|DECLINED] », engine/ability_calls.py) :
+        # (nom, USED|DECLINED) -> {1,2}. C'est ce qui rend lisible un taux d'activation par
+        # capacite, et distingue « refuse » de « jamais propose ».
+        'ability_call_counts': defaultdict(lambda: {1: 0, 2: 0}),
         'reactive_move_stats': {
             1: {'applied': 0, 'declined': 0, 'abnormal': 0},
             2: {'applied': 0, 'declined': 0, 'abnormal': 0},
@@ -2305,6 +2318,8 @@ def parse_step_log(filepath: str) -> Dict:
             'lethal_hits_wrong_wound': {1: None, 2: None},
             'lethal_hits_wrong_wound_fight': {1: None, 2: None},
             'blast_x_mismatch': {1: None, 2: None},
+            'suppression_without_hit': {1: None, 2: None},
+            'da_jump_invalid': {1: None, 2: None},
             'alloc_character_over_bodyguard': {
                 'move': {1: None, 2: None}, 'shooting': {1: None, 2: None},
                 'charge': {1: None, 2: None}, 'fight': {1: None, 2: None},
@@ -4061,6 +4076,16 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             )
     else:
         log_print("  No agent decision recorded.")
+    # APPELS DE CAPACITE (engine/ability_calls.py) — meme famille que les decisions : un
+    # « you can … » rendu au joueur, USED ou DECLINED par capacite et par joueur.
+    _ac_counts = require_key(stats, 'ability_call_counts')
+    if _ac_counts:
+        log_print("\n  Ability calls (USED / DECLINED, by ability)")
+        log_print(f"  {'Ability':<32} {'Verdict':>9} {'P1':>8} {'P2':>8}")
+        for (_ac_name, _ac_verdict), _ac_cnt in sorted(_ac_counts.items()):
+            log_print(
+                f"  {_ac_name:<32} {_ac_verdict:>9} {int(_ac_cnt[1]):8d} {int(_ac_cnt[2]):8d}"
+            )
 
     # WEAPONS RULES USAGE (by rule and weapon+unit)
     _switch_section("1.8")

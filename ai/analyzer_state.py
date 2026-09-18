@@ -404,6 +404,26 @@ class AnalyzerState:
     # Réinitialisé à chaque début d'épisode.
     battle_shocked_by_unit: Dict[str, bool] = field(default_factory=dict)
 
+    #: Touches de TIR relevées par joueur tireur depuis sa dernière phase de commandement :
+    #: {joueur → {(tireur, cible)}} — ce contre quoi une ligne SUPPRESSES est jugée
+    #: (`ai/analyzer_suppression.py`). Repart de zéro à chaque phase de commandement du joueur.
+    shoot_hits_since_command: Dict[int, Set[Tuple[str, str]]] = field(default_factory=dict)
+    #: Suppressions EN VIGUEUR : {supprimée → (suppresseur, joueur suppresseur)}, posées par les
+    #: lignes SUPPRESSES (grammaire 12), levées à la phase de commandement du suppresseur.
+    suppressions_in_force: Dict[str, Tuple[str, int]] = field(default_factory=dict)
+
+    #: Da Jump (grammaire 13, `ai/analyzer_da_jump.py`) : jets relevés `{(épisode, tour, joueur)}`
+    #: (« once per turn, per army ») et l'attente ouverte par le dernier jet — `{"kind":
+    #: "ingress"|"suffers", "unit_id", "turn", "player", "episode"}` — soldée par la ligne
+    #: d'ingress ou la ligne SUFFERS [DA JUMP] de la même escouade, ou comptée en faute.
+    da_jump_rolled: Set[Tuple[int, int, int]] = field(default_factory=set)
+    da_jump_pending: Optional[Dict[str, Any]] = None
+
+    #: Appels de capacité relevés (« ABILITY CALL <Nom> [USED|DECLINED] », `engine/ability_calls`),
+    #: dans l'ordre du journal : {episode, turn, phase, player, unit_id, ability, used}. C'est la
+    #: trace qui distingue « refusé » de « jamais proposé » pour Grot Orderly / Finest Hour / Da Jump.
+    ability_calls: List[Dict[str, Any]] = field(default_factory=list)
+
     #: Paires leader→garde-du-corps lues depuis la ligne `Attached: lid→bid` de l'entête d'épisode.
     #: Mappé AVANT les lignes `Starting position` (unit_types indisponibles à ce stade) ;
     #: consommé pendant le bloc unit_start pour coter note_rule_usage leader/support.

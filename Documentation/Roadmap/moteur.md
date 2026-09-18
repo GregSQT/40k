@@ -38,6 +38,78 @@ Seuils de gate / promotion relus, non modifiés (relatifs au pool ; seule la rè
 effet sur les terrains actuels (planchers à 3", budget 3" consommé par la hauteur), courbe
 `06_fight/d_fights_multi_niveaux` = 0 en attendant.
 
+## Capacités Armageddon → décisions d'agent (lot du 2026-09-18) {#capacites-decisions-agent}
+
+Huit chantiers en séquence, ordre imposé par le prompt du 2026-09-18 ; référence vivante
+[capacites.md](../Reference/moteur/capacites.md). Aucun run lancé avant la fin du lot ; le `--new`
+de la lignée suit le chantier 8.
+
+1. ✅ **Hail of Bolts / Overlapping Detonations → cible DÉSIGNÉE** (2026-09-18). Le Bloc B de
+   `_manual_roll_intent` bonifiait CHAQUE cible du tir fractionné ; la datasheet dit « that targeted
+   that selected unit ». Modélisation : désignée = cible prioritaire (gym `SHOOT_SLOT`) ou première
+   déclarée (siège humain), clé unique `designated_shoot_target_id` posée par
+   `designate_shoot_target` sur les quatre chemins de déclaration (ex-`_last_shoot_target_id`, que
+   lisait la suppression), visibilité vérifiée pour les porteurs. Journal `[DESIGNATED:<id>]` sur
+   toute ligne SHOT (grammaire 11) ; l'analyzer ne lève le plafond `shoot_over_rng_nb` que pour
+   les tirs sur la désignée, abstention sur journal antérieur. Reproduction (deux Intercessors, deux
+   cibles) rendue 4 + 2 records au lieu de 4 + 4 ; 4 tests moteur + 6 analyzer rouge→vert.
+2. ✅ **Refonte du bloc candidat de décision** (2026-09-18). Le one-hot positionnel `grants_*`
+   (`DECISION_GRANTABLE_EFFECT_IDS`, 7 effets × 6 slots) était le dernier endroit où une règle
+   coûtait des scalaires : chaque capacité ACTIVABLE aurait ajouté 6 bits et un `--new`. Un
+   candidat porte désormais l'`obs_id` de son effet (`decision_options_effect_ids`, 6 × 1, lu par
+   `ability_embedding` — même table que « ce que j'ai ») ; `DECISION_OPTION_BIN_FIELDS` =
+   (`declines`, `present`) ; une seule liste (`UNIT_RULE_EFFECT_IDS`) dans la garde d'
+   `agent_decision`. `obs_size` 18269 → **18241** (−42 + 6 + 8 : `AGENT_DECISION_TYPE_SLOTS`
+   16 → 24, type `suppress_target` déclaré en fin de tuple), `TOTAL_ACTION_SIZE` 1389 inchangé
+   (`test_action_space_mirror`). Socle `engine/ability_calls.py` : `push_ability_call(gs, squad,
+   effet, phase)` empile un prompt `kind=ability_call` à deux candidats dans la file
+   `pending_rule_choice_queue`, servie aux trois sièges (gym `CHOICE_0/1`, bot par
+   `ABILITY_CALL_BOT_POLICIES` — aussi pour le bot adversaire du gym via `env_wrappers`, humain
+   par le panneau rule_choice avec `decline`) ; application par `ABILITY_CALL_HANDLERS`, file
+   vidée AVANT l'application pour qu'un gestionnaire puisse poser sa propre décision ; journal
+   `ABILITY CALL <Nom> [USED|DECLINED]` (step.log, Game Log, replay), relevé analyzer
+   `ability_call_counts`. `faction_decision_is_pending` voit un appel de phase de commandement
+   (une seule source). Archives incompatibles : un seul `--new` après le chantier 8
+   ([training.md#refonte-bloc-candidat](training.md#refonte-bloc-candidat)). Épisodes gym complets
+   rejoués (`test_episode_combat_counters`, `test_objective_control_checkpoint_1402`).
+3. ✅ **Indiscriminate Detonations = unité TOUCHÉE, choix du joueur** (2026-09-18). La fin
+   d'activation supprimait la cible DÉSIGNÉE sans contrôle de touche (reproductions : désignée
+   ratée → supprimée ; désignée ratée, seconde cible touchée → la désignée supprimée). Mesuré :
+   l'état d'allocation connaît les touches (`counts["hits"]` par lot, `_roll_batch`) — relevé
+   `alloc["hit_target_sids"]` → `unit["_shoot_hit_targets"]` (contexte tir), jamais le journal.
+   Aucune touchée → rien ; une → elle ; plusieurs → décision `suppress_target` (fin d'activation
+   différée, patron `move_after_shooting`), trois sièges : gym `CHOICE_k`, bots (PvE et adversaire
+   du gym) par `select_bot_suppress_target` déclarée, humain par panneau + refus généralisé
+   (`_ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS`). Journal `SUPPRESSES Unit M [SUPPRESSED→M]`
+   (grammaire 12) ; analyzer `ai/analyzer_suppression.py` : `suppression_without_hit`
+   (PROJ.1.2.suppression, bucket §1.2) juge suppression ⇔ touche ⇔ malus, au tir comme en mêlée,
+   abstention sur journal antérieur. `target_health_and_value` partagé avec `mortal_wounds_target`.
+   Tests rouge→vert : 6 moteur (test_primitive_f), 6 sièges/journal (test_suppress_target_decision),
+   6 analyzer (test_analyzer_suppression), 2 vitest.
+4. ✅ **Da Jump** (2026-09-18). Non livré jusqu'ici sur un bloqueur périmé (« slot de ciblage
+   d'escouade amie », `AGENT_DECISION_TYPE_SLOTS = 8`) : la datasheet dit « place THIS unit » —
+   l'escouade du WeirdBoy. Règle `da_jump` (obs_id 39, `UNIT_RULE_EFFECT_IDS`, `WeirdBoy.ts`),
+   appel de capacité posé au début de la phase de mouvement à la première escouade candidate
+   (chaîne sur refus, une proposition par escouade et par tour), `once_claim("da_jump", (tour,
+   joueur))` sur le JET. 1 → D6 MW `is_psychic=True` (drapeau porté jusqu'au lot mortel manuel :
+   Psychic Hood joue), `hazard_origin="da_jump"` ; 2-6 → `reposition_unit_to_strategic_reserves`,
+   arrivée dès ce round, mise en place « anywhere » à plus de 8" (les commentaires « 9" » étaient
+   l'ancien texte 24.09), Deep Strike ACCORDÉ par le registre `deep_strike_granted_squads` (purgé
+   en fin de phase, jamais dans les UNIT_RULES), escouade remise au pool pour son ingress la même
+   phase. Le service de la file `rule_choice` après une décision qui change de phase est ajouté
+   (`_serve_queued_prompts_after_decision`) — sans lui l'appel attendait l'action suivante et
+   pouvait être servi dans la phase de tir. Journal `DA JUMP (D6=n) [REPOSITIONED|MISCAST]`
+   (grammaire 13 ; « MISCAST », `[FAILED]` étant le statut de ligne) + `SUFFERS n MW [DA JUMP]
+   Trigger:1 MW:n` ; analyzer `ai/analyzer_da_jump.py` (`da_jump_invalid`, PROJ.1.1.da_jump,
+   bucket §1.1 : once per turn, phase, issue ⇔ D6, hors table jusqu'à l'ingress, ingress > 8" en
+   métrique hex, MISCAST ⇒ SUFFERS, exemption `reserves_too_early` au round 1) et dés par
+   `MW_ABILITY_DICE_CHECKS["da_jump"]`. Moteur réel : 14 tests (`test_da_jump.py`, WeirdBoy
+   inline 19.04) + 9 analyzer.
+5. 🟡 Grot Orderly = choix d'agent.
+6. 🟡 Finest Hour = choix à la sélection.
+7. 🟡 Analyzer : FNP / InSv.
+8. 🟡 Analyzer : objectifs / REVIVED.
+
 ---
 
 ## Chaîne d'attaque 100 % {#chaine-attaque-100}
@@ -248,6 +320,8 @@ canal de grille `occupant_level`. Ce qui restait de la Phase B — la LoS 3D cô
 **Cadré le 2026-08-25 — même root cause que la Phase B, pas un chantier indépendant.**
 
 Le tir est légitime côté backend : le tireur élevé ignore correctement les murs de sa propre ruine (`_walls_around_occupied_floor`). Mais le cône WASM ne le sait pas — il trace la LoS comme si le tireur était au sol, bloque sur le mur de la ruine, alors que la cible clignote (backend valide). Le joueur voit le cône bloqué, clique quand même, ça tire. Bug d'affichage, pas de règle.
+
+**Côté cible (2026-09-18, fait au backend)** : la LoS étage↔sol était à sens unique — les murs de la ruine n'étaient retirés que pour la figurine tireuse, une cible à l'étage restait masquée pour un tireur au sol. Corrigé : wall_set de paire = murs − étage du tireur − étage de la cible (`_resolve_target_models_for_los`, jumeaux GtG et `_attacker_model_can_reach_squad`). Le cône WASM ne connaît toujours ni l'étage du tireur ni celui des cibles ; le backend peint les cases visibles des cibles valides (`build_visible_cells_by_target`), source autoritative, par-dessus le cône.
 
 → Traiter en même temps que la Phase B (`combat_utils`/WASM).
 

@@ -103,7 +103,7 @@ def _game_state(phase, n_target_models, n_attacks):
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
         # `player` sur l'attaquant : exigé par le décideur d'allocation du COMBAT
         # (`_is_ai_controlled_fight_unit`), qui lève sinon avant tout log.
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "player": 0},
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "player": 0, "designated_shoot_target_id": "2"},
                        "2": {"id": "2", "UNIT_RULES": [], "player": 1}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         # `destroy_model` invalide la LoS de l'escouade amputée et recalcule son cache :

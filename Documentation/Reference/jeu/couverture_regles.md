@@ -72,9 +72,9 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | IGNORES_COVER neutralises indirect fire penalty | 10.07 | ✅ |
 | Line of Sight 3D per model | 06.01 | ✅ |
 | Benefit of Cover (−1 BS) | 13.08 | ✅ |
-| Hidden status (detection range 15") | 13.09 | ✅ |
+| Hidden status (detection range 15" ; zone contenant du dense, dérivé des murs typés) | 13.09 | ✅ |
 | Gone to Ground (−3" detection range) | 13-5 | ✅ |
-| Obscuring terrain (no LoS through) | 13.10 | ✅ |
+| Obscuring terrain (no LoS through ; zones dérivées des murs light/dense, exclusion par paire de figurines) | 13.10 | ✅ |
 | Solid terrain (no LoS through closed spaces ≤3") | 13.11 | ✅ |
 | Plunging Fire (+1 BS from height ≥3") | 22.05 | ✅ |
 | Overwatch / Snap Fire (hit on 6+ only) | 15.08–15.09 | ❌ |
@@ -264,10 +264,10 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Movement through terrain by keyword | 13.06 | ⚠️ Étages par mot-clé ✅ ; traversée du terrain DENSE par INFANTRY/BEASTS/SWARM/MOBILE ❌ (tout mur bloque hors vol — `xfail` strict de la checklist mouvement PvP, `Roadmap/moteur.md#dense-traversal-1306`) |
 | Vertical movement cost | 13.06 | ✅ |
 | Benefit of Cover | 13.08 | ✅ |
-| Hidden (INFANTRY/BEASTS/SWARM in dense terrain) | 13.09 | ✅ |
+| Hidden (INFANTRY/BEASTS/SWARM in dense terrain — `dense` dérivé des murs typés du fichier terrain) | 13.09 | ✅ |
 | Detection range (15" default) | 13.09 | ✅ |
 | Gone to Ground (−3" detection) | 13-5 | ✅ |
-| Obscuring terrain areas | 13.10 | ✅ |
+| Obscuring terrain areas (dérivées : zone contenant un mur light ou dense ; LoS symétrique étage↔sol) | 13.10 | ✅ |
 | Solid (no LoS through closed spaces ≤3") | 13.11 | ✅ |
 
 ---
@@ -387,6 +387,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | FLY keyword (Jump Pack, Land Speeder, WarTrakk) | 21.03 | ✅ |
 | Multi-level terrain + coût vertical | 13.06 | ✅ |
 | Strategic Reserves + Deep Strike | 20.01–20.04, 24.09 | ✅ |
+| Da Jump (WeirdBoy) — 20.02 repositionnement + Deep Strike accordé jusqu'à la fin de la phase, ingress dès le round 1 ; 1 → D6 MW psychiques | Datasheets - Orks p5 | ✅ 2026-09-18 |
 
 **Shooting Phase**
 
@@ -399,7 +400,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | HEAVY (Eradicators, LandSpeeder) | 24.16 | ✅ |
 | INDIRECT FIRE | 24.19 | ✅ |
 | Line of Sight 3D | 06.01 | ✅ |
-| Cover + Hidden + Obscuring + Solid | 13.08–13.11 | ✅ |
+| Cover + Hidden + Obscuring + Solid (catégories dérivées des murs typés) | 13.08–13.11 | ✅ |
 | Stealth | 24.33 | ✅ |
 | COMBI_WEAPON (NobKombi) | — | ✅ |
 | PSYCHIC (Librarian, WeirdBoy) | 24.29 | ✅ |

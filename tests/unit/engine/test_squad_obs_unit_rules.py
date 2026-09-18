@@ -666,6 +666,9 @@ def test_the_declared_observation_space_bounds_the_id_keys():
     id_keys = [k for k in obs_space.spaces if k.endswith("_ids")]
     assert sorted(id_keys) == [
         "allies_ability_ids", "allies_status_ids", "allies_wpn_rule_ids",
+        # Refonte du 2026-09-18 : l'effet accorde par un candidat de decision est un obs_id du
+        # MEME vocabulaire que `allies_ability_ids` — memes bornes, meme table d'embedding.
+        "decision_options_effect_ids",
         "enemies_ability_ids", "enemies_status_ids", "enemies_wpn_rule_ids",
     ]
     for key in id_keys:
@@ -835,6 +838,11 @@ def test_adding_an_observed_capability_costs_zero_scalar():
     chaque capacite ajoutee a l'observation coutait 6 scalaires (1 par slot de candidat) et un
     retrain `--new` — l'exact contraire de ce que le chantier 01 existe pour garantir.
 
+    Etendu au bloc CANDIDAT le 2026-09-18 : la capacite fictive est aussi PROPOSEE en candidat
+    (`test_a_fictive_capability_proposed_as_candidate_costs_zero_scalar`, ci-dessous) — c'est le
+    cas d'une capacite ACTIVABLE (Da Jump, Grot Orderly, Finest Hour), que l'ancien registre
+    `DECISION_GRANTABLE_EFFECT_IDS` faisait payer 6 bits.
+
     Methode : recalculer `obs_size` dans un processus neuf bati sur un schema d'entites augmente
     d'une capacite fictive, et comparer le NOMBRE (cf. `_obs_size_with_one_more_capability`).
 
@@ -866,9 +874,33 @@ def test_adding_an_observed_capability_costs_zero_scalar():
     assert measured == frozen, (
         f"une capacite OBSERVEE de plus fait passer obs_size de {frozen} a {measured} "
         f"({measured - frozen:+d} scalaires), donc impose un retrain `--new`. Le vocabulaire "
-        "observe ne doit dimensionner AUCUN bloc : le registre positionnel des candidats de "
-        "decision est `DECISION_GRANTABLE_EFFECT_IDS`."
+        "observe ne doit dimensionner AUCUN bloc — ni les entites (ids de capacite), ni les "
+        "candidats de decision (`decision_options_effect_ids`, refonte du 2026-09-18 : un "
+        "candidat porte l'obs_id de son effet, plus aucun bit positionnel `grants_*`)."
     )
+
+
+def test_a_fictive_capability_proposed_as_candidate_costs_zero_scalar():
+    """Extension au bloc CANDIDAT (2026-09-18) : la capacite fictive, une fois dans le vocabulaire
+    (avec un obs_id), peut etre PROPOSEE en candidat de decision sans qu'aucune forme du bloc
+    `decision_options_*` ne bouge — un candidat porte l'obs_id de son effet, jamais un bit
+    positionnel. La mesure d'obs_size vit dans le test precedent (meme source patchee) ; ici on
+    prouve que le bloc candidat n'a AUCUN registre indexe par le vocabulaire.
+    """
+    import engine.observation_entities as oe
+
+    patched = _entities_module_with_one_more_capability()
+    for name in (
+        "DECISION_OPTION_BIN_FIELDS", "DECISION_OPTION_CONT_FIELDS", "DECISION_OPTION_EFFECT_SLOTS",
+        "DECISION_CTX_BIN_FIELDS", "MAX_DECISION_OPTIONS",
+    ):
+        assert getattr(patched, name) == getattr(oe, name), (
+            f"{name} depend du vocabulaire : une capacite proposable de plus le ferait grossir"
+        )
+    # VERT VACANT : le module patche connait bien la capacite fictive, et le contrat des
+    # candidats l'accepterait (elle est dans UNIT_RULE_EFFECT_IDS) — c'est la garde d'
+    # `agent_decision.normalize_decision_options`, dont la seule liste est ce vocabulaire.
+    assert _FICTIVE_CAPABILITY in patched.UNIT_RULE_EFFECT_IDS
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -514,6 +514,10 @@ def handle_fight(
             # ai/analyzer_hit.py.
             from ai.analyzer_hit import check_hit_result, check_melee_hit_threshold
             check_hit_result(state, stats, line, action_desc, player, is_melee=True)
+            # Primitive F : le malus [SUPPRESSED] doit correspondre à une suppression en vigueur
+            # (jumeau du tir). Cf. ai/analyzer_suppression.py.
+            from ai import analyzer_suppression as _suppression
+            _suppression.check_attack_malus(state, stats, line, action_desc, fighter_id, player)
             # Seuil de TOUCHE 05.01 + modificateurs Primitive A (chantier 06). `check_hit_result`
             # ci-dessus juge le VERDICT contre le seuil imprimé ; celui-ci juge le SEUIL lui-même
             # contre la WS des datasheets — sans lui, un +1 appliqué à tort passerait les deux.

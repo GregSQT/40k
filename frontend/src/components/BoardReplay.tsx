@@ -828,6 +828,17 @@ export const BoardReplay: React.FC = () => {
           phase: "rule_choice",
           player: action.player,
         });
+      } else if (action.type === "ability_call" && action.pos) {
+        // « you can … » rendu au joueur (engine/ability_calls.py) : même rendu que le choix de
+        // règle, la ligne dit USED ou DECLINED.
+        gameLog.addEvent({
+          type: "ability_call",
+          message: requireReplayLogMessage(action, "ability_call"),
+          unitId: action.unit_id!,
+          turnNumber: turnNumber,
+          phase: "ability_call",
+          player: action.player,
+        });
       } else if (action.type === "roll_info" && action.unit_id) {
         const rollInfoMessage = requireReplayLogMessage(action, "roll_info");
         const isFightRollInfo = rollInfoMessage.includes(" FIGHTS with ");

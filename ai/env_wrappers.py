@@ -127,6 +127,54 @@ def random_action_for_pending_choice(
     return None
 
 
+def _ability_call_slot_for_bot(
+    game_state: Dict[str, Any], action_mask: Any, wrapper: str
+) -> Optional[int]:
+    """Le `CHOICE_i` que la politique déclarée d'un appel de capacité fait jouer au bot, ou
+    ``None`` si la décision en attente n'est pas un appel de capacité."""
+    from engine.ability_calls import bot_accepts_ability_call, is_ability_call_prompt
+
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != "rule_choice":
+        return None
+    queue = game_state.get("pending_rule_choice_queue")  # get allowed : file jamais initialisée
+    if not isinstance(queue, list) or not queue or not is_ability_call_prompt(queue[0]):
+        return None
+    prompt = queue[0]
+    if str(require_key(prompt, "unit_id")) != str(require_key(decision, "unit_id")):
+        raise RuntimeError(
+            f"{wrapper}: la decision rule_choice porte sur l'unite {decision['unit_id']} mais la "
+            f"file presente l'appel de capacite de {prompt['unit_id']} — etats divergents."
+        )
+    if bot_accepts_ability_call(game_state, prompt):
+        slot = int(mi.CHOICE_BASE)  # candidat 0 = activer (ordre contractuel de push_ability_call)
+        if not bool(action_mask[slot]):
+            raise RuntimeError(f"{wrapper}: appel de capacite en attente sans CHOICE_0 ouvert.")
+        return slot
+    return pending_decision_decline_slot(game_state, action_mask, "rule_choice")
+
+
+def _suppress_target_slot_for_bot(
+    game_state: Dict[str, Any], action_mask: Any, wrapper: str
+) -> Optional[int]:
+    """Le `CHOICE_i` que la politique déclarée du bot joue sur `suppress_target`, ou ``None``."""
+    from engine.phase_handlers.shared_utils import require_unit_by_id
+    from engine.phase_handlers.shooting_handlers import select_bot_suppress_target
+
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != "suppress_target":
+        return None
+    unit = require_unit_by_id(game_state, str(require_key(decision, "unit_id")))
+    hit_targets = [
+        str(require_key(require_key(o, "payload"), "target_eid"))
+        for o in require_key(decision, "options")
+    ]
+    slot = int(mi.CHOICE_BASE + hit_targets.index(select_bot_suppress_target(game_state, unit, hit_targets)))
+    if not bool(action_mask[slot]):
+        raise RuntimeError(f"{wrapper}: suppress_target en attente sans CHOICE_{slot - mi.CHOICE_BASE} ouvert.")
+    return slot
+
+
 def bot_action_for_pending_choice(
     game_state: Dict[str, Any], action_mask: Any, wrapper: str
 ) -> Optional[int]:
@@ -191,6 +239,19 @@ def bot_action_for_pending_choice(
                 f"{wrapper}: decision consolidation_engaging en attente sans CHOICE_0 ouvert."
             )
         return int(mi.CHOICE_BASE)
+    # APPEL DE CAPACITÉ (`engine/ability_calls.py`, 2026-09-18) : un `rule_choice` dont le prompt
+    # de tête est un appel « you can … ». Le bot répond par la politique DÉCLARÉE de la capacité
+    # — la même qu'au siège PvE (`_select_ai_rule_choice_option`) —, jamais par tirage : Grot
+    # Orderly, Finest Hour ou Da Jump joués une fois sur deux feraient bouger la baseline.
+    ability_call_slot = _ability_call_slot_for_bot(game_state, action_mask, wrapper)
+    if ability_call_slot is not None:
+        return ability_call_slot
+    # `suppress_target` (Indiscriminate Detonations, Primitive F) : la politique DÉCLARÉE
+    # `select_bot_suppress_target` — la même qu'au siège PvE —, jamais un tirage sur l'escouade
+    # touchée à supprimer, qui ferait bouger la baseline du WarTrakk adverse une fois sur deux.
+    suppress_slot = _suppress_target_slot_for_bot(game_state, action_mask, wrapper)
+    if suppress_slot is not None:
+        return suppress_slot
     # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de
     # LISTE, jamais une decision de bot ». Le bot ne declare donc jamais de reserves de sa propre
     # initiative — invariant que portait auparavant le retrait de `SQUAD_ACTION_WAIT` du pool

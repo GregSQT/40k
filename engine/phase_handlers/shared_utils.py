@@ -4601,14 +4601,16 @@ def _roll_deadly_demise(game_state: Dict[str, Any], entry: Dict[str, Any]) -> Li
 
 def queue_mortal_wounds(
     game_state: Dict[str, Any], uid: str, n_wounds: int, log_payload: Dict[str, Any],
-    *, details_key: str,
+    *, details_key: str, is_psychic: bool = False,
 ) -> None:
     """Met en file `n_wounds` blessures mortelles pour `uid` (06.02), a attribuer par
     `drain_mortal_wound_queue` : AUTO si le proprietaire est programmatique, allocation manuelle
-    sinon. `log_payload` est la ligne DEJA emise ; `details_key` y recoit le detail par figurine."""
+    sinon. `log_payload` est la ligne DEJA emise ; `details_key` y recoit le detail par figurine.
+    `is_psychic` : source PSYCHIC (Da Jump rate) — Psychic Hood 24.12 s applique, sur les deux
+    chemins d attribution."""
     game_state.setdefault(MORTAL_WOUND_QUEUE_KEY, []).append({
         "kind": "victim", "uid": str(uid), "n_wounds": int(n_wounds),
-        "log_payload": log_payload, "details_key": details_key,
+        "log_payload": log_payload, "details_key": details_key, "is_psychic": bool(is_psychic),
     })
 
 
@@ -4636,10 +4638,17 @@ def drain_mortal_wound_queue(game_state: Dict[str, Any]) -> Optional[Dict[str, A
         details_key = str(entry["details_key"])
         log_payload = entry["log_payload"]
         n_wounds = int(entry["n_wounds"])
+        # get allowed : les entrees `deadly_demise` -> victimes sont construites sans le drapeau
+        # (une explosion n est jamais psychique) ; absent = False est leur valeur, pas un repli.
+        is_psychic = bool(entry.get("is_psychic", False))
         if is_programmatic_owner(game_state, require_key(require_key(game_state, "units_cache")[uid], "player")):
-            allocate_mortal_wounds(game_state, uid, n_wounds, True, log_payload[details_key])
+            allocate_mortal_wounds(
+                game_state, uid, n_wounds, True, log_payload[details_key], is_psychic=is_psychic
+            )
             continue
-        build_manual_hazard_allocation(game_state, uid, n_wounds, log_payload, details_key=details_key)
+        build_manual_hazard_allocation(
+            game_state, uid, n_wounds, log_payload, details_key=details_key, is_psychic=is_psychic
+        )
         if PENDING_HAZARD_ALLOCATION_KEY in game_state:
             return manual_allocation_waiting_payload(game_state, HAZARD_CTX)
     game_state.pop(MORTAL_WOUND_QUEUE_KEY, None)
@@ -8435,6 +8444,11 @@ def _attacker_model_can_reach_squad(
         )
         if edge > range_subhex:
             continue
+        # Murs de la PAIRE (13.11, LoS symétrique) : murs de l'étage du tireur ∪ murs de l'étage de
+        # CETTE figurine cible (∅ au sol). Même clé de cache « m:<mid> » que la LoS unité→unité.
+        pair_ignored_walls = ignored_wall_hexes | _walls_around_occupied_floor(
+            game_state, {"id": f"m:{mid}", "level": target_level}, footprint
+        )
         if target_hidden and require_visibility:
             # Cette figurine ne rend la cible atteignable que si elle est dans SA detection range :
             # base, ou base−3" si elle est "gone to ground" (masquée par un terrain Solid intervenant
@@ -8443,7 +8457,7 @@ def _attacker_model_can_reach_squad(
             if base_detection_subhex - detection_penalty < edge <= base_detection_subhex:
                 if dense_wall_set and _model_footprint_not_fully_visible_due_to_solid(
                     game_state, shooter_anchor, shooter_hexes, footprint, dense_wall_set,
-                    ignored_wall_hexes,
+                    pair_ignored_walls,
                 ):
                     eff_detection = base_detection_subhex - detection_penalty
             if edge > eff_detection:
@@ -8473,7 +8487,7 @@ def _attacker_model_can_reach_squad(
             floor_occ = [o for o in (shooter_occ, target_occ) if o is not None] or None
         visible, total, _ = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint,
-            ignored_wall_hexes=ignored_wall_hexes,
+            ignored_wall_hexes=pair_ignored_walls,
             floor_occluders=floor_occ, z_start=z_start, z_end=z_end,
         )
         if visible > 0:
@@ -8652,6 +8666,78 @@ def _model_can_shoot_target(
     return True
 
 
+def target_health_and_value(game_state: Dict[str, Any], target_squad_id: str) -> Tuple[float, float]:
+    """(santé de la figurine la plus entamée, VALUE vivante) d une escouade cible d une décision.
+
+    Traits continus des candidats-escouades (`mortal_wounds_target`, `suppress_target`) : une
+    colonne = une grandeur, lue ICI pour tous. La première est celle de `wounded_hp_ratio`
+    (`UNIT_CONT_FIELDS`), lue à l identique : en 40K les pertes s allouent une figurine à la
+    fois, donc au plus une est partiellement blessée et le `min` est une lecture exacte, pas un
+    repli. Proche de 0, l effet achève quelqu un ; à 1.0, il entame seulement. La seconde reste
+    BRUTE — c est l appelant qui la rapporte à la cible la plus chère proposée, parce que la
+    borne de normalisation n existe qu à l échelle du choix.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [m for m in squad_models.get(str(target_squad_id), []) if m in models_cache]  # get allowed
+    if not alive:
+        raise KeyError(
+            f"target_health_and_value: escouade {target_squad_id!r} sans figurine vivante — "
+            f"un pool de cibles ne doit contenir que des unites vivantes."
+        )
+    wounded = min(
+        int(require_key(models_cache[m], "HP_CUR"))
+        / float(int(require_key(models_cache[m], "HP_MAX")))
+        for m in alive
+    )
+    value = float(sum(int(require_key(models_cache[m], "VALUE")) for m in alive))
+    return wounded, value
+
+
+#: Cle d ACTIVATION portee par l unite tireuse : les escouades ennemies TOUCHEES (>= 1 touche)
+#: par ses attaques de TIR, dans l ordre des lots. Posee par `_finalize_manual_allocation`
+#: (contexte tir seulement), lue par `suppress_target_on_shooting` (Indiscriminate Detonations :
+#: « select one enemy unit HIT by one or more of those attacks »).
+SHOOT_HIT_TARGETS_KEY = "_shoot_hit_targets"
+
+#: Cle d ACTIVATION portee par l unite tireuse : l escouade ennemie DESIGNEE au demarrage du
+#: tir. UNE seule cle pour les trois lecteurs — Hail of Bolts (+N A, Primitive B), Overlapping
+#: Detonations ([BLAST 1], Primitive B) et Indiscriminate Detonations (suppression, Primitive F).
+#: Posee par `designate_shoot_target`, effacee par `_clear_shoot_activation_state`.
+DESIGNATED_SHOOT_TARGET_KEY = "designated_shoot_target_id"
+
+def designate_shoot_target(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str
+) -> None:
+    """Designe la cible de l activation de tir de `attacker_squad_id` (site UNIQUE d ecriture).
+
+    Decision de modelisation (2026-09-18, capacites.md §Primitive B) : la cible designee EST la
+    cible prioritaire de l activation — en gym `priority_target_squad_id`, au siege humain la
+    PREMIERE cible declaree. Aucune decision d agent supplementaire : la priorite est deja le
+    choix de l agent (SHOOT_SLOT). Une seconde declaration de la meme activation ne change donc
+    rien (premiere ecriture gagnante).
+
+    « select one enemy unit VISIBLE to this unit » (Hail of Bolts / Overlapping Detonations) est
+    tenu par CONSTRUCTION, pas par un second test de ligne de vue : le bonus ne s applique qu a
+    un intent dont la cible EST la designee, et un intent n existe que si sa figurine VOIT sa
+    cible (`_model_can_shoot_target`, 06.01, par figurine) — hors tir indirect 10.07, ou seules
+    les armes [INDIRECT FIRE] visent sans ligne de vue, armes que ni Hail of Bolts ni Overlapping
+    Detonations ne nomment. Un test unite→unite ancre-a-ancre (`compute_unit_los`) ici a rendu un
+    faux « invisible » sur une cible que trois figurines voyaient (mesure du 2026-09-18, roster
+    reserves, graine 2) : il n a pas la granularite de la regle et n est pas la source de verite.
+    """
+    attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
+    if DESIGNATED_SHOOT_TARGET_KEY in attacker_unit:
+        return
+    attacker_unit[DESIGNATED_SHOOT_TARGET_KEY] = str(target_squad_id)
+
+
+def designated_shoot_target_id(game_state: Dict[str, Any], attacker_unit: Dict[str, Any]) -> str:
+    """Cible designee de l activation EN COURS du tireur — absente = activation jamais declaree
+    (chaine rompue), jamais « pas de designation »."""
+    return str(require_key(attacker_unit, DESIGNATED_SHOOT_TARGET_KEY))
+
+
 def squad_declare_shoot(
     game_state: Dict[str, Any],
     attacker_squad_id: str,
@@ -8686,10 +8772,13 @@ def squad_declare_shoot(
 
     intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
 
-    # Primitive F (chantier 06, passe 6) — suppress_target_on_shooting (Indiscriminate Detonations) :
-    # stocker la cible prioritaire sur l unite attaquante pour l appliquer a la fin du tir.
+    # Cible DESIGNEE de l activation (Hail of Bolts / Overlapping Detonations, Primitive B ; et
+    # Indiscriminate Detonations, Primitive F) : en gym, c est la cible PRIORITAIRE — le choix
+    # de l agent (SHOOT_SLOT), aucune decision supplementaire (decision 2026-09-18, capacites.md
+    # §Primitive B). `designate_shoot_target` est le site UNIQUE d ecriture, jumeau des trois
+    # declarations PvP.
+    designate_shoot_target(game_state, str(attacker_squad_id), str(priority_target_squad_id))
     attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
-    attacker_unit["_last_shoot_target_id"] = str(priority_target_squad_id)
 
     def _target_size(target_sid: str) -> int:
         return sum(
@@ -9440,11 +9529,9 @@ def squad_declare_shoot_model(
 
     Wrapper fin de declare_attack_model via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    # Primitive F (chantier 06) — suppress_target_on_shooting : enregistrer la cible principale
-    # (première déclarée) pour _handle_shooting_end_activation. Miroir du gym (squad_declare_shoot).
-    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
-        "_last_shoot_target_id", str(target_squad_id)
-    )
+    # Cible DESIGNEE de l activation = la PREMIERE cible declaree (siege humain). Miroir du gym
+    # (squad_declare_shoot, cible prioritaire) — site unique `designate_shoot_target`.
+    designate_shoot_target(game_state, str(attacker_squad_id), str(target_squad_id))
     return declare_attack_model(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, attacker_model_id, target_squad_id
     )
@@ -10242,9 +10329,7 @@ def squad_declare_shoot_weapon(
 
     Wrapper fin de declare_attack_weapon via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
-        "_last_shoot_target_id", str(target_squad_id)
-    )
+    designate_shoot_target(game_state, str(attacker_squad_id), str(target_squad_id))
     return declare_attack_weapon(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
     )
@@ -10260,9 +10345,7 @@ def squad_declare_shoot_weapon_qty(
     `only_model_id` (optionnel) : attribution restreinte a CETTE figurine (menu par-fig).
     Wrapper fin de declare_attack_weapon_qty via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
-        "_last_shoot_target_id", str(target_squad_id)
-    )
+    designate_shoot_target(game_state, str(attacker_squad_id), str(target_squad_id))
     return declare_attack_weapon_qty(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, count, target_squad_id,
         only_model_id,
@@ -11385,6 +11468,17 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
             if ctx.log_type == "shoot"
             else None
         ),
+        # Cible DESIGNEE de l activation (grammaire 11) : portee par TOUTES les lignes de tir,
+        # comme [SHOOT_TYPE:] — c est elle qui borne le plafond d attaques de Hail of Bolts et
+        # d Overlapping Detonations cote analyzer (bonus seulement si cible == designee). Un tir
+        # sans declaration prealable est une chaine rompue : `designated_shoot_target_id` leve.
+        "designatedTargetId": (
+            designated_shoot_target_id(
+                game_state, require_unit_by_id(game_state, attacker_squad_id_str)
+            )
+            if ctx.log_type == "shoot"
+            else None
+        ),
         # Pré-capture du segment [MODELS:] AVANT que les effets de l'action (hazardous,
         # destroy_model) ne modifient occupied_hexes_by_model. Sans pré-capture,
         # _build_shot_details lirait le segment LIVE au flush — après que les figurines tuées
@@ -12382,17 +12476,24 @@ def _manual_roll_intent(
         )
         if weapon.get("code") == _dk_weapon_code and _dk_target_ok:  # get allowed
             n_attacks += int(require_key(_dakkablitz_args, "attacks_bonus"))
-    # weapon_attacks_bonus_vs_designated_target : +N A vs cible designee (Hail of Bolts).
-    # Dans ce moteur la cible de l intent EST la cible designee — pas de designation separee.
+    # weapon_attacks_bonus_vs_designated_target : +N A vs cible designee (Hail of Bolts) —
+    # « this unit's bolt rifles that targeted THAT selected unit ». La designee est UNE escouade
+    # par activation (`designate_shoot_target`) ; une figurine qui tire ailleurs (hors portee de
+    # la prioritaire, second slot) n a pas le bonus. Avant le 2026-09-18 le bonus jouait sur
+    # CHAQUE cible de l activation (« la cible de l intent EST la cible designee »).
     _hob_args = _pB_get_args(attacker_unit, "weapon_attacks_bonus_vs_designated_target")
-    if _hob_args is not None and weapon.get("code") == _hob_args.get("weapon_code"):  # get allowed
+    if (_hob_args is not None
+            and weapon.get("code") == _hob_args.get("weapon_code")  # get allowed
+            and str(target_sid) == designated_shoot_target_id(game_state, attacker_unit)):
         n_attacks += int(require_key(_hob_args, "attacks_bonus"))
-    # grant_weapon_rule_vs_designated_target : [BLAST 1] hors MONSTER/VEHICLE (Overlapping Detonations).
+    # grant_weapon_rule_vs_designated_target : [BLAST 1] hors MONSTER/VEHICLE (Overlapping
+    # Detonations) — meme clause « that targeted that selected unit » que ci-dessus.
     # [BLAST 1] = 1 de par tranche de 5 figurines dans la cible.
     _od_args = _pB_get_args(attacker_unit, "grant_weapon_rule_vs_designated_target")
     if (_od_args is not None
             and weapon.get("code") == _od_args.get("weapon_code")  # get allowed
-            and _target_is_non_mv):
+            and _target_is_non_mv
+            and str(target_sid) == designated_shoot_target_id(game_state, attacker_unit)):
         _od_tgt_size = int(require_key(intent, "target_squad_size_at_declaration"))
         n_attacks += _od_tgt_size // 5
     # Waaagh! Energy +D : les scalings _we_n_scalings et _waaagh_energy_args sont du Bloc A.
@@ -12848,6 +12949,14 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
     batches = alloc["batches"]
     primary_target_sid = str(batches[0]["target_sid"]) if batches else None
     hazardous_count = int(alloc["hazardous_weapon_count"]) if "hazardous_weapon_count" in alloc else 0
+    if ctx.log_type == "shoot":
+        # Cle d ACTIVATION de l attaquant : les escouades touchees par ses attaques, lue par la
+        # fin d activation de tir (`suppress_target_on_shooting`). Posee meme vide — « aucune
+        # touche » est un fait de l activation, pas une absence de donnee. Effacee par
+        # `shooting_clear_activation_state`.
+        require_unit_by_id(game_state, attacker_squad_id)[SHOOT_HIT_TARGETS_KEY] = list(
+            alloc.get("hit_target_sids", [])  # get allowed : aucune touche = aucune entree
+        )
     # 19.04, derniere clause : « the ability it was conferring applies until the attacking unit
     # has resolved all of its attacks ». On y est. Les squads dont une source de regle est morte
     # sous cette attaque sont recalcules APRES la suppression de l allocation — c est elle qui
@@ -13257,6 +13366,13 @@ def _roll_batch(game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[s
         summary["attacks_made"] += counts["attacks"]
         summary["hits"] += counts["hits"]
         summary["wounds"] += counts["wounds"]
+        # Escouades TOUCHEES par l activation (Indiscriminate Detonations, Primitive F : « select
+        # one enemy unit HIT by one or more of those attacks ») — connu ICI, au jet, pas dans le
+        # journal ; ordre d apparition conserve (celui des lots), sans doublon.
+        if counts["hits"] > 0:
+            _hit_sids = alloc.setdefault("hit_target_sids", [])
+            if str(batch["target_sid"]) not in _hit_sids:
+                _hit_sids.append(str(batch["target_sid"]))
         g["attacks"] += counts["attacks"]
         g["shots"].extend(rolled["shot_records"])
         for pw in rolled["pending_wounds"]:
@@ -13763,9 +13879,13 @@ def _resolve_one_mortal_wound(
     cur = batch["current_model_id"]
     m = require_key(game_state, "models_cache")[cur]
     # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
-    # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent ici.
+    # Inclut feel_no_pain_near_objective ; PSYCHIC ssi la source l est (Da Jump rate, drapeau
+    # pose par `build_manual_hazard_allocation`). get allowed : une allocation de tir / combat
+    # (lot mortel de capacite, Hold Still) ne porte pas le drapeau — non psychique par nature.
     _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
-    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False, model_id=cur)
+    _fnp_ths = _collect_fnp_thresholds_mortal(
+        _fnp_unit, game_state, is_psychic=bool(alloc.get("is_psychic", False)), model_id=cur
+    )
     rec = _inflict_one_mortal_wound(game_state, cur, _fnp_ths, details)
     _count_mortal_details_in_summary(alloc["summary"], [rec])
     batch["pool_index"] += 1
@@ -14132,7 +14252,7 @@ HAZARD_CTX = ManualAllocCtx(
 
 def build_manual_hazard_allocation(
     game_state: Dict[str, Any], squad_id: str, n_wounds: int, log_payload: Dict[str, Any],
-    *, details_key: str = "hazardDetails",
+    *, details_key: str = "hazardDetails", is_psychic: bool = False,
 ) -> Dict[str, Any]:
     """Allocation manuelle de blessures mortelles HORS lot d attaques, defenseur humain :
     Desperate Escape 09.07, [HAZARDOUS] 24.15, et Exhortation of Rage (06.02, infligee a la
@@ -14166,6 +14286,8 @@ def build_manual_hazard_allocation(
         # Cle de la ligne emise qui recoit le detail par figurine : `hazardDetails` (24.15,
         # 09.07, Exhortation), `deadlyDemiseDetails` (24.08), `chargeImpactDetails`.
         "hazard_details_key": details_key,
+        # Source PSYCHIC (Da Jump rate) : lu par `_resolve_one_mortal_wound` pour Psychic Hood.
+        "is_psychic": bool(is_psychic),
     }
     return _manual_allocation_step(game_state, HAZARD_CTX)
 

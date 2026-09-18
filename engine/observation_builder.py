@@ -65,6 +65,7 @@ from engine.observation_entities import (
     DECISION_OPTION_BIN_SIZE,
     DECISION_OPTION_CONT_FIELDS,
     DECISION_OPTION_CONT_SIZE,
+    DECISION_OPTION_EFFECT_SLOTS,
     DEPLOY_CAND_BIN_SIZE,
     DEPLOY_CAND_CONT_SIZE,
     MAX_DECISION_OPTIONS,
@@ -510,6 +511,9 @@ class ObservationBuilder:
         + DECISION_CTX_BIN_SIZE
         + MAX_DECISION_OPTIONS * DECISION_OPTION_BIN_SIZE
         + MAX_DECISION_OPTIONS * DECISION_OPTION_CONT_SIZE
+        # L'effet accordé par chaque candidat, en `obs_id` (refonte du 2026-09-18) : lu par la
+        # même table que les capacités d'unité, donc une capacité activable de plus coûte 0.
+        + MAX_DECISION_OPTIONS * DECISION_OPTION_EFFECT_SLOTS
         # Bloc « candidats de déploiement » (§0.40 point 3) : sans lui, les actions 4-8 sont
         # cinq boîtes noires — l'agent choisit une stratégie sans voir l'hexe qu'elle pose.
         + N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE)
@@ -554,6 +558,9 @@ class ObservationBuilder:
             "decision_ctx_bin": (DECISION_CTX_BIN_SIZE,),
             "decision_options_bin": (MAX_DECISION_OPTIONS, DECISION_OPTION_BIN_SIZE),
             "decision_options_cont": (MAX_DECISION_OPTIONS, DECISION_OPTION_CONT_SIZE),
+            # `obs_id` de l'effet que le candidat accorde (padding 0 sinon) — même table
+            # d'embedding que `allies_ability_ids`.
+            "decision_options_effect_ids": (MAX_DECISION_OPTIONS, DECISION_OPTION_EFFECT_SLOTS),
             # Déploiement (§0.40 point 3). ⚠ L'ORDRE DES SLOTS EST CONTRACTUEL, comme celui des
             # slots ennemis : `deploy_cand_*[i]` décrit ce que pose l'action
             # `DEPLOY_SLOT_BASE + i`. Bloc NUL hors phase de déploiement.
@@ -739,13 +746,16 @@ class ObservationBuilder:
         geometrie que le moteur (``compute_models_within_terrain``), aucune duplication de regle.
 
         - **hidden (13.09)** : hideable (INFANTRY/BEASTS/SWARM) ET toutes les figurines vivantes
-          dans une zone obscurante ET l unite n a tire ni ce tour ni au tour precedent.
+          dans une zone de terrain contenant un terrain **dense** (``area["dense"]``, derive des
+          murs types du fichier terrain) ET l unite n a tire ni ce tour ni au tour precedent.
         - **gone to ground « pret » (13.5)** : hidden ET toutes les figurines vivantes dans une
-          zone de terrain contenant un terrain **Solid** (dense, 13.11). La derniere condition
-          de 13.5 — « pas entierement visible pour la figurine ATTAQUANTE a cause d un Solid
-          intervenant » — depend du tireur et n a donc PAS de valeur au niveau escouade : elle
-          reste dans le calcul par-paire du moteur (``hidden_enemy_out_of_detection``). Ce
-          drapeau dit « je remplis tout ce qui ne depend pas de l ennemi ».
+          zone de terrain contenant un terrain **Solid** (dense, 13.11). Depuis que 13.09 exige
+          lui-meme une zone dense, cette condition est INCLUSE dans hidden : le drapeau vaut
+          hidden. La derniere condition de 13.5 — « pas entierement visible pour la figurine
+          ATTAQUANTE a cause d un Solid intervenant » — depend du tireur et n a donc PAS de valeur
+          au niveau escouade : elle reste dans le calcul par-paire du moteur
+          (``hidden_enemy_out_of_detection``). Ce drapeau dit « je remplis tout ce qui ne depend
+          pas de l ennemi ».
         - **in_cover (13.08)** : hideable ET toutes les figurines vivantes dans une zone de
           terrain — c est la premiere des deux conditions alternatives de 13.08, et elle ne
           depend PAS de l attaquant : si elle est remplie par toutes mes figurines, l escouade a
@@ -777,49 +787,35 @@ class ObservationBuilder:
         }
         may_hide = not shot_now and not shot_prev
 
-        def _all_models_in_obscuring() -> bool:
-            in_obscuring = compute_models_within_terrain(
-                entry, by_model, game_state, terrain_areas, obscuring_only=True
+        def _all_models_in_dense() -> bool:
+            # 13.09 : zone contenant un terrain DENSE (`area["dense"]`, derive des murs types) —
+            # meme filtre que `compute_models_in_dense_terrain`, la source du statut moteur.
+            in_dense = compute_models_within_terrain(
+                entry, by_model, game_state, terrain_areas, "dense"
             )
-            return len(in_obscuring) == len(by_model)
+            return len(in_dense) == len(by_model)
 
         if hidden_only:
             # UNE passe, et seulement si les gardes gratuites laissent hidden possible. La passe
             # « toute zone de terrain » ci-dessous ne sert que `in_cover` et de court-circuit :
             # ici elle serait un second scan pour un drapeau qui n est pas demande.
-            return (1.0 if (may_hide and _all_models_in_obscuring()) else 0.0), 0.0, 0.0
+            return (1.0 if (may_hide and _all_models_in_dense()) else 0.0), 0.0, 0.0
 
         in_any_terrain = compute_models_within_terrain(
-            entry, by_model, game_state, terrain_areas, obscuring_only=False
+            entry, by_model, game_state, terrain_areas, None
         )
         all_in_terrain = len(in_any_terrain) == len(by_model)
-        # Passe obscurante conditionnee : une zone obscurante EST une zone de terrain, donc
-        # « toutes dans une zone obscurante » implique « toutes dans une zone ». Si le couvert est
-        # deja faux, hidden l est aussi — inutile de rescanner (le test figurine<->polygone est le
-        # poste dominant de cette fonction).
-        hidden = all_in_terrain and may_hide and _all_models_in_obscuring()
+        # Passe dense conditionnee : une zone dense EST une zone de terrain, donc « toutes dans
+        # une zone dense » implique « toutes dans une zone ». Si le couvert est deja faux, hidden
+        # l est aussi — inutile de rescanner (le test figurine<->polygone est le poste dominant
+        # de cette fonction).
+        hidden = all_in_terrain and may_hide and _all_models_in_dense()
 
-        gtg_ready = False
-        if hidden:
-            # Zones contenant un terrain Solid (13.11 : les terrains dense ont la regle Solid).
-            # Le moteur ne type le « dense » qu au niveau des MURS (dense_wall_hexes) : une zone
-            # est donc Solid des qu elle contient un mur dense. Statique -> memoise.
-            solid_areas = game_state.get("_obs_solid_terrain_areas")  # get allowed
-            if solid_areas is None:
-                from engine.phase_handlers.shooting_handlers import _get_dense_wall_set
-
-                dense = _get_dense_wall_set(game_state)
-                solid_areas = [
-                    a
-                    for a in terrain_areas
-                    if any((int(h[0]), int(h[1])) in dense for h in require_key(a, "hexes"))
-                ]
-                game_state["_obs_solid_terrain_areas"] = solid_areas
-            if solid_areas:
-                in_solid = compute_models_within_terrain(
-                    entry, by_model, game_state, solid_areas, obscuring_only=False
-                )
-                gtg_ready = len(in_solid) == len(by_model)
+        # 13.5 condition 1 « within Solid terrain features » : 13.11 donne Solid aux terrains
+        # dense, et 13.09 exige deja que toutes les figurines soient dans une zone dense → la
+        # condition est incluse dans hidden. Plus aucune seconde derivation « zone Solid » a cote
+        # de `area["dense"]`.
+        gtg_ready = hidden
 
         return (1.0 if hidden else 0.0), (1.0 if gtg_ready else 0.0), (1.0 if all_in_terrain else 0.0)
 
@@ -998,10 +994,26 @@ class ObservationBuilder:
             )
         opts = obs["decision_options_bin"]
         opts_cont = obs["decision_options_cont"]
+        opts_effects = obs["decision_options_effect_ids"]
         raw_cont = decision.get("options_cont")  # get allowed : absent pour les types sans continu
+        ability_ids = unit_ability_obs_ids()
         for slot, option in enumerate(options):
-            for effect_id in require_key(option, "effect_ids"):
-                opts[slot, decision_option_bin_index(f"grants_{effect_id}")] = 1.0
+            effect_ids = require_key(option, "effect_ids")
+            if len(effect_ids) > DECISION_OPTION_EFFECT_SLOTS:
+                raise ValueError(
+                    f"_encode_pending_decision: candidat {slot} accorde {len(effect_ids)} effets "
+                    f"pour {DECISION_OPTION_EFFECT_SLOTS} slot(s) — `set_pending_agent_decision` "
+                    f"aurait du lever."
+                )
+            for effect_slot, effect_id in enumerate(effect_ids):
+                # `KeyError` explicite : un effet sans `obs_id` ne peut pas etre propose — le
+                # decrire par le padding le rendrait indiscernable d'un candidat sans effet.
+                if effect_id not in ability_ids:
+                    raise KeyError(
+                        f"_encode_pending_decision: effet '{effect_id}' du candidat {slot} sans "
+                        f"obs_id (vocabulaire : {sorted(ability_ids)})"
+                    )
+                opts_effects[slot, effect_slot] = float(ability_ids[effect_id])
             if require_key(option, "declines"):
                 opts[slot, decision_option_bin_index("declines")] = 1.0
             opts[slot, decision_option_bin_index("present")] = 1.0
@@ -1183,19 +1195,21 @@ class ObservationBuilder:
         # hideable qui s y tient est « within a terrain area ». Statique comme les murs et les
         # objectifs.
         #
-        # Cases des zones OBSCURANTES (13.10) : sous-ensemble strict du precedent, `obscuring`
-        # etant un drapeau PAR ZONE pose au chargement du terrain (`game_state.py`). Le couvert
-        # 13.08 s'applique « within a terrain area », toutes zones confondues ; le hidden 13.09
-        # et l'occultation 13.10 ne regardent QUE les zones obscurantes. Les deux ensembles sont
-        # donc construits ici cote a cote, sur la meme boucle et le meme cache.
+        # Cases des zones DENSES (13.09 : « terrain area that contains one or more dense terrain
+        # features ») : sous-ensemble strict du precedent, `dense` etant un drapeau PAR ZONE derive
+        # des murs types au chargement du terrain (`game_state.py` / `derive_area_categories`). Le
+        # couvert 13.08 s'applique « within a terrain area », toutes zones confondues ; le hidden
+        # 13.09 ne regarde QUE les zones denses — pas les obscurantes 13.10 (mur light OU dense),
+        # que le moteur n'utilise que pour couper la LoS entre deux autres figurines. Les deux
+        # ensembles sont donc construits ici cote a cote, sur la meme boucle et le meme cache.
         cover_hexes: List[Tuple[int, int]] = []
-        obscuring_hexes: List[Tuple[int, int]] = []
+        dense_hexes: List[Tuple[int, int]] = []
         for area in game_state.get("terrain_areas", []):  # get allowed (scenario sans terrain)
-            # `get` MEME accessor que les deux sites de REGLE qui tranchent 13.09/13.10
-            # (`terrain_utils.hexes_in_obscuring_terrain` et `compute_models_within_terrain`) :
-            # exiger la cle ici rendrait l'observation plus stricte que la regle elle-meme, donc
-            # ferait lever sur un terrain que le moteur accepte et joue.
-            sinks = (cover_hexes, obscuring_hexes) if area.get("obscuring") else (cover_hexes,)
+            # `get` MEME accessor que le site de REGLE qui tranche 13.09
+            # (`terrain_utils.filter_terrain_areas`, via `compute_models_within_terrain`) : exiger
+            # la cle ici rendrait l'observation plus stricte que la regle elle-meme, donc ferait
+            # lever sur un terrain que le moteur accepte et joue.
+            sinks = (cover_hexes, dense_hexes) if area.get("dense") else (cover_hexes,)
             for hex_entry in require_key(area, "hexes"):
                 cell = (int(hex_entry[0]), int(hex_entry[1]))
                 for sink in sinks:
@@ -1205,7 +1219,7 @@ class ObservationBuilder:
             "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
             "objectives": _to_arrays(objective_hexes),
             "cover": _to_arrays(cover_hexes),
-            "obscuring": _to_arrays(obscuring_hexes),
+            "dense": _to_arrays(dense_hexes),
         }
         game_state["_grid_static_hex_arrays"] = static
         return static
@@ -2672,13 +2686,13 @@ class ObservationBuilder:
             GRID_CHANNELS,
             GRID_CH_ALLY,
             GRID_CH_COVER,
+            GRID_CH_DENSE,
             GRID_CH_ENEMY,
             GRID_CH_EZ,
             GRID_CH_LEVEL,
             GRID_CH_LOS_EXPOSURE,
             GRID_CH_MOVE_COST,
             GRID_CH_OBJECTIVE,
-            GRID_CH_OBSCURING,
             GRID_CH_OCCUPANT_LEVEL,
             GRID_CH_SELF,
             GRID_CH_WALL,
@@ -2786,9 +2800,9 @@ class ObservationBuilder:
         _paint_arrays(GRID_CH_COVER, *static["cover"])
         grid[GRID_CH_COVER] = dilate_channel(grid[GRID_CH_COVER], dilation_cells)
 
-        # --- Canal 9 : zones obscurantes ---------------------------------------
+        # --- Canal 9 : zones denses (hidden possible) --------------------------
         # Sous-ensemble des cases du couvert, dilate du MEME rayon et pour la MEME raison : le
-        # moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain`
+        # moteur tranche 13.09 par chevauchement de socle (`compute_models_in_dense_terrain`
         # delegue a `compute_models_within_terrain`, le test disque<->polygone du couvert). Peindre
         # les hexes bruts a cote d'un couvert dilate ferait diverger deux canaux voisins sur leurs
         # bords pour une raison qui tient a notre rasterisation, pas au jeu.
@@ -2796,9 +2810,11 @@ class ObservationBuilder:
         # CE QUE CE CANAL AJOUTE AU COUVERT : etre `hidden` (13.09) ne degrade pas un jet, il rend
         # INTIRABLE au-dela de la portee de detection — l'ennemi cache est ecarte du pool de cibles
         # (`shooting_handlers`). Sans ce canal la grille ne distinguait pas une zone ou l'on peut
-        # disparaitre d'une zone qui se contente de donner le couvert.
-        _paint_arrays(GRID_CH_OBSCURING, *static["obscuring"])
-        grid[GRID_CH_OBSCURING] = dilate_channel(grid[GRID_CH_OBSCURING], dilation_cells)
+        # disparaitre d'une zone qui se contente de donner le couvert. Il peint les zones DENSES
+        # et non les obscurantes (13.10) : meme filtre `area["dense"]` que le moteur, sinon une
+        # zone a mur light seul serait annoncee « hidden possible » sans jamais cacher personne.
+        _paint_arrays(GRID_CH_DENSE, *static["dense"])
+        grid[GRID_CH_DENSE] = dilate_channel(grid[GRID_CH_DENSE], dilation_cells)
 
         # --- Canal 5 : niveau (etages) ----------------------------------------
         # Vaut 0 partout tant qu'aucun etage n'est declare : le sol EST le niveau 0, ce n'est

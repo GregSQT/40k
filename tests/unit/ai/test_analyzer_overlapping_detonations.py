@@ -163,3 +163,58 @@ def test_10_tirs_heavy_bolter_vehicle_declenche_erreur(tmp_path):
         f"Attendu 1 erreur shoot_over_rng_nb P1 (VEHICLE), "
         f"obtenu {stats['shoot_over_rng_nb'][1]}"
     )
+
+
+# --- Grammaire 11 : `[DESIGNATED:<id>]` — [BLAST 1] seulement sur la cible DÉSIGNÉE -----------
+#
+# JUMEAU du verrou Hail of Bolts (test_analyzer_hail_of_bolts.py) : « this unit's heavy bolters
+# that targeted THAT selected unit have [BLAST 1] ». Cible de 6 non désignée → +0, cap = NB.
+_UNITS_DEUX_CIBLES = _UNITS_NON_MV + (
+    "[10:00:00] Unit 102 (Boyz) P2: Starting position (-1,-1), HP_MAX=1 base=round/6\n"
+)
+T2 = "(80,50)"
+
+
+def _tir_vers(seconde: int, coup: int, target: str, pos: str, designated: str) -> str:
+    return (
+        f"[10:00:{seconde:02d}] E1 T1 P1 SHOOT : Unit 1{S}"
+        f" SHOT [TARGET_DECL:6] [DESIGNATED:{designated}] Unit {target}{pos} with [Heavy Bolter]"
+        f" - Hit {coup}(3+) - Wound 5(4+) - → {target}#0 - Save 2(3+) - Dmg:1HP [R:+0.0]"
+        f" [MODELS: 1#0@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
+        f" 1#1@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
+        f" 1#2@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)]"
+        f" [SHOOTER_MODELS: 1#0 1#1 1#2] [ALLOC_MODEL: {target}#0] [SUCCESS]\n"
+    )
+
+
+def _stats_deux_cibles(tmp_path, n_shots_hors_designee: int) -> dict:
+    """Désignée = 101 ; les tirs vont TOUS sur 102 (6 fig, non désignée) : cap = 3×3 = 9."""
+    import ai.analyzer as an
+
+    models_102 = " ".join(f"102#{i}@(80,50,z0)" for i in range(6))
+    setup = _setup(6) + (
+        f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102{T2} DEPLOYED from (-1,-1) to {T2}"
+        f" [R:+0.0] [MODELS: {models_102}] [SUCCESS]\n"
+    )
+    shots = "".join(_tir_vers(i + 2, i + 1, "102", T2, "101") for i in range(n_shots_hors_designee))
+    log = tmp_path / "step.log"
+    log.write_text(
+        entete_step_log(setup + shots, units=_UNITS_DEUX_CIBLES, ez_vertical_inches=None, log_grammar=11)
+    )
+    return an.parse_step_log(str(log))
+
+
+def test_grammaire_11_blast_hors_designee_est_une_erreur(tmp_path):
+    """10 tirs sur une cible de 6 NON désignée : cap = 9 (pas de [BLAST 1]) → 1 erreur."""
+    stats = _stats_deux_cibles(tmp_path, 10)
+    assert stats["shoot_over_rng_nb"][1] == 1, (
+        f"Attendu 1 erreur shoot_over_rng_nb P1, obtenu {stats['shoot_over_rng_nb'][1]}"
+    )
+
+
+def test_grammaire_11_nb_seul_hors_designee_pas_d_erreur(tmp_path):
+    """9 tirs sur la cible non désignée : cap = 9 → 0 erreur."""
+    stats = _stats_deux_cibles(tmp_path, 9)
+    assert stats["shoot_over_rng_nb"][1] == 0, (
+        f"Attendu 0 erreur shoot_over_rng_nb P1, obtenu {stats['shoot_over_rng_nb'][1]}"
+    )

@@ -4,7 +4,7 @@
     {
       "id": "rect_b_nw_OK",
       "name": "rect b NW",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -29,7 +29,7 @@
     {
       "id": "rect_b_ne_OK",
       "name": "rect b NE",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -54,7 +54,7 @@
     {
       "id": "rect_s_n_OK",
       "name": "rect s N",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -79,7 +79,7 @@
     {
       "id": "rect_s_w_OK",
       "name": "rect s W",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -104,7 +104,7 @@
     {
       "id": "line_l_n_OK",
       "name": "line l N",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -129,7 +129,7 @@
     {
       "id": "line_s_w_OK",
       "name": "line s NW",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -154,7 +154,7 @@
     {
       "id": "line_l_w_OK",
       "name": "line l NW",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -179,7 +179,7 @@
     {
       "id": "ruin_center_OK",
       "name": " tri_2 Centre",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -250,7 +250,7 @@
     {
       "id": "rect_b_sw_OK",
       "name": "rect b SW",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -275,7 +275,7 @@
     {
       "id": "rect_b_se_OK",
       "name": "rect b SE",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -300,7 +300,7 @@
     {
       "id": "rect_s_s_OK",
       "name": "rect s S",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -325,7 +325,7 @@
     {
       "id": "rect_s_e_OK",
       "name": "rect s E",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -350,7 +350,7 @@
     {
       "id": "line_s_e_OK",
       "name": "line s SE",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -375,7 +375,7 @@
     {
       "id": "line_l_e_OK",
       "name": "line l SE",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [
@@ -400,7 +400,7 @@
     {
       "id": "line_s_s_OK",
       "name": "line s S",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [
         [

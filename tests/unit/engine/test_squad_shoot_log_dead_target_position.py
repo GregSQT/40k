@@ -46,6 +46,8 @@ def _game_state_target_removed() -> Dict[str, Any]:
             "1": {"col": ATTACKER_COL, "row": ATTACKER_ROW, "player": 1},
             # "2" absente : c'est précisément l'état qui produisait (0,0).
         },
+        # Cible désignée de l'activation (grammaire 11) : l'émetteur la lit sur l'unité tireuse.
+        "unit_by_id": {"1": {"id": "1", "designated_shoot_target_id": "2"}},
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,
@@ -194,7 +196,7 @@ def _live_shoot_state() -> Dict[str, Any]:
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {"1": units_cache_entry(*ATK_ANCHOR, player=0), "2": units_cache_entry(*TGT_ANCHOR, player=1)},
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "designated_shoot_target_id": "2"}, "2": {"id": "2", "UNIT_RULES": []}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "pending_squad_shoot_intents": {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,

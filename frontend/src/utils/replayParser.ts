@@ -1321,6 +1321,33 @@ export function parse_log_file_from_text(text: string): ReplayData {
       continue;
     }
 
+    // Parse ABILITY CALL actions (engine/ability_calls.py)
+    // Format: [timestamp] E1 T2 P1 COMMAND : Unit 3(7,12) ABILITY CALL Grot Orderly [USED] [SUCCESS]
+    const abilityCallMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) (\w+) : Unit (\d+)\((\d+),\s*(\d+)\) ABILITY CALL (.+?) \[(USED|DECLINED)\] \[(SUCCESS|FAILED)\]/
+    );
+    if (abilityCallMatch) {
+      const timestamp = abilityCallMatch[1];
+      const turn = abilityCallMatch[2];
+      const player = parseInt(abilityCallMatch[3], 10);
+      const unitId = parseInt(abilityCallMatch[5], 10);
+      const unitCol = parseInt(abilityCallMatch[6], 10);
+      const unitRow = parseInt(abilityCallMatch[7], 10);
+      syncKnownUnitPosition(currentEpisode, unitId, unitCol, unitRow);
+
+      pushAction({
+        type: "ability_call",
+        timestamp,
+        turn,
+        player,
+        unit_id: unitId,
+        pos: { col: unitCol, row: unitRow },
+        selected_rule_name: `${abilityCallMatch[8].trim()} [${abilityCallMatch[9]}]`,
+        log_message: extractLogMessage(trimmed),
+      });
+      continue;
+    }
+
     // Parse FIGHT actions
     // Format: [timestamp] T1 P0 FIGHT : Unit 2(9,6) FOUGHT Unit 8(9,7) with [weapon] - Hit:3+:2(MISS) [SUCCESS]
     // Token(s) de capacité OPTIONNELS entre `FOUGHT` et la cible (`[WAAAGH!]`, 24) — même

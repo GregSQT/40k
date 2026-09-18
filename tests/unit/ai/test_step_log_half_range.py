@@ -67,7 +67,8 @@ def _game_state(weapon_rules: list, *, target: tuple) -> Dict:
         "units": [{"id": "1", "player": 0, "unitType": "TestUnit"},
                   {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
         "unit_by_id": {
-            "1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": 0, "player": 0},
+            "1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": 0, "player": 0,
+                  "designated_shoot_target_id": "101"},
             "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0, "player": 1,
                     "unit_keywords": []},
         },

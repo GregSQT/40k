@@ -347,5 +347,11 @@
     "id": "return_destroyed_models",
     "obs_id": 38,
     "description": "Primitive F (chantier 06) : 1x/partie, en phase de commandement, retourne D3 figurines detruites de l unite. Porte par Grot Orderly (PainBoy)."
+  },
+  "da_jump": {
+    "id": "da_jump",
+    "obs_id": 39,
+    "name": "Da Jump",
+    "description": "Da Jump (Psychic, once per turn, per army) : In your Movement phase, you can roll 1 D6 and on a result of 1 this unit suffers D6 mortal wounds ; 2-6 place THIS unit in strategic reserves and it gains Deep Strike until the end of the phase, then it can make an ingress move (including during the first battle round). Appel de capacite (engine/ability_calls) pose au debut de la phase de mouvement a l escouade du WeirdBoy ; porte par WeirdBoy (Datasheets - Orks p5)."
   }
 }

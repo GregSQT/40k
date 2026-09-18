@@ -78,9 +78,36 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       tests/unit/engine/test_returned_models_placement.py (ligne formatee) et
 #:       tests/unit/ai/test_analyzer_returned_models.py (lecteur).
 #:
+#:  11 — toute ligne SHOT porte `[DESIGNATED:<id>]`, l escouade ennemie DESIGNEE au demarrage
+#:       de l activation (cible prioritaire en gym, premiere declaree au siege humain — decision
+#:       2026-09-18, capacites.md §Primitive B). C est la clause « that targeted that selected
+#:       unit » de Hail of Bolts et d Overlapping Detonations : sur un journal log_grammar>=11,
+#:       leur bonus d attaques ne leve le plafond que des tirs dont la cible EST la designee ;
+#:       un tir bonifie ailleurs est une faute (`shoot_over_rng_nb`), jamais un vieux format.
+#:       Sur un journal anterieur, le lecteur s abstient (plafond bonifie sur toute cible).
+#:       Verrou : test_step_log_designated_target.py et test_analyzer_hail_of_bolts.py.
+#:
+#:  12 — toute SUPPRESSION (Primitive F, Indiscriminate Detonations) laisse une ligne
+#:       « Unit N(c,r) SUPPRESSES Unit M(c,r) [SUPPRESSED→M] » a la fin de l activation de tir
+#:       qui l a causee — et depuis le 2026-09-18 la supprimee est une escouade TOUCHEE par ces
+#:       attaques, choisie par le joueur (decision `suppress_target` si plusieurs). Sur un journal
+#:       log_grammar>=12, une unite vue `[SUPPRESSED]` sans ligne SUPPRESSES ni tir qui l ait
+#:       touchee depuis la derniere phase de commandement du suppresseur est une FAUTE
+#:       (`suppression_without_hit`), jamais un vieux format. Verrou :
+#:       test_primitive_f_unit_state_effects.py (producteur), test_analyzer_suppression.py (lecteur).
+#:
+#:  13 — tout Da Jump JETE (WeirdBoy) laisse « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] »
+#:       avant son effet : sur REPOSITIONED l escouade est hors table jusqu a sa ligne d ingress
+#:       de la MEME phase (chaque socle a plus de 8" de tout ennemi, zone adverse comprise, des le
+#:       round 1) ; sur MISCAST une ligne « SUFFERS n Mortal Wounds [DA JUMP] Trigger:1 MW:n » sur
+#:       la meme escouade (n <= 6, source PSYCHIC). Sur un journal log_grammar>=13, un ingress au
+#:       round 1 sans DA JUMP REPOSITIONED est une faute (`reserves_too_early`), un ingress a 8"
+#:       ou moins d un ennemi apres Da Jump aussi (`da_jump_invalid`). Verrous :
+#:       test_da_jump.py (producteur), test_analyzer_da_jump.py (lecteur).
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 10
+LOG_GRAMMAR_VERSION = 13
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1292,6 +1319,12 @@ class StepLogger:
             _shoot_type = details.get("shoot_type")
             if _shoot_type is not None:
                 shot_tags.append(f"[SHOOT_TYPE:{_shoot_type}]")
+            # Grammaire 11 — [DESIGNATED:<id>] : l escouade ennemie DESIGNEE au demarrage de
+            # l activation (Hail of Bolts / Overlapping Detonations : « that targeted that
+            # selected unit »). Constante d activation, portee par TOUTES ses lignes de tir.
+            _designated = details.get("designated_target_id")
+            if _designated is not None:
+                shot_tags.append(f"[DESIGNATED:{_designated}]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"
@@ -1751,6 +1784,27 @@ class StepLogger:
             result = "SHOCKED" if shocked else "OK"
             return f"Unit {unit_with_coords} BATTLE-SHOCK Roll:2D6={roll_val} vs Ld{ld_val}+ → {result}"
 
+        elif action_type == "da_jump":
+            # Da Jump (WeirdBoy), grammaire 13 : « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] ».
+            # Sur REPOSITIONED, l escouade quitte la table (20.02) et sa ligne d ingress suit dans
+            # la meme phase ; sur MISCAST (le 1), sa ligne SUFFERS [DA JUMP] suit. « MISCAST » et
+            # non « FAILED » : `[FAILED]` est le token de STATUT de toute ligne, et le lecteur
+            # (`analyzer_core`, regex de ligne d action) le prendrait pour la fin du message.
+            roll = int(require_key(details, "da_jump_roll"))
+            outcome = str(require_key(details, "da_jump_outcome"))
+            if outcome not in ("REPOSITIONED", "MISCAST"):
+                raise ValueError(f"da_jump: issue inconnue {outcome!r}")
+            return f"{unit_label} DA JUMP (D6={roll}) [{outcome}]"
+
+        elif action_type == "suppress_target":
+            # Primitive F (Indiscriminate Detonations), grammaire 12 : « Unit N(c,r) SUPPRESSES
+            # Unit M(c,r) [SUPPRESSED→M] » — l escouade TOUCHEE que le tireur a choisi de
+            # supprimer, a la fin de son activation de tir.
+            target_id = require_key(details, "target_id")
+            target_coords = details.get("target_coords")
+            target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+            return f"{unit_label} SUPPRESSES Unit {target_id}{target_coords_str} [SUPPRESSED→{target_id}]"
+
         elif action_type == "waaagh_call":
             # L25 — 08.04 : déclaration Waaagh! par le joueur Orks.
             # `unit_id` = "P<n>" (pas une unité de jeu — décision d'armée).
@@ -1798,6 +1852,16 @@ class StepLogger:
             if not isinstance(selected_rule_name, str) or not selected_rule_name.strip():
                 raise KeyError("Rule_choice action missing required selected_rule_name")
             return f"{unit_label} chose [{selected_rule_name.strip().upper()}]"
+
+        elif action_type == "ability_call":
+            # Appel de capacite (`engine/ability_calls.py`) : « Unit N(c,r) ABILITY CALL <Nom>
+            # [USED|DECLINED] ». La ligne DECLINED existe pour que l analyzer distingue « pas
+            # propose » de « refuse » ; l effet lui-meme laisse sa propre ligne (RETURNED, DA JUMP…).
+            ability_name = require_key(details, "ability_name")
+            if not isinstance(ability_name, str) or not ability_name.strip():
+                raise KeyError("ability_call action missing required ability_name")
+            verdict = "USED" if bool(require_key(details, "ability_used")) else "DECLINED"
+            return f"{unit_label} ABILITY CALL {ability_name.strip()} [{verdict}]"
             
         elif action_type in ("pile_in", "overrun_pile_in", "consolidation") and details:
             # Déplacements de la phase fight (12.02 pile-in / 12.06 overrun / 12.07 consolidation),

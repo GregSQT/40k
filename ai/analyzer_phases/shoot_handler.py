@@ -483,6 +483,11 @@ def handle_shoot(
         from ai.analyzer_hit import check_hit_result, check_indirect_fire_rule
         check_hit_result(state, stats, line, action_desc, player, is_melee=False)
         check_indirect_fire_rule(state, stats, line, action_desc, player)
+        # Primitive F : relevé de la TOUCHE (ce contre quoi une suppression est jugée) et
+        # cohérence du malus [SUPPRESSED] du tireur. Cf. ai/analyzer_suppression.py.
+        from ai import analyzer_suppression as _suppression
+        _suppression.record_shot(state, player, shooter_id, target_id, action_desc)
+        _suppression.check_attack_malus(state, stats, line, action_desc, shooter_id, player)
         # §22.05 PLUNGING FIRE : présence du token [PLUNGING FIRE] dans le segment Hit.
         if "[PLUNGING FIRE]" in action_desc:
             note_rule_usage(stats, "22.05", player)
@@ -815,19 +820,32 @@ def handle_shoot(
                 # est le symétrique exact de ce que fait additive_rule_extra_dice pour [BLAST].
                 rapid_fire_cap = rapid_fire_value_squad if rapid_fire_match else 0
                 # `weapon_attacks_bonus_vs_designated_target` (Hail of Bolts) : +N A par figurine
-                # pour l'arme, INCONDITIONNEL. « Cible désignée » = la cible déclarée du tir, PAS
-                # l'Oath of Moment : le moteur le dit explicitement et n'applique aucun filtre
-                # (`shared_utils.py` — « la cible de l intent EST la cible designee »). Gater ce
-                # bonus sur `oath_target` faisait tomber le plafond sous le nombre de tirs légitimes
-                # dès qu'une escouade répartissait son tir sur une seconde cible.
+                # pour l'arme, « that targeted THAT selected unit ». La désignée est UNE escouade
+                # par activation, écrite `[DESIGNATED:<id>]` sur chaque ligne de tir depuis la
+                # grammaire 11 (cible prioritaire en gym, première déclarée au siège humain). Le
+                # plafond bonifié ne vaut que pour les tirs dont la cible EST la désignée ; un tir
+                # bonifié ailleurs sort en `shoot_over_rng_nb`. Journal antérieur : token absent,
+                # abstention — plafond bonifié sur toute cible (l'ancien moteur le faisait), jamais
+                # une faute inventée. Ce n'est PAS l'Oath of Moment : gater sur `oath_target` faisait
+                # tomber le plafond sous les tirs légitimes dès qu'une escouade répartissait son tir.
                 _shooter_living = state.current_line_models.get(shooter_id)  # get allowed
                 _living_mids_set = set(_shooter_living) if _shooter_living is not None else None
+                _designated_match = re.search(r'\[DESIGNATED:(\d+)\]', action_desc)
+                if state.log_grammar >= 11 and _designated_match is None:
+                    raise ValueError(
+                        f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — "
+                        f"ligne SHOT sans `[DESIGNATED:<id>]`, que cette grammaire garantit : "
+                        f"{line.strip()!r}"
+                    )
+                _target_is_designated = (
+                    _designated_match is None or _designated_match.group(1) == str(target_id)
+                )
                 atk_bonus_squad = unit_ability_attack_cap(
                     shooter_models, state.model_types, shooter_id, shooter_unit_type,
                     weapon_name_for_limits, config.unit_attack_limits,
                     "atk_bonus_by_weapon", n_shooter_models,
                     living_mids=_living_mids_set,
-                )
+                ) if _target_is_designated else 0
                 # Primitive B — mots-clés et type de la cible, nécessaires aux deux contrôles ci-dessous.
                 # `.get()` sur `unit_types` : la cible peut ne pas encore avoir été vue (rare) ;
                 # dans ce cas bénéfice du doute accordé au moteur pour les deux bonus (pas de faux positif) :
@@ -849,13 +867,14 @@ def handle_shoot(
                     _tgt_upper_kws, n_shooter_models, living_mids=_living_mids_set,
                 )
                 # `grant_weapon_rule_vs_designated_target` (Overlapping Detonations) :
-                # +target_size//5 A par figurine tirante, seulement vs non-MONSTER/VEHICLE.
+                # +target_size//5 A par figurine tirante, seulement vs non-MONSTER/VEHICLE et,
+                # comme Hail of Bolts, seulement si la cible est la DÉSIGNÉE de l'activation.
                 od_bonus = unit_blast_per5_nonmv_bonus(
                     shooter_models, state.model_types, shooter_id, shooter_unit_type,
                     weapon_name_for_limits, config.unit_attack_limits,
                     _tgt_is_nonmv, frozen_target.models_alive, n_shooter_models,
                     living_mids=_living_mids_set,
-                )
+                ) if _target_is_designated else 0
                 max_allowed_shots = (
                     rng_nb_squad + blast_dice + rapid_fire_cap
                     + atk_bonus_squad + dakkablitz_bonus + od_bonus
