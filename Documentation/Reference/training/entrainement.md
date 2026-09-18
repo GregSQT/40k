@@ -21,7 +21,8 @@
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
 >   unité — la mienne, mes alliées, les ennemies — porte le même schéma et passe par le même
->   encodeur), plus une grille égocentrique 9×32×32. Détail :
+>   encodeur), plus une grille égocentrique 12×32×32 (`GRID_CHANNELS` / `GRID_SIZE`,
+>   [`engine/spatial_grid.py`](../../../engine/spatial_grid.py)). Détail :
 >   [observation_et_actions.md](observation_et_actions.md) — qui ne décrit QUE le pipeline actuel depuis le
 >   2026-07-28 (le vecteur plat mono-figurine est archivé dans
 >   [AI_OBSERVATION_Legacy.md](../../Archives/docs/AI_OBSERVATION_Legacy.md)).

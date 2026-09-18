@@ -753,7 +753,7 @@ D ennemis, E escouades amies). Ces blocs ont été matérialisés en **clés de 
 | **E** — escouades amies | `allies_[1..K-1]` | les alliés sont **agrégés** par le réseau, leur ordre n'a pas de sémantique |
 | *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, seul bloc mémoïsé |
 | *(transverse)* règles d'unité | `*_ability_ids` (8 slots d'`obs_id`) | sur **toute** entité, amie comme ennemie ; ids lus par embedding, ajouter une capacité coûte **zéro scalaire** |
-| *(transverse)* terrain perçu | `grid` | **11** canaux égocentriques 32×32 |
+| *(transverse)* terrain perçu | `grid` | **12** canaux égocentriques 32×32 (`GRID_CHANNELS`) |
 
 ⚠️ Deux blocs sont **transverses** : les profils d'armes et les règles d'unité vivent DANS chaque
 entité par construction du schéma unifié. Chercher un « bloc armes » ou un « bloc règles » séparé
@@ -1036,9 +1036,10 @@ absents. L'agent ne percevait pas le terrain sur lequel il évoluait.
 ### Décision : obs spatiale égocentrique + tête spatiale
 
 **Observation** : ajout d'une **grille locale égocentrique 32×32** autour de l'escouade active,
-avec **11 canaux** : murs/obstacles, occupation alliée, occupation ennemie, zone d'engagement,
+avec **12 canaux** : murs/obstacles, occupation alliée, occupation ennemie, zone d'engagement,
 objectifs, niveau, couvert, escouade active seule (T-L), coût géodésique du pool de move (T-K),
-zones denses (hidden possible, 13.09) et exposition à la vue ennemie.
+zones denses (hidden possible, 13.09), exposition à la vue ennemie et niveau de l'occupant
+(`occupant_level`, verticalité 13.06, 2026-09-09).
 
 La demi-étendue de la grille = budget Advance **MAXIMAL** (`M + 6" × inches_to_subhex`), et **non**
 le budget du jet effectivement tiré. La géométrie de la grille doit être **identique entre l'obs,
