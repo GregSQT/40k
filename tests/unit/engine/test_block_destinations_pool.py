@@ -51,15 +51,15 @@ MOVE_BUDGET = 3
 
 
 def _move_state() -> Dict[str, Any]:
+    # UNIT_KEYWORDS : `create_unit` / `_build_enhanced_unit` le posent sur toute unité de roster
+    # (require_key sur la config), et le pool par-figurine lit désormais la capacité 13.06
+    # (`_squad_can_end_move_elevated`) avant même de savoir si un étage est en jeu. Escouade
+    # d'infanterie : sans étage ni terrain ici, le verdict n'entre pas dans le résultat.
     gs = synthetic_state(
         [
-            # 13.06 : le pool demande à l'escouade si elle PEUT finir en hauteur (mot-clé), même sans
-            # terrain — une unité de roster porte toujours ses mots-clés.
-            synthetic_unit(
-                "S", 1, [{"col": c, "row": r} for c, r in (S0, S1, S2)],
-                MOVE=MOVE_BUDGET, UNIT_KEYWORDS=[{"keywordId": "INFANTRY"}],
-            ),
-            synthetic_unit("E", 2, [{"col": 30, "row": 30}], UNIT_KEYWORDS=[{"keywordId": "INFANTRY"}]),
+            synthetic_unit("S", 1, [{"col": c, "row": r} for c, r in (S0, S1, S2)], MOVE=MOVE_BUDGET,
+                           UNIT_KEYWORDS=[{"keywordId": "INFANTRY"}]),
+            synthetic_unit("E", 2, [{"col": 30, "row": 30}]),
         ],
         phase="move",
         game_rules={},

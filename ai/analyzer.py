@@ -443,11 +443,20 @@ def _apply_damage_and_handle_death(
         `T{n} STATE:` — minorant, l'instantané recalant tout à chaque tour."""
     if damage <= 0:
         return
-    # DEAD-before-FIGHT : le moteur journalise DEAD avant la ou les lignes d'attaque létales.
+    # DEAD-before-FIGHT/SHOT : le moteur journalise DEAD avant la ou les lignes d'attaque létales.
     # Le DEAD handler a déjà mis unit_hp[target_id] = 0 (clé présente). Les blessures qui
     # suivent sont des « excess wounds lost » ; les appliquer déclencherait _sync_front_hp_mirror
     # et restaurerait unit_hp à une valeur positive — faussant les snapshots des tours suivants.
+    # Quand la ligne porte un [ALLOC_MODEL:] nommé, on retire ce socle de unit_model_hp pour que
+    # _non_character_alive lise un état cohérent à la fermeture du lot : sans ça, les bodyguards
+    # déjà abattus par leurs DEAD comptent encore et déclenchent un faux positif 05.03.
+    # La comptabilité de mort (unit_deaths, unit_kill_context, current_episode_deaths) n'est pas
+    # refaite ici — le handler DEAD l'a déjà écrite.
     if target_id in unit_hp and unit_hp[target_id] <= 0:
+        if alloc_model_id is not None:
+            _per = unit_model_hp.get(target_id)
+            if _per is not None:
+                _per.pop(alloc_model_id, None)
         return
     # Occasion jugée : des dégâts non nuls vont être appliqués et la présence de l'unité dans
     # l'état reconstruit va être confrontée. Les deux sorties au-dessus (dégâts nuls, garde

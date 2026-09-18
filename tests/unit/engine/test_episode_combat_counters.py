@@ -35,7 +35,9 @@ import pytest
 
 from ai.metrics_tracker import W40KMetricsTracker
 from engine.observation_builder import ObservationBuilder
-from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
+from engine.phase_handlers.shared_utils import (
+    SQUAD_ACTION_WAIT, mortal_wound_log_hp_lost, roll_hazard_for_unit,
+)
 from engine.reward_calculator import RewardCalculator
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import charge_log_line
@@ -553,30 +555,9 @@ def _hp_lost_by_player(engine: W40KEngine) -> Dict[int, int]:
     return lost
 
 
-def _self_inflicted_by_player(engine: W40KEngine) -> Dict[int, int]:
-    """Blessures mortelles qu'un camp s'inflige A LUI-MEME, lues sur les lignes ``hazard``.
-
-    Desperate Escape (09.04) et [HAZARDOUS] (24.15) blessent la propre unite du joueur : ces PV
-    quittent le plateau sans qu'aucune ligne ``shoot``/``combat`` adverse ne les porte, donc
-    ``damage_dealt`` ne doit PAS les compter. Une blessure sauvee par FNP (``fnpSaved``) n'a
-    retire aucun PV. Ce montage n'a ni Deadly Demise ni source de blessure mortelle adverse :
-    toute ligne ``hazard`` y est auto-infligee.
-    """
-    inflicted = {1: 0, 2: 0}
-    for log in engine.game_state["action_logs"]:
-        if log.get("type") != "hazard":
-            continue
-        inflicted[int(log["player"])] += sum(
-            1 for rec in log["hazardDetails"] if not rec.get("fnpSaved", False)
-        )
-    return inflicted
-
-
-# Graines choisies pour couvrir les trois formes de l'egalite (mesure du 2026-09-18) : 7 et 11
-# — l'adversaire n'inflige RIEN (``damage_received`` doit tenir a zero) ; 23 et 39 — l'adversaire
-# se blesse lui-meme en Desperate Escape (la soustraction des blessures auto-infligees est
-# reellement exercee, sinon elle passerait au vert sans rien prouver) ; 28 — degats dans les
-# deux sens, sans hasard.
+# 28 et 39 sont des graines PACIFIQUES : le camp controle n'y inflige aucun degat. Elles sont
+# incluses expres — l'egalite doit tenir a zero aussi, et c'est ce qui rend ces tests immunises
+# aux correctifs de regles qui changent la partie produite par une graine.
 _EPISODE_SEEDS = [7, 11, 23, 28, 39]
 
 
@@ -586,26 +567,13 @@ def test_damage_dealt_matches_the_hp_the_opponent_actually_lost(seed: int) -> No
 
     C'est ce controle qui separe un compteur juste d'un compteur qui compte n'importe quoi :
     il relie le journal a l'etat reel du plateau, et non le journal a lui-meme. Il n'exige
-    aucun combat — a zero partout, l'egalite tient et le controle reste valide. Les PV qu'un
-    camp se retire lui-meme (Desperate Escape) sont perdus sur le plateau sans avoir ete
-    infliges par l'autre camp : ils se lisent sur les lignes ``hazard`` et sortent de l'egalite.
+    aucun combat — a zero partout, l'egalite tient et le controle reste valide.
     """
     engine, tactical = _random_episode(seed, controlled_player=1)
     hp_lost = _hp_lost_by_player(engine)
-    self_inflicted = _self_inflicted_by_player(engine)
 
-    assert tactical["damage_dealt"] == hp_lost[2] - self_inflicted[2]
-    assert tactical["damage_received"] == hp_lost[1] - self_inflicted[1]
-
-
-def test_the_seed_sample_exercises_self_inflicted_wounds() -> None:
-    """VERT VACANT : la soustraction des blessures auto-infligees doit etre atteinte par au moins
-    une graine de l'echantillon — sinon le test precedent ne prouve rien de plus que l'ancienne
-    egalite, et un compteur qui ajouterait ces blessures a ``damage_dealt`` passerait."""
-    assert any(
-        sum(_self_inflicted_by_player(_random_episode(seed, controlled_player=1)[0]).values()) > 0
-        for seed in _EPISODE_SEEDS
-    ), "aucune graine ne produit de blessure mortelle auto-infligee : la soustraction n'est jamais exercee"
+    assert tactical["damage_dealt"] == hp_lost[2]
+    assert tactical["damage_received"] == hp_lost[1]
 
 
 @pytest.mark.parametrize("controlled_player", [1, 2])
@@ -616,11 +584,63 @@ def test_counters_follow_the_controlled_seat(controlled_player: int) -> None:
     """
     engine, tactical = _random_episode(seed=5, controlled_player=controlled_player)
     hp_lost = _hp_lost_by_player(engine)
-    self_inflicted = _self_inflicted_by_player(engine)
     opponent = 2 if controlled_player == 1 else 1
 
-    assert tactical["damage_dealt"] == hp_lost[opponent] - self_inflicted[opponent]
-    assert tactical["damage_received"] == hp_lost[controlled_player] - self_inflicted[controlled_player]
+    assert tactical["damage_dealt"] == hp_lost[opponent]
+    assert tactical["damage_received"] == hp_lost[controlled_player]
+
+
+@pytest.mark.parametrize("controlled_player", [1, 2])
+def test_mortal_wounds_outside_the_attack_chain_count_as_attrition(
+    monkeypatch: pytest.MonkeyPatch, controlled_player: int,
+) -> None:
+    """Un hazard (06.03) retire des PV sans ligne ``shoot``/``combat`` : l'attrition doit le voir.
+
+    Depuis que le mode de fall-back se CHOISIT (09.07, commit acaab98ab), un episode d'actions
+    legales au hasard joue couramment un Desperate Escape, dont le jet rate retire 1 PV a la
+    victime. ``damage_dealt`` ne lisait que le ``damage`` des lignes d'attaque : il restait en
+    retard de 1 PV sur le plateau. Le montage joue le jet REEL (``roll_hazard_for_unit``, de
+    epingle sur 1 = echec, 1 figurine = 1 blessure mortelle) sur une unite de CHAQUE camp, pour
+    verifier les deux colonnes et le siege ; le de sur 1 fait aussi rater toute attaque, donc
+    ces deux blessures sont la seule attrition de l'episode.
+    """
+    _pinned_die(monkeypatch, 1)
+    opponent = 2 if controlled_player == 1 else 1
+    engine = _build(_config(_melee_units(controlled_player), controlled_player))
+    victim_by_player = {1: "1", 2: "3"}
+    assert roll_hazard_for_unit(victim_by_player[opponent], engine.game_state, True) == 1
+    assert roll_hazard_for_unit(victim_by_player[controlled_player], engine.game_state, True) == 1
+    tactical = _run_to_end(engine, _POLICIES["first"])
+    hp_lost = _hp_lost_by_player(engine)
+
+    # Non vacant : chaque camp a perdu AU MOINS le PV de son jet, lu sur le plateau (la
+    # politique peut y ajouter d'autres fall-backs en Desperate Escape, tous rates sur 1)...
+    assert hp_lost[opponent] >= 1
+    assert hp_lost[controlled_player] >= 1
+    # ...et AUCUNE ligne d'attaque n'a porte de degat : toute l'attrition vient des blessures
+    # mortelles, donc ces deux egalites ne tiennent que si le compteur les lit.
+    for player in (1, 2):
+        assert _damage_of(engine, "shoot", player) + _damage_of(engine, "combat", player) == 0
+    assert tactical["damage_dealt"] == hp_lost[opponent]
+    assert tactical["damage_received"] == hp_lost[controlled_player]
+
+
+def test_mortal_wound_log_hp_lost_reads_the_victim_not_the_line_player() -> None:
+    """Sur ``deadly_demise`` et ``charge_impact``, ``player`` est le proprietaire de la SOURCE :
+    la victime vient de la cle d'unite de la ligne, et une blessure sauvee par FNP ne coute rien.
+    """
+    game_state = {"unit_by_id": {"3": {"id": 3, "player": 2}, "1": {"id": 1, "player": 1}}}
+    hit = {"modelId": "3_0", "col": 1, "row": 1, "died": False}
+    saved = {"modelId": "3_0", "col": 1, "row": 1, "died": False, "fnpSaved": True}
+    assert mortal_wound_log_hp_lost(game_state, {
+        "type": "deadly_demise", "unitId": "3", "player": 1,
+        "deadlyDemiseDetails": [hit, saved, hit],
+    }) == (2, 2)
+    assert mortal_wound_log_hp_lost(game_state, {
+        "type": "charge_impact", "unitId": "3", "targetId": "1", "player": 2,
+        "chargeImpactDetails": [hit],
+    }) == (1, 1)
+    assert mortal_wound_log_hp_lost(game_state, {"type": "move", "unitId": "3"}) is None
 
 
 @pytest.mark.parametrize("seed", _EPISODE_SEEDS)
