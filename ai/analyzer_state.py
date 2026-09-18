@@ -63,24 +63,25 @@ AllocCharacterKey = Tuple[int, int, str, str, str, str, Tuple[str, str, str]]
 @dataclass(frozen=True)
 class AllocCharacterCandidate:
     """Une ligne du lot allouée à un CHARACTER, en attente du verdict de fin de lot (05.03 /
-    06.02 / 24.28). La clé du run est capturée à la ligne : le verdict tombe plus tard, et un
-    journal peut enchaîner des runs aux règles différentes."""
+    06.02 / 24.28)."""
     line: str
     action_desc: str
-    precision_mw_to_character: Optional[bool]
 
 
 @dataclass
 class AllocCharacterGroup:
     """Le lot d'attaques en cours de lecture, côté allocation CHARACTER (`analyzer_core.
-    _judge_character_allocation`). Mutable : il se remplit ligne à ligne.
+    _note_character_allocation_in_lot`). Mutable : il se remplit ligne à ligne.
 
-    `non_character_alive` est recalculé APRÈS les dégâts de chaque ligne du lot : à la fermeture
-    du lot il vaut « un bodyguard de la cible est encore vivant à la FIN du lot », quel que soit
-    le moment où le verdict est rendu."""
+    `is_char` : CHARACTER ou non, par figurine de la cible, résolu UNE fois à l'ouverture du lot
+    (la cible est dans la clé ; une figurine ne change pas de rôle). `non_character_alive` est
+    recalculé APRÈS les dégâts de chaque ligne du lot : à la fermeture du lot il vaut « un
+    bodyguard de la cible est encore vivant à la FIN du lot », quel que soit le moment où le
+    verdict est rendu."""
     key: AllocCharacterKey
     player: int
     bucket: str
+    is_char: Dict[str, bool]
     candidates: List[AllocCharacterCandidate] = field(default_factory=list)
     non_character_alive: bool = True
 

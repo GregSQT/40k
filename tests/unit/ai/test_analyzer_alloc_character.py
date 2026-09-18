@@ -116,7 +116,7 @@ def test_line_inflicts_mortal_wound():
     assert not line_inflicts_mortal_wound("... - Save 2(3+) - Dmg:1HP")
 
 
-# ─── à travers le journal (analyzer_core._judge_character_allocation) ────────────────────────
+# ─── à travers le journal (analyzer_core._note_character_allocation_in_lot → _flush) ────────
 
 def test_bodyguard_alloue_en_premier_aucune_erreur(tmp_path):
     """Ordre légal : les deux Intercessors tombent, puis l'Ancient encaisse."""
@@ -226,7 +226,8 @@ def test_deux_combats_de_la_meme_paire_dans_le_meme_round_sont_deux_lots(tmp_pat
     """Même clé (épisode, tour, phase, attaquant, cible, arme, seuils) pour les deux combats de
     l'unité 1 sur l'unité 102 dans le round 1 ; entre les deux, l'unité 102 riposte (une AUTRE
     unité agit) : le premier lot se ferme là, sa faute reste comptée même si le second lot tue
-    les bodyguards."""
+    les bodyguards. Le même corps SANS la riposte est un seul lot et ne compte rien :
+    `test_melee_ligne_du_character_avant_celles_des_bodyguards_aucune_erreur`."""
     body = (
         _fought("102#2")                                        # lot 1 : faute
         + _riposte_102()                                        # frontière d'activation
@@ -235,10 +236,3 @@ def test_deux_combats_de_la_meme_paire_dans_le_meme_round_sont_deux_lots(tmp_pat
     )
     stats = _stats(tmp_path, body)
     assert _errors(stats, "fight") == 1
-    # Sans la frontière, les deux combats fusionnent et la faute du premier disparaît :
-    # c'est le comportement que ce test verrouille en le distinguant du cas contigu.
-    stats_contigu = _stats(
-        tmp_path,
-        _fought("102#2") + _fought("102#0") + _fought("102#0") + _fought("102#1") + _fought("102#1"),
-    )
-    assert _errors(stats_contigu, "fight") == 0
