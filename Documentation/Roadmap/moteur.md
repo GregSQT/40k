@@ -301,7 +301,7 @@ Suite 141 (2026-09-18) : fin de tir d'escouade par la fin d'activation de DATASH
 
 Suite 142 (2026-09-18) : descente 13.06 facturée au sol en métrique HEX sur le chemin par-figurine PvP (branche `_floor_start` hex : BFS amputé de la hauteur du plancher, étage vu par `ascent_field_for_model`, cases d'étage = celles que le commit résout) ; verrou FLY 21.03 (M − 2, sans descente). Détail suite 142.
 
-Suite 145 (2026-09-18) : split-fire gym aligné sur 24.07 par figurine — déclaration immédiate à chaque cible et `def purge_undeclarable_from_remaining` (le masque n'offre plus une arme que le commit refuse) ; attrition de fin d'épisode alimentée par les blessures mortelles hors chaîne d'attaque (`def mortal_wound_log_hp_lost`) ; départage des destinations de charge dans la métrique du verdict de coherency (`def coherency_euclidean_gap`) ; distance de charge journalisée non arrondie. Détail suite 145.
+Suite 147 (2026-09-18) : attrition de fin d'épisode alimentée par les blessures mortelles hors chaîne d'attaque (`def mortal_wound_log_hp_lost`) ; départage des destinations de charge dans la métrique du verdict de coherency (`def coherency_euclidean_gap`) ; distance de charge journalisée non arrondie. Détail suite 147 (le split-fire 24.07 est la suite 146).
 
 ---
 

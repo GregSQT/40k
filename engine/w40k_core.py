@@ -28,6 +28,7 @@ from engine.constants import (
     PENDING_SHOOT_ALLOCATION_KEY,
     PENDING_HAZARD_ALLOCATION_KEY,
     PENDING_HAZARD_RESUME_RESULT_KEY,
+    PENDING_GYM_FALL_BACK_RESUME_KEY,
     MORTAL_WOUND_QUEUE_KEY,
 )
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
@@ -95,6 +96,21 @@ from engine.phase_handlers.shared_utils import (
 #: y est, aucune action de politique ne passe (`_process_squad_action`). Tuple de module : le garde
 #: est sur le chemin chaud du gym, il ne le reconstruit pas a chaque step.
 _PENDING_ALLOC_CTXS = (HAZARD_CTX, SHOOT_CTX, FIGHT_CTX)
+
+#: Actions du client qui repondent a une attente HAZARD (confirmation du Desperate Escape 09.07,
+#: declaration d'ordre et clic figurine de l'attribution 06.02). Routees par
+#: `_process_semantic_action` au rang des handlers de phase, jamais en `return` anticipe : leur
+#: resultat est celui de l'activation reprise, qui peut completer une phase.
+_HAZARD_ACTIONS = ("hazard_confirm", "squad_hazard_declare_order", "squad_hazard_allocate_model")
+
+#: Actions hors phase dont le RESULTAT peut porter une transition (`phase_complete` +
+#: `next_phase`) et qui doivent donc atteindre la cascade de `_process_semantic_action` : les
+#: reponses hazard ci-dessus (l activation reprise peut completer sa phase) et la designation de
+#: retrait pour coherence 03.03 (la derniere designation rend la progression joueur/tour).
+#: Rendues avant la cascade, ces transitions etaient annoncees au client sans etre executees :
+#: phase de charge figee pool vide, ou progression jouee une seconde fois par l `advance_phase`
+#: de rattrapage du client (joueur courant bascule deux fois).
+_CASCADED_OUT_OF_PHASE_ACTIONS = (*_HAZARD_ACTIONS, "select_coherency_removal")
 
 #: Borne de la chaine d'attentes forcees auto-jouees d'affilee (cf. `step_with_mask`). Ce n'est PAS
 #: un reglage de jeu : la chaine se draine seule, chaque attente retirant une escouade de son pool.
@@ -1778,6 +1794,7 @@ class W40KEngine(gym.Env):
         self.game_state.pop("hazard_origin", None)
         self.game_state.pop("hazard_origin_unit", None)
         self.game_state.pop(PENDING_HAZARD_RESUME_RESULT_KEY, None)
+        self.game_state.pop(PENDING_GYM_FALL_BACK_RESUME_KEY, None)
         self.game_state.pop(MORTAL_WOUND_QUEUE_KEY, None)
         self.game_state.pop("_pending_exhortation_resume", None)
         self.game_state.pop("_pending_exhortation_fight", None)
@@ -5739,6 +5756,26 @@ class W40KEngine(gym.Env):
         return self._resume_after_hazard(uid)
 
 
+    def _process_out_of_phase_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Dispatch des actions hors phase (`_CASCADED_OUT_OF_PHASE_ACTIONS`) depuis la chaine
+        des handlers de `_process_semantic_action` : le resultat rejoint la cascade de phases
+        comme celui de n importe quelle action de phase."""
+        name = action.get("action")
+        if name == "select_coherency_removal":
+            # Retrait pour coherence (P3-0, 03.03) : le moteur est arrete entre la fin de fight
+            # et la progression joueur.
+            return self._handle_select_coherency_removal(action)
+        if name == "hazard_confirm":
+            # Desperate Escape (09.07) : le joueur a valide le popup hazard affiche a l activation.
+            # Hazard (06.03) + attribution des mortal wounds (06.02) AVANT de bouger, puis reprise
+            # du move preview (Fall Back) ou fin d activation si l unite meurt.
+            return self._handle_hazard_confirm(action)
+        if name == "squad_hazard_declare_order":
+            return self._handle_hazard_declare_order(action)
+        if name == "squad_hazard_allocate_model":
+            return self._handle_hazard_allocate_model(action)
+        raise ValueError(f"_process_out_of_phase_action: action inconnue {name!r}")
+
     def _resume_after_hazard(self, uid: str) -> Tuple[bool, Dict[str, Any]]:
         """Reprise du flux après attribution du hazard, selon l'ORIGINE du jet.
 
@@ -5813,6 +5850,7 @@ class W40KEngine(gym.Env):
                 )
             return True, charge_result
         if not is_unit_alive(sid, self.game_state):
+            self.game_state.pop(PENDING_GYM_FALL_BACK_RESUME_KEY, None)
             clear_desperate_escape_state(self.game_state, sid)
             _mh._invalidate_all_destination_pools_after_movement(self.game_state)
             _mh.movement_clear_preview(self.game_state)
@@ -5822,6 +5860,12 @@ class W40KEngine(gym.Env):
                 "activation_complete": True,
                 "waiting_for_player": False,
             }
+        # Pipeline squad (bot PvE) : le fall back suspendu par l attribution d une explosion
+        # est rejoue tel que le siege l avait decide — la branche `squad_fall_back` de
+        # `_process_squad_action` lit la reprise et saute le hazard, deja fait.
+        squad_resume = self.game_state.get(PENDING_GYM_FALL_BACK_RESUME_KEY)  # get allowed : absent hors pipeline squad
+        if squad_resume is not None:
+            return self._process_squad_action(dict(require_key(squad_resume, "semantic")))
         # Hazard résolu, unité vivante → on (re)pose l'unité active + le pool Fall Back. Côté
         # front, ce payload est identique à une activation engagée normale → le flux move preview
         # (ghost + Valider) reprend exactement comme pour une unité non hazardée.
@@ -5898,10 +5942,9 @@ class W40KEngine(gym.Env):
         # choix de joueur qui précède l'activation, aucune action de phase n'a de sens avant.
         if action.get("action") == "select_activation":
             return self._handle_select_activation_action(action)
-        # Désignation de retrait pour cohérence (P3-0, 03.03) : MÊME rang — le moteur est
-        # arrêté entre la fin de fight et la progression joueur.
-        if action.get("action") == "select_coherency_removal":
-            return self._handle_select_coherency_removal(action)
+        # Désignation de retrait pour cohérence (P3-0, 03.03) : routée PLUS BAS, au rang des
+        # handlers de phase — la dernière désignation déclenche la progression joueur/tour, dont
+        # la transition doit traverser la cascade (voir `_CASCADED_OUT_OF_PHASE_ACTIONS`).
 
         blocked = self._reject_action_while_faction_decision_pending(action)
         if blocked is not None:
@@ -5955,19 +5998,9 @@ class W40KEngine(gym.Env):
         ):
             return True, manual_allocation_waiting_payload(self.game_state, HAZARD_CTX)
 
-        # Desperate Escape (09.07) : le joueur a validé le popup hazard affiché à l'activation.
-        # On résout le hazard (06.03) + l'attribution des mortal wounds (06.02) AVANT de bouger,
-        # puis on reprend le move preview (Fall Back) ou on termine l'activation si l'unité meurt.
-        if action.get("action") == "hazard_confirm":
-            return self._handle_hazard_confirm(action)
-
-        # Declaration de l'ordre des groupes pour l'attribution des mortal wounds (hazard).
-        if action.get("action") == "squad_hazard_declare_order":
-            return self._handle_hazard_declare_order(action)
-
-        # Clic figurine pour l'attribution manuelle des mortal wounds (hazard).
-        if action.get("action") == "squad_hazard_allocate_model":
-            return self._handle_hazard_allocate_model(action)
+        # Les actions hazard elles-memes (`hazard_confirm`, `squad_hazard_declare_order`,
+        # `squad_hazard_allocate_model`) sont routees PLUS BAS, dans la chaine des handlers de
+        # phase : leur resultat doit traverser la cascade (voir `_CASCADED_OUT_OF_PHASE_ACTIONS`).
 
         # Block gameplay actions while an explicit choice prompt is pending.
         active_prompt = self.game_state.get("active_rule_choice_prompt")
@@ -6083,6 +6116,18 @@ class W40KEngine(gym.Env):
             # to actually execute the phase transition in game_state
             success = True
             # Fall through to cascade loop below
+
+        # Attribution des blessures mortelles (hazard, 06.02), confirmation du Desperate Escape
+        # et designation de retrait pour coherence : MEME rang que les handlers de phase, et
+        # surtout PAS un `return` anticipe. La reprise (`_resume_after_hazard`) rend le resultat
+        # de l activation GARDEE pendant l attribution — une charge qui a vide le pool porte
+        # `phase_complete`/`next_phase=fight`, une fin de tir ou de combat peut completer sa
+        # phase — et la derniere designation de coherence rend la progression joueur/tour ; seule
+        # la cascade ci-dessous execute ces transitions. Rendues avant elle, la derniere charge
+        # de la phase attribuee par un defenseur humain laissait la partie en phase `charge`,
+        # pool vide, sans `advance_phase` possible (le client n en envoie pas depuis la charge).
+        elif action.get("action") in _CASCADED_OUT_OF_PHASE_ACTIONS:
+            success, result = self._process_out_of_phase_action(action)
 
         # Route to phase handlers with detailed logging (only if not advance_phase)
         elif current_phase == "deployment":
@@ -8570,9 +8615,13 @@ class W40KEngine(gym.Env):
         if semantic.get("action") == "select_activation":
             return self._handle_select_activation_action(semantic)
 
-        # Désignation de retrait pour cohérence (P3-0, 03.03) : même rang.
-        if semantic.get("action") == "select_coherency_removal":
-            return self._handle_select_coherency_removal(semantic)
+        # Désignation de retrait pour cohérence (P3-0, 03.03) : routée dans la chaîne des
+        # actions ci-dessous — la dernière désignation rend la progression joueur/tour, et sa
+        # transition doit traverser la cascade de cette méthode. Rendue ici en `return`
+        # anticipé, la progression était jouée (joueur courant basculé) sans transition ; le
+        # `advance_phase` « pool vide » du step suivant refaisait alors la fin de phase de combat
+        # POUR L'AUTRE JOUEUR : mesuré, P1 finit son tour 1 → tour 2 de P1 directement, le tour 1
+        # de P2 n'est jamais joué. Jumeau de `_CASCADED_OUT_OF_PHASE_ACTIONS` (chemin API).
 
         blocked = self._reject_action_while_faction_decision_pending(semantic)
         if blocked is not None:
@@ -8619,6 +8668,10 @@ class W40KEngine(gym.Env):
             else:
                 from config_loader import get_config_loader
                 result = {"phase_complete": True, "next_phase": get_config_loader().next_phase_after(from_phase), "reason": "pool_empty"}
+
+        # ── retrait pour cohérence 03.03 (fin de tour) : progression via la cascade ────────
+        elif action_name == "select_coherency_removal":
+            success, result = self._handle_select_coherency_removal(semantic)
 
         # ── deployment : logique existante inchangée ──────────────────────────
         elif action_name == "deploy_unit":
@@ -8841,26 +8894,43 @@ class W40KEngine(gym.Env):
             if move_type == "fall_back":
                 from engine.phase_handlers.shared_utils import (
                     desperate_escape_pre_move, clear_desperate_escape_state,
+                    drain_mortal_wound_queue,
                 )
                 from engine.phase_handlers import movement_handlers as _mh_de
                 _anchor_before_de = (_move_from_col, _move_from_row)
-                _is_desp, _is_alive, _ = desperate_escape_pre_move(
-                    str(squad_id), self.game_state, auto_resolve=True
-                )
-                if _is_desp and not _is_alive:
-                    # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
-                    # `_resume_after_hazard` → cas `not is_unit_alive`). Une Deadly Demise de
-                    # l unite morte se sert ici ; si une VICTIME humaine doit choisir, la main lui
-                    # est rendue et la reprise (`_resume_after_hazard`, origine move) constate
-                    # la mort de l unite exactement comme ci-dessous.
-                    from engine.phase_handlers.shared_utils import drain_mortal_wound_queue
-                    self.game_state["hazard_origin"] = "move"
-                    self.game_state["hazard_origin_unit"] = str(squad_id)
-                    _dd_wait = drain_mortal_wound_queue(self.game_state)
-                    if _dd_wait is not None:
-                        return True, _dd_wait
-                    self.game_state.pop("hazard_origin", None)
-                    self.game_state.pop("hazard_origin_unit", None)
+                _de_resume = self.game_state.pop(PENDING_GYM_FALL_BACK_RESUME_KEY, None)
+                if _de_resume is not None:
+                    # Reprise apres l attribution HUMAINE d une Deadly Demise causee par le
+                    # hazard (`_resume_after_hazard`, origine move) : jets faits, file servie,
+                    # unite vivante — il reste le controle de formation et le mouvement.
+                    _is_desp = True
+                    _anchor_before_de = tuple(require_key(_de_resume, "anchor_before"))
+                else:
+                    _is_desp, _, _ = desperate_escape_pre_move(
+                        str(squad_id), self.game_state, auto_resolve=True
+                    )
+                    if _is_desp:
+                        # Deadly Demise des socles tues par le hazard : mort HORS attaque, donc
+                        # resolue ICI (25 DESTROYED), avant le mouvement — l unite elle-meme est
+                        # « within 6" » de son propre socle, et le controle de formation
+                        # ci-dessous doit voir ces pertes. Si une VICTIME humaine doit choisir,
+                        # la main lui est rendue ; la reprise constate la mort de l unite
+                        # (`desperate_escape_died`) ou rejoue ce mouvement (cle de reprise).
+                        self.game_state["hazard_origin"] = "move"
+                        self.game_state["hazard_origin_unit"] = str(squad_id)
+                        _dd_wait = drain_mortal_wound_queue(self.game_state)
+                        if _dd_wait is not None:
+                            if is_unit_alive(str(squad_id), self.game_state):
+                                self.game_state[PENDING_GYM_FALL_BACK_RESUME_KEY] = {
+                                    "semantic": dict(semantic),
+                                    "anchor_before": list(_anchor_before_de),
+                                }
+                            return True, _dd_wait
+                        self.game_state.pop("hazard_origin", None)
+                        self.game_state.pop("hazard_origin_unit", None)
+                if _is_desp and not is_unit_alive(str(squad_id), self.game_state):
+                    # Jets (ou explosion) ont détruit l'unité : fin d'activation sans déplacement
+                    # (miroir PvP `_resume_after_hazard` → cas `not is_unit_alive`).
                     clear_desperate_escape_state(self.game_state, str(squad_id))
                     _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                     _mh_de.movement_clear_preview(self.game_state)
@@ -9553,7 +9623,7 @@ class W40KEngine(gym.Env):
                 squad_shooting_type_clear,
                 get_enemy_slot_mapping,
                 build_manual_shoot_allocation,
-                purge_undeclarable_from_remaining,
+                filter_remaining_weapon_slots,
             )
 
             _pending_sw2 = self.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
@@ -9594,14 +9664,14 @@ class W40KEngine(gym.Env):
             _pending_sw2["pending_weapon"] = None
             _pending_sw2["pending_weapon_slot"] = None
 
-            # Déclaration IMMÉDIATE, dans l'ordre des choix de l'agent : les déclarations
-            # posées consomment des figurines (arme physique tirée, famille 24.07 choisie par
-            # la figurine — pistolets OU autres armes), et c'est sur ces intents que le masque
-            # calcule les cibles de l'arme suivante et les slots encore déclarables. Différer
-            # les déclarations à la fin (ancienne pré-validation sur l'état initial) offrait
-            # au masque des armes que le commit refusait ensuite (« count > figurines
-            # eligibles ») ; `squad_declare_shoot` (tir mono-cible) tranche 24.07 par figurine
-            # de la même façon, ici c'est l'ordre des choix de l'agent qui tranche.
+            # Déclaration IMMÉDIATE, lot par lot, sur l'état réel. Chaque déclaration consomme
+            # des figurines (arme physique déjà tirée ; famille 24.07 pistolet / autre choisie
+            # PAR FIGURINE) et c'est `_declare_qty_candidates` qui impose ces clauses. L'ancienne
+            # pré-validation de toutes les armes sur l'état INITIAL comptait des figurines que
+            # les déclarations précédentes avaient déjà prises (bolt_rifle sur 6 Intercessors →
+            # bolt_pistol à 0 éligible) et commettait un compte impossible. Le nombre engagé
+            # est le compte du moteur à CET instant ; `eligible_target_slots` a été calculé
+            # sur ce même état, donc > 0 est garanti.
             try:
                 _maxq = squad_shoot_weapon_qty_max(
                     self.game_state, sw2_squad_id, sw2_weapon_code, _tsid2
@@ -9614,17 +9684,21 @@ class W40KEngine(gym.Env):
                 squad_declare_shoot_weapon_qty(
                     self.game_state, sw2_squad_id, sw2_weapon_code, _maxq, _tsid2
                 )
-                purge_undeclarable_from_remaining(
-                    self.game_state, sw2_squad_id, _enemy_slots2,
-                    _pending_sw2["remaining_weapon_slots"],
-                )
             except Exception:
                 del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
                 squad_shooting_type_clear(self.game_state, sw2_squad_id)
                 raise
 
+            # Le masque du prochain choix d'arme relit le compte du moteur APRÈS cette
+            # déclaration : un slot dont plus aucune figurine ne peut tirer (arme consommée,
+            # famille 24.07 verrouillée) se ferme — masque ⊆ exécutable.
+            _pending_sw2["remaining_weapon_slots"] = filter_remaining_weapon_slots(
+                self.game_state, sw2_squad_id, _enemy_slots2,
+                _pending_sw2["remaining_weapon_slots"],
+            )
+
             if _pending_sw2["remaining_weapon_slots"]:
-                # D'autres groupes d'armes restent déclarables.
+                # D'autres groupes d'armes restent à assigner.
                 self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = _pending_sw2
                 return True, {
                     "action": "squad_shoot_split_target",
@@ -9634,7 +9708,7 @@ class W40KEngine(gym.Env):
                     "waiting_for_next_weapon_sel": True,
                 }
 
-            # Plus aucune arme déclarable → résolution.
+            # Toutes les armes déclarées → résolution.
             del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
             try:
                 squad_lock_shoot(self.game_state, sw2_squad_id)

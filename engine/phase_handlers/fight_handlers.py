@@ -1232,6 +1232,30 @@ def squad_fight_toggle_model_weapon(
     return toggle_attack_model_weapon(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, model_id, weapon_code, target_squad_id)
 
 
+def melee_attacks_characteristic_bonus(
+    game_state: Dict[str, Any], attacker_model: Dict[str, Any], attacker_unit: Dict[str, Any]
+) -> int:
+    """Bonus a la caracteristique A des armes de melee de CETTE figurine, connu a la declaration.
+
+    Deux sources, toutes deux formulees par leur regle comme une modification de la
+    caracteristique A (« add 1 to the Strength and Attacks characteristics of melee weapons ») :
+    le Waaagh! (chantier 03) et `melee_attacks_bonus_while_waaagh` (Da Biggest and da Best,
+    primitive B, lue sur les regles du MODELE seul). UNE SEULE SOURCE pour le roller
+    (`_manual_roll_fight_intent`) et pour la repartition 04.02 : le total a repartir entre
+    plusieurs cibles est la caracteristique A MODIFIEE, sinon le roller ajoutait le bonus a
+    chaque part (un choppa A4 reparti 2/2 sous Waaagh! jetait 6 attaques au lieu de 5).
+    Finest Hour (`once_per_battle_melee_buff`) reste au roller : une fois par bataille, posee
+    au premier intent resolu, elle n est pas une caracteristique connue a la declaration.
+    """
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
+
+    bonus = waaagh_melee_bonus(game_state, attacker_unit)
+    waaagh_atk_args = _unit_get_primitive_b_rule_args(attacker_model, "melee_attacks_bonus_while_waaagh")
+    if waaagh_atk_args is not None and bonus > 0:
+        bonus += int(require_key(waaagh_atk_args, "attacks_bonus"))
+    return bonus
+
+
 def squad_fight_split_weapon_attacks(
     game_state: Dict[str, Any], attacker_squad_id: str, model_id: str, weapon_code: str,
     split: Dict[str, int],
@@ -1246,11 +1270,14 @@ def squad_fight_split_weapon_attacks(
     that weapon equal to the number of attacks you declared ». Contraintes : chaque cible
     engagee avec la figurine et vivante, au moins une attaque par cible, la SOMME egale a la
     caracteristique A de l arme (toutes ses attaques sont faites). Une arme a A aleatoire (D6…)
-    ne se repartit pas : le nombre n est connu qu au jet (erreur explicite).
+    ne se repartit pas : le nombre n est connu qu au jet (erreur explicite). La caracteristique
+    A comparee est la caracteristique MODIFIEE (`melee_attacks_characteristic_bonus` : Waaagh!,
+    Da Biggest and da Best) — c est elle que l attaquant repartit.
 
     Semantique SET sur (figurine, arme) : les intents existants de cette arme sont remplaces,
-    un intent par cible avec son `n_attacks_resolved`. `_weapon_attacks_single_target` (CLEAVE)
-    lit ces cibles.
+    un intent par cible avec son `n_attacks_resolved` ; `attacks_bonus_included` dit au roller
+    que ce nombre porte deja le bonus de caracteristique. `_weapon_attacks_single_target`
+    (CLEAVE) lit ces cibles.
     """
     from .shared_utils import _weapon_group_key, init_pending_intents
 
@@ -1281,10 +1308,13 @@ def squad_fight_split_weapon_attacks(
     counts = {str(t): int(n) for t, n in split.items()}
     if any(n < 1 for n in counts.values()):
         raise ValueError("04.02 : au moins une attaque par unite ciblee")
-    if sum(counts.values()) != int(nb_raw):
+    attacks_total = int(nb_raw) + melee_attacks_characteristic_bonus(
+        game_state, m, require_unit_by_id(game_state, sid)
+    )
+    if sum(counts.values()) != attacks_total:
         raise ValueError(
             f"04.02 : la somme des attaques reparties ({sum(counts.values())}) doit valoir la "
-            f"caracteristique A de l arme ({nb_raw})"
+            f"caracteristique A de l arme ({attacks_total})"
         )
     for tid in counts:
         if not FIGHT_DECLARE_CTX.can_target_with_weapon(game_state, m, sid, tid, local_idx):
@@ -1307,6 +1337,7 @@ def squad_fight_split_weapon_attacks(
                 1 for mid in squad_models.get(tid, []) if mid in models_cache  # get allowed
             ),
             "n_attacks_resolved": int(n),
+            "attacks_bonus_included": True,
         })
     current[:] = remaining + created
     return created
@@ -4952,17 +4983,12 @@ def _manual_roll_fight_intent(
     attacker_unit = require_unit_by_id(game_state, str(attacker["squad_id"]))
     _waaagh_bonus = waaagh_melee_bonus(game_state, attacker_unit)
     strength += _waaagh_bonus
-    n_attacks += _waaagh_bonus
-    # Primitive B (chantier 06) : bonus d attaques de MODELE ("this model's melee weapons").
-    # On lit attacker["UNIT_RULES"] (regles du modele seul, pas de l unite fusionnee) pour
-    # que le bonus ne s applique qu aux intents du porteur de la regle.
+    # Bonus de caracteristique A (Waaagh!, Da Biggest and da Best) : MEME helper que la
+    # repartition 04.02. Un intent issu de la repartition porte deja sa part du total modifie
+    # (`attacks_bonus_included`) — l ajouter ici le compterait une fois par cible.
+    if not intent.get("attacks_bonus_included", False):  # get allowed : absent = intent entier
+        n_attacks += melee_attacks_characteristic_bonus(game_state, attacker, attacker_unit)
     from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
-    # melee_attacks_bonus_while_waaagh : +N A tant que Waaagh! actif (Da Biggest and da Best)
-    _waaagh_atk_args = _unit_get_primitive_b_rule_args(
-        attacker, "melee_attacks_bonus_while_waaagh"
-    )
-    if _waaagh_atk_args is not None and _waaagh_bonus > 0:
-        n_attacks += int(require_key(_waaagh_atk_args, "attacks_bonus"))
     # once_per_battle_melee_buff : +N A + [DEVASTATING WOUNDS] jusqu a fin de phase (Finest Hour).
     # Le flag finest_hour_used est pose ICI, lu dans build_weapon_attack_profile via finest_hour_active.
     _finest_hour_args = _unit_get_primitive_b_rule_args(

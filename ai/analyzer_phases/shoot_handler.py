@@ -11,6 +11,7 @@ from ai.analyzer_phases import PHASE_ORDER, died_in_own_activation
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_state import ShootAllocGroup
 from ai.analyzer_perfig import (
+    WEAPON_NAME_RE,
     additive_rule_extra_dice,
     parse_shooter_models_segment,
     per_model_attack_cap,
@@ -457,7 +458,7 @@ def handle_shoot(
     # tests/unit/engine/test_shoot_los_perfig_parity.py (parité ancre↔per-figurine).
     # Le tir reste par ailleurs gaté à la source par `_attacker_model_can_reach_squad`.
 
-    weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
+    weapon_match = WEAPON_NAME_RE.search(action_desc)
     is_close_quarters = False
     weapon_found = False
     weapon_range = None

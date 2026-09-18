@@ -54,6 +54,46 @@ class ShootAllocGroup:
     first_not_allocated_line: Optional[str] = None
 
 
+#: (épisode, tour, phase, attaquant, cible, arme, signature `shoot_group_signature`) — le lot
+#: (cible × profil d'arme, 04.03) d'une activation, tir comme mêlée. Cf.
+#: `AnalyzerState.alloc_character_pending`.
+AllocCharacterKey = Tuple[int, int, str, str, str, str, Tuple[str, str, str]]
+
+
+@dataclass(frozen=True)
+class AllocCharacterCandidate:
+    """Une ligne du lot allouée à un CHARACTER, en attente du verdict de fin de lot (05.03 /
+    06.02 / 24.28)."""
+    line: str
+    action_desc: str
+
+
+@dataclass
+class AllocCharacterGroup:
+    """Le lot d'attaques en cours de lecture, côté allocation CHARACTER (`analyzer_core.
+    _note_character_allocation_in_lot`). Mutable : il se remplit ligne à ligne.
+
+    `is_char` : CHARACTER ou non, par figurine de la cible, résolu UNE fois à l'ouverture du lot
+    (la cible est dans la clé ; une figurine ne change pas de rôle). `non_character_alive` est
+    recalculé APRÈS les dégâts de chaque ligne du lot : à la fermeture du lot il vaut « un
+    bodyguard de la cible est encore vivant à la FIN du lot », quel que soit le moment où le
+    verdict est rendu."""
+    key: AllocCharacterKey
+    player: int
+    bucket: str
+    is_char: Dict[str, bool]
+    candidates: List[AllocCharacterCandidate] = field(default_factory=list)
+    non_character_alive: bool = True
+
+    @property
+    def actor_id(self) -> str:
+        return self.key[3]
+
+    @property
+    def target_id(self) -> str:
+        return self.key[4]
+
+
 @dataclass
 class AnalyzerState:
     # Stats globales (référence partagée, pas une copie)
@@ -287,6 +327,18 @@ class AnalyzerState:
     #: ligne de dégâts. L'épisode est dans la clé : l'accumulateur couvre tout le journal et
     #: n'est jugé qu'une fois, en fin de lecture — pas de remise à zéro par épisode.
     shoot_alloc_groups: Dict[ShootAllocKey, ShootAllocGroup] = field(default_factory=dict)
+    #: Allocation à un CHARACTER (05.03 / 06.02 / 24.28) : verdict PAR LOT, jamais ligne à
+    #: ligne — même raison que `shoot_alloc_groups` : dans un lot, l'ordre des lignes est celui
+    #: des jets, pas celui de l'allocation (pool trié par sauvegarde croissante, 05.04 —
+    #: `_roll_batch`), donc la ligne de l'Ancient peut précéder celles des bodyguards que le
+    #: même lot a tués AVANT lui. Un CHARACTER n'est fautif que si, à la FIN du lot, un
+    #: non-CHARACTER de son unité est encore vivant (les morts d'un lot sont monotones : vivant
+    #: à la fin ⟺ vivant à chaque allocation du lot). Un seul lot en attente : le moteur émet
+    #: les lignes d'un lot d'un bloc (`_emit_squad_shoot_log` → une `log_action` par jet,
+    #: consécutives), donc le lot se ferme au premier jet d'un AUTRE lot (clé différente), dès
+    #: qu'une AUTRE unité agit (`[MODELS:]` étranger : deux combats d'une même paire dans un
+    #: même round portent la même clé) ou en fin de lecture (`_flush_character_allocation`).
+    alloc_character_pending: Optional[AllocCharacterGroup] = None
     #: Dernière unité dont un SHOT a déclenché un marqueur d'activation SHOOT (frontière
     #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT et au changement
     #: de tour. Mis à jour uniquement sur les lignes SHOT (pas sur les actions non-tir).

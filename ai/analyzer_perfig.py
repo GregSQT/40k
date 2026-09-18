@@ -32,6 +32,9 @@ from shared.data_validation import require_key
 # sur tous les journaux antérieurs aux étages. C'est la différence avec l'entête `Run rules:`,
 # qui est EXIGÉE : pour une règle absente il n'existe aucun repli correct (prendre celle du
 # config du jour rend un verdict FAUX, pas un verdict absent). Le moteur, lui, l'écrit toujours.
+#: ` with [arme]` d'une ligne d'attaque : UN motif pour les trois lecteurs (tir, mêlée,
+#: lot d'allocation CHARACTER) — trois copies littérales dérivaient ensemble ou pas du tout.
+WEAPON_NAME_RE = re.compile(r'with \[([^\]]+)\]')
 _MODELS_RE = re.compile(r'\[MODELS:\s*([^\]]+)\]')
 _TARGET_MODELS_RE = re.compile(r'\[TARGET_MODELS:\s*([^\]]+)\]')
 #: Grammaire d'un token per-figurine `mid@(col,row[,zH])`. SOURCE UNIQUE : la ligne d'état
