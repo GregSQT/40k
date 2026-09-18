@@ -4784,7 +4784,15 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     # d une attribution de blessures mortelles, reprise d un hazard. Une version precedente
     # l appliquait a l instant de la mort : la cible et l attaquant encaissaient l explosion au
     # milieu du lot.
-    if _deadly_demise_val is not None:
+    # SEULES les morts par attaque (`combat`) et par blessure mortelle hors attaque (`hazard` :
+    # Desperate Escape 09.07, [HAZARDOUS] 24.15, explosion en chaine) declenchent la regle, et
+    # chacune a son point de drain. Les autres raisons ne la declenchent PAS : le retrait de
+    # coherence 03.03 (« Models removed in this way are destroyed, but they do not trigger rules
+    # that apply when a model is destroyed »), et les unites hors du champ de bataille — reserves
+    # jamais arrivees 20.04, unite sans place au deploiement — dont aucune unite n est « within
+    # 6" ». Mises en file, ces morts sans point de drain explosaient au prochain drain venu,
+    # depuis une position memorisee et contre des unites qui avaient bouge.
+    if _deadly_demise_val is not None and reason in ("combat", "hazard"):
         game_state.setdefault(MORTAL_WOUND_QUEUE_KEY, []).append({
             "kind": "deadly_demise",
             "squad_id": str(squad_id), "model_id": str(model_id),
@@ -10310,6 +10318,37 @@ def shoot_weapon_remaining_eligible_slots(
     return result
 
 
+def filter_remaining_weapon_slots(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    enemy_slot_ids: List[Optional[str]],
+    remaining: Dict[int, str],
+) -> Dict[int, str]:
+    """Relit `remaining` sur l'état courant : ne garde que les slots encore déclarables.
+
+    Appelé après CHAQUE déclaration du split-fire (`squad_shoot_split_target`) : une
+    déclaration consomme des figurines — arme physique déjà tirée, famille 24.07
+    [CLOSE-QUARTERS] / autre choisie par la figurine — et le masque du prochain choix d'arme
+    doit rester ⊆ exécutable. Même critère que `shoot_weapon_remaining_eligible_slots`
+    (≥ 1 ennemi sur le plateau avec `weapon_qty_max` > 0), appliqué en FILTRE et non en
+    reconstruction : la purge des profils COMBI frères (restriction d'encodage, un profil par
+    arme physique et par escouade) reste acquise.
+    """
+    _uc = require_key(game_state, "units_cache")
+    on_table = [
+        tsid for tsid in enemy_slot_ids
+        if tsid is not None and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
+    ]
+    return {
+        slot_j: code
+        for slot_j, code in remaining.items()
+        if any(
+            squad_shoot_weapon_qty_max(game_state, squad_id, code, tsid) > 0
+            for tsid in on_table
+        )
+    }
+
+
 def purge_combi_siblings_from_remaining(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -10346,39 +10385,6 @@ def purge_combi_siblings_from_remaining(
         and (wpn.get("COMBI_WEAPON") if isinstance(wpn, dict) else None) == sel_combi
     ]
     for slot_j in to_purge:
-        del remaining[slot_j]
-
-
-def prune_remaining_weapon_slots(
-    game_state: Dict[str, Any],
-    squad_id: str,
-    enemy_slot_ids: List[Optional[str]],
-    remaining: Dict[int, str],
-) -> None:
-    """Retire de `remaining` les slots qu'aucune figurine LIBRE ne peut plus tirer sur aucune cible.
-
-    Appelé après chaque déclaration du split-fire gym (`squad_shoot_split_target`) : les intents
-    posés consomment, par figurine, l'arme physique (`_weapon_group_key`) et la famille
-    [CLOSE-QUARTERS] 24.07 (pistolets OU autres armes, hors MONSTER/VEHICLE). Un slot ouvert à
-    l'activation peut donc n'avoir plus aucune tireuse — ex. Boyz slugga + shoota : la première
-    ligne déclarée prend toutes les figurines, l'autre famille se ferme. Même lecture
-    (`squad_shoot_weapon_qty_max`, sur les intents courants) que
-    `shoot_weapon_remaining_eligible_slots` et `shoot_weapon_eligible_target_slots` : le masque
-    n'ouvre que ce que le commit déclarera. Mute `remaining` en place.
-    """
-    _uc = require_key(game_state, "units_cache")
-    on_table = [
-        tsid for tsid in enemy_slot_ids
-        if tsid is not None and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
-    ]
-    to_prune = [
-        slot_j for slot_j, code in remaining.items()
-        if not any(
-            squad_shoot_weapon_qty_max(game_state, squad_id, code, tsid) > 0
-            for tsid in on_table
-        )
-    ]
-    for slot_j in to_prune:
         del remaining[slot_j]
 
 
@@ -13056,11 +13062,20 @@ def select_attack_lot(
 ) -> Dict[str, Any]:
     """Reponse de l attaquant a `squad_<phase>_select_lot` : le lot `lot_id` est le prochain.
 
-    Valide que le lot est un candidat (04.03 : cible verrouillee respectee, cible vivante) —
-    sinon erreur explicite, aucune mutation. La politique de relance est facultative ; si la
-    question se pose pour ce lot et qu elle n est pas donnee, la machine la redemande.
+    Valide que la machine ATTEND ce choix (le lot courant n est pas jete : un lot jete est en
+    cours d attribution chez le defenseur, et un choix accepte a ce moment serait stocke puis
+    consomme au lot suivant, apres une issue que l attaquant n a pas vue) et que le lot est un
+    candidat (04.03 : cible verrouillee respectee, cible vivante) — sinon erreur explicite,
+    aucune mutation. La politique de relance est facultative ; si la question se pose pour ce
+    lot et qu elle n est pas donnee, la machine la redemande.
     """
     alloc = require_key(game_state, ctx.alloc_key)
+    cbi = int(alloc["current_batch_index"])
+    if cbi >= len(alloc["batches"]) or _batch_is_rolled(alloc["batches"][cbi]):
+        raise ValueError(
+            f"select_attack_lot ({ctx.phase_label}) : aucun choix de lot attendu — le lot "
+            f"courant est en cours d attribution"
+        )
     candidates, _locked = _lot_candidates(game_state, alloc)
     if not any(int(b["lot_id"]) == int(lot_id) for b in candidates):
         raise ValueError(
@@ -13317,10 +13332,12 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
         # Lot MORTEL (hazard 06.03, capacite 06.02) : pas de groupes ni d ordre a declarer — la
         # cascade 06.02 designe la figurine ; les etapes 2 et 2bis ne concernent que les attaques.
         is_mortal_batch = _batch_is_mortal(ctx, batch)
-        # 2. Declaration de l ordre des groupes du lot si necessaire (apres les jets).
+        # 2. Declaration de l ordre des groupes du lot si necessaire (apres les jets). Un lot
+        # jete SANS blessure a attribuer n a pas d ordre a declarer : il n y aurait rien a
+        # allouer dans le groupe declare (ses blessures mortelles, s il en doit, suivent 06.02).
         if not is_mortal_batch and batch["declared_order"] is None:
             live_groups = [g for g in batch["alloc_groups"] if _group_alive(game_state, g)]
-            if len(live_groups) >= 2:
+            if len(live_groups) >= 2 and batch["pool"]:
                 if _defender_is_programmatic(game_state, ctx, batch["target_sid"]):
                     batch["declared_order"] = _auto_declared_order(game_state, live_groups)
                     batch["current_group_index"] = 0
@@ -14163,7 +14180,7 @@ def manual_allocation_waiting_payload(game_state: Dict[str, Any], ctx: ManualAll
     is_mortal_batch = _batch_is_mortal(ctx, batch)
     if not is_mortal_batch and batch["declared_order"] is None:
         live_groups = [g for g in (batch["alloc_groups"] or []) if _group_alive(game_state, g)]
-        if len(live_groups) >= 2:
+        if len(live_groups) >= 2 and batch["pool"]:  # jumeau de l etape 2 : rien a ordonner sans blessure
             return _declare_order_payload(game_state, batch, live_groups, ctx)
     target_sid = str(batch["target_sid"])
     pw = batch["pool"][batch["pool_index"]] if batch["pool_index"] < len(batch["pool"]) else None

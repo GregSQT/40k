@@ -5,7 +5,7 @@ fight_handler.py — gestion des actions FIGHT dans parse_step_log.
 import re
 from typing import TYPE_CHECKING, Optional, Tuple
 
-from ai.analyzer_perfig import parse_shooter_models_segment
+from ai.analyzer_perfig import WEAPON_NAME_RE, parse_shooter_models_segment
 from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage, note_special_rule_usage
 from ai.analyzer_phases import claim_kill_context, died_before_phase, died_in_own_activation
 from shared.data_validation import require_key
@@ -321,7 +321,7 @@ def handle_fight(
                         'eligible_charged_units': eligible_charged_units
                     }
 
-        weapon_match = re.search(r'with \[([^\]]+)\]', action_desc)
+        weapon_match = WEAPON_NAME_RE.search(action_desc)
         if weapon_match:
             weapon_display_name = weapon_match.group(1).strip()
             fighter_unit_type = require_key(state.unit_types, fighter_id)

@@ -55,6 +55,16 @@ def _fought(alloc: str, *, save: str = "Save 2(3+)", tags: str = "") -> str:
     )
 
 
+def _riposte_102() -> str:
+    """L'unité 102 frappe l'unité 1 : une AUTRE unité agit (son `[MODELS:]`), ce qui ferme
+    l'activation de l'unité 1. Sauvegarde réussie : aucun dégât, l'unité 1 reste entière."""
+    return (
+        f"[10:00:03] E1 T1 P2 FIGHT : Unit 102{T} FOUGHT Unit 1{S} with [Bolt Pistol]"
+        f" - Hit 4(3+) - Wound 5(4+) - Save 6(3+) - Dmg:0HP [R:+0.0]"
+        f" [MODELS: 102#0@(80,50) 102#1@(80,51) 102#2@(80,52)] [ALLOC_MODEL: 1#0] [SUCCESS]\n"
+    )
+
+
 def _stats(tmp_path, body: str, *, precision_mw: str | None = "False") -> dict:
     extra = {} if precision_mw is None else {RUN_RULE_PRECISION_MW_TO_CHARACTER: precision_mw}
     log = tmp_path / "step.log"
@@ -106,7 +116,7 @@ def test_line_inflicts_mortal_wound():
     assert not line_inflicts_mortal_wound("... - Save 2(3+) - Dmg:1HP")
 
 
-# ─── à travers le journal (analyzer_core._judge_character_allocation) ────────────────────────
+# ─── à travers le journal (analyzer_core._note_character_allocation_in_lot → _flush) ────────
 
 def test_bodyguard_alloue_en_premier_aucune_erreur(tmp_path):
     """Ordre légal : les deux Intercessors tombent, puis l'Ancient encaisse."""
@@ -161,3 +171,68 @@ def test_melee_meme_regle_bucket_fight(tmp_path):
     assert _errors(stats, "shooting") == 0
     assert stats["rule_usage"]["PROJ.1.4.alloc_character"][1] == 1
     assert an.error_totals(stats)["fight"] >= 1
+
+
+# ─── verdict PAR LOT : l'ordre des lignes est celui des jets, pas de l'allocation ──────────────
+
+def test_ligne_du_character_avant_celles_des_bodyguards_meme_lot_aucune_erreur(tmp_path):
+    """ROUGE avec un verdict ligne à ligne. Le lot tue 102#0 et 102#1 PUIS blesse l'Ancient
+    (allocation légale), mais sa ligne est écrite en premier : `g["shots"]` suit l'ordre des
+    jets, le pool d'allocation est trié par sauvegarde croissante (`_roll_batch`, 05.04)."""
+    body = (
+        _shot("102#2")                      # l'Ancient : jet écrit en premier, alloué en dernier
+        + _shot("102#0") + _shot("102#0")   # 102#0 : 2 PV → mort
+        + _shot("102#1") + _shot("102#1")   # 102#1 : mort
+    )
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "shooting") == 0
+    # Cinq occasions : l'unité est mixte AVANT chacune des cinq lignes.
+    assert stats["rule_usage"]["PROJ.1.2.alloc_character"][1] == 5
+
+
+def test_melee_ligne_du_character_avant_celles_des_bodyguards_aucune_erreur(tmp_path):
+    body = (
+        _fought("102#2")
+        + _fought("102#0") + _fought("102#0")
+        + _fought("102#1") + _fought("102#1")
+    )
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "fight") == 0
+    assert stats["rule_usage"]["PROJ.1.4.alloc_character"][1] == 5
+
+
+def test_bodyguard_survivant_en_fin_de_lot_reste_une_faute(tmp_path):
+    """Un seul bodyguard tombe, l'autre survit au lot : l'Ancient n'avait pas le droit
+    d'encaisser, quel que soit le rang de sa ligne."""
+    body = _shot("102#0") + _shot("102#2") + _shot("102#0")
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "shooting") == 1
+    first = stats["first_error_lines"]["alloc_character_over_bodyguard"]["shooting"][1]
+    assert first is not None and "[ALLOC_MODEL: 102#2]" in first["line"]
+
+
+def test_un_autre_lot_de_la_meme_activation_ne_blanchit_pas_le_precedent(tmp_path):
+    """Lot 1 (Bolt Rifle) : l'Ancient encaisse alors que les deux bodyguards sont intacts →
+    faute. Lot 2 (Plasma Pistol, autre clé) tue ensuite les bodyguards : le verdict du lot 1 se
+    rend sur l'état de FIN DU LOT 1, pas de fin d'activation."""
+    plasma = _shot("102#0").replace("[Bolt Rifle]", "[Plasma Pistol]")
+    plasma1 = _shot("102#1").replace("[Bolt Rifle]", "[Plasma Pistol]")
+    body = _shot("102#2") + plasma + plasma + plasma1 + plasma1
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "shooting") == 1
+
+
+def test_deux_combats_de_la_meme_paire_dans_le_meme_round_sont_deux_lots(tmp_path):
+    """Même clé (épisode, tour, phase, attaquant, cible, arme, seuils) pour les deux combats de
+    l'unité 1 sur l'unité 102 dans le round 1 ; entre les deux, l'unité 102 riposte (une AUTRE
+    unité agit) : le premier lot se ferme là, sa faute reste comptée même si le second lot tue
+    les bodyguards. Le même corps SANS la riposte est un seul lot et ne compte rien :
+    `test_melee_ligne_du_character_avant_celles_des_bodyguards_aucune_erreur`."""
+    body = (
+        _fought("102#2")                                        # lot 1 : faute
+        + _riposte_102()                                        # frontière d'activation
+        + _fought("102#0") + _fought("102#0")                   # lot 2 : tue les bodyguards
+        + _fought("102#1") + _fought("102#1")
+    )
+    stats = _stats(tmp_path, body)
+    assert _errors(stats, "fight") == 1

@@ -23,7 +23,7 @@ frontend) :
 from __future__ import annotations
 
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from engine.phase_handlers.fight_handlers import (
     EXHORTATION_REGIME_GYM,
@@ -47,20 +47,13 @@ _EXHORT_RULE = {
 }
 
 
-def _two_model_cfg(
-    uid: int, player: int, col: int, row: int, second: Optional[Tuple[int, int]] = None,
-) -> Dict[str, Any]:
-    """Deux figurines INTACTES de 3 PV : le défenseur humain a un vrai choix à la première
-    blessure (05.04 / 06.02, décision du 2026-09-18 : la question n'est posée que devant un
-    choix ; une figurine unique, ou déjà entamée, est attribuée d'office). `second` place la
-    seconde figurine ailleurs qu'à `col + 1`."""
+def _two_model_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
     base = _unit_cfg(uid, player, col, row)
     base["HP_CUR"] = 3
     base["HP_MAX"] = 3
-    second_col, second_row = second if second is not None else (col + 1, row)
     base["models"] = [
         {"col": col, "row": row, "VALUE": 50},
-        {"col": second_col, "row": second_row, "VALUE": 50},
+        {"col": col + 1, "row": row, "VALUE": 50},
     ]
     return base
 
@@ -194,9 +187,7 @@ def test_pvp_deux_ennemis_le_joueur_choisit_puis_le_defenseur_attribue(monkeypat
 def test_pvp_un_seul_ennemi_jet_immediat_a_l_activation(monkeypatch):
     eng = _engine("pvp", "human", [
         _chaplain(),
-        # Deux figurines intactes, TOUTES DEUX au contact de l'aumônier en (20,20) : le choix de
-        # la première blessure est réel, et l'unité reste engagée quelle que soit la victime.
-        _two_model_cfg(2, 2, 21, 20, second=(20, 21)),
+        _unit_cfg(2, 2, 21, 20),  # mono-figurine, 5 PV
     ])
     gs = eng.game_state
     monkeypatch.setattr(random, "randint", lambda a, b: 6)  # 6 : 3 blessures mortelles
@@ -207,13 +198,11 @@ def test_pvp_un_seul_ennemi_jet_immediat_a_l_activation(monkeypatch):
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["hazardousMortalWounds"] == 3, lines
     assert lines[0]["unitId"] == "2" and lines[0]["abilityTriggerRoll"] == 6
-    # Défenseur humain : premier clic entre deux figurines intactes, les deux autres blessures
-    # vont d'office à la figurine entamée (06.02) — plus aucune question.
-    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
-    assert {c["model_id"] for c in out["allocation"]["choices"]} == {"2#0", "2#1"}
-    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "2", "modelId": "2#0"})
-    assert ok is True, out
-    assert "2#0" not in gs["models_cache"] and gs["models_cache"]["2#1"]["HP_CUR"] == 3
+    # Défenseur humain, figurine UNIQUE : aucun choix 06.02 à poser (décision du 2026-09-18,
+    # chantier « chaîne d'attaque 100 % » : attribution d'office à candidate unique) — les trois
+    # blessures tombent dans la même requête et le Chaplain reste actif.
+    assert gs["models_cache"]["2#0"]["HP_CUR"] == 2
+    assert "pending_hazard_allocation" not in gs
     assert out["action"] == "wait" and out["active_fight_unit"] == "1", out
     assert out["valid_targets"] == ["2"]
     assert "1" not in gs["units_selected_to_fight"]
@@ -306,8 +295,7 @@ def test_pve_siege_ia_la_decision_est_tranchee_sur_le_champ(monkeypatch):
     eng = _engine("pve", "ai", [
         chap,
         _unit_cfg(2, 1, 21, 20),
-        # Deux figurines intactes : l'attribution humaine n'est demandée que devant un vrai choix.
-        _two_model_cfg(3, 1, 20, 21),
+        _unit_cfg(3, 1, 20, 21),
     ])
     gs = eng.game_state
     eng.gym_training_mode = False
@@ -330,12 +318,10 @@ def test_pve_siege_ia_la_decision_est_tranchee_sur_le_champ(monkeypatch):
     assert gs.get("_pending_exhortation_fight") is None
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["unitId"] == "3" and lines[0]["hazardousMortalWounds"] == 3
-    # Défenseur HUMAIN : l'attribution lui revient (HAZARD_CTX), puis la reprise GYM du bot.
-    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
-    assert {c["model_id"] for c in out["allocation"]["choices"]} == {"3#0", "3#1"}
-    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "3", "modelId": "3#0"})
-    assert ok is True, out
-    assert "3#0" not in gs["models_cache"] and gs["models_cache"]["3#1"]["HP_CUR"] == 3
+    # Défenseur HUMAIN à figurine UNIQUE : aucun choix 06.02 (attribution d'office à candidate
+    # unique, décision du 2026-09-18), donc la reprise GYM du bot suit dans la même requête.
+    assert out == {"action": "squad_fight", "squad_id": "5"}, out
+    assert gs["models_cache"]["3#0"]["HP_CUR"] == 2
     assert resumed == [("5", 1, "gym")]
     # Une action humaine n'est plus refusée : la décision n'existe plus.
     assert eng._reject_action_while_exhortation_pending({"action": "activate_unit"}) is None

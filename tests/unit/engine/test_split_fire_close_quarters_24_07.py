@@ -1,19 +1,18 @@
-"""Split-fire gym (P3-8) sous [CLOSE-QUARTERS] 24.07 : le masque n'ouvre que ce que le commit déclare.
+"""Split-fire gym (P3-8) sous [CLOSE-QUARTERS] 24.07 : le verrou est PAR FIGURINE, pas par unité.
 
 24.07 (PDF 24) : « for each model in that unit (excluding MONSTER/VEHICLE models), you can only
 select one of the following to make attacks with: one or more of its [CLOSE-QUARTERS] weapons ;
 one or more of its other ranged weapons. » Le moteur l'impose PAR FIGURINE à la déclaration
-(`_declare_qty_candidates`, chantier « chaîne d'attaque 100 % », 2026-09-18).
+(`_declare_qty_candidates`, chantier « chaîne d'attaque 100 % », 2026-09-18), et le chemin de
+l'agent déclare chaque ligne (arme, cible) dès le choix de la cible puis relit le masque sur l'état
+déclaré (`filter_remaining_weapon_slots`, suite 146).
 
-DÉFAUT FERMÉ ICI. Le chemin de l'agent (`squad_shoot_weapon_sel` → `squad_shoot_split_target`)
-gardait ses assignations en mémoire et ne les DÉCLARAIT qu'à la résolution, en pré-calculant
-chaque quantité sur l'état INITIAL. Un Boy slugga + shoota se voyait donc offrir les DEUX slots ;
-au commit, la première ligne consommait la famille 24.07 de toutes les figurines et la seconde
-levait `count=N > figurines éligibles (0)` — l'épisode d'entraînement plantait (mesuré : 30 tests
-d'épisode rouges, `test_geodesic_move_reach_contract`, `test_reserves_metrics`, …).
-
-Depuis : chaque ligne (arme, cible) est déclarée DÈS le choix de la cible, sur l'état déclaré, et
-`prune_remaining_weapon_slots` ferme les slots qu'aucune figurine libre ne peut plus tirer.
+Le jumeau `test_split_fire_gym.py::test_split_fire_24_07_first_family_closes_the_other_slot`
+verrouille la fermeture de l'AUTRE famille quand toutes les figurines ont tiré la première. Ici,
+le cas complémentaire : une figurine n'a QUE le pistolet, l'autre QUE le fusil — la ligne
+pistolet ne ferme rien pour la seconde (24.07 se lit figurine par figurine), le slot fusil reste
+ouvert, la seconde ligne est déclarée sur l'état déclaré et l'activation résout les deux lots.
+Un verrou par UNITÉ (l'ancien grisage du menu PvP) rendrait ce test rouge en fermant le fusil.
 """
 
 from __future__ import annotations
@@ -160,21 +159,6 @@ def _shoot_logs(engine) -> List[Tuple[str, int]]:
         for log in engine.game_state["action_logs"]
         if log.get("type") == "shoot" and str(log.get("shooterId")) == "1"
     ]
-
-
-def test_a_pistol_line_closes_the_other_family_of_every_model_that_fired_it():
-    """Deux Boyz slugga + shoota : la première ligne prend les deux figurines, l'autre famille se
-    ferme (24.07), la résolution part sans lever — plus de `count > figurines éligibles`."""
-    engine = _engine([[BOLTER, PISTOL], [BOLTER, PISTOL]])
-    _activate_and_arm(engine, "cq_pistol")
-    engine.step_with_mask(_target_action(engine))
-    assert PENDING_KEY not in engine.game_state, (
-        "le shoota devait être retiré du masque : les deux figurines ont déjà choisi la famille "
-        "[CLOSE-QUARTERS] (24.07), aucune ne peut plus le tirer"
-    )
-    # Résolue dans le même step (la phase cascade ensuite) : une seule ligne, les DEUX pistolets,
-    # aucun bolter.
-    assert _shoot_logs(engine) == [("cq_pistol", 2)]
 
 
 def test_the_family_lock_is_per_model_not_per_unit():

@@ -114,12 +114,17 @@ def test_gym_desperate_escape_died_clears_game_state_keys() -> None:
     """
     eng, gs = _engine_battle_shocked()
 
-    # Simuler desperate_escape_pre_move qui pose les clés PUIS retourne is_alive=False.
+    # Simuler desperate_escape_pre_move qui pose les clés, DÉTRUIT réellement l'unité (le
+    # moteur relit l'état, pas seulement le drapeau rendu : une explosion Deadly Demise peut
+    # achever l'unité après les jets) puis retourne is_alive=False.
     def _fake_pre_move(
         squad_id: str, game_state: Dict[str, Any], auto_resolve: bool
     ) -> tuple:
+        from engine.phase_handlers.shared_utils import destroy_model
+
         game_state["_flee_mode"] = "desperate_escape"
         game_state["_desperate_escape_rolls"] = [1, 2]
+        destroy_model(game_state, "1#0", "hazard")
         return True, False, 2  # is_desperate, is_alive=False, wounds
 
     with patch(
@@ -602,3 +607,145 @@ def test_desperate_escape_mode_survives_activation_postpone() -> None:
     assert payload["would_flee"] is True, (
         "la ré-activation annonce un move normal alors que le commit posera units_fled"
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Deadly Demise §24.08 d'un socle tué par le hazard, l'unité SURVIVANT : mort HORS attaque
+# (25 DESTROYED) → l'explosion se résout AVANT le mouvement, pas au prochain drain venu.
+# ---------------------------------------------------------------------------
+
+_DD_RULE_1 = {"ruleId": "deadly_demise", "displayName": "Deadly Demise 1", "rule_args": {"value": 1}}
+
+
+def _engine_deadly_demise_survivor() -> W40KEngine:
+    """Escouade 1 : `1#0` (20,20) ancre et `1#1` (19,20) porteur de Deadly Demise 1 ; ennemi 2
+    en (21,20), adjacent à l'ancre (ER). Escouade 3 loin : garde le pool de move non vide."""
+    squad = _unit_cfg(1, 1, 20, 20)
+    squad["HP_CUR"] = 2
+    squad["HP_MAX"] = 2
+    squad["models"] = [
+        {"col": 20, "row": 20, "VALUE": 100},
+        {"col": 19, "row": 20, "VALUE": 100, "UNIT_RULES": [_DD_RULE_1]},
+    ]
+    eng = _make_engine(_base_config([squad, _unit_cfg(2, 2, 21, 20), _unit_cfg(3, 1, 5, 5)]))
+    gs = eng.game_state
+    gs["phase"] = "move"
+    gs["move_activation_pool"] = ["1", "3"]
+    next(u for u in gs["units"] if str(u["id"]) == "1")["battle_shocked"] = True
+    return eng
+
+
+def _hazard_kills_demise_carrier(squad_id, game_state, auto_resolve, **kwargs) -> int:
+    from engine.phase_handlers.shared_utils import destroy_model
+
+    destroy_model(game_state, "1#1", "hazard")
+    return 1
+
+
+def test_gym_desperate_escape_survivor_resolves_deadly_demise_before_moving(monkeypatch) -> None:
+    """Le hazard tue `1#1` (Deadly Demise 1), `1#0` survit. Le D6 de 24.08 donne 6 : l'ennemi 2
+    (2 hexes) et l'escouade 1 elle-même (1 hex) encaissent 1 blessure mortelle AVANT le
+    mouvement (ligne `deadly_demise` avant la ligne `move`), la file est vide à la fin de
+    l'activation, et le fall back a bien lieu.
+
+    Cycle rouge→vert : sans drain sur la branche « unité vivante », la file reste pleine
+    (`MORTAL_WOUND_QUEUE_KEY`), personne n'encaisse, et l'explosion partirait au prochain drain
+    sans rapport depuis la position mémorisée de `1#1`."""
+    import random
+    from engine.constants import MORTAL_WOUND_QUEUE_KEY
+
+    eng = _engine_deadly_demise_survivor()
+    gs = eng.game_state
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    before = len(gs["action_logs"])
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_demise_carrier,
+    ):
+        ok, result = eng._process_squad_action(
+            {"action": "squad_fall_back", "squad_id": "1", "destCol": 18, "destRow": 20}
+        )
+
+    assert ok, f"squad_fall_back a échoué : {result}"
+    assert result.get("action") == "squad_fall_back", result.get("action")
+    assert MORTAL_WOUND_QUEUE_KEY not in gs, "explosion laissée en file après l'activation"
+    assert gs["models_cache"]["2#0"]["HP_CUR"] == 4, "l'ennemi à 2 hexes encaisse l'explosion"
+    m10 = gs["models_cache"]["1#0"]
+    assert m10["HP_CUR"] == int(m10["HP_MAX"]) - 1, "l'escouade elle-même est à 1 hex du socle"
+    types = [e["type"] for e in gs["action_logs"][before:]]
+    assert "deadly_demise" in types and "move" in types, types
+    assert types.index("deadly_demise") < types.index("move"), types
+    assert (gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]) == (18, 20)
+    assert "1" in gs["units_fled"]
+
+
+def _two_model_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
+    base = _unit_cfg(uid, player, col, row)
+    base["HP_CUR"] = 4
+    base["HP_MAX"] = 4
+    base["models"] = [
+        {"col": col, "row": row, "VALUE": 50},
+        {"col": col + 1, "row": row, "VALUE": 50},
+    ]
+    return base
+
+
+def test_pve_bot_fall_back_suspended_by_human_victim_then_replayed(monkeypatch) -> None:
+    """Siège bot (P1) en PvE : le hazard tue `1#1` (Deadly Demise 1), l'escouade 1 survit, et la
+    VICTIME humaine (escouade 2, deux figurines intactes à portée) doit choisir (06.02). La main
+    lui est rendue AVANT le mouvement ; une fois la blessure attribuée, la reprise
+    (`_resume_after_hazard`, origine move) REJOUE le fall back décidé par le bot — même
+    destination, `units_fled`, clé de reprise consommée."""
+    import random
+    from engine.agent_decision import clear_pending_agent_decision
+    from engine.constants import MORTAL_WOUND_QUEUE_KEY, PENDING_GYM_FALL_BACK_RESUME_KEY
+
+    squad = _unit_cfg(1, 1, 20, 20)
+    squad["HP_CUR"] = 2
+    squad["HP_MAX"] = 2
+    squad["models"] = [
+        {"col": 20, "row": 20, "VALUE": 100},
+        {"col": 19, "row": 20, "VALUE": 100, "UNIT_RULES": [_DD_RULE_1]},
+    ]
+    eng = _make_engine(_base_config([squad, _two_model_cfg(2, 2, 21, 20), _unit_cfg(3, 1, 5, 5)]))
+    gs = eng.game_state
+    gs["gym_training_mode"] = False
+    clear_pending_agent_decision(gs)
+    gs["player_types"] = {"1": "ai", "2": "human"}
+    gs["current_mode_code"] = "pve"
+    eng.current_mode_code = "pve"
+    gs["phase"] = "move"
+    gs["current_player"] = 1
+    gs["move_activation_pool"] = ["1", "3"]
+    next(u for u in gs["units"] if str(u["id"]) == "1")["battle_shocked"] = True
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_demise_carrier,
+    ):
+        ok, wait = eng._process_squad_action(
+            {"action": "squad_fall_back", "squad_id": "1", "destCol": 18, "destRow": 20}
+        )
+
+    assert ok is True and wait["waiting_for_player"] is True, wait
+    assert wait["action"] == "squad_hazard_manual_alloc"
+    assert [c["model_id"] for c in wait["allocation"]["choices"]] == ["2#0", "2#1"]
+    assert gs["hazard_origin"] == "move" and gs["hazard_origin_unit"] == "1"
+    assert gs[PENDING_GYM_FALL_BACK_RESUME_KEY]["semantic"]["destCol"] == 18
+    assert (gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]) == (20, 20), "pas encore bougé"
+
+    ok, result = eng.execute_semantic_action(
+        {"action": "squad_hazard_allocate_model", "unitId": "2", "modelId": "2#1"}
+    )
+
+    assert ok is True, result
+    assert result["action"] == "squad_fall_back", result
+    m20, m21 = gs["models_cache"]["2#0"], gs["models_cache"]["2#1"]
+    assert m21["HP_CUR"] == int(m21["HP_MAX"]) - 1 and m20["HP_CUR"] == int(m20["HP_MAX"])
+    assert (gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]) == (18, 20)
+    assert "1" in gs["units_fled"]
+    assert PENDING_GYM_FALL_BACK_RESUME_KEY not in gs and MORTAL_WOUND_QUEUE_KEY not in gs
+    assert "hazard_origin" not in gs and FALL_BACK_MODES_KEY not in gs
