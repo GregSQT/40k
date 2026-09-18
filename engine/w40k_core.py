@@ -7445,6 +7445,7 @@ class W40KEngine(gym.Env):
             SQUAD_ACTION_FIGHT_SLOT_COUNT,
             get_enemy_slot_mapping,
             get_fighting_models,
+            squad_auto_declare_fight_weapons,
         )
         from engine.utils.weapon_helpers import melee_weapons
 
