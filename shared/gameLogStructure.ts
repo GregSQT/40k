@@ -36,6 +36,7 @@ export interface BaseLogEntry {
     | "move"
     | "reactive_move"
     | "rule_choice"
+    | "ability_call"
     | "shoot"
     | "combat"
     | "charge"
@@ -442,6 +443,8 @@ export function getEventIcon(type: string): string {
       return "⚠️"; // Yellow warning triangle for reactive movement
     case "rule_choice":
       return "⚠️"; // Same icon as reactive movement
+    case "ability_call":
+      return "✦"; // « you can … » : la capacité activée ou passée (engine/ability_calls.py)
     case "shoot":
       return "◎"; // Target circle for shooting
     case "charge":
@@ -488,6 +491,7 @@ export function getEventTypeClass(event: BaseLogEntry | TrainingLogEntry): strin
     case "reactive_move":
       return "game-log-entry--reactive-move";
     case "rule_choice":
+    case "ability_call":
       return "game-log-entry--rule-choice";
     case "shoot":
       // Check shootDetails for actual shooting results

@@ -1101,3 +1101,92 @@ describe("BoardWithAPI — mode de fall-back (09.07)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// T_BoardWithAPI_AbilityCall — appel de capacité (`engine/ability_calls.push_ability_call`).
+//
+// Le moteur pose un prompt `rule_choice` de `kind: "ability_call"` à deux candidats — [activer la
+// capacité] / [passer, `declines: true`] — servi au siège humain par `active_rule_choice_prompt`,
+// donc par le panneau rule_choice existant. Ce que ce test verrouille : le panneau rend les DEUX
+// boutons, le candidat « Passer » n'est PAS résolu contre `unit_rules.json` (il n'y est pas — sans
+// la branche `declines`, `getRuleDescription` lève au survol), et le clic joue `select_rule_choice`
+// avec l'id du candidat (`decline` pour passer).
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — appel de capacité (rule_choice kind=ability_call)", () => {
+  const ABILITY_CALL_PROMPT = {
+    kind: "ability_call",
+    trigger: "ability_call",
+    phase: "command",
+    player: 1,
+    unit_id: "1",
+    rule_id: "return_destroyed_models",
+    display_name: "Grot Orderly",
+    usage: "unique",
+    options: [
+      {
+        display_rule_id: "return_destroyed_models",
+        technical_rule_id: "return_destroyed_models",
+        label: "Grot Orderly",
+        declines: false,
+      },
+      {
+        display_rule_id: "decline",
+        technical_rule_id: null,
+        label: "Passer (Grot Orderly)",
+        declines: true,
+      },
+    ],
+  };
+  const UNITS = [{ ...makeUnit(1, 1), DISPLAY_NAME: "Boyz", col: 5, row: 5 }];
+
+  it("siège humain → deux boutons, survol de « Passer » sans erreur, clic = select_rule_choice decline", async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            phase: "command",
+            units: UNITS,
+            active_rule_choice_prompt: ABILITY_CALL_PROMPT,
+            pending_rule_choice_queue: [ABILITY_CALL_PROMPT],
+          }),
+        })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          result: { action: "select_rule_choice" },
+          game_state: makeGameState({ phase: "command", units: UNITS }),
+        });
+      })
+    );
+    renderBoard();
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Ability call - Command Phase/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    const activate = screen.getByRole("button", { name: "Grot Orderly" });
+    const pass = screen.getByRole("button", { name: "Passer (Grot Orderly)" });
+    expect(activate).toBeTruthy();
+    // Le survol du candidat « Passer » ne résout AUCUNE règle : sa description est la sienne.
+    fireEvent.mouseEnter(pass);
+    expect(screen.getByText(/Ne pas activer la capacité maintenant/)).toBeTruthy();
+
+    fireEvent.click(pass);
+    await waitFor(() => {
+      expect(posted.length).toBeGreaterThan(0);
+    });
+    expect(posted[0]).toMatchObject({
+      action: "select_rule_choice",
+      unitId: "1",
+      player: 1,
+      selectedRuleId: "decline",
+    });
+  });
+});

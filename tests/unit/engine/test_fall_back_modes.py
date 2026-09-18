@@ -148,7 +148,10 @@ def _logs_of_type(gs: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
 
 
 def test_the_type_consumes_a_reserved_slot_and_leaves_obs_size_untouched():
-    assert AGENT_DECISION_TYPE_IDS[-1] == "fall_back_mode", "ajouté en FIN, jamais inséré"
+    # `suppress_target` (2026-09-18) est venu APRÈS lui, en fin de tuple lui aussi : l'index de
+    # `fall_back_mode` n'a pas bougé — c'est cela que « jamais inséré » garantit.
+    assert AGENT_DECISION_TYPE_IDS.index("fall_back_mode") == 12, "ajouté en FIN, jamais inséré"
+    assert AGENT_DECISION_TYPE_IDS[-1] == "suppress_target"
     assert len(AGENT_DECISION_TYPE_IDS) <= AGENT_DECISION_TYPE_SLOTS
 
 

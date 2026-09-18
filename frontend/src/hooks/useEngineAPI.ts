@@ -466,12 +466,25 @@ interface ArmyListItem {
 
 interface RuleChoiceOption {
   display_rule_id: string;
-  technical_rule_id: string;
+  /** `null` sur le candidat qui PASSE d'un appel de capacité (`engine/ability_calls.py`). */
+  technical_rule_id: string | null;
   label: string;
+  /** Appel de capacité : `true` sur le candidat « Passer » — il n'accorde rien et n'est pas une
+   *  règle du registre ; le panneau le décrit par lui-même, jamais par `unit_rules.json`. */
+  declines?: boolean;
 }
 
 interface RuleChoicePrompt {
-  trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+  /** `ability_call` : « you can … » rendu au joueur (`push_ability_call`), deux candidats
+   *  [activer] / [passer] ; absent sur un choix de règle de datasheet. */
+  kind?: "ability_call";
+  trigger:
+    | "on_deploy"
+    | "turn_start"
+    | "player_turn_start"
+    | "phase_start"
+    | "activation_start"
+    | "ability_call";
   phase?: "command" | "move" | "shoot" | "charge" | "fight";
   player: number;
   unit_id: string;

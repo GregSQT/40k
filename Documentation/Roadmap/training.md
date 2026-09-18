@@ -2,6 +2,19 @@
 
 ---
 
+## ⚠️ Refonte du bloc candidat de décision (2026-09-18) — modèles archivés incompatibles {#refonte-bloc-candidat}
+
+`obs_size` 18269 → **18241** (`decision_options_effect_ids` remplace le one-hot `grants_*`,
+`AGENT_DECISION_TYPE_SLOTS` 16 → 24, type `suppress_target`) et `decision_encoder` change de
+largeur d'entrée (+ `ABILITY_EMBED_DIM`) : **aucun `.zip` archivé ne se recharge** — SB3 refuse
+les espaces, le contrat d'entraînement (`ai/training_contract.py`, registres `DECISION_*`) refuse
+la forme. Un seul `--new` pour tout le lot « capacités Armageddon → décisions d'agent » (huit
+chantiers, `ROADMAP_INDEX.md` J4), lancé **après le chantier 8** et pas avant. Les juges de la
+première génération post-refonte sont les **bots** (holdout `--test-only --step`) : aucune archive
+P0′/P1′ ne peut servir d'adversaire de sonde, la lignée repart d'un P0 neuf.
+
+---
+
 ## ⚠️ À FAIRE UNE FOIS — initialiser le contrat des modèles existants {#contrat-init}
 
 **Livré le 2026-09-09** (`ai/training_contract.py`). Le prologue d'un run vérifie désormais que le

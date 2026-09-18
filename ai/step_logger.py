@@ -1809,6 +1809,16 @@ class StepLogger:
             if not isinstance(selected_rule_name, str) or not selected_rule_name.strip():
                 raise KeyError("Rule_choice action missing required selected_rule_name")
             return f"{unit_label} chose [{selected_rule_name.strip().upper()}]"
+
+        elif action_type == "ability_call":
+            # Appel de capacite (`engine/ability_calls.py`) : « Unit N(c,r) ABILITY CALL <Nom>
+            # [USED|DECLINED] ». La ligne DECLINED existe pour que l analyzer distingue « pas
+            # propose » de « refuse » ; l effet lui-meme laisse sa propre ligne (RETURNED, DA JUMP…).
+            ability_name = require_key(details, "ability_name")
+            if not isinstance(ability_name, str) or not ability_name.strip():
+                raise KeyError("ability_call action missing required ability_name")
+            verdict = "USED" if bool(require_key(details, "ability_used")) else "DECLINED"
+            return f"{unit_label} ABILITY CALL {ability_name.strip()} [{verdict}]"
             
         elif action_type in ("pile_in", "overrun_pile_in", "consolidation") and details:
             # Déplacements de la phase fight (12.02 pile-in / 12.06 overrun / 12.07 consolidation),

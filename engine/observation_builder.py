@@ -65,6 +65,7 @@ from engine.observation_entities import (
     DECISION_OPTION_BIN_SIZE,
     DECISION_OPTION_CONT_FIELDS,
     DECISION_OPTION_CONT_SIZE,
+    DECISION_OPTION_EFFECT_SLOTS,
     DEPLOY_CAND_BIN_SIZE,
     DEPLOY_CAND_CONT_SIZE,
     MAX_DECISION_OPTIONS,
@@ -510,6 +511,9 @@ class ObservationBuilder:
         + DECISION_CTX_BIN_SIZE
         + MAX_DECISION_OPTIONS * DECISION_OPTION_BIN_SIZE
         + MAX_DECISION_OPTIONS * DECISION_OPTION_CONT_SIZE
+        # L'effet accordé par chaque candidat, en `obs_id` (refonte du 2026-09-18) : lu par la
+        # même table que les capacités d'unité, donc une capacité activable de plus coûte 0.
+        + MAX_DECISION_OPTIONS * DECISION_OPTION_EFFECT_SLOTS
         # Bloc « candidats de déploiement » (§0.40 point 3) : sans lui, les actions 4-8 sont
         # cinq boîtes noires — l'agent choisit une stratégie sans voir l'hexe qu'elle pose.
         + N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE)
@@ -554,6 +558,9 @@ class ObservationBuilder:
             "decision_ctx_bin": (DECISION_CTX_BIN_SIZE,),
             "decision_options_bin": (MAX_DECISION_OPTIONS, DECISION_OPTION_BIN_SIZE),
             "decision_options_cont": (MAX_DECISION_OPTIONS, DECISION_OPTION_CONT_SIZE),
+            # `obs_id` de l'effet que le candidat accorde (padding 0 sinon) — même table
+            # d'embedding que `allies_ability_ids`.
+            "decision_options_effect_ids": (MAX_DECISION_OPTIONS, DECISION_OPTION_EFFECT_SLOTS),
             # Déploiement (§0.40 point 3). ⚠ L'ORDRE DES SLOTS EST CONTRACTUEL, comme celui des
             # slots ennemis : `deploy_cand_*[i]` décrit ce que pose l'action
             # `DEPLOY_SLOT_BASE + i`. Bloc NUL hors phase de déploiement.
@@ -998,10 +1005,26 @@ class ObservationBuilder:
             )
         opts = obs["decision_options_bin"]
         opts_cont = obs["decision_options_cont"]
+        opts_effects = obs["decision_options_effect_ids"]
         raw_cont = decision.get("options_cont")  # get allowed : absent pour les types sans continu
+        ability_ids = unit_ability_obs_ids()
         for slot, option in enumerate(options):
-            for effect_id in require_key(option, "effect_ids"):
-                opts[slot, decision_option_bin_index(f"grants_{effect_id}")] = 1.0
+            effect_ids = require_key(option, "effect_ids")
+            if len(effect_ids) > DECISION_OPTION_EFFECT_SLOTS:
+                raise ValueError(
+                    f"_encode_pending_decision: candidat {slot} accorde {len(effect_ids)} effets "
+                    f"pour {DECISION_OPTION_EFFECT_SLOTS} slot(s) — `set_pending_agent_decision` "
+                    f"aurait du lever."
+                )
+            for effect_slot, effect_id in enumerate(effect_ids):
+                # `KeyError` explicite : un effet sans `obs_id` ne peut pas etre propose — le
+                # decrire par le padding le rendrait indiscernable d'un candidat sans effet.
+                if effect_id not in ability_ids:
+                    raise KeyError(
+                        f"_encode_pending_decision: effet '{effect_id}' du candidat {slot} sans "
+                        f"obs_id (vocabulaire : {sorted(ability_ids)})"
+                    )
+                opts_effects[slot, effect_slot] = float(ability_ids[effect_id])
             if require_key(option, "declines"):
                 opts[slot, decision_option_bin_index("declines")] = 1.0
             opts[slot, decision_option_bin_index("present")] = 1.0

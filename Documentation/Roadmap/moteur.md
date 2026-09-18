@@ -22,7 +22,25 @@ de la lignée suit le chantier 8.
    toute ligne SHOT (grammaire 11) ; l'analyzer ne lève le plafond `shoot_over_rng_nb` que pour
    les tirs sur la désignée, abstention sur journal antérieur. Reproduction (deux Intercessors, deux
    cibles) rendue 4 + 2 records au lieu de 4 + 4 ; 4 tests moteur + 6 analyzer rouge→vert.
-2. 🟡 Refonte du bloc candidat de décision — voir ROADMAP_INDEX.
+2. ✅ **Refonte du bloc candidat de décision** (2026-09-18). Le one-hot positionnel `grants_*`
+   (`DECISION_GRANTABLE_EFFECT_IDS`, 7 effets × 6 slots) était le dernier endroit où une règle
+   coûtait des scalaires : chaque capacité ACTIVABLE aurait ajouté 6 bits et un `--new`. Un
+   candidat porte désormais l'`obs_id` de son effet (`decision_options_effect_ids`, 6 × 1, lu par
+   `ability_embedding` — même table que « ce que j'ai ») ; `DECISION_OPTION_BIN_FIELDS` =
+   (`declines`, `present`) ; une seule liste (`UNIT_RULE_EFFECT_IDS`) dans la garde d'
+   `agent_decision`. `obs_size` 18269 → **18241** (−42 + 6 + 8 : `AGENT_DECISION_TYPE_SLOTS`
+   16 → 24, type `suppress_target` déclaré en fin de tuple), `TOTAL_ACTION_SIZE` 1389 inchangé
+   (`test_action_space_mirror`). Socle `engine/ability_calls.py` : `push_ability_call(gs, squad,
+   effet, phase)` empile un prompt `kind=ability_call` à deux candidats dans la file
+   `pending_rule_choice_queue`, servie aux trois sièges (gym `CHOICE_0/1`, bot par
+   `ABILITY_CALL_BOT_POLICIES` — aussi pour le bot adversaire du gym via `env_wrappers`, humain
+   par le panneau rule_choice avec `decline`) ; application par `ABILITY_CALL_HANDLERS`, file
+   vidée AVANT l'application pour qu'un gestionnaire puisse poser sa propre décision ; journal
+   `ABILITY CALL <Nom> [USED|DECLINED]` (step.log, Game Log, replay), relevé analyzer
+   `ability_call_counts`. `faction_decision_is_pending` voit un appel de phase de commandement
+   (une seule source). Archives incompatibles : un seul `--new` après le chantier 8
+   ([training.md#refonte-bloc-candidat](training.md#refonte-bloc-candidat)). Épisodes gym complets
+   rejoués (`test_episode_combat_counters`, `test_objective_control_checkpoint_1402`).
 3. 🟡 Indiscriminate Detonations = unité TOUCHÉE, choix du joueur.
 4. 🟡 Da Jump.
 5. 🟡 Grot Orderly = choix d'agent.

@@ -424,10 +424,26 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
 #: suivante LÈVE, ou la phase ne s'arrête pas alors qu'un choix attend.
 #:
 #: `rule_choice` n'en fait PAS partie : il a son propre cycle (`pending_rule_choice_queue`) et
-#: peut être posé hors phase de commandement (`trigger: on_deploy`).
+#: peut être posé hors phase de commandement (`trigger: on_deploy`). Un APPEL DE CAPACITÉ posé en
+#: phase de commandement (Grot Orderly, `engine/ability_calls.push_ability_call`) passe par cette
+#: file : c'est `faction_decision_is_pending` qui le voit, par la file et non par ce registre —
+#: une seule source pour « la phase de commandement attend-elle une réponse ? ».
 COMMAND_PHASE_DECISION_TYPES: frozenset = frozenset(
     {"waaagh_call", "returned_models_profile", "returned_models_placement"}
 )
+
+
+def _command_phase_ability_call_is_pending(game_state: Dict[str, Any], player: Optional[int]) -> bool:
+    """Un appel de capacité de PHASE DE COMMANDEMENT attend-il son décideur (file `rule_choice`,
+    prompt actif compris) ? Les appels d'autres phases n'arrêtent pas cette phase-ci."""
+    from engine.ability_calls import pending_ability_call_prompts
+
+    for prompt in pending_ability_call_prompts(game_state):
+        if prompt.get("phase") != "command":  # get allowed : phase exigée par push_ability_call
+            continue
+        if player is None or int(require_key(prompt, "player")) == int(player):
+            return True
+    return False
 
 
 def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int] = None) -> bool:
@@ -452,6 +468,8 @@ def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int
 
     pending_oath = game_state.get("pending_oath_selection")  # get allowed : None = aucune
     if pending_oath is not None and (player is None or int(pending_oath) == int(player)):
+        return True
+    if _command_phase_ability_call_is_pending(game_state, player):
         return True
     decision = read_pending_agent_decision(game_state)
     if decision is None or str(require_key(decision, "type")) not in COMMAND_PHASE_DECISION_TYPES:

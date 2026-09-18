@@ -87,10 +87,16 @@ def test_extractor_reads_the_continuous_candidate_block():
     """La clé est EXIGÉE à la construction et entre dans la largeur de `decision_encoder`."""
     extractor = _extractor()
     assert extractor.decision_option_cont_dim == DECISION_OPTION_CONT_SIZE
+    from ai.spatial_extractor import ABILITY_EMBED_DIM
+
     first_layer = next(m for m in extractor.decision_encoder.modules() if isinstance(m, torch.nn.Linear))
-    assert first_layer.in_features == extractor.decision_option_dim + DECISION_OPTION_CONT_SIZE, (
-        "le candidat entre par ses DEUX blocs ; sur le seul binaire, les traits continus "
-        "n'atteignent aucun poids"
+    # TROIS entrees depuis le 2026-09-18 : binaire, continu, et l'embedding de l'effet accorde
+    # (`decision_options_effect_ids`, poole par la table des capacites).
+    assert first_layer.in_features == (
+        extractor.decision_option_dim + DECISION_OPTION_CONT_SIZE + ABILITY_EMBED_DIM
+    ), (
+        "le candidat entre par ses TROIS blocs ; sur le seul binaire, les traits continus et "
+        "l'effet accorde n'atteignent aucun poids"
     )
 
 
@@ -169,3 +175,31 @@ def test_extractor_requires_the_continuous_block():
     del spaces["decision_options_cont"]
     with pytest.raises(KeyError, match="decision_options_cont"):
         SpatialCombinedExtractor(gym.spaces.Dict(spaces), cnn_features=_CNN_FEATURES)
+
+
+def test_candidates_differing_only_by_the_granted_effect_are_discernable():
+    """Refonte du 2026-09-18 : deux candidats à lignes binaire ET continue identiques, qui
+    n'accordent pas le même effet (`decision_options_effect_ids`), sortent des embeddings
+    distincts — c'est l'`obs_id` de l'effet, poolé par `ability_embedding`, qui les sépare.
+    ROUGE si l'extracteur ignore le tenseur (écart exactement 0.0)."""
+    extractor = _extractor()
+    obs = _two_candidates({}, {})
+    obs["decision_options_effect_ids"][0, 0, 0] = 14.0  # cp_gain_on_objective
+    obs["decision_options_effect_ids"][0, 1, 0] = 10.0  # reroll_charge
+    emb = _decision_embeddings(extractor, obs)
+    ecart = (emb[0] - emb[1]).abs().max().item()
+    assert ecart > 1e-6, "deux effets accordés différents sortent le même embedding"
+
+
+def test_a_candidate_without_effect_reads_the_padding_row():
+    """Padding 0 = aucun effet : le sac ignore l'entrée, le candidat contribue zéro sur ce canal
+    — même invariant `padding_idx` que pour les capacités d'entité."""
+    from ai.spatial_extractor import _pool_ids
+
+    extractor = _extractor()
+    ids = torch.zeros((1, MAX_DECISION_OPTIONS, 1), dtype=torch.float32)
+    pooled = _pool_ids(extractor.ability_embedding, ids)
+    assert pooled.abs().max().item() == 0.0
+    ids[0, 0, 0] = 14.0
+    pooled = _pool_ids(extractor.ability_embedding, ids)
+    assert pooled[0, 0].abs().max().item() > 0.0 and pooled[0, 1:].abs().max().item() == 0.0

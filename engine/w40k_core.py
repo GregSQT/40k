@@ -202,6 +202,14 @@ from engine.macro_intents import (
     action_family,
     open_placement_slots,
 )
+from engine.ability_calls import (
+    ABILITY_CALL_DECLINE_ID,
+    ability_call_effect_id,
+    ability_call_selection_is_accept,
+    apply_ability_call,
+    bot_accepts_ability_call,
+    is_ability_call_prompt,
+)
 from engine.agent_decision import (
     clear_pending_agent_decision,
     consume_pending_agent_decision,
@@ -4329,19 +4337,10 @@ class W40KEngine(gym.Env):
                 },
             )
 
-    def _apply_rule_choice_selection(
-        self,
-        prompt: Dict[str, Any],
-        selected_display_rule_id: str,
-        consumes_gym_step: bool = False,
-    ) -> None:
-        """Apply one selected option to unit rule runtime state.
-
-        `consumes_gym_step` : cf. `_record_rule_choice_action_log` — True uniquement quand le
-        choix vient d'une action gym `CHOICE_i` (V11 §9.3 P2).
-        """
-        unit_id = str(require_key(prompt, "unit_id"))
-        rule_id = require_key(prompt, "rule_id")
+    @staticmethod
+    def _validate_rule_choice_selection(prompt: Dict[str, Any], selected_display_rule_id: str) -> None:
+        """Le candidat choisi est l'un des candidats du prompt — contrôlé AVANT de retirer le
+        prompt de la file, pour qu'un choix invalide ne laisse pas un état à moitié consommé."""
         options = require_key(prompt, "options")
         allowed_display_rule_ids = {require_key(opt, "display_rule_id") for opt in options}
         if selected_display_rule_id not in allowed_display_rule_ids:
@@ -4349,6 +4348,85 @@ class W40KEngine(gym.Env):
                 f"Invalid selected display rule '{selected_display_rule_id}' for prompt {prompt}"
             )
 
+    def _record_ability_call_action_log(
+        self, prompt: Dict[str, Any], accepted: bool, consumes_gym_step: bool
+    ) -> None:
+        """Ligne « Unit N(c,r) ABILITY CALL <Nom> [USED|DECLINED] » — Game Log ET step.log.
+
+        Sans la ligne DECLINED, l'analyzer ne distinguerait pas « pas proposé » de « refusé ».
+        Même régime que `_record_rule_choice_action_log` : écrite directement (le choix est
+        appliqué hors de la fenêtre de flush des action_logs).
+        """
+        unit_id = str(require_key(prompt, "unit_id"))
+        prompt_player = int(require_key(prompt, "player"))
+        ability_name = str(require_key(prompt, "display_name"))
+        unit = self._get_unit_by_id(unit_id)
+        if unit is None:
+            raise KeyError(f"Cannot record ability call log: unit {unit_id} not found")
+        unit_col, unit_row = require_unit_position(unit, self.game_state)
+        verdict = "USED" if accepted else "DECLINED"
+        append_action_log(
+            self.game_state,
+            {
+                "type": "ability_call",
+                "message": f"Unit {unit_id}({unit_col},{unit_row}) ABILITY CALL {ability_name} [{verdict}]",
+                "unitId": unit_id,
+                "player": prompt_player,
+                "col": unit_col,
+                "row": unit_row,
+                "abilityName": ability_name,
+                "ruleId": ability_call_effect_id(prompt),
+                "accepted": bool(accepted),
+                "phase": prompt.get("phase"),
+            },
+        )
+        if self.step_logger and self.step_logger.enabled:
+            phase_raw = prompt.get("phase")
+            phase_for_log = (
+                phase_raw.strip() if isinstance(phase_raw, str) and phase_raw.strip()
+                else str(require_key(self.game_state, "phase"))
+            )
+            self.step_logger.log_action(
+                unit_id=unit_id,
+                action_type="ability_call",
+                phase=phase_for_log,
+                player=prompt_player,
+                success=True,
+                step_increment=consumes_gym_step,
+                action_details={
+                    "current_turn": require_key(self.game_state, "turn"),
+                    "current_episode": require_key(self.game_state, "episode_number"),
+                    "unit_with_coords": f"{unit_id}({unit_col},{unit_row})",
+                    "ability_name": ability_name,
+                    "ability_used": bool(accepted),
+                    "reward": 0.0,
+                },
+            )
+
+    def _apply_rule_choice_selection(
+        self,
+        prompt: Dict[str, Any],
+        selected_display_rule_id: str,
+        consumes_gym_step: bool = False,
+    ) -> Dict[str, Any]:
+        """Apply one selected option to unit rule runtime state.
+
+        `consumes_gym_step` : cf. `_record_rule_choice_action_log` — True uniquement quand le
+        choix vient d'une action gym `CHOICE_i` (V11 §9.3 P2).
+
+        Rend le payload de l'application : `{}` pour un `rule_choice` de datasheet (un drapeau
+        posé, rien d'autre), celui du GESTIONNAIRE pour un appel de capacité (`ability_calls`) —
+        qui peut lui-même poser une décision d'agent et rendre la main. L'appelant l'a donc
+        déjà retiré de la file et effacé la décision AVANT cet appel.
+        """
+        self._validate_rule_choice_selection(prompt, selected_display_rule_id)
+        unit_id = str(require_key(prompt, "unit_id"))
+        if is_ability_call_prompt(prompt):
+            accepted = ability_call_selection_is_accept(prompt, selected_display_rule_id)
+            self._record_ability_call_action_log(prompt, accepted, consumes_gym_step)
+            return apply_ability_call(self.game_state, prompt, accepted)
+
+        rule_id = require_key(prompt, "rule_id")
         unit = self._get_unit_by_id(unit_id)
         if unit is None:
             raise KeyError(f"Cannot apply rule choice: unit {unit_id} not found")
@@ -4359,7 +4437,7 @@ class W40KEngine(gym.Env):
                 self._record_rule_choice_action_log(
                     prompt, selected_display_rule_id, consumes_gym_step=consumes_gym_step
                 )
-                return
+                return {}
         raise KeyError(f"Rule '{rule_id}' not found in UNIT_RULES for unit {unit_id}")
 
     def _push_rule_choice_agent_decision(self, prompt: Dict[str, Any]) -> Dict[str, Any]:
@@ -4379,18 +4457,24 @@ class W40KEngine(gym.Env):
         decision_options: List[Dict[str, Any]] = []
         for option in options:
             display_rule_id = require_key(option, "display_rule_id")
-            technical_rule_id = require_key(option, "technical_rule_id")
+            # Un candidat qui PASSE n'existe que sur un appel de capacité (`ability_calls`) :
+            # un `rule_choice` de datasheet naît d'une règle en « usage: or », chaque candidat
+            # ACCORDE quelque chose et ne porte pas le drapeau. `declines` est EXIGÉ par le
+            # mécanisme de décision, jamais déduit d'un effet vide.
+            declines = bool(option.get("declines", False))  # get allowed : absent = candidat qui accorde
+            if declines:
+                effect_ids: Tuple[str, ...] = ()
+            else:
+                technical_rule_id = require_key(option, "technical_rule_id")
+                # Ce que le candidat ACCORDE, dans le vocabulaire d'observation des règles
+                # d'unité (§0.31) : c'est la seule description qui ait un sens pour l'agent —
+                # son `obs_id` est écrit dans `decision_options_effect_ids`.
+                effect_ids = (str(technical_rule_id),)
             decision_options.append(
                 {
                     "label": require_key(option, "label"),
-                    # Ce que le candidat ACCORDE, dans le vocabulaire d'observation des règles
-                    # d'unité (§0.31) : c'est la seule description qui ait un sens pour l'agent.
-                    "effect_ids": (str(technical_rule_id),),
-                    # `rule_choice` n'a pas de candidat « ne rien faire » : le prompt naît d'une
-                    # règle en « usage: or », chaque candidat ACCORDE quelque chose. Déclaré et
-                    # non omis — le champ est exigé, pour qu'un futur type de décision optionnel
-                    # ne puisse pas passer en silence.
-                    "declines": False,
+                    "effect_ids": effect_ids,
+                    "declines": declines,
                     "payload": {"display_rule_id": str(display_rule_id)},
                 }
             )
@@ -4880,15 +4964,23 @@ class W40KEngine(gym.Env):
         selected_display_rule_id = require_key(
             require_key(selected_option, "payload"), "display_rule_id"
         )
+        # Contrôle, PUIS retrait de la file et effacement de la décision, PUIS application : un
+        # appel de capacité peut poser sa propre décision d'agent (Grot Orderly : profil des
+        # figurines rendues) — effacer APRÈS l'application l'aurait supprimée.
+        self._validate_rule_choice_selection(prompt, selected_display_rule_id)
+        queue.pop(0)
+        clear_pending_agent_decision(self.game_state)
         # L'action `CHOICE_i` a consommé un step gym complet : la ligne de step.log doit
         # l'incrémenter, sinon elle compte un appel à `step()` de moins qu'il n'y en a eu.
         # Ce n'est PAS ce qui ferait coïncider `Steps=` et `Total=` — ils comptent deux choses
         # différentes et divergent par construction, cf. `_record_rule_choice_action_log`.
-        self._apply_rule_choice_selection(
+        applied = self._apply_rule_choice_selection(
             prompt, selected_display_rule_id, consumes_gym_step=True
         )
-        queue.pop(0)
-        clear_pending_agent_decision(self.game_state)
+        if applied.get("waiting_for_player"):  # get allowed : {} pour un rule_choice de datasheet
+            # Le gestionnaire a posé une décision d'agent (ou une attente humaine) : c'est elle
+            # que le moteur rend, les prompts suivants de la file attendront sa résolution.
+            return True, applied
 
         # Un même événement peut avoir empilé plusieurs prompts : le suivant repose immédiatement
         # une décision, et le moteur rend de nouveau la main.
@@ -4896,6 +4988,7 @@ class W40KEngine(gym.Env):
         if next_prompt_result is not None:
             return True, next_prompt_result
         return True, {
+            **applied,
             "action": "agent_decision",
             "waiting_for_player": False,
             "decision_type": decision_type,
@@ -5019,6 +5112,17 @@ class W40KEngine(gym.Env):
                 return
             if self._is_player_human(current_player):
                 return
+            # Appel de capacité de phase de commandement (Grot Orderly) encore dans la file
+            # `rule_choice` : la file sert elle-même le siège bot (politique déclarée de la
+            # capacité). Un prompt qui reste en attente ici serait un siège humain, déjà exclu.
+            if command_handlers._command_phase_ability_call_is_pending(self.game_state, current_player):
+                waiting = self._emit_next_rule_choice_prompt_if_needed()
+                if waiting is not None:
+                    raise RuntimeError(
+                        "_resolve_faction_decisions_for_ai_seats: un appel de capacité attend un "
+                        f"siège qui n'est pas humain — {waiting!r}"
+                    )
+                continue
             decision = read_pending_agent_decision(self.game_state)
             if decision is not None and str(
                 require_key(decision, "type")
@@ -5547,6 +5651,14 @@ class W40KEngine(gym.Env):
         if not isinstance(options, list) or not options:
             raise ValueError(f"AI rule choice requires non-empty options list, got: {options!r}")
 
+        # Appel de capacité : la politique DÉCLARÉE de la capacité (`register_ability_call`),
+        # jamais un tirage ni la valeur de la politique — celle-ci ne peut pas simuler « activer »
+        # (l'effet est appliqué par un gestionnaire, pas par `_selected_granted_rule_id`).
+        if is_ability_call_prompt(prompt):
+            if bot_accepts_ability_call(self.game_state, prompt):
+                return ability_call_effect_id(prompt)
+            return ABILITY_CALL_DECLINE_ID
+
         if not hasattr(self, "pve_controller"):
             raise RuntimeError("AI rule choice requires pve_controller to be initialized")
         if not self.pve_controller.is_ready_for_decision():
@@ -5590,11 +5702,17 @@ class W40KEngine(gym.Env):
                 self.game_state["active_rule_choice_prompt"] = None
                 return self._push_rule_choice_agent_decision(prompt)
 
-            # AI side: policy-based option selection (no heuristic default behavior).
+            # AI side: policy-based option selection (no heuristic default behavior) — or, for
+            # an ability call, the capability's DECLARED bot policy.
             selected_display_rule_id = self._select_ai_rule_choice_option(prompt)
-            self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+            self._validate_rule_choice_selection(prompt, selected_display_rule_id)
             queue.pop(0)
             self.game_state["active_rule_choice_prompt"] = None
+            applied = self._apply_rule_choice_selection(prompt, selected_display_rule_id)
+            if applied.get("waiting_for_player"):  # get allowed : {} pour un rule_choice de datasheet
+                # Le gestionnaire attend un joueur (défenseur humain d'un lot mortel, …) : rendre
+                # cette attente, les prompts suivants de la file attendront sa résolution.
+                return applied
 
         self.game_state["active_rule_choice_prompt"] = None
         return None
@@ -5639,19 +5757,25 @@ class W40KEngine(gym.Env):
                 "received_player": int(action["player"]),
             }
 
-        self._apply_rule_choice_selection(selected_prompt, selected_display_rule_id)
+        # Même ordre que le chemin gym : contrôle, retrait de la file, puis application — le
+        # gestionnaire d'un appel de capacité peut poser une attente à son tour.
+        self._validate_rule_choice_selection(selected_prompt, selected_display_rule_id)
         selected_prompt_unit_id = str(require_key(selected_prompt, "unit_id"))
         if queue and queue[0] == selected_prompt:
             queue.pop(0)
         else:
             queue[:] = [prompt for prompt in queue if prompt != selected_prompt]
         self.game_state["active_rule_choice_prompt"] = None
+        applied = self._apply_rule_choice_selection(selected_prompt, selected_display_rule_id)
+        if applied.get("waiting_for_player"):  # get allowed : {} pour un rule_choice de datasheet
+            return True, applied
 
         next_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
         if next_prompt_result is not None:
             return True, next_prompt_result
 
         return True, {
+            **applied,
             "action": "select_rule_choice",
             "waiting_for_player": False,
             "unitId": selected_prompt_unit_id,

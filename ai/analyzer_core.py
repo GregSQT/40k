@@ -298,6 +298,8 @@ _MW_ABILITY_SUFFERS_RE = re.compile(
 #: quand le candidat joue est celui qui PASSE. Le libelle n'est pas capture : c'est du texte
 #: libre venu du moteur, et le TYPE + l'INDEX suffisent a compter un taux de choix.
 _AGENT_DECISION_RE = re.compile(r'DECISION\s+\[([A-Za-z0-9_]+)\]\s+CHOICE_(\d+)')
+#: « Unit N(c,r) ABILITY CALL <Nom> [USED|DECLINED] » (`engine/ability_calls.py`).
+_ABILITY_CALL_RE = re.compile(r'ABILITY CALL (.+?) \[(USED|DECLINED)\]')
 
 
 def agent_decision_option_rate(
@@ -2445,6 +2447,27 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
+                elif _ABILITY_CALL_RE.search(action_desc):
+                        # Appel de capacite (`engine/ability_calls.py`) : « Unit N(c,r) ABILITY
+                        # CALL <Nom> [USED|DECLINED] ». Branche AVANT les verbes de jeu, pour la
+                        # meme raison que DECISION : le nom est du texte libre venu du moteur.
+                        # Releve par unite : c'est ce que lisent les controles de capacite
+                        # (Grot Orderly, Finest Hour, Da Jump) pour dater un usage.
+                        action_type = 'ability_call'
+                        _ac_match = _ABILITY_CALL_RE.search(action_desc)
+                        assert _ac_match is not None
+                        state.ability_calls.append({
+                            "episode": state.current_episode_num,
+                            "turn": turn,
+                            "phase": phase,
+                            "player": player,
+                            "unit_id": action_unit_id,
+                            "ability": _ac_match.group(1).strip(),
+                            "used": _ac_match.group(2) == "USED",
+                        })
+                        stats['ability_call_counts'][
+                            (_ac_match.group(1).strip(), _ac_match.group(2))
+                        ][player] += 1
                 elif agent_decision_match:
                         # V11 §9.3 P2 — RELEVE d'une decision d'agent resolue (grammaire 8).
                         # PREMIERE branche de la chaine, et ce n'est pas cosmetique : le libelle

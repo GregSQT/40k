@@ -340,6 +340,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         expected_keys = [
             "global_cont", "global_bin", "self_models_cont", "self_models_bin", "grid",
             "decision_ctx_bin", "decision_options_bin", "decision_options_cont",
+            "decision_options_effect_ids",
             "deploy_cand_cont", "deploy_cand_bin",
         ]
         for family in _UNIT_FAMILIES:
@@ -398,6 +399,13 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 f"SpatialCombinedExtractor : {self.n_decision_options} slots de candidat en "
                 f"'decision_options_bin' contre {_decision_cont_slots} en "
                 f"'decision_options_cont' — les deux blocs decrivent les memes candidats."
+            )
+        _decision_effect_slots = _shape("decision_options_effect_ids")[0]
+        if _decision_effect_slots != self.n_decision_options:
+            raise ValueError(
+                f"SpatialCombinedExtractor : {self.n_decision_options} slots de candidat en "
+                f"'decision_options_bin' contre {_decision_effect_slots} en "
+                f"'decision_options_effect_ids' — les trois blocs decrivent les memes candidats."
             )
         self.n_deploy_slots, self.deploy_cand_cont_dim = _shape("deploy_cand_cont")
         self.deploy_cand_bin_dim = _shape("deploy_cand_bin")[1]
@@ -581,8 +589,17 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # `EntityRunningNorm` : ses colonnes sont normalisees a la source et six sur huit sont
         # muettes selon le type, si bien que des statistiques glissantes melangeraient
         # « sans objet » et vraies valeurs (cf. `DECISION_OPTION_CONT_FIELDS`).
+        # + ABILITY_EMBED_DIM (refonte du 2026-09-18) : l'effet que le candidat ACCORDE, poole
+        # depuis son `obs_id` par `ability_embedding` — la MEME table que « ce que j'ai » sur les
+        # entites. C'est ce qui rend une capacite activable de plus gratuite en scalaires ET en
+        # parametres du candidat : l'ancien one-hot `grants_*` ajoutait une colonne d'entree ici
+        # par effet accordable.
         self.decision_encoder = _mlp(
-            [self.decision_option_dim + self.decision_option_cont_dim, entity_dim, entity_dim]
+            [
+                self.decision_option_dim + self.decision_option_cont_dim + ABILITY_EMBED_DIM,
+                entity_dim,
+                entity_dim,
+            ]
         )
         # Encodeur de CANDIDAT DE DÉPLOIEMENT (§0.40 point 3) : un seul module pour les 5 slots.
         # Ses features continues sont des distances et des comptages BRUTS (subhex, nombre
@@ -786,11 +803,17 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # jamais déduit de la ligne — un candidat sans effet observé aurait une ligne nulle.
         decision_options = observations["decision_options_bin"]
         decision_mask = decision_options[..., -1]
+        # L'effet accorde par le candidat : meme sac que les capacites des entites (`_pool_ids`),
+        # padding ignore — un candidat sans effet (`declines`, decision d'armee) contribue zero.
+        decision_effect_emb = _pool_ids(
+            self.ability_embedding, observations["decision_options_effect_ids"]
+        )
         decision_emb = _encode_masked(
             self.decision_encoder,
             decision_mask,
             observations["decision_options_cont"],
             decision_options,
+            decision_effect_emb,
         )
         decision_agg = _masked_mean_max(decision_emb, decision_mask)
 

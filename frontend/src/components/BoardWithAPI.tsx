@@ -306,19 +306,32 @@ function ManualOrderPicker({
   );
 }
 
+/** Un candidat d'un prompt de la file `pending_rule_choice_queue`. `declines` : candidat « Passer »
+ *  d'un appel de capacité (`engine/ability_calls.py`) — pas une règle du registre. */
+type RuleChoiceOption = {
+  display_rule_id: string;
+  technical_rule_id: string | null;
+  label: string;
+  declines?: boolean;
+};
+
 type RuleChoicePrompt = {
-  trigger: "on_deploy" | "turn_start" | "player_turn_start" | "phase_start" | "activation_start";
+  /** `ability_call` : « you can … » rendu au joueur, deux candidats [activer] / [passer]. */
+  kind?: "ability_call";
+  trigger:
+    | "on_deploy"
+    | "turn_start"
+    | "player_turn_start"
+    | "phase_start"
+    | "activation_start"
+    | "ability_call";
   phase?: "command" | "move" | "shoot" | "charge" | "fight";
   player: number;
   unit_id: string;
   rule_id: string;
   display_name: string;
   usage: "or" | "unique";
-  options: Array<{
-    display_rule_id: string;
-    technical_rule_id: string;
-    label: string;
-  }>;
+  options: RuleChoiceOption[];
 };
 
 type EndlessDutySlotProfiles = {
@@ -1270,6 +1283,14 @@ export const BoardWithAPI: React.FC = () => {
       throw new Error(`Missing description for rule id '${ruleId}' in config/unit_rules.json`);
     }
     return description;
+  };
+  /** Description d'un CANDIDAT : le candidat « Passer » d'un appel de capacité n'est pas une
+   *  règle du registre — il se décrit par lui-même. Tout autre candidat est une règle. */
+  const getRuleChoiceOptionDescription = (option: RuleChoiceOption): string => {
+    if (option.declines === true) {
+      return "Ne pas activer la capacité maintenant. Rien n'est consommé.";
+    }
+    return getRuleDescription(option.display_rule_id);
   };
 
   useEffect(() => {
@@ -2515,6 +2536,7 @@ export const BoardWithAPI: React.FC = () => {
     if (prompt.trigger === "player_turn_start") return "Player Turn Start";
     if (prompt.trigger === "phase_start") return "Phase Start";
     if (prompt.trigger === "activation_start") return "Activation Start";
+    if (prompt.trigger === "ability_call") return "Ability Call";
     throw new Error(`Unknown rule choice trigger context: ${JSON.stringify(prompt)}`);
   };
   const onRuleChoiceTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -4695,7 +4717,7 @@ export const BoardWithAPI: React.FC = () => {
               className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
               onMouseDown={onRuleChoiceTitleMouseDown}
             >
-              {`Capacity choice - ${getRuleChoiceMomentLabel(activeRuleChoicePrompt)}${isDraggingRuleChoicePopup ? " (drag...)" : ""}`}
+              {`${activeRuleChoicePrompt.kind === "ability_call" ? "Ability call" : "Capacity choice"} - ${getRuleChoiceMomentLabel(activeRuleChoicePrompt)}${isDraggingRuleChoicePopup ? " (drag...)" : ""}`}
             </button>
             <div className="deployment-panel__picker-content deployment-panel__picker-content--rule-choice">
               <div className="deployment-panel__picker-list deployment-panel__picker-list--rule-choice">
@@ -4731,7 +4753,7 @@ export const BoardWithAPI: React.FC = () => {
                                   className="deployment-panel__picker-item rule-choice-group__option"
                                   onMouseEnter={() =>
                                     setRuleChoiceHoveredDescription(
-                                      getRuleDescription(option.display_rule_id)
+                                      getRuleChoiceOptionDescription(option)
                                     )
                                   }
                                   onMouseLeave={() => setRuleChoiceHoveredDescription("")}

@@ -421,7 +421,8 @@ def contract_missing(model_path: str, agent_key: str) -> ValueError:
 FAMILLES_INVISIBLES_AILLEURS = ("reward_keys",)
 
 #: Suffixe des registres de VOCABULAIRE : `UNIT_RULE_EFFECT_IDS`, `OBS_PHASE_IDS`,
-#: `AGENT_DECISION_TYPE_IDS`, `DECISION_GRANTABLE_EFFECT_IDS`.
+#: `AGENT_DECISION_TYPE_IDS` (`DECISION_GRANTABLE_EFFECT_IDS` a disparu le 2026-09-18 : un
+#: candidat de decision porte desormais l'obs_id de son effet, `decision_options_effect_ids`).
 #:
 #: Ces registres-la ne portent pas des CASES de l'observation, mais le sens des VALEURS qu'elle
 #: transporte : l'indice d'une entree y est l'`obs_id` emis. « Le vocabulaire s'allonge pour zero

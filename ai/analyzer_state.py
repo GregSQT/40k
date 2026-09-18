@@ -399,6 +399,11 @@ class AnalyzerState:
     # Réinitialisé à chaque début d'épisode.
     battle_shocked_by_unit: Dict[str, bool] = field(default_factory=dict)
 
+    #: Appels de capacité relevés (« ABILITY CALL <Nom> [USED|DECLINED] », `engine/ability_calls`),
+    #: dans l'ordre du journal : {episode, turn, phase, player, unit_id, ability, used}. C'est la
+    #: trace qui distingue « refusé » de « jamais proposé » pour Grot Orderly / Finest Hour / Da Jump.
+    ability_calls: List[Dict[str, Any]] = field(default_factory=list)
+
     #: Paires leader→garde-du-corps lues depuis la ligne `Attached: lid→bid` de l'entête d'épisode.
     #: Mappé AVANT les lignes `Starting position` (unit_types indisponibles à ce stade) ;
     #: consommé pendant le bloc unit_start pour coter note_rule_usage leader/support.

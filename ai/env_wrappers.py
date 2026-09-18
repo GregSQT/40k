@@ -127,6 +127,33 @@ def random_action_for_pending_choice(
     return None
 
 
+def _ability_call_slot_for_bot(
+    game_state: Dict[str, Any], action_mask: Any, wrapper: str
+) -> Optional[int]:
+    """Le `CHOICE_i` que la politique déclarée d'un appel de capacité fait jouer au bot, ou
+    ``None`` si la décision en attente n'est pas un appel de capacité."""
+    from engine.ability_calls import bot_accepts_ability_call, is_ability_call_prompt
+
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != "rule_choice":
+        return None
+    queue = game_state.get("pending_rule_choice_queue")  # get allowed : file jamais initialisée
+    if not isinstance(queue, list) or not queue or not is_ability_call_prompt(queue[0]):
+        return None
+    prompt = queue[0]
+    if str(require_key(prompt, "unit_id")) != str(require_key(decision, "unit_id")):
+        raise RuntimeError(
+            f"{wrapper}: la decision rule_choice porte sur l'unite {decision['unit_id']} mais la "
+            f"file presente l'appel de capacite de {prompt['unit_id']} — etats divergents."
+        )
+    if bot_accepts_ability_call(game_state, prompt):
+        slot = int(mi.CHOICE_BASE)  # candidat 0 = activer (ordre contractuel de push_ability_call)
+        if not bool(action_mask[slot]):
+            raise RuntimeError(f"{wrapper}: appel de capacite en attente sans CHOICE_0 ouvert.")
+        return slot
+    return pending_decision_decline_slot(game_state, action_mask, "rule_choice")
+
+
 def bot_action_for_pending_choice(
     game_state: Dict[str, Any], action_mask: Any, wrapper: str
 ) -> Optional[int]:
@@ -180,6 +207,13 @@ def bot_action_for_pending_choice(
     ordered_retreat = pending_decision_decline_slot(game_state, action_mask, "fall_back_mode")
     if ordered_retreat is not None:
         return ordered_retreat
+    # APPEL DE CAPACITÉ (`engine/ability_calls.py`, 2026-09-18) : un `rule_choice` dont le prompt
+    # de tête est un appel « you can … ». Le bot répond par la politique DÉCLARÉE de la capacité
+    # — la même qu'au siège PvE (`_select_ai_rule_choice_option`) —, jamais par tirage : Grot
+    # Orderly, Finest Hour ou Da Jump joués une fois sur deux feraient bouger la baseline.
+    ability_call_slot = _ability_call_slot_for_bot(game_state, action_mask, wrapper)
+    if ability_call_slot is not None:
+        return ability_call_slot
     # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de
     # LISTE, jamais une decision de bot ». Le bot ne declare donc jamais de reserves de sa propre
     # initiative — invariant que portait auparavant le retrait de `SQUAD_ACTION_WAIT` du pool

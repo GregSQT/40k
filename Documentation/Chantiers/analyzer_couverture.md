@@ -202,6 +202,7 @@ l'écriture directe de `rule_choice`) :
 | `pile_in` / `consolidation` | `Unit N(c,r) PILED IN\|CONSOLIDATED from … to …` | positions, `[MODELS:]` |
 | `wait` | `Unit N(c,r) WAIT` | — |
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
+| `ability_call` | `Unit N(c,r) ABILITY CALL <Nom> [USED\|DECLINED]` | appel de capacité (`engine/ability_calls.py`, 2026-09-18) : « you can … » rendu au joueur ; DECLINED distingue « refusé » de « jamais proposé » ; compté par `ability_call_counts` (§1.6) et relevé dans `state.ability_calls` |
 
 **Formateurs sans producteur** (code mort côté moteur) : `skip`.
 Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`
@@ -821,6 +822,7 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | ~~L25~~ | ~~**Capacités de commandement déclarées** (Waaagh! appelé, cible Oath of Moment)~~ — **LIVRÉ le 2026-08-18** : `P<n> COMMAND [WAAAGH!]` / `[OATH OF MOMENT] → Unit M` via `append_action_log` dans `command_handlers.py` | 08.04, 22.02, `waaagh`, `oath_of_moment` |
 | ~~L26~~ | ~~**Modificateurs de touche hors HEAVY/COVER** (`hit_target_base` généralisé)~~ — **LIVRÉ le 2026-08-20** : `[POINT-BLANK]` + `base+->eff+` généralisé pour tout `hit_rule_modifier` (10.06 M/V) ; 5 verrous rouge→vert | 10.06 (−1 M/V), 17.03, 22.05, 24.29, 15.09 |
 | ~~L27~~ | ~~**Relance de sauvegarde en mêlée : nom de la capacité**~~ — **LIVRÉ le 2026-08-18** : `saveAbility` sur le shot_record via `_get_source_unit_rule_display_name_for_effect(target, "reroll_1_save_fight")` | `reroll_1_save_fight`, `preservation_imperative` |
+| ~~L30~~ | ~~**Appel de capacité : USED / DECLINED**~~ — **LIVRÉ le 2026-09-18** : `Unit N(c,r) ABILITY CALL <Nom> [USED\|DECLINED]` (`engine/ability_calls.py`, `_record_ability_call_action_log`), branche `ABILITY CALL` de `analyzer_core` avant les verbes de jeu, `state.ability_calls` + `ability_call_counts` ; verrous `test_agent_decision_mechanism.py` (producteur), `test_analyzer_ability_call.py` (lecteur) | Grot Orderly, Finest Hour, Da Jump (chantiers 4–6 du lot) |
 | ~~L29~~ | ~~**Cible désignée de l'activation de tir**~~ — **LIVRÉ le 2026-09-18** : `[DESIGNATED:<id>]` dans les tags de toute ligne `SHOT` (cible prioritaire en gym, première déclarée au siège humain) ; `shoot_handler` ne lève le plafond Hail of Bolts / Overlapping Detonations que pour les tirs sur la désignée ; verrous `test_step_log_designated_target.py`, `test_analyzer_hail_of_bolts.py`, LOG_GRAMMAR_VERSION=11 | `weapon_attacks_bonus_vs_designated_target`, `grant_weapon_rule_vs_designated_target` |
 | ~~L28~~ | ~~**Relance de charge : token**~~ — **LIVRÉ le 2026-08-18** : `[REROLLED:<jet initial>]` sur `CHARGED` via `charge_roll_initial` dans l'action_log | `reroll_charge` |
 

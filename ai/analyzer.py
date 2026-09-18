@@ -2144,6 +2144,10 @@ def parse_step_log(filepath: str) -> Dict:
         # disait si l'agent declarait ou declinait systematiquement.
         'agent_decision_totals': defaultdict(lambda: {1: 0, 2: 0}),  # decision_type -> {1,2}
         'agent_decision_options': defaultdict(lambda: {1: 0, 2: 0}),  # (decision_type, i) -> {1,2}
+        # Appels de capacite (« ABILITY CALL <Nom> [USED|DECLINED] », engine/ability_calls.py) :
+        # (nom, USED|DECLINED) -> {1,2}. C'est ce qui rend lisible un taux d'activation par
+        # capacite, et distingue « refuse » de « jamais propose ».
+        'ability_call_counts': defaultdict(lambda: {1: 0, 2: 0}),
         'reactive_move_stats': {
             1: {'applied': 0, 'declined': 0, 'abnormal': 0},
             2: {'applied': 0, 'declined': 0, 'abnormal': 0},
@@ -4021,6 +4025,16 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             )
     else:
         log_print("  No agent decision recorded.")
+    # APPELS DE CAPACITE (engine/ability_calls.py) — meme famille que les decisions : un
+    # « you can … » rendu au joueur, USED ou DECLINED par capacite et par joueur.
+    _ac_counts = require_key(stats, 'ability_call_counts')
+    if _ac_counts:
+        log_print("\n  Ability calls (USED / DECLINED, by ability)")
+        log_print(f"  {'Ability':<32} {'Verdict':>9} {'P1':>8} {'P2':>8}")
+        for (_ac_name, _ac_verdict), _ac_cnt in sorted(_ac_counts.items()):
+            log_print(
+                f"  {_ac_name:<32} {_ac_verdict:>9} {int(_ac_cnt[1]):8d} {int(_ac_cnt[2]):8d}"
+            )
 
     # WEAPONS RULES USAGE (by rule and weapon+unit)
     _switch_section("1.8")

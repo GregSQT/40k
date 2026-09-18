@@ -33,8 +33,9 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
-    DECISION_GRANTABLE_EFFECT_IDS,
+    DECISION_OPTION_EFFECT_SLOTS,
     MAX_DECISION_OPTIONS,
+    UNIT_RULE_EFFECT_IDS,
 )
 from shared.data_validation import require_key
 
@@ -77,18 +78,26 @@ def _validate_options(decision_type: str, options: Sequence[Dict[str, Any]]) -> 
             raise TypeError(
                 f"pending_agent_decision: 'effect_ids' du candidat {index} doit etre une sequence"
             )
+        if len(effect_ids) > DECISION_OPTION_EFFECT_SLOTS:
+            raise ValueError(
+                f"pending_agent_decision: candidat {index} accorde {len(effect_ids)} effets pour "
+                f"{DECISION_OPTION_EFFECT_SLOTS} slot(s) d'effet par candidat "
+                f"(`decision_options_effect_ids`). Un candidat accorde UN effet ; en decrire "
+                f"plusieurs par un seul id tronquerait ce que l'agent percoit."
+            )
         for effect_id in effect_ids:
-            # Garde resserree le 2026-08-04 : le registre du bloc candidat n'est plus le
-            # vocabulaire observe ENTIER mais les seuls effets ACCORDABLES. Un effet observable
-            # mais absent d'ici n'a pas de bit `grants_*` : le candidat serait decrit par un
-            # vecteur nul, donc indiscernable d'un autre. C'est exactement ce que la garde large
-            # laissait passer.
-            if effect_id not in DECISION_GRANTABLE_EFFECT_IDS:
+            # Une SEULE liste (refonte du 2026-09-18) : l'effet doit etre dans le vocabulaire
+            # observe `UNIT_RULE_EFFECT_IDS`, dont chaque entree porte un `obs_id`
+            # (`observation_builder.unit_ability_obs_ids` leve sinon) — c'est cet id que le bloc
+            # candidat ecrit. Un effet hors vocabulaire n'a pas d'id : le candidat serait decrit
+            # par le padding, donc indiscernable d'un candidat sans effet.
+            if effect_id not in UNIT_RULE_EFFECT_IDS:
                 raise KeyError(
                     f"pending_agent_decision: effet '{effect_id}' du candidat {index} absent de "
-                    f"DECISION_GRANTABLE_EFFECT_IDS. L'agent ne pourrait pas percevoir ce que ce "
-                    f"candidat lui accorde : ajouter l'effet au registre des accordables "
-                    f"(obs_size change -> retrain --new) plutot que de le decrire par un zero."
+                    f"UNIT_RULE_EFFECT_IDS. L'agent ne pourrait pas percevoir ce que ce candidat "
+                    f"lui accorde : declarer l'effet dans le vocabulaire observe (avec son "
+                    f"`obs_id` dans config/unit_rules.json — zero scalaire) plutot que de le "
+                    f"decrire par le padding."
                 )
         # `declines` est EXIGÉ, jamais déduit de `not effect_ids` : « n'accorde aucun effet
         # observable » et « ne fait rien » sont deux choses différentes — un candidat peut très
@@ -176,7 +185,7 @@ def set_pending_agent_decision(
     ligne est celle de `DECISION_OPTION_CONT_FIELDS`, contrôlée à l'encodage.
 
     Absent SEULEMENT pour les types dont les candidats se distinguent par un autre canal :
-    `rule_choice` par le one-hot de l'effet accordé ; `waaagh_call`, `fly_declaration`,
+    `rule_choice` par l'`obs_id` de l'effet accordé ; `waaagh_call`, `fly_declaration`,
     `ascent_declaration` et `fall_back_mode` par le bit `declines`. Pour les autres, l'omettre
     rend les candidats strictement identiques dans l'observation — le défaut mesuré à un écart
     d'embedding de 0.0.

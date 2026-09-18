@@ -677,13 +677,14 @@ def test_combi_markers_cost_no_observation_scalar():
     vocabulaire d'embedding est pré-dimensionné. `obs_size` ne bouge pas — donc aucun retrain
     n'est imposé par la FORME de l'observation.
 
-    18269 est la valeur acquittée par `test_deployment_observation_contract`
+    18241 est la valeur acquittée par `test_deployment_observation_contract`
     (`_ACKNOWLEDGED_OBS_SIZE`) : ce test la reprend ici pour que le chantier des marqueurs ait
-    son propre verrou, au même endroit que le code qu'il ajoute.
+    son propre verrou, au même endroit que le code qu'il ajoute (18269 jusqu'à la refonte du
+    bloc candidat du 2026-09-18, qui ne touche pas aux marqueurs).
     """
     from engine.observation_entities import OBS_ID_MAX, OBS_ID_VOCAB_SIZE
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 18269
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 18241
     assert OBS_ID_VOCAB_SIZE == OBS_ID_MAX + 1
     assert max(COMBI_GROUP_MARKER_OBS_IDS.values()) <= OBS_ID_MAX, (
         "un marqueur au-delà du vocabulaire ferait, LUI, grossir les tables d'embedding"
