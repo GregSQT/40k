@@ -1161,7 +1161,7 @@
         ]
       ],
       "status": "COUVERT",
-      "status_note": "2026-09-18 (capacités-agent, prompt 8), grammaire 15 : `Sec=<p>` d'un instantané ne peut apparaître qu'après une ligne « Unit N(c,r) SECURES <zone> [<capacité>] » de <p> (phase COMMAND de <p>, escouade vivante avec un socle dans l'aire, porteuse de secure_objective_on_control — 19.04 par note_special_rule_usage) et le contrôle revient à <p> ; une perte de `Sec=` sans niveau adverse strictement supérieur, ou un contrôleur ≠ <p> sur un objectif que <p> sécurise sans niveau strictement supérieur, est une faute. Journal < 15 : abstention."
+      "status_note": "2026-09-18 (capacités-agent, prompt 8), grammaire 15 : `Sec=<p>` d'un instantané ne peut apparaître qu'après une ligne « Unit N(c,r) SECURES <zone> [<capacité>] » de <p> (phase COMMAND de <p>, escouade vivante avec un socle dans l'aire, porteuse de secure_objective_on_control — 19.04 par note_special_rule_usage) et le contrôle revient à <p> ; une perte de `Sec=` sans niveau adverse strictement supérieur, une REPRISE (`Sec=` passant de <q> à <p> sans `none` intermédiaire, ce que le moteur produit en fin de phase de commandement) sans niveau strictement supérieur, ou un contrôleur ≠ <p> sur un objectif que <p> sécurise sans niveau strictement supérieur, est une faute. Journal < 15 : abstention."
     },
     {
       "id": "PROJ.2.3.returned_models",
@@ -1191,7 +1191,7 @@
         ]
       ],
       "status": "COUVERT",
-      "status_note": "2026-09-18 (capacités-agent, prompt 7) : `[FNP:s/t+ ×n]` jugé par ai/analyzer_save.check_fnp — seuil attendu = meilleur seuil (24.02) porté par une source PRÉSENTE au Select Targets step (Dok's Toolz 5+ ; Psychic Hood 4+ si l'arme est [PSYCHIC] ou la source Da Jump ; Unbreakable Resolve 4+ si la FIGURINE allouée est l'Ancient dans une aire d'objectif 14.02 ou à 6\" du centre). Aucune source → tout [FNP:] est une faute ; source présente et Dmg>0 sans [FNP:] → faute ; Dmg ≠ n − s → faute. Miroir SUFFERS ([FNP:n] sans seuil) : présence sans source seulement. Abstention à x5 sur la clause positionnelle (le socle déborde de son ancre)."
+      "status_note": "2026-09-18 (capacités-agent, prompt 7) : `[FNP:s/t+ ×n]` jugé par ai/analyzer_save.check_fnp — seuil attendu = meilleur seuil (24.02) porté par une source PRÉSENTE au Select Targets step (Dok's Toolz 5+ ; Psychic Hood 4+ si l'arme est [PSYCHIC] ou la source Da Jump ; Unbreakable Resolve 4+ si la FIGURINE allouée est l'Ancient dans une aire d'objectif 14.02 ou à 6\" du centre). Aucune source → tout [FNP:] est une faute ; source présente et Dmg>0 sans [FNP:] → faute ; Dmg ≠ n − s → faute. Miroir SUFFERS ([FNP:n] sans seuil) : présence sans source seulement. 2026-09-18 : la clause positionnelle est jugée à TOUTE résolution — l'aire sur l'empreinte du socle, le 6\" du centre du BORD du socle (01.04) via engine.combat_utils.ranged_edge_distance_to_cell et la métrique `metric.ranged` du run ; abstention seulement si le journal ne donne pas la position de la figurine."
     },
     {
       "id": "PROJ.2.8.fantome",

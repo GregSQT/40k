@@ -210,8 +210,9 @@ producteur `_log_effects_snapshot` ; Waaagh! actif sans la clé = abstention) ; 
 (un 5+ sous AP−4 s'imprime 9+, insauvable, et c'est exact) ; `fnp_threshold_mismatch` (PROJ.2.3.fnp)
 — `[FNP:s/t+ ×n]` : seuil = meilleur seuil des sources présentes (24.02), Dok's Toolz 5+, Psychic
 Hood 4+ si `[PSYCHIC]` ou Da Jump, Unbreakable Resolve 4+ si l'Ancient alloué est dans une aire
-d'objectif (`state.objective_cells`, entête `Objectives:`) ou à 6" du centre (abstention à x5 :
-le socle déborde de son ancre) ; présence sans source, absence avec source et `Dmg>0`, compte
+d'objectif (`state.objective_cells`, entête `Objectives:`) ou à 6" du centre — mesuré depuis le
+2026-09-18 du BORD du socle (01.04) par `ranged_edge_distance_to_cell` et la métrique `metric.ranged`
+du run, donc jugé à TOUTE résolution ; l'abstention x5 est levée ; présence sans source, absence avec source et `Dmg>0`, compte
 `Dmg ≠ n − s` ; miroir `[FNP:n]` sur SUFFERS (présence sans source). Corpus : 24.12 → COUVERT
 (la note « jet et seuil absents » était périmée), PROJ.1.9.feel_no_pain/_vs_psychic/_near_objective
 → COUVERT via 24.12, unit.invul_save_override et unit.waaagh → COUVERT, unit.toughness_bonus_while_waaagh
@@ -238,8 +239,9 @@ l'escouade est battle-shocked (01.07/08.03) ; contrôleur attendu = miroir de
 `Unit N(c,r) SECURES <zone> [<capacité>]` (action_log `secure_objective` d'`apply_secure_objective_on_control`,
 enrichi de la zone et de la capacité) : une sécurisation n'apparaît qu'après une ligne SECURES du
 camp en phase COMMAND, sur une escouade vivante présente dans l'aire et porteuse (19.04 par
-`note_special_rule_usage`), le contrôle lui revenant ; perte seulement sur niveau adverse strictement
-supérieur ; `returned_models_invalid` (PROJ.2.3.returned_models) — chaque ligne RETURNED : k ≤ D3,
+`note_special_rule_usage`), le contrôle lui revenant ; perte — et depuis le 2026-09-18 REPRISE par
+l'adversaire sans `Sec=none` intermédiaire, ce que le moteur produit en fin de phase de commandement —
+seulement sur niveau adverse strictement supérieur ; `returned_models_invalid` (PROJ.2.3.returned_models) — chaque ligne RETURNED : k ≤ D3,
 k ≤ figurines mortes rendables (`dead_model_ids_episode`), une par escouade et par partie, phase
 COMMAND du propriétaire, types ⊆ mortes non rendues, aucun leader/support (`_model_is_character`).
 Corpus : unit.secure_objective_on_control, unit.oc_bonus, unit.return_destroyed_models → COUVERT.

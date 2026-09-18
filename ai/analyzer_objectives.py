@@ -17,8 +17,11 @@ Trois compteurs, un par entrée du corpus (bucket §2.3 « dégâts / état de p
    depuis l'instantané précédent ; cette ligne est en phase COMMAND de <p>, sur une escouade
    vivante et PRÉSENTE dans l'aire, porteuse de `secure_objective_on_control` (19.04, relevé
    `note_special_rule_usage`), et l'instantané qui suit donne le contrôle à <p>. Une perte de
-   `Sec=` sans niveau adverse strictement supérieur, ou `Sec=<p>` maintenu avec un contrôleur
-   ≠ <p> sans niveau strictement supérieur, est une faute. Journal < 15 : abstention (pas de Sec=).
+   `Sec=` sans niveau adverse strictement supérieur, une REPRISE (`Sec=` passant de <q> à <p>
+   sans `none` intermédiaire) sans niveau strictement supérieur, ou `Sec=<p>` maintenu avec un
+   contrôleur ≠ <p> sans niveau strictement supérieur, est une faute — 14.03 : « that objective
+   remains under their control … until their opponent's level of control over that objective is
+   greater than theirs at the end of a phase ». Journal < 15 : abstention (pas de Sec=).
 3. ``returned_models_invalid`` (PROJ.2.3.returned_models, REVIVED + Grot Orderly). Sur chaque
    ligne `RETURNED k models [GROT ORDERLY] (D3=n) [MODEL_TYPES: mid=type …]` : k ≤ n ; k ≤ figurines
    détruites de l'escouade non encore rendues ; un usage par escouade et par partie ; phase
@@ -234,6 +237,17 @@ def _judge_secured(
         elif ctrl != sec:
             _error(state, stats, SECURED_COUNTER, int(sec), line,
                    f"zone {name} sécurisée par {sec} mais contrôlée par {ctrl}")
+        elif prev is not None and not (oc is not None and oc[sec - 1] > oc[prev - 1]):
+            # REPRISE : la sécurisation de l'adversaire ne tombe que sur un niveau STRICTEMENT
+            # supérieur (14.03), et le moteur peut la remplacer sans instantané `Sec=none`
+            # intermédiaire — `calculate_objective_control` efface puis `apply_secure_objective_
+            # on_control` repose, dans le MÊME appel de fin de phase de commandement, alors que
+            # l'instantané n'est écrit qu'au changement. Sans ce test, une sécurisation prise sur
+            # une simple égalité d'OC passait : la branche PERTE, seule à juger le « strictement
+            # supérieur », n'est atteinte que par `Sec=none`.
+            _error(state, stats, SECURED_COUNTER, int(sec), line,
+                   f"zone {name} sécurisée par {sec} alors que {prev} la sécurisait, sans niveau "
+                   f"strictement supérieur (OC {oc})")
         return
     if prev is not None and sec is None:
         # PERTE : seulement sur un niveau adverse STRICTEMENT supérieur.
