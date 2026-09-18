@@ -5512,7 +5512,7 @@ def get_board_config():
         merged["wall_hexes"] = wall_hexes
         if wall_segments_raw:
             merged["walls"] = wall_segments_raw
-        def _zone_entry(o: dict) -> dict:
+        def _zone_entry(o: dict, walls_by_type: dict) -> dict:
             entry: dict = {"id": str(o["id"]), "name": str(o.get("name", o["id"])), "hexes": o["hexes"]}
             if "shape" in o:
                 entry["shape"] = o["shape"]
@@ -5524,8 +5524,16 @@ def get_board_config():
                 entry["bottom_right"] = o["bottom_right"]
             if "objective" in o:
                 entry["objective"] = o["objective"]
+            # Catégorie DÉRIVÉE des murs typés du fichier (13.02/13.10) — même dérivation que le
+            # moteur (`_load_terrain_areas_from_ref`) : le cône LoS du front (bloqueurs obscuring)
+            # et le moteur lisent la même vérité. Une clé `obscuring` saisie à la main est refusée.
             if "obscuring" in o:
-                entry["obscuring"] = o["obscuring"]
+                raise ValueError(
+                    f"board terrain ({board_subdir}) zone '{o['id']}': clé 'obscuring' obsolète — "
+                    f"dérivée des murs typés (light/dense), retirer la clé"
+                )
+            from engine.terrain_utils import derive_area_categories as _derive_cat
+            entry["obscuring"], entry["dense"] = _derive_cat(o["hexes"], walls_by_type)
             # Étages (format B) : exposés au front avec chaque plancher rasterisé (empreinte + hexes).
             if isinstance(o.get("floors"), list) and o["floors"]:
                 from engine.hex_utils import polygon_to_hex_list as _p2h
@@ -5569,7 +5577,11 @@ def get_board_config():
                 rows=board_rows,
                 path_hint=f"board terrain ({board_subdir})",
             )
-            terrain_zones = [_zone_entry(t) for t in terrain_features]
+            from engine.terrain_utils import terrain_wall_hexes_by_type as _walls_by_type
+            _terrain_walls_by_type = _walls_by_type(
+                terrain_data.get("walls"), path_hint=f"board terrain ({board_subdir})"
+            )
+            terrain_zones = [_zone_entry(t, _terrain_walls_by_type) for t in terrain_features]
             # Source UNIQUE des objectifs côté rendu : terrains flaggés "objective": true.
             merged["objective_zones"] = [z for z in terrain_zones if z.get("objective")]
             terrain_icons = terrain_data.get("icons", [])

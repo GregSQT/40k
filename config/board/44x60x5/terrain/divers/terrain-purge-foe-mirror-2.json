@@ -4,7 +4,7 @@
     {
       "id": "home_nw",
       "name": "Home NW",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [[25,40],[82,40],[82,85],[25,85]],
       "objective": true,
@@ -13,7 +13,7 @@
     {
       "id": "baseplate_ne",
       "name": "Baseplate NE",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[157,39],[185,39],[185,74],[157,74]],
       "objective": true
@@ -21,7 +21,7 @@
     {
       "id": "obstacle_ne",
       "name": "Obstacle NE",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[200,68],[210,68],[210,98],[200,98]],
       "objective": false
@@ -29,7 +29,7 @@
     {
       "id": "obstacle_w",
       "name": "Obstacle W",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[15,95],[25,95],[25,125],[15,125]],
       "objective": false
@@ -37,7 +37,7 @@
     {
       "id": "ruin_center_n",
       "name": "Ruin Center N",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [[83,35],[137,35],[137,102],[83,102]],
       "objective": false,
@@ -49,7 +49,7 @@
     {
       "id": "home_se",
       "name": "Home SE",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [[138,215],[195,215],[195,260],[138,260]],
       "objective": true,
@@ -58,7 +58,7 @@
     {
       "id": "baseplate_sw",
       "name": "Baseplate SW",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[35,226],[63,226],[63,261],[35,261]],
       "objective": true
@@ -66,7 +66,7 @@
     {
       "id": "obstacle_sw",
       "name": "Obstacle SW",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[10,202],[20,202],[20,232],[10,232]],
       "objective": false
@@ -74,7 +74,7 @@
     {
       "id": "obstacle_e",
       "name": "Obstacle E",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[195,175],[205,175],[205,205],[195,205]],
       "objective": false
@@ -82,7 +82,7 @@
     {
       "id": "ruin_center_s",
       "name": "Ruin Center S",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [[83,198],[137,198],[137,265],[83,265]],
       "objective": false,

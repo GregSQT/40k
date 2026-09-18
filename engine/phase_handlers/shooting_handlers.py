@@ -957,7 +957,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def compute_models_in_obscuring_terrain(
+def compute_models_in_dense_terrain(
     unit: Dict[str, Any],
     by_model: Dict[Any, Any],
     game_state: Dict[str, Any],
@@ -965,18 +965,18 @@ def compute_models_in_obscuring_terrain(
 ) -> List[Any]:
     """SOURCE UNIQUE du test "caché" par figurine (rule 13.09).
 
-    Pour chaque figurine de ``by_model`` (map model_id -> (col, row)), calcule son empreinte à
-    cette position (``_compute_unit_occupied_hexes`` — dépend de engagement_zone, base_shape,
-    base_size et de ``unit['orientation']``) et la teste contre les zones obscurantes
-    (intersection = au moins une case touchée). Read-only, sans effet de bord.
+    13.09 : « within a terrain area that contains one or more DENSE terrain features » — une zone
+    seulement obscurante (murs light) donne le couvert, pas hidden. Pour chaque figurine de
+    ``by_model`` (map model_id -> (col, row)), calcule son empreinte à cette position
+    (``_compute_unit_occupied_hexes`` — dépend de engagement_zone, base_shape, base_size et de
+    ``unit['orientation']``) et la teste contre les zones ``dense`` (intersection = au moins une
+    case touchée). Read-only, sans effet de bord.
 
     Appelée par ``compute_hidden_statuses`` (statut réel) ET ``preview_hidden_models_from_position``
     (preview de mouvement) → garantit un résultat identique entre preview et drop, pour toute
     forme de base. Les gates niveau-unité (vivant, hideable, a tiré) sont gérés par l'appelant.
     """
-    return compute_models_within_terrain(
-        unit, by_model, game_state, terrain_areas, obscuring_only=True
-    )
+    return compute_models_within_terrain(unit, by_model, game_state, terrain_areas, "dense")
 
 
 def compute_models_within_terrain(
@@ -984,14 +984,15 @@ def compute_models_within_terrain(
     by_model: Dict[Any, Any],
     game_state: Dict[str, Any],
     terrain_areas: List[Dict[str, Any]],
-    obscuring_only: bool,
+    category: Optional[str],
 ) -> List[Any]:
     """Figurines de ``by_model`` dont le socle est « within a terrain area », par figurine.
 
-    ``obscuring_only=True`` restreint aux zones obscurantes (Hidden 13.09) ; ``False`` prend
-    toute zone de terrain (Benefit of Cover 13.08, volet « INFANTRY/BEASTS/SWARM within a
-    terrain area »). Read-only. Généralisation de ``compute_models_in_obscuring_terrain``, dont
-    elle est la source : une seule géométrie figurine↔terrain pour les deux règles.
+    ``category`` (cf. ``terrain_utils.filter_terrain_areas``) : ``"dense"`` restreint aux zones
+    contenant un terrain dense (Hidden 13.09) ; ``None`` prend toute zone de terrain (Benefit of
+    Cover 13.08, volet « INFANTRY/BEASTS/SWARM within a terrain area »). Read-only. Généralisation
+    de ``compute_models_in_dense_terrain``, dont elle est la source : une seule géométrie
+    figurine↔terrain pour les deux règles.
     """
     from engine.terrain_utils import model_within_terrain
     base_shape = require_key(unit, "BASE_SHAPE")
@@ -1000,8 +1001,7 @@ def compute_models_within_terrain(
     model_ids: List[Any] = []
     for mid, (col, row) in by_model.items():
         if model_within_terrain(
-            int(col), int(row), base_shape, base_size, orientation,
-            terrain_areas, obscuring_only=obscuring_only,
+            int(col), int(row), base_shape, base_size, orientation, terrain_areas, category,
         ):
             model_ids.append(mid)
     return model_ids
@@ -1042,7 +1042,7 @@ def compute_hidden_status_for_unit(game_state: Dict[str, Any], unit_id: str) -> 
         return
     terrain_areas = require_key(game_state, "terrain_areas")
     by_model = require_key(entry, "occupied_hexes_by_model")
-    hidden_model_ids = compute_models_in_obscuring_terrain(unit, by_model, game_state, terrain_areas)
+    hidden_model_ids = compute_models_in_dense_terrain(unit, by_model, game_state, terrain_areas)
     unit["hidden_models"] = hidden_model_ids
     unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
 
@@ -1082,7 +1082,7 @@ def preview_hidden_models_from_position(
     """Read-only : statut "caché" (rule 13.09) de chaque figurine SI l'escouade était déplacée à
     (dest_col, dest_row) avec ``orientation``. Reproduit le chemin du move réel
     (``translate_squad_to_destination`` : translation offset rigide des figs ; l'orientation est
-    appliquée à l'unité avant recalcul du footprint) puis réutilise ``compute_models_in_obscuring_terrain``
+    appliquée à l'unité avant recalcul du footprint) puis réutilise ``compute_models_in_dense_terrain``
     → résultat identique au recalcul effectué après le drop, sans muter ``game_state`` ni deepcopy.
 
     Retourne ``{"hidden_models": [...], "hidden": bool}``.
@@ -1123,7 +1123,7 @@ def preview_hidden_models_from_position(
         moved_by_model[mid] = (int(_nc), int(_nr))
     # Le move applique unit['orientation'] = orientation avant de recalculer le footprint.
     unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
-    hidden_model_ids = compute_models_in_obscuring_terrain(
+    hidden_model_ids = compute_models_in_dense_terrain(
         unit_for_footprint, moved_by_model, game_state, terrain_areas
     )
     return {
@@ -1141,7 +1141,7 @@ def preview_hidden_models_from_model_positions(
     """Read-only : statut "caché" (rule 13.09) de chaque figurine SI elles étaient aux positions
     EXPLICITES données (``model_positions`` : map model_id -> [col, row]). Pour le déplacement
     figurine-par-figurine (perModelMove), où chaque fig a sa propre position provisoire (pas une
-    translation rigide). Réutilise ``compute_models_in_obscuring_terrain`` → identique au recalcul après pose.
+    translation rigide). Réutilise ``compute_models_in_dense_terrain`` → identique au recalcul après pose.
 
     Retourne ``{"hidden_models": [...], "hidden": bool}``.
     """
@@ -1159,7 +1159,7 @@ def preview_hidden_models_from_model_positions(
         str(mid): (int(pos[0]), int(pos[1])) for mid, pos in model_positions.items()
     }
     unit_for_footprint = unit if orientation is None else {**unit, "orientation": int(orientation)}
-    hidden_model_ids = compute_models_in_obscuring_terrain(
+    hidden_model_ids = compute_models_in_dense_terrain(
         unit_for_footprint, by_model, game_state, terrain_areas
     )
     return {
@@ -4686,7 +4686,7 @@ def _compute_unit_los_uncached(
                 and model_within_terrain(
                     center[0], center[1],
                     cover_base_shape, cover_base_size, cover_orientation,
-                    terrain_areas, obscuring_only=False,
+                    terrain_areas, None,
                 )
             )
             if not cond_a:

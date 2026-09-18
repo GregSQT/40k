@@ -346,7 +346,7 @@ def test_obscuring_channel_paints_only_obscuring_areas(engine):
 def test_obscuring_channel_is_dilated_like_its_cover_twin():
     """13.09 se tranche par CHEVAUCHEMENT DE SOCLE, comme 13.08 — donc même dilatation.
 
-    Le moteur évalue « caché » via `compute_models_in_obscuring_terrain`, qui délègue à
+    Le moteur évalue « caché » via `compute_models_in_dense_terrain`, qui délègue à
     `compute_models_within_terrain`, c'est-à-dire au même test disque↔polygone que le couvert.
     Un canal obscurant brut à côté d'un couvert dilaté décrirait un prédicat que le moteur
     n'applique nulle part, et ferait diverger deux canaux voisins sur leurs bords.

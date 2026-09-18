@@ -81,7 +81,7 @@ GRID_CH_MOVE_COST = 8
 # Cases des zones de terrain OBSCURANTES (13.10), dilatees du rayon de socle de l escouade active
 # — exactement comme `GRID_CH_COVER`, et pour la meme raison : la regle testee de part et d autre
 # est « the model is WITHIN a terrain area », que le moteur evalue par CHEVAUCHEMENT DE SOCLE
-# (`compute_models_in_obscuring_terrain` delegue a `compute_models_within_terrain`, donc au meme
+# (`compute_models_in_dense_terrain` delegue a `compute_models_within_terrain`, donc au meme
 # test disque<->polygone que le couvert). Peindre les hexes bruts decrirait un predicat que le
 # moteur n applique nulle part.
 #

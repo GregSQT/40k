@@ -88,16 +88,15 @@ modèles** (ennemis, MONSTER/VEHICLE inclus) et **toutes les catégories de terr
 - **Hidden** — §13.09 : terrain area contenant du dense + unité **n'ayant pas tiré ce tour ni le
   précédent** → visible seulement à ≤ **15"** (detection range). Très pertinent pour la LoS en ruines.
 
-  > **Décision de conception (voulue, pas un bug de conformité) :** le texte §13.09 exige une area
-  > contenant un terrain **dense** ; le moteur teste à la place l'appartenance à une area
-  > **obscuring** (`compute_models_in_obscuring_terrain` → `model_within_terrain(obscuring_only=True)`).
-  > Le flag `obscuring` est **posé manuellement** par le concepteur de terrain sur chaque area
-  > (`config/board/{board}/terrain/terrain-*.json`, champ `"obscuring": true`) — il n'existe volontairement
-  > **aucun marqueur dense/light au niveau de l'area** (seuls les `walls` sont typés `light`/`dense`,
-  > pour le blocage de LoS / Solid §13.11). L'`obscuring` manuel **fait donc foi** pour Hidden : une area
-  > marquée obscuring accorde Hidden, par choix. Conséquence assumée : le moteur ne distingue pas une
-  > area obscuring dense d'une light-only pour Hidden (c'est au concepteur de ne flaguer `obscuring` que
-  > les areas qui doivent cacher).
+  > **Catégories dérivées des features (option A, 2026-09-18) :** la catégorie appartient à la
+  > FEATURE (§13.02) — ici le champ `type` ∈ {light, dense} de chaque groupe de `walls` du fichier
+  > terrain (`config/board/{board}/terrain/terrain-*.json`), obligatoire. La zone en hérite au
+  > chargement (`terrain_utils.derive_area_categories`, partagé moteur / API front) :
+  > `obscuring` ⇔ elle contient un mur light ou dense (§13.10), `dense` ⇔ un mur dense. Hidden teste
+  > `dense` (`compute_models_in_dense_terrain` → `model_within_terrain(category="dense")`) : une zone
+  > à murs light seuls donne le couvert et coupe la LoS, mais ne cache pas. La clé JSON `obscuring`
+  > saisie à la main est **refusée** au chargement (elle contredisait les murs : 4 zones light-only
+  > de terrain-mc1 accordaient Hidden, 6 zones à murs typés de terrain-mc2 ne coupaient pas la LoS).
 
 ### 2.5 Multi-niveaux : cohésion & engagement (verticalité déjà chiffrée)
 - Coherency — `03 Moving.pdf` §03.03 : **deux conditions simultanées** pour chaque fig :

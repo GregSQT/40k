@@ -739,13 +739,16 @@ class ObservationBuilder:
         geometrie que le moteur (``compute_models_within_terrain``), aucune duplication de regle.
 
         - **hidden (13.09)** : hideable (INFANTRY/BEASTS/SWARM) ET toutes les figurines vivantes
-          dans une zone obscurante ET l unite n a tire ni ce tour ni au tour precedent.
+          dans une zone de terrain contenant un terrain **dense** (``area["dense"]``, derive des
+          murs types du fichier terrain) ET l unite n a tire ni ce tour ni au tour precedent.
         - **gone to ground « pret » (13.5)** : hidden ET toutes les figurines vivantes dans une
-          zone de terrain contenant un terrain **Solid** (dense, 13.11). La derniere condition
-          de 13.5 — « pas entierement visible pour la figurine ATTAQUANTE a cause d un Solid
-          intervenant » — depend du tireur et n a donc PAS de valeur au niveau escouade : elle
-          reste dans le calcul par-paire du moteur (``hidden_enemy_out_of_detection``). Ce
-          drapeau dit « je remplis tout ce qui ne depend pas de l ennemi ».
+          zone de terrain contenant un terrain **Solid** (dense, 13.11). Depuis que 13.09 exige
+          lui-meme une zone dense, cette condition est INCLUSE dans hidden : le drapeau vaut
+          hidden. La derniere condition de 13.5 — « pas entierement visible pour la figurine
+          ATTAQUANTE a cause d un Solid intervenant » — depend du tireur et n a donc PAS de valeur
+          au niveau escouade : elle reste dans le calcul par-paire du moteur
+          (``hidden_enemy_out_of_detection``). Ce drapeau dit « je remplis tout ce qui ne depend
+          pas de l ennemi ».
         - **in_cover (13.08)** : hideable ET toutes les figurines vivantes dans une zone de
           terrain — c est la premiere des deux conditions alternatives de 13.08, et elle ne
           depend PAS de l attaquant : si elle est remplie par toutes mes figurines, l escouade a
@@ -777,49 +780,35 @@ class ObservationBuilder:
         }
         may_hide = not shot_now and not shot_prev
 
-        def _all_models_in_obscuring() -> bool:
-            in_obscuring = compute_models_within_terrain(
-                entry, by_model, game_state, terrain_areas, obscuring_only=True
+        def _all_models_in_dense() -> bool:
+            # 13.09 : zone contenant un terrain DENSE (`area["dense"]`, derive des murs types) —
+            # meme filtre que `compute_models_in_dense_terrain`, la source du statut moteur.
+            in_dense = compute_models_within_terrain(
+                entry, by_model, game_state, terrain_areas, "dense"
             )
-            return len(in_obscuring) == len(by_model)
+            return len(in_dense) == len(by_model)
 
         if hidden_only:
             # UNE passe, et seulement si les gardes gratuites laissent hidden possible. La passe
             # « toute zone de terrain » ci-dessous ne sert que `in_cover` et de court-circuit :
             # ici elle serait un second scan pour un drapeau qui n est pas demande.
-            return (1.0 if (may_hide and _all_models_in_obscuring()) else 0.0), 0.0, 0.0
+            return (1.0 if (may_hide and _all_models_in_dense()) else 0.0), 0.0, 0.0
 
         in_any_terrain = compute_models_within_terrain(
-            entry, by_model, game_state, terrain_areas, obscuring_only=False
+            entry, by_model, game_state, terrain_areas, None
         )
         all_in_terrain = len(in_any_terrain) == len(by_model)
-        # Passe obscurante conditionnee : une zone obscurante EST une zone de terrain, donc
-        # « toutes dans une zone obscurante » implique « toutes dans une zone ». Si le couvert est
-        # deja faux, hidden l est aussi — inutile de rescanner (le test figurine<->polygone est le
-        # poste dominant de cette fonction).
-        hidden = all_in_terrain and may_hide and _all_models_in_obscuring()
+        # Passe dense conditionnee : une zone dense EST une zone de terrain, donc « toutes dans
+        # une zone dense » implique « toutes dans une zone ». Si le couvert est deja faux, hidden
+        # l est aussi — inutile de rescanner (le test figurine<->polygone est le poste dominant
+        # de cette fonction).
+        hidden = all_in_terrain and may_hide and _all_models_in_dense()
 
-        gtg_ready = False
-        if hidden:
-            # Zones contenant un terrain Solid (13.11 : les terrains dense ont la regle Solid).
-            # Le moteur ne type le « dense » qu au niveau des MURS (dense_wall_hexes) : une zone
-            # est donc Solid des qu elle contient un mur dense. Statique -> memoise.
-            solid_areas = game_state.get("_obs_solid_terrain_areas")  # get allowed
-            if solid_areas is None:
-                from engine.phase_handlers.shooting_handlers import _get_dense_wall_set
-
-                dense = _get_dense_wall_set(game_state)
-                solid_areas = [
-                    a
-                    for a in terrain_areas
-                    if any((int(h[0]), int(h[1])) in dense for h in require_key(a, "hexes"))
-                ]
-                game_state["_obs_solid_terrain_areas"] = solid_areas
-            if solid_areas:
-                in_solid = compute_models_within_terrain(
-                    entry, by_model, game_state, solid_areas, obscuring_only=False
-                )
-                gtg_ready = len(in_solid) == len(by_model)
+        # 13.5 condition 1 « within Solid terrain features » : 13.11 donne Solid aux terrains
+        # dense, et 13.09 exige deja que toutes les figurines soient dans une zone dense → la
+        # condition est incluse dans hidden. Plus aucune seconde derivation « zone Solid » a cote
+        # de `area["dense"]`.
+        gtg_ready = hidden
 
         return (1.0 if hidden else 0.0), (1.0 if gtg_ready else 0.0), (1.0 if all_in_terrain else 0.0)
 
@@ -2788,7 +2777,7 @@ class ObservationBuilder:
 
         # --- Canal 9 : zones obscurantes ---------------------------------------
         # Sous-ensemble des cases du couvert, dilate du MEME rayon et pour la MEME raison : le
-        # moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain`
+        # moteur tranche 13.09 par chevauchement de socle (`compute_models_in_dense_terrain`
         # delegue a `compute_models_within_terrain`, le test disque<->polygone du couvert). Peindre
         # les hexes bruts a cote d'un couvert dilate ferait diverger deux canaux voisins sur leurs
         # bords pour une raison qui tient a notre rasterisation, pas au jeu.
