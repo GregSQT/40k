@@ -184,16 +184,23 @@ def test_the_target_distance_is_measured_before_the_charge_move(melee_scenario_f
 
     Le seuil compare est l'ENGAGEMENT RANGE lu dans la config, pas un 2 ecrit en dur : c'est la
     borne que le moteur applique reellement.
+
+    L'echantillon est TOUTES les charges reussies des graines, pas celles du premier episode qui
+    en porte une : une charge declaree juste a la frontiere de l'ER (distance bord-a-bord egale a
+    l'ER, unite non engagee au sens euclidien 03.04) est un cas legal qu'un seul episode peut
+    n'avoir que lui — mesure le 2026-09-18, graine 1, une seule charge reussie a exactement 2,0".
+    Le verrou porte sur la mesure, pas sur la graine.
     """
-    engine, _tactical = _episode_with_successful_charges(melee_scenario_file)
     from engine.phase_handlers.shared_utils import get_engagement_zone
 
+    engine, _tactical = _episode_with_successful_charges(melee_scenario_file)
     ez_inches = get_engagement_zone(engine.game_state) / int(
         engine.game_state["inches_to_subhex"]
     )
     distances = [
         lg["charge_target_distance_inches"]
-        for lg in _charge_lines(engine)
+        for seed in _SEEDS
+        for lg in _charge_lines(_cached_play(melee_scenario_file, seed)[0])
         if lg.get("type") == "charge"
     ]
     assert distances, "montage casse : aucune charge reussie"

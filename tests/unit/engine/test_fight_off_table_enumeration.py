@@ -226,6 +226,10 @@ def test_a_friendly_off_table_blocks_no_ranged_shot(gs: Dict[str, Any]) -> None:
     # Le tireur est `mover` (joueur ACTING) ; `allie` est en (4,5), la cible en (5,5).
     cible = _entry(5, 5, FOE)
     gs["units_cache"]["cible"] = cible
+    # 17.03 : la cible est lue figurine par figurine (MONSTER/VEHICLE engagee = ciblable malgre
+    # l'allie au contact). Une figurine d'INFANTERIE garde le chemin 10.05 sous test.
+    gs["squad_models"] = {"cible": ["cible#0"]}
+    gs["models_cache"] = {"cible#0": {"UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}}
 
     assert _friendly_engagement_blocks_ranged_shot(
         gs, "mover", ACTING, cible, "cible", False, gs["units_cache"]

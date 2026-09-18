@@ -9528,6 +9528,7 @@ class W40KEngine(gym.Env):
                 squad_shooting_type_clear,
                 get_enemy_slot_mapping,
                 build_manual_shoot_allocation,
+                prune_remaining_weapon_slots,
             )
 
             _pending_sw2 = self.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
@@ -9568,6 +9569,37 @@ class W40KEngine(gym.Env):
             _pending_sw2["pending_weapon"] = None
             _pending_sw2["pending_weapon_slot"] = None
 
+            # Déclaration IMMÉDIATE de la ligne (arme, cible) : toutes les figurines encore
+            # LIBRES qui portent l'arme et peuvent viser la cible. Une déclaration consomme, par
+            # figurine, l'arme physique (profils exclusifs d'un combi) et la famille 24.07
+            # (pistolets OU autres armes, hors MONSTER/VEHICLE) ; la ligne suivante se déclare
+            # donc sur l'état DÉCLARÉ, et c'est sur ce même état que `prune_remaining_weapon_slots`
+            # ferme les slots qu'aucune figurine ne peut plus tirer et que
+            # `shoot_weapon_eligible_target_slots` ouvre les cibles de l'arme suivante : ce que le
+            # masque ouvre est exactement ce que le commit déclare. Une pré-validation de toutes
+            # les lignes sur l'état INITIAL déclarait au commit des quantités que les lignes
+            # précédentes avaient déjà consommées (`count > figurines éligibles`).
+            _maxq = squad_shoot_weapon_qty_max(
+                self.game_state, sw2_squad_id, sw2_weapon_code, _tsid2
+            )
+            if _maxq == 0:
+                raise RuntimeError(
+                    f"squad_shoot_split_target: qty_max==0 pour arme {sw2_weapon_code!r}"
+                    f" → cible {_tsid2!r} — rupture masque/commit ({sw2_squad_id!r})"
+                )
+            try:
+                squad_declare_shoot_weapon_qty(
+                    self.game_state, sw2_squad_id, sw2_weapon_code, _maxq, _tsid2
+                )
+                prune_remaining_weapon_slots(
+                    self.game_state, sw2_squad_id, _enemy_slots2,
+                    _pending_sw2["remaining_weapon_slots"],
+                )
+            except Exception:
+                del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
+                squad_shooting_type_clear(self.game_state, sw2_squad_id)
+                raise
+
             if _pending_sw2["remaining_weapon_slots"]:
                 # D'autres groupes d'armes restent à assigner.
                 self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = _pending_sw2
@@ -9579,28 +9611,9 @@ class W40KEngine(gym.Env):
                     "waiting_for_next_weapon_sel": True,
                 }
 
-            # Toutes les armes assignées → résolution.
+            # Toutes les armes assignées → résolution des lignes déjà déclarées.
             del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
             try:
-                # Pré-valider toutes les armes sur l'état initial (avant toute déclaration)
-                # pour éviter qu'une déclaration précédente consomme le groupe d'arme
-                # d'une arme suivante (ex. bolt_pistol consomme le slot du même modèle).
-                _precheck: List[Tuple[str, str, int]] = []
-                for _wcode2, _assign2 in _pending_sw2["assignments"].items():
-                    _tgt2 = str(require_key(_assign2, "target_id"))
-                    _maxq = squad_shoot_weapon_qty_max(
-                        self.game_state, sw2_squad_id, _wcode2, _tgt2
-                    )
-                    if _maxq == 0:
-                        raise RuntimeError(
-                            f"squad_shoot_split_target: qty_max==0 pour arme {_wcode2!r}"
-                            f" → cible {_tgt2!r} — rupture masque/commit ({sw2_squad_id!r})"
-                        )
-                    _precheck.append((_wcode2, _tgt2, _maxq))
-                for _wcode2, _tgt2, _maxq in _precheck:
-                    squad_declare_shoot_weapon_qty(
-                        self.game_state, sw2_squad_id, _wcode2, _maxq, _tgt2
-                    )
                 squad_lock_shoot(self.game_state, sw2_squad_id)
                 _alloc2 = build_manual_shoot_allocation(self.game_state, sw2_squad_id)
                 if _alloc2.get("waiting_for_player"):  # get allowed

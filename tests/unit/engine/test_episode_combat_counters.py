@@ -553,9 +553,30 @@ def _hp_lost_by_player(engine: W40KEngine) -> Dict[int, int]:
     return lost
 
 
-# 28 et 39 sont des graines PACIFIQUES : le camp controle n'y inflige aucun degat. Elles sont
-# incluses expres — l'egalite doit tenir a zero aussi, et c'est ce qui rend ces tests immunises
-# aux correctifs de regles qui changent la partie produite par une graine.
+def _self_inflicted_by_player(engine: W40KEngine) -> Dict[int, int]:
+    """Blessures mortelles qu'un camp s'inflige A LUI-MEME, lues sur les lignes ``hazard``.
+
+    Desperate Escape (09.04) et [HAZARDOUS] (24.15) blessent la propre unite du joueur : ces PV
+    quittent le plateau sans qu'aucune ligne ``shoot``/``combat`` adverse ne les porte, donc
+    ``damage_dealt`` ne doit PAS les compter. Une blessure sauvee par FNP (``fnpSaved``) n'a
+    retire aucun PV. Ce montage n'a ni Deadly Demise ni source de blessure mortelle adverse :
+    toute ligne ``hazard`` y est auto-infligee.
+    """
+    inflicted = {1: 0, 2: 0}
+    for log in engine.game_state["action_logs"]:
+        if log.get("type") != "hazard":
+            continue
+        inflicted[int(log["player"])] += sum(
+            1 for rec in log["hazardDetails"] if not rec.get("fnpSaved", False)
+        )
+    return inflicted
+
+
+# Graines choisies pour couvrir les trois formes de l'egalite (mesure du 2026-09-18) : 7 et 11
+# — l'adversaire n'inflige RIEN (``damage_received`` doit tenir a zero) ; 23 et 39 — l'adversaire
+# se blesse lui-meme en Desperate Escape (la soustraction des blessures auto-infligees est
+# reellement exercee, sinon elle passerait au vert sans rien prouver) ; 28 — degats dans les
+# deux sens, sans hasard.
 _EPISODE_SEEDS = [7, 11, 23, 28, 39]
 
 
@@ -565,13 +586,26 @@ def test_damage_dealt_matches_the_hp_the_opponent_actually_lost(seed: int) -> No
 
     C'est ce controle qui separe un compteur juste d'un compteur qui compte n'importe quoi :
     il relie le journal a l'etat reel du plateau, et non le journal a lui-meme. Il n'exige
-    aucun combat — a zero partout, l'egalite tient et le controle reste valide.
+    aucun combat — a zero partout, l'egalite tient et le controle reste valide. Les PV qu'un
+    camp se retire lui-meme (Desperate Escape) sont perdus sur le plateau sans avoir ete
+    infliges par l'autre camp : ils se lisent sur les lignes ``hazard`` et sortent de l'egalite.
     """
     engine, tactical = _random_episode(seed, controlled_player=1)
     hp_lost = _hp_lost_by_player(engine)
+    self_inflicted = _self_inflicted_by_player(engine)
 
-    assert tactical["damage_dealt"] == hp_lost[2]
-    assert tactical["damage_received"] == hp_lost[1]
+    assert tactical["damage_dealt"] == hp_lost[2] - self_inflicted[2]
+    assert tactical["damage_received"] == hp_lost[1] - self_inflicted[1]
+
+
+def test_the_seed_sample_exercises_self_inflicted_wounds() -> None:
+    """VERT VACANT : la soustraction des blessures auto-infligees doit etre atteinte par au moins
+    une graine de l'echantillon — sinon le test precedent ne prouve rien de plus que l'ancienne
+    egalite, et un compteur qui ajouterait ces blessures a ``damage_dealt`` passerait."""
+    assert any(
+        sum(_self_inflicted_by_player(_random_episode(seed, controlled_player=1)[0]).values()) > 0
+        for seed in _EPISODE_SEEDS
+    ), "aucune graine ne produit de blessure mortelle auto-infligee : la soustraction n'est jamais exercee"
 
 
 @pytest.mark.parametrize("controlled_player", [1, 2])
@@ -582,10 +616,11 @@ def test_counters_follow_the_controlled_seat(controlled_player: int) -> None:
     """
     engine, tactical = _random_episode(seed=5, controlled_player=controlled_player)
     hp_lost = _hp_lost_by_player(engine)
+    self_inflicted = _self_inflicted_by_player(engine)
     opponent = 2 if controlled_player == 1 else 1
 
-    assert tactical["damage_dealt"] == hp_lost[opponent]
-    assert tactical["damage_received"] == hp_lost[controlled_player]
+    assert tactical["damage_dealt"] == hp_lost[opponent] - self_inflicted[opponent]
+    assert tactical["damage_received"] == hp_lost[controlled_player] - self_inflicted[controlled_player]
 
 
 @pytest.mark.parametrize("seed", _EPISODE_SEEDS)

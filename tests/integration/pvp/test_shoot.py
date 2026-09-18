@@ -664,6 +664,7 @@ class TestShootResolution:
         game.drain_to("shoot")
         squad = None
         weapon_code = None
+        target = None
         for candidate in game.pool("shoot_activation_pool"):
             game.act("squad_shoot_activate", unitId=candidate)
             targets = game.act("squad_shoot_los_overview", unitId=candidate)["result"]["valid_targets"]
@@ -676,7 +677,9 @@ class TestShootResolution:
                 squad, weapon_code, target = candidate, hazardous[0]["code"], targets[0]
                 break
             game.act("squad_shoot_cancel", unitId=candidate)
-        assert squad is not None, "aucune escouade humaine à ≥ 2 figurines avec une arme [HAZARDOUS] à portée"
+        assert squad is not None and target is not None, (
+            "aucune escouade humaine à ≥ 2 figurines avec une arme [HAZARDOUS] à portée"
+        )
 
         game.act("squad_shoot_assign_weapon_qty", unitId=squad, weaponCode=weapon_code, count=1, targetId=target)
         monkeypatch.setattr(_random, "randint", lambda a, b: 1)

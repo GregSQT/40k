@@ -288,6 +288,10 @@ def test_verrou_game_state_shooting_handlers(monkeypatch: pytest.MonkeyPatch) ->
         "shooter": _entry(5, 5, player=1),
         "friendly": friendly_entry,
     }
+    # 17.03 : la cible est lue figurine par figurine (MONSTER/VEHICLE engagée = ciblable malgré
+    # l'allié au contact). Une figurine d'INFANTERIE garde le chemin 10.05 sous test.
+    gs["squad_models"] = {"target": ["target#0"]}
+    gs["models_cache"] = {"target#0": {"UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}}
 
     gs_received: list = []
 

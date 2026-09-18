@@ -3817,17 +3817,64 @@ def coherency_violation_flags(
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_neighbors = get_min_neighbors(game_state)
+    mode = cohesion_distance_mode(game_state)
+    if mode == "euclidean":
+        return _coherency_flags_euclidean(models, coh, coh_max, min_neighbors)
+    return _coherency_flags_footprint(models, game_state, coh, coh_max, min_neighbors)
+
+
+def cohesion_distance_mode(game_state: Dict[str, Any]) -> str:
+    """Metrique de la coherency 03.03 reellement appliquee — `euclidean` | `footprint`.
+
+    Source unique de la resolution : `game_rules.cohesion_distance_mode`, ramene a `footprint` en
+    geometrie hex (cf. l avertissement RESOLUTION de `coherency_violation_flags`). Partagee par le
+    verdict et par toute mesure qui doit ANTICIPER ce verdict (`cohesion_pair_distance`).
+    """
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     mode = require_key(game_rules, "cohesion_distance_mode")
     if geometry_is_hex(game_state):
-        mode = "footprint"
-    if mode == "euclidean":
-        return _coherency_flags_euclidean(models, coh, coh_max, min_neighbors)
-    if mode == "footprint":
-        return _coherency_flags_footprint(models, game_state, coh, coh_max, min_neighbors)
-    raise ValueError(
-        f"Invalid game_rules.cohesion_distance_mode: {mode!r} (expected 'euclidean' or 'footprint')"
-    )
+        return "footprint"
+    if mode not in ("euclidean", "footprint"):
+        raise ValueError(
+            f"Invalid game_rules.cohesion_distance_mode: {mode!r} (expected 'euclidean' or 'footprint')"
+        )
+    return str(mode)
+
+
+def _cohesion_cart(m: Dict[str, Any]) -> Tuple[float, float]:
+    """Centre de rendu d une figurine (hexCenter, hex_radius=1) — l echelle de `_hex_center`."""
+    sqrt3 = 3.0 ** 0.5
+    c, r = int(m["col"]), int(m["row"])
+    return (c * 1.5, r * sqrt3 + (c % 2) * sqrt3 / 2.0)
+
+
+def _cohesion_base_radius(m: Dict[str, Any]) -> float:
+    """Rayon de socle en unites de rendu (socle mono-case : rayon d un hexagone inscrit)."""
+    s = int(m["BASE_SIZE"])
+    return s * 1.5 / 2.0 if s > 1 else 0.7
+
+
+def cohesion_pair_distance(
+    model_a: Dict[str, Any], model_b: Dict[str, Any], game_state: Dict[str, Any]
+) -> float:
+    """Distance bord-a-bord entre deux figurines DANS LA METRIQUE DE LA COHERENCY (03.03).
+
+    La MEME mesure que celle du verdict (`_coherency_flags_euclidean` / `_coherency_flags_footprint`),
+    pour qui construit une formation qui sera validee par ce verdict. `charge_build_valid_plan`
+    departageait ses candidats par la distance HEX centre-a-centre alors que la coherency se
+    jugeait en euclidien : deux cases a egale distance hex (10 pas plein est, 10 pas en diagonale)
+    y different de 15 % — la diagonale depasse les 2" et le plan complet etait refuse (mesure a x5,
+    trois figurines en file, jet de 8 : aucune charge).
+    """
+    if cohesion_distance_mode(game_state) == "euclidean":
+        from math import hypot
+        (ax, ay), (bx, by) = _cohesion_cart(model_a), _cohesion_cart(model_b)
+        return hypot(ax - bx, ay - by) - _cohesion_base_radius(model_a) - _cohesion_base_radius(model_b)
+    from engine.hex_utils import min_distance_between_sets
+    return float(min_distance_between_sets(
+        _compute_unit_occupied_hexes(int(model_a["col"]), int(model_a["row"]), model_a, game_state),
+        _compute_unit_occupied_hexes(int(model_b["col"]), int(model_b["row"]), model_b, game_state),
+    ))
 
 
 def _positions_in_coherency(
@@ -3907,19 +3954,10 @@ def _coherency_flags_euclidean(
     de 10 Hormagaunts sur 9" dont le dernier est pousse de 2" restait `coherency_ok`.
     """
     from math import hypot
-    sqrt3 = 3.0 ** 0.5
     n = len(models)
 
-    def cart(m: Dict[str, Any]) -> Tuple[float, float]:
-        c, r = int(m["col"]), int(m["row"])
-        return (c * 1.5, r * sqrt3 + (c % 2) * sqrt3 / 2.0)
-
-    def base_radius(m: Dict[str, Any]) -> float:
-        s = int(m["BASE_SIZE"])
-        return s * 1.5 / 2.0 if s > 1 else 0.7
-
-    pts = [cart(m) for m in models]
-    radii = [base_radius(m) for m in models]
+    pts = [_cohesion_cart(m) for m in models]
+    radii = [_cohesion_base_radius(m) for m in models]
     model_range = coh * ENGAGEMENT_NORM_HEX_WIDTH      # 2" en unites de rendu (hex_radius=1)
     global_range = coh_max * ENGAGEMENT_NORM_HEX_WIDTH  # ecart max fig-a-fig (9"), bord a bord
     neighbor = [[False] * n for _ in range(n)]
@@ -7866,19 +7904,27 @@ def charge_build_valid_plan(
     from engine.phase_handlers.charge_handlers import _charge_distance_metric
     _charge_metric = _charge_distance_metric(game_state)
 
-    def _formation_gap(col: int, row: int) -> int:
+    def _formation_gap(mid: str, col: int, row: int) -> float:
         """Ecart a la derniere figurine deja placee — departage les candidats a egalite.
 
         Sans ce critere, deux destinations aussi bonnes (meme distance a la cible, meme trajet)
         sont departagees par l'ordre de balayage, qui privilegie un coin de l'anneau : les
         figurines partent en eventail et la coherency (03.03) rejette le plan complet.
+
+        Mesure dans la METRIQUE DE LA COHERENCY (`cohesion_pair_distance`), pas en distance hex :
+        c'est le verdict final qui juge la formation, et deux cases a egale distance hex de la
+        figurine precedente peuvent etre l'une dans ses 2" euclidiens et l'autre au-dela.
         """
         if not plan:
-            return 0
-        _prev_mid, prev_col, prev_row, _prev_lvl = plan[-1]
-        return calculate_hex_distance(prev_col, prev_row, col, row)
+            return 0.0
+        prev_mid, prev_col, prev_row, _prev_lvl = plan[-1]
+        return cohesion_pair_distance(
+            {**models_cache[prev_mid], "col": prev_col, "row": prev_row},
+            {**models_cache[mid], "col": col, "row": row},
+            game_state,
+        )
 
-    def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: int) -> tuple:
+    def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: float) -> tuple:
         """Clé de tri pour les candidats d'engagement, paramétrée par l'intention L10."""
         if intent == 1:  # Objectif : priorité à la cellule la plus proche d'un objectif
             return (_dist_field.get((nc, nr), 0), d_orig, gap, nc, nr)
@@ -7940,7 +7986,7 @@ def charge_build_valid_plan(
             if not _eng_v:
                 continue
             engaged_candidates.append(
-                (_engaged_sort_key(nc, nr, d_orig, _formation_gap(nc, nr)), nc, nr)
+                (_engaged_sort_key(nc, nr, d_orig, _formation_gap(mid, nc, nr)), nc, nr)
             )
         picked: Optional[Tuple[int, int]] = None
         if engaged_candidates:
@@ -7955,7 +8001,7 @@ def charge_build_valid_plan(
             )
             tc, tr = nearest_target
             # (dist_to_target, ecart a la fig precedente, col, row)
-            best_cand: Optional[Tuple[int, int, int, int]] = None
+            best_cand: Optional[Tuple[int, float, int, int]] = None
             # Anneaux DECROISSANTS depuis le budget : la figurine qui ne peut pas engager doit
             # suivre le reste de l'escouade, pas avancer d'un seul subhex. Avec l'ordre croissant
             # (etat anterieur au 2026-08-01), elle s'arretait au premier anneau utile pendant que
@@ -7989,7 +8035,7 @@ def charge_build_valid_plan(
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
                             continue  # doit etre strictement plus proche
-                        cand = (cand_d, _formation_gap(nc, nr), nc, nr)
+                        cand = (cand_d, _formation_gap(mid, nc, nr), nc, nr)
                         if best_cand is None or cand < best_cand:
                             best_cand = cand
                 if best_cand is not None:
@@ -10300,6 +10346,39 @@ def purge_combi_siblings_from_remaining(
         and (wpn.get("COMBI_WEAPON") if isinstance(wpn, dict) else None) == sel_combi
     ]
     for slot_j in to_purge:
+        del remaining[slot_j]
+
+
+def prune_remaining_weapon_slots(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    enemy_slot_ids: List[Optional[str]],
+    remaining: Dict[int, str],
+) -> None:
+    """Retire de `remaining` les slots qu'aucune figurine LIBRE ne peut plus tirer sur aucune cible.
+
+    Appelé après chaque déclaration du split-fire gym (`squad_shoot_split_target`) : les intents
+    posés consomment, par figurine, l'arme physique (`_weapon_group_key`) et la famille
+    [CLOSE-QUARTERS] 24.07 (pistolets OU autres armes, hors MONSTER/VEHICLE). Un slot ouvert à
+    l'activation peut donc n'avoir plus aucune tireuse — ex. Boyz slugga + shoota : la première
+    ligne déclarée prend toutes les figurines, l'autre famille se ferme. Même lecture
+    (`squad_shoot_weapon_qty_max`, sur les intents courants) que
+    `shoot_weapon_remaining_eligible_slots` et `shoot_weapon_eligible_target_slots` : le masque
+    n'ouvre que ce que le commit déclarera. Mute `remaining` en place.
+    """
+    _uc = require_key(game_state, "units_cache")
+    on_table = [
+        tsid for tsid in enemy_slot_ids
+        if tsid is not None and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
+    ]
+    to_prune = [
+        slot_j for slot_j, code in remaining.items()
+        if not any(
+            squad_shoot_weapon_qty_max(game_state, squad_id, code, tsid) > 0
+            for tsid in on_table
+        )
+    ]
+    for slot_j in to_prune:
         del remaining[slot_j]
 
 

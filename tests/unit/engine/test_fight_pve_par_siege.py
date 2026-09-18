@@ -204,7 +204,12 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     """ROUGE avant le fix : le clic `squad_fight_manual_alloc` de l'humain partait dans
     `_fight_v11_auto_step`, jamais dans `apply_manual_shoot_allocation`."""
     slot_of_1 = None
-    eng = _engine([_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 21, 20)], current_player=2)
+    # Défenseur humain à DEUX figurines intactes : l'attribution ne lui est demandée que devant
+    # un vrai choix (05.04, décision du 2026-09-18) — une figurine unique encaisse d'office.
+    defender = _unit_cfg(1, 1, 20, 20)
+    defender["HP_CUR"] = defender["HP_MAX"] = 3
+    defender["models"] = [{"col": 20, "row": 20, "VALUE": 50}, {"col": 20, "row": 21, "VALUE": 50}]
+    eng = _engine([defender, _unit_cfg(2, 2, 21, 20)], current_player=2)
     gs = _fight_step(eng)
     slot_of_1 = get_enemy_slot_mapping(gs, 2).index("1")
     eng.pve_controller.actions = [  # type: ignore[attr-defined]
@@ -225,7 +230,7 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     assert ok is True, out
     assert out["action"] == "squad_fight_manual_alloc" and out["waiting_for_player"] is True, out
     assert PENDING_FIGHT_ALLOCATION_KEY in gs
-    assert {c["model_id"] for c in out["allocation"]["choices"]} == {"1#0"}
+    assert {c["model_id"] for c in out["allocation"]["choices"]} == {"1#0", "1#1"}
 
     # Tant que l'humain n'a pas alloué, le bot ne joue pas (et n'interroge pas la politique).
     ok, out = _ai_turn(eng)

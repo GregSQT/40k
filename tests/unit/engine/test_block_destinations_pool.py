@@ -53,8 +53,13 @@ MOVE_BUDGET = 3
 def _move_state() -> Dict[str, Any]:
     gs = synthetic_state(
         [
-            synthetic_unit("S", 1, [{"col": c, "row": r} for c, r in (S0, S1, S2)], MOVE=MOVE_BUDGET),
-            synthetic_unit("E", 2, [{"col": 30, "row": 30}]),
+            # 13.06 : le pool demande à l'escouade si elle PEUT finir en hauteur (mot-clé), même sans
+            # terrain — une unité de roster porte toujours ses mots-clés.
+            synthetic_unit(
+                "S", 1, [{"col": c, "row": r} for c, r in (S0, S1, S2)],
+                MOVE=MOVE_BUDGET, UNIT_KEYWORDS=[{"keywordId": "INFANTRY"}],
+            ),
+            synthetic_unit("E", 2, [{"col": 30, "row": 30}], UNIT_KEYWORDS=[{"keywordId": "INFANTRY"}]),
         ],
         phase="move",
         game_rules={},
