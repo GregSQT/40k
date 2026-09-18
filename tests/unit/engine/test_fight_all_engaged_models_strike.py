@@ -86,6 +86,9 @@ def _engine_in_fight_phase(scenario_path: str):
     gs["current_player"] = 1
     gs["units_fought"] = set()
     res = fight_handlers.fight_phase_start(gs)
+    # Les pile-in 12.02 des deux camps sont consommés AVANT le déroulement : la géométrie testée
+    # est celle posée par le scénario, pas celle qu'un pile-in (A1) recomposerait.
+    gs["pile_in_done"] = {str(u["id"]) for u in gs["units"]}
     eng._fight_v11_gym_after_phase_start(res)
     return eng
 

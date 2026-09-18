@@ -14373,6 +14373,8 @@ def _assign_cells_toward_enemies(
     mids: List[str],
     enemy_positions: List[Tuple[int, int]],
     budget: int,
+    *,
+    target_ids: Optional[List[str]] = None,
 ) -> Dict[str, Tuple[int, int]]:
     """Affectation figurine -> cellule pour un move vers l'ennemi (pile-in 12.03 / conso 12.08).
 
@@ -14381,6 +14383,18 @@ def _assign_cells_toward_enemies(
     must end its move closer to the closest [target], and **engaged with it if possible** »
     (12.03 WHILE MOVING ; 12.08 WHILE MOVING, modes Ongoing et Engaging). Dupliquer
     l'algorithme rouvrirait la classe de bug §0.18, qui existait deja en double exemplaire.
+
+    TROIS PALIERS par figurine, du plus serre au plus large, chacun « si possible » (A1,
+    2026-09-18 ; miroir du pool PvP `_fight_pile_in_build_model_pool` closer/engaged) :
+      1. CONTACT socle a socle (couplage maximum figurine -> cellule bord a bord) ;
+      2. sinon une cellule ENGAGEE (≤ zone d'engagement, bord a bord) avec la cible la plus
+         proche, dans tout le budget — mesuree par la primitive d'engagement, contre l'entree
+         de la cible la plus proche (``target_ids`` ; sans lui, palier saute) ;
+      3. sinon la cellule strictement plus proche de la cible la plus proche, dans TOUT le
+         budget (pas seulement le premier anneau qui rapproche).
+    Mesure du defaut ferme (bench bot contre bot, 40 parties, moteur 5b2422dd5) : 100 figurines
+    sur 762 finissaient hors engagement apres pile-in ; le repli sortait au premier anneau qui
+    rapprochait sans jamais chercher une cellule engagee a deux cases.
 
     L'immobilite des figurines au contact est appliquee inconditionnellement : elle est **sans
     objet** en mode Engaging (unite non engagee => aucune figurine au contact), donc correcte
@@ -14533,40 +14547,79 @@ def _assign_cells_toward_enemies(
     unmatched = [mid for mid in movers if mid not in matching]
     taken |= {origins[mid] for mid in unmatched}
 
+    # Palier 2 : entree-cache de la cible la plus proche de chaque figurine, par position de
+    # figurine cible. Sans `target_ids` (appel de test), le palier est saute.
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+
+    _entry_by_pos: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for _tid in (target_ids or []):
+        _te = require_unit_from_cache(str(_tid), game_state, "_assign_cells_toward_enemies/target")
+        for _pos in _squad_model_positions(game_state, str(_tid)):
+            _entry_by_pos[_pos] = _te
+
+    def _footprint_legal(mid: str, col: int, row: int) -> bool:
+        """EMPREINTE entiere legale (plateau, murs, autres escouades) — `_cell_base_legal` ne
+        juge que la cellule centrale, ce qui suffit a x1 (socle = une case) mais laissait un
+        socle de plusieurs cases chevaucher l'ennemi qu'il approche des que le candidat n'est
+        plus a un subhex de l'origine."""
+        fp = compute_occupied_hexes(
+            int(col), int(row), require_key(models_cache[mid], "BASE_SHAPE"),
+            require_key(models_cache[mid], "BASE_SIZE"),
+            int(models_cache[mid].get("orientation", 0)),  # get allowed
+        )
+        return all(_cell_base_legal(fc, fr) for fc, fr in fp)
+
     for mid in unmatched:
         oc, orow = origins[mid]
-        # (b) A defaut de B2B : finir strictement plus proche du plus proche ennemi.
         # `_model_closest_ep` et `_model_orig_dist` sont precalcules plus haut (WHILE MOVING).
         tc, tr = _model_closest_ep[mid]
         orig_dist = _model_orig_dist[mid]
-        best: Optional[Tuple[int, int, int]] = None  # (dist_to_target, col, row)
-        for d in range(1, pile_in_budget + 1):
-            for d_col in range(-d, d + 1):
-                for d_row in range(-d, d + 1):
-                    if max(abs(d_col), abs(d_row)) != d:
-                        continue
-                    nc, nr = oc + d_col, orow + d_row
-                    if not _cell_base_legal(nc, nr) or (nc, nr) in taken:
-                        continue
-                    if not _reach_by_mid[mid](nc, nr):
-                        continue
-                    cand_d = calculate_hex_distance(nc, nr, tc, tr)
-                    if cand_d >= orig_dist:
-                        continue
-                    if best is not None and cand_d >= best[0]:
-                        continue  # ne peut pas ameliorer `best` : pas de mesure d'engagement
-                    # AFTER en dernier : la mesure d'engagement est la plus couteuse des trois,
-                    # ne la payer que sur une case deja plus proche ET meilleure.
-                    if _keeps_start_engagements(mid, nc, nr):
-                        best = (cand_d, nc, nr)
-            if best is not None:
-                break
+        _closest_entry = _entry_by_pos.get(_model_closest_ep[mid])  # get allowed : None = pas de palier 2
+        # Candidats : tout le budget, legalite hors-plan + trajet + strictement plus proche.
+        # Tries par distance a la cible puis par anneau (deplacement minimal a distance egale).
+        candidates_ring: List[Tuple[int, int, int, int]] = []
+        for d_col in range(-pile_in_budget, pile_in_budget + 1):
+            for d_row in range(-pile_in_budget, pile_in_budget + 1):
+                if d_col == 0 and d_row == 0:
+                    continue
+                nc, nr = oc + d_col, orow + d_row
+                if not _cell_base_legal(nc, nr) or (nc, nr) in taken:
+                    continue
+                if not _reach_by_mid[mid](nc, nr):
+                    continue
+                cand_d = calculate_hex_distance(nc, nr, tc, tr)
+                if cand_d >= orig_dist:
+                    continue
+                candidates_ring.append((cand_d, max(abs(d_col), abs(d_row)), nc, nr))
+        candidates_ring.sort()
+        best: Optional[Tuple[int, int]] = None
+        if _closest_entry is not None:
+            # Palier 2 : la premiere cellule (la plus proche) ENGAGEE avec la cible la plus
+            # proche. AFTER (engagements de depart) puis mesure d'engagement, la plus couteuse.
+            for _cand_d, _ring, nc, nr in candidates_ring:
+                if not _footprint_legal(mid, nc, nr) or not _keeps_start_engagements(mid, nc, nr):
+                    continue
+                synth = _synth_model_entry(
+                    game_state, str(squad_id), models_cache[mid], nc, nr,
+                    level=int(require_key(models_cache[mid], "level")),
+                )
+                if unit_entries_within_engagement_zone(
+                    synth, _closest_entry, _ez, game_state=game_state, memoise=False
+                ):
+                    best = (nc, nr)
+                    break
+        if best is None:
+            # Palier 3 : la cellule strictement plus proche, dans tout le budget.
+            for _cand_d, _ring, nc, nr in candidates_ring:
+                if _footprint_legal(mid, nc, nr) and _keeps_start_engagements(mid, nc, nr):
+                    best = (nc, nr)
+                    break
         if best is None:
             chosen[mid] = (oc, orow)  # reste sur place : sa cellule est deja dans `taken`
         else:
             taken.discard((oc, orow))  # elle part : son origine redevient libre
-            chosen[mid] = (best[1], best[2])
-            taken.add(chosen[mid])
+            chosen[mid] = best
+            taken.add(best)
 
     return chosen
 
@@ -14676,7 +14729,7 @@ def fight_pile_in_plan(
     wall_hexes = game_state.get("wall_hexes", set())
 
     chosen = _assign_cells_toward_enemies(
-        game_state, squad_id, mids, enemy_positions, pile_in_budget
+        game_state, squad_id, mids, enemy_positions, pile_in_budget, target_ids=target_ids
     )
     # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le plan
     # PORTE (toute entrée de plan porte le sien).
@@ -15257,7 +15310,9 @@ def squad_consolidate_plan(
 
     # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le plan
     # PORTE (toute entrée de plan porte le sien).
-    chosen = _assign_cells_toward_enemies(game_state, squad_id, mids, enemy_positions, budget)
+    chosen = _assign_cells_toward_enemies(
+        game_state, squad_id, mids, enemy_positions, budget, target_ids=target_ids
+    )
     plan = [
         (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
         for mid in mids

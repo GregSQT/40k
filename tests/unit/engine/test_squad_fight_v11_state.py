@@ -351,9 +351,11 @@ def test_combat_a_vide_ne_pose_pas_pending_fight_weapon_select(melee_scenario_fi
 
 # Position de l'ennemi E (unité 4, P2) pour le scénario : à ≤ 3" (consolidation_trigger_range)
 # de l'unité 1 (P1) SANS être engagé avec elle, et atteignable par une consolidation engaging
-# (`squad_consolidate_plan` rend un plan qui finit engagé). Mesuré sur le scénario mêlée :
-# rows 212-220 = déjà engagé (mode ongoing), 222-225 = engaging mais plan None (hors d'atteinte).
-_NEW_FOE_COL, _NEW_FOE_ROW = 59, 221
+# (`squad_consolidate_plan` rend un plan qui finit engagé). Mesuré sur le scénario mêlée le
+# 2026-09-18, APRÈS A1 (le pile-in gym cherche désormais la case engagée la plus proche : 1#0
+# atterrit en (60,204) et non plus (59,201)) : rows ≤ 222 = déjà engagé (mode ongoing),
+# 223-228 = engaging avec plan, ≥ 229 = hors des 3" (mode objective).
+_NEW_FOE_COL, _NEW_FOE_ROW = 59, 225
 
 
 def _engine_at_new_foes(scenario_file: str):
