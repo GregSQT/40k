@@ -148,13 +148,39 @@ class RerollProfile:
     #: même patron : relance des ÉCHECS seulement, un seul dé de relance, priorité explicite
     #: entre les causes, `hitRerollCause` au record.
     #:
-    #: Relancer une touche RÉUSSIE pour chercher un critique serait perdant (on échangerait une
-    #: touche acquise contre P(touche)), et la règle dit « re-roll the Hit roll » dans le cadre
-    #: 01 Core « Re-rolls », qui ne s'applique qu'à un jet dont on veut changer le résultat.
+    #: Relancer une touche RÉUSSIE ordinaire n'est un choix que lorsqu'un critique vaut plus
+    #: qu'une touche ([SUSTAINED HITS], [LETHAL HITS]) : c'est la politique `hit_non_crit`
+    #: ci-dessous, décidée par le joueur lot par lot ; par défaut, les échecs seulement.
     hit_any_fail: bool = False
     wound_1: bool = False
     wound_any_fail: bool = False
     save_1: bool = False
+    #: POLITIQUE DE RELANCE de l'attaquant, décidée PAR LOT (décision utilisateur du 2026-09-18,
+    #: chantier « chaîne d'attaque 100 % »). « You can re-roll the Hit roll » (Oath) et « you can
+    #: re-roll the wound roll » ([TWIN-LINKED] 24.38) ne restreignent pas la relance aux échecs :
+    #: quand une règle se déclenche sur un CRITIQUE ([SUSTAINED HITS] / [LETHAL HITS] côté
+    #: touche, [DEVASTATING WOUNDS] côté blessure), relancer une réussite ordinaire pour chercher
+    #: le critique est un vrai choix, et il appartient au joueur. `True` = relancer aussi les
+    #: réussites NON critiques ; `False` = les échecs seulement (défaut, et seul comportement
+    #: raisonnable quand aucun critique ne vaut plus qu'une réussite). N'ouvre jamais une relance
+    #: que l'ability ne donne pas : `hit_non_crit` exige `hit_any_fail`, `wound_non_crit` exige
+    #: `wound_any_fail` ou [TWIN-LINKED] sur l'arme — `hit_1` / `wound_1` ne relancent que des 1.
+    hit_non_crit: bool = False
+    wound_non_crit: bool = False
+
+
+def reroll_policy_choices(profile: "WeaponAttackProfile", rerolls: "RerollProfile") -> Dict[str, bool]:
+    """Les deux questions de politique de relance qui ont un SENS pour ce lot.
+
+    `{"hit": bool, "wound": bool}` — `True` quand une relance de tout jet existe ET qu'une règle
+    se déclenche sur le critique correspondant. Sinon « échecs seulement » domine strictement et
+    la question n'est pas posée (même principe que l'allocation à candidat unique du défenseur).
+    """
+    hit_open = bool(rerolls.hit_any_fail) and not profile.torrent and (
+        profile.sustained_hits > 0 or profile.lethal_hits
+    )
+    wound_open = (bool(rerolls.wound_any_fail) or profile.twin_linked) and profile.devastating
+    return {"hit": hit_open, "wound": wound_open}
 
 
 def unit_keywords_upper(unit: Optional[Dict[str, Any]]) -> frozenset:
@@ -458,11 +484,17 @@ def roll_attack_pool(
             # `hit_any_fail` (Oath of Moment) relance TOUT echec. Meme forme que la blessure
             # ci-dessous, priorite explicite comprise — sans quoi la cause enregistree ne serait
             # pas celle qui a ouvert la relance.
-            if not hit_success and (
+            # Politique « non-critiques » (`RerollProfile.hit_non_crit`) : une réussite
+            # ordinaire se relance aussi ; un critique, jamais.
+            _hit_reroll_non_crit = (
+                rerolls.hit_non_crit and rerolls.hit_any_fail
+                and hit_success and not is_critical_hit
+            )
+            if (not hit_success and (
                 (hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1) or rerolls.hit_any_fail
-            ):
+            )) or _hit_reroll_non_crit:
                 hit_reroll_cause = (
-                    "hit_1" if (hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1)
+                    "hit_1" if (hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1 and not hit_success)
                     else "hit_any_fail"
                 )
                 # Jet AVANT relance, conserve : sans lui le log ne peut afficher que le second de
@@ -539,10 +571,17 @@ def roll_attack_pool(
                     or rerolls.wound_any_fail
                     or profile.twin_linked
                 )
-                if not wound_success and may_reroll:
+                # Politique « non-critiques » (`RerollProfile.wound_non_crit`) : une blessure
+                # ordinaire se relance aussi pour chercher le critique ; un critique, jamais.
+                _wound_reroll_non_crit = (
+                    rerolls.wound_non_crit
+                    and (rerolls.wound_any_fail or profile.twin_linked)
+                    and wound_success and not is_critical_wound
+                )
+                if (not wound_success and may_reroll) or _wound_reroll_non_crit:
                     # Meme ordre de priorite que `may_reroll` ci-dessus : le miroir exact, pour
                     # que la cause enregistree soit bien celle qui a ouvert la relance.
-                    if wound_roll == NATURAL_FAIL_ROLL and rerolls.wound_1:
+                    if wound_roll == NATURAL_FAIL_ROLL and rerolls.wound_1 and not wound_success:
                         wound_reroll_cause = "wound_1"
                     elif rerolls.wound_any_fail:
                         wound_reroll_cause = "wound_any_fail"

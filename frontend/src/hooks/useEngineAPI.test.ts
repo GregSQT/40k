@@ -20,7 +20,12 @@ import { cubeSub } from "../utils/blockSelection";
 import { offsetToCube } from "../utils/gameHelpers";
 import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
-import { readManualAllocationPrompt, readManualOrderPrompt, useEngineAPI } from "./useEngineAPI";
+import {
+  readAttackLotPrompt,
+  readManualAllocationPrompt,
+  readManualOrderPrompt,
+  useEngineAPI,
+} from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------
 // ErrorBoundary pour tester les hooks qui lancent une exception sur erreur
@@ -940,6 +945,183 @@ describe("readManualOrderPrompt", () => {
     expect(
       readManualOrderPrompt({ action: "squad_fight_declare_order", waiting_for_player: true })
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Attente de l'ATTAQUANT (04.03, option B du 2026-09-18) : le moteur demande le prochain lot
+// (unité puis profil) et sa politique de relance ; payload `{ action: squad_*_select_lot,
+// lot_request }`. Chantier « chaîne d'attaque 100 % ».
+// ---------------------------------------------------------------------------
+
+const LOT_REQUEST = {
+  attacker_unit_id: "1",
+  locked_target_unit_id: null,
+  policy_only: false,
+  lots: [
+    {
+      lot_id: 0,
+      target_unit_id: "2",
+      weapon_name: "Bolt rifle",
+      weapon_code: "bolt_rifle",
+      n_models: 3,
+      n_attacks: 6,
+      reroll_choices: { hit: false, wound: false },
+    },
+    {
+      lot_id: 1,
+      target_unit_id: "3",
+      weapon_name: "Plasma gun",
+      weapon_code: "plasma_gun",
+      n_models: 1,
+      n_attacks: 1,
+      reroll_choices: { hit: true, wound: false },
+    },
+  ],
+};
+
+describe("readAttackLotPrompt", () => {
+  it("payload shoot en attente de lot → requête de famille shoot", () => {
+    expect(
+      readAttackLotPrompt({
+        action: "squad_shoot_select_lot",
+        waiting_for_player: true,
+        lot_request: LOT_REQUEST,
+      })
+    ).toEqual({ ...LOT_REQUEST, kind: "shoot" });
+  });
+
+  it("famille fight reconnue ; pas une attente de lot → null", () => {
+    expect(
+      readAttackLotPrompt({
+        action: "squad_fight_select_lot",
+        waiting_for_player: true,
+        lot_request: LOT_REQUEST,
+      })?.kind
+    ).toBe("fight");
+    expect(
+      readAttackLotPrompt({
+        action: "squad_shoot_manual_alloc",
+        waiting_for_player: true,
+        lot_request: LOT_REQUEST,
+      })
+    ).toBeNull();
+    expect(
+      readAttackLotPrompt({ action: "squad_shoot_select_lot", waiting_for_player: true })
+    ).toBeNull();
+    expect(readAttackLotPrompt(undefined)).toBeNull();
+  });
+});
+
+describe("useEngineAPI — attente de lot de l'attaquant (04.03)", () => {
+  const shootState = makeGameState({
+    phase: "shoot",
+    current_player: 1,
+    player_types: { "1": "human", "2": "human" },
+    shoot_activation_pool: ["1"],
+    move_activation_pool: [],
+    units: [makeUnit(1, 1), makeUnit(2, 2), makeUnit(3, 2)],
+  });
+
+  async function hookWithLotPending(actionBodies: Array<Record<string, unknown>>) {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: shootState })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        actionBodies.push(body);
+        if (body.action === "squad_shoot_select_lot") {
+          // Lot choisi → le moteur enchaîne sur l'allocation du défenseur (05.04).
+          return HttpResponse.json({
+            success: true,
+            result: {
+              action: "squad_shoot_manual_alloc",
+              waiting_for_player: true,
+              allocation: {
+                attacker_unit_id: "1",
+                target_unit_id: "3",
+                defender_player: 2,
+                choices: [{ model_id: "3#0", col: 0, row: 0, HP_CUR: 2, HP_MAX: 2 }],
+                wounds_remaining: 1,
+                weapon_name: "Plasma gun",
+                weapon_names: ["Plasma gun"],
+              },
+            },
+            game_state: shootState,
+            action_logs: [],
+          });
+        }
+        // Tout autre geste (ici : l'allocation posée en premier) → le moteur attend le lot.
+        return HttpResponse.json({
+          success: true,
+          result: {
+            action: "squad_shoot_select_lot",
+            waiting_for_player: true,
+            lot_request: LOT_REQUEST,
+          },
+          game_state: shootState,
+          action_logs: [],
+        });
+      })
+    );
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    return result;
+  }
+
+  it("ROUGE sans la prise en charge : une réponse squad_shoot_select_lot pose attackLotRequest", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await hookWithLotPending(bodies);
+    expect(result.current.attackLotRequest).toBeNull();
+    // Un geste quelconque du joueur : la réponse est l'attente de lot.
+    await act(async () => {
+      await result.current.onStartTargetPreview(1, 2);
+    });
+    expect(result.current.attackLotRequest).toEqual({ ...LOT_REQUEST, kind: "shoot" });
+    expect(result.current.manualAllocation).toBeNull();
+    expect(result.current.manualOrderRequest).toBeNull();
+  });
+
+  it("onSelectAttackLot envoie squad_shoot_select_lot + politique, puis l'allocation remplace l'attente de lot", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await hookWithLotPending(bodies);
+    await act(async () => {
+      await result.current.onStartTargetPreview(1, 2);
+    });
+    expect(result.current.attackLotRequest).not.toBeNull();
+
+    await act(async () => {
+      await result.current.onSelectAttackLot(1, { hit: true, wound: false });
+    });
+    const sent = bodies.find((b) => b.action === "squad_shoot_select_lot");
+    expect(sent).toMatchObject({
+      action: "squad_shoot_select_lot",
+      unitId: "1",
+      lotId: 1,
+      hitReroll: true,
+      woundReroll: false,
+    });
+    // Les trois attentes s'excluent : l'allocation du défenseur a remplacé l'attente de lot.
+    expect(result.current.attackLotRequest).toBeNull();
+    expect(result.current.manualAllocation?.target_unit_id).toBe("3");
+    expect(result.current.manualAllocation?.weapon_names).toEqual(["Plasma gun"]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("sans question de relance, le corps ne porte ni hitReroll ni woundReroll", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await hookWithLotPending(bodies);
+    await act(async () => {
+      await result.current.onStartTargetPreview(1, 2);
+    });
+    await act(async () => {
+      await result.current.onSelectAttackLot(0);
+    });
+    const sent = bodies.find((b) => b.action === "squad_shoot_select_lot");
+    expect(sent).toMatchObject({ action: "squad_shoot_select_lot", unitId: "1", lotId: 0 });
+    expect(sent).not.toHaveProperty("hitReroll");
+    expect(sent).not.toHaveProperty("woundReroll");
   });
 });
 

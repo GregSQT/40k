@@ -2194,6 +2194,40 @@ def _has_valid_shooting_targets(game_state: Dict[str, Any], unit: Dict[str, Any]
     return can_shoot
 
 
+def target_is_monster_or_vehicle_unit(game_state: Dict[str, Any], target_id_str: str) -> bool:
+    """17.03 : « enemy MONSTER/VEHICLE units » — chaque figurine VIVANTE de l unite porte le
+    mot-cle MONSTER ou VEHICLE (mots-cles PROPRES, 19.03 : un CHARACTER d infanterie attache a
+    un vehicule n en fait pas une unite VEHICLE). Unite sans figurine vivante : False."""
+    from engine.phase_handlers.shared_utils import _model_is_monster_or_vehicle
+
+    models_cache = require_key(game_state, "models_cache")
+    alive = [
+        models_cache[m]
+        for m in require_key(game_state, "squad_models").get(target_id_str, [])  # get allowed
+        if m in models_cache
+    ]
+    return bool(alive) and all(_model_is_monster_or_vehicle(m) for m in alive)
+
+
+def engaged_monster_vehicle_target_malus(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str, weapon: Dict[str, Any],
+) -> bool:
+    """17.03 : « Each time a model makes a ranged attack that targets such a unit [MONSTER/
+    VEHICLE engagee], subtract 1 from the hit roll (excluding attacks made with [CLOSE-QUARTERS]
+    weapons by models in a unit engaged with the target). »"""
+    tid = str(target_squad_id)
+    if not target_is_monster_or_vehicle_unit(game_state, tid):
+        return False
+    target_unit = require_unit_by_id(game_state, tid)
+    if not _is_adjacent_to_enemy_within_cc_range(game_state, target_unit):
+        return False
+    if weapon_has_rule(weapon, "CLOSE_QUARTERS"):
+        from engine.phase_handlers.shared_utils import _squads_are_engaged
+        if _squads_are_engaged(game_state, str(attacker_squad_id), tid):
+            return False
+    return True
+
+
 def _friendly_engagement_blocks_ranged_shot(
     game_state: Dict[str, Any],
     shooter_id_str: str,
@@ -2209,6 +2243,13 @@ def _friendly_engagement_blocks_ranged_shot(
     _is_valid_shooting_target). Weapon-independent for a fixed (shooter, target) pair.
     """
     if enemy_adjacent_to_shooter:
+        return False
+    # 17.03 SHOOTING AT ENGAGED MONSTERS AND VEHICLES : « In your Shooting phase, enemy
+    # MONSTER/VEHICLE units that are engaged can be selected as targets of ranged attacks. »
+    # L engagement avec un allie ne ferme donc pas ces cibles (le -1 au jet de touche s applique
+    # a la resolution, `_manual_roll_intent` ; l interdiction [BLAST], FAQ p. 88, au ciblage par
+    # arme, `_shoot_engagement_blocks_target`).
+    if target_is_monster_or_vehicle_unit(game_state, target_id_str):
         return False
     from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
 

@@ -18,7 +18,19 @@ Discrimination verrouillee :
 import random
 import pytest
 
-from engine.phase_handlers.shared_utils import destroy_model
+from engine.phase_handlers.shared_utils import destroy_model as _destroy_model_raw, drain_mortal_wound_queue
+
+
+def destroy_model(gs, model_id, reason):
+    """Détruit la figurine PUIS sert la file des blessures mortelles.
+
+    25 DESTROYED : une Deadly Demise causée par une attaque n'est résolue qu'après les attaques
+    de l'attaquant — `destroy_model` la met en file, `drain_mortal_wound_queue` la joue. Ces
+    tests mesurent l'explosion elle-même : les deux gestes sont enchaînés ici, sans attente
+    humaine possible (`player_types` programmatiques dans les fixtures)."""
+    _destroy_model_raw(gs, model_id, reason=reason)
+    wait = drain_mortal_wound_queue(gs)
+    assert wait is None, f"attente humaine inattendue : {wait}"
 from tests._state_invariants import unit_invariants
 from tests.unit.engine._config_helpers import load_engine_from_scenario
 
@@ -104,6 +116,8 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
         },
         "phase": "fight",
         "turn": 1,
+        # Proprietaires programmatiques : les blessures mortelles s attribuent sans question.
+        "player_types": {"1": "ai", "2": "ai"},
     }
 
 
@@ -262,6 +276,7 @@ def _gs_multi(*, n_targets: int = 3):
         },
         "phase": "fight",
         "turn": 1,
+        "player_types": {"1": "ai", "2": "ai"},
     }
 
 
@@ -303,10 +318,10 @@ def test_dd_cible_hors_portee_pas_d_entree(monkeypatch):
 
 
 def test_dd_mutation_verrou(monkeypatch):
-    """Verrou mutation : si _apply_deadly_demise n'est pas appele, aucun log deadly_demise.
+    """Verrou mutation : si la mise en file de destroy_model est retiree, aucun log deadly_demise.
 
-    Prouve que le bloc `if _deadly_demise_val is not None: _apply_deadly_demise(...)` dans
-    destroy_model est effectivement atteint quand la cle est presente.
+    Prouve que le bloc `if _deadly_demise_val is not None: … append({"kind": "deadly_demise"…})`
+    dans destroy_model est effectivement atteint quand la cle est presente.
     """
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     import engine.phase_handlers.shared_utils as su

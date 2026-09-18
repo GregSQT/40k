@@ -80,11 +80,37 @@ def _finish_allocation(client, unit_id, body):
     fois. ``end_activation`` n'a lieu qu'au dernier clic.
     """
     for _ in range(200):
-        allocation = body["result"].get("allocation")
+        result = body["result"]
+        lot_request = result.get("lot_request")
+        if lot_request:
+            # 04.03 (option B) : l'attaquant humain choisit le lot suivant (et sa politique de
+            # relance) ; ce harnais prend le premier candidat, échecs seulement.
+            body = client.act(
+                "squad_shoot_select_lot", unitId=unit_id,
+                lotId=lot_request["lots"][0]["lot_id"], hitReroll=False, woundReroll=False,
+            )
+            continue
+        order_request = result.get("order_request")
+        if order_request:
+            # 05.03 : le défenseur déclare l'ordre des groupes ; l'ordre proposé par le moteur
+            # (non-CHARACTER d'abord) respecte les trois contraintes.
+            body = client.act(
+                "squad_shoot_declare_order", unitId=unit_id,
+                order=[g["group_id"] for g in order_request["groups"]],
+            )
+            continue
+        allocation = result.get("allocation")
         if not allocation:
             return body
         choices = allocation["choices"]
         assert choices, f"allocation en attente sans figurine à désigner : {allocation}"
+        if result.get("action") == "squad_hazard_manual_alloc":
+            # [HAZARDOUS] 24.15 après les attaques : le TIREUR encaisse ses blessures mortelles,
+            # désignées par son propriétaire (06.02) — même harnais, autre action.
+            body = client.act(
+                "squad_hazard_allocate_model", unitId=unit_id, modelId=choices[0]["model_id"]
+            )
+            continue
         body = client.act(
             "squad_shoot_allocate_model", unitId=unit_id, modelId=choices[0]["model_id"]
         )
@@ -603,23 +629,75 @@ class TestShootResolution:
                 unitId=squad, weaponCode=plain[0]["code"], count=plain[0]["m"], targetId=wanted,
             )
             body = game.act("squad_shoot_validate", unitId=squad)
-            # Les lots d'attaques ne sont exposés que tant qu'une blessure reste à allouer :
-            # une salve sans sauvegarde ratée termine l'activation sans passer par là.
-            allocation = game.state.get(PENDING_SHOOT_ALLOCATION_KEY)
-            if allocation is None:
-                continue
-            for group in allocation["weapon_groups"]:
-                assert group["heavy_applied"] is False
-                expected = min(6, group["bs_base"] + 1) if group["cover"] else group["bs_base"]
-                assert group["bs"] == expected, (
-                    f"{squad} → {wanted} : BS {group['bs']} attendu {expected} "
-                    f"(base {group['bs_base']}, cover {group['cover']})"
+            logs = list(body.get("action_logs", []))
+            body = _finish_allocation(game, squad, body)
+            logs.extend(body.get("action_logs", []))
+            # Le lot d'attaques n'est pas observable pendant l'activation (il se résout d'un
+            # trait quand ni l'attaquant ni le défenseur n'ont de choix) : on lit ce qui en
+            # SORT, la ligne de journal du groupe, qui porte `bs`, `bsBase` et `cover`.
+            for entry in logs:
+                if entry.get("type") != "shoot" or str(entry.get("shooterId")) != str(squad):
+                    continue
+                assert entry["heavyApplied"] is False
+                expected = min(6, entry["bsBase"] + 1) if entry["cover"] else entry["bsBase"]
+                assert entry["bs"] == expected, (
+                    f"{squad} → {wanted} : BS {entry['bs']} attendu {expected} "
+                    f"(base {entry['bsBase']}, cover {entry['cover']})"
                 )
-                samples[bool(group["cover"])] += 1
-            _finish_allocation(game, squad, body)
+                samples[bool(entry["cover"])] += 1
 
         assert samples[True] > 0, "aucun tir sur une cible à couvert éprouvé"
         assert samples[False] > 0, "aucun tir sans couvert éprouvé (comparaison impossible)"
+
+    def test_hazardous_human_allocation_then_the_activation_ends(self, game, monkeypatch):
+        """24.15 [HAZARDOUS] : après TOUTES les attaques, un jet de hasard par arme sélectionnée ;
+        le tireur (humain) désigne la figurine qui encaisse (06.02) — et son activation se
+        termine APRÈS cette attribution : hors du pool de tir, dans `units_shot`, plus d'unité
+        active. Une version précédente rendait « done » sans rien terminer : l'escouade restait
+        active et rejouable.
+
+        Dés forcés à 1 : toutes les touches ratent (aucune allocation de pertes), le jet de
+        hasard rate (1 ≤ 2 → 1 blessure mortelle sur le tireur).
+        """
+        import random as _random
+
+        game.drain_to("shoot")
+        squad = None
+        weapon_code = None
+        for candidate in game.pool("shoot_activation_pool"):
+            game.act("squad_shoot_activate", unitId=candidate)
+            targets = game.act("squad_shoot_los_overview", unitId=candidate)["result"]["valid_targets"]
+            if not targets:
+                game.act("squad_shoot_cancel", unitId=candidate)
+                continue
+            weapons = game.act("squad_shoot_weapons_for_target", unitId=candidate, targetId=targets[0])["result"]["weapons"]
+            hazardous = [w for w in weapons if "HAZARDOUS" in w["weapon"]["WEAPON_RULES"]]
+            if hazardous and len(game.models_of(candidate)) >= 2:
+                squad, weapon_code, target = candidate, hazardous[0]["code"], targets[0]
+                break
+            game.act("squad_shoot_cancel", unitId=candidate)
+        assert squad is not None, "aucune escouade humaine à ≥ 2 figurines avec une arme [HAZARDOUS] à portée"
+
+        game.act("squad_shoot_assign_weapon_qty", unitId=squad, weaponCode=weapon_code, count=1, targetId=target)
+        monkeypatch.setattr(_random, "randint", lambda a, b: 1)
+        body = game.act("squad_shoot_validate", unitId=squad)
+        # Lot unique sans question de relance → jets → aucune perte → jet de hasard raté.
+        result = _finish_allocation(game, squad, body)["result"]
+        for _ in range(3):  # le premier prompt est celui du hasard ; on le suit jusqu'au bout
+            if result.get("action") != "squad_hazard_manual_alloc" or not result.get("waiting_for_player"):
+                break
+            choice = result["allocation"]["choices"][0]["model_id"]
+            result = game.act("squad_hazard_allocate_model", unitId=squad, modelId=choice)["result"]
+        monkeypatch.undo()
+
+        assert result.get("waiting_for_player") is False
+        assert result.get("activation_ended") is True, result
+        assert squad not in game.pool("shoot_activation_pool")
+        assert squad in [str(u) for u in game.state["units_shot"]]
+        assert "active_shooting_unit" not in game.state
+        assert int(game.unit(squad)["HP_CUR"]) < sum(
+            int(game.state["models_cache"][m]["HP_MAX"]) for m in game.models_of(squad)
+        ), "la blessure mortelle du hasard a bien atteint le tireur"
 
 
 class TestWeaponIndexAssignment:

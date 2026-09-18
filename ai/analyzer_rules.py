@@ -59,6 +59,68 @@ def load_rules_corpus() -> List[Dict[str, Any]]:
     return rules
 
 
+#: Bucket d'`error_totals` (et section du corpus) d'une ligne d'attaque, par PHASE de la ligne.
+#: L'allocation à un CHARACTER se juge sur toute ligne qui alloue (tir, mêlée, blessures
+#: mortelles d'une capacité, d'un hazard, d'une charge ou d'un Deadly Demise) : la section est
+#: celle de la phase où la ligne est écrite, comme pour les autres compteurs de ces phases.
+ALLOC_CHARACTER_BUCKET_BY_PHASE = {
+    "MOVE": "move",
+    "SHOOT": "shooting",
+    "CHARGE": "charge",
+    "FIGHT": "fight",
+}
+
+#: Clé de l'entête `Run rules:` qui porte `game_rules.precision_mortal_wounds_to_character`
+#: (`w40k_core._run_rules_for_step_log`). Décision utilisateur du 2026-09-18, en attente de
+#: confirmation GW : `false` = les blessures MORTELLES d'une arme [PRECISION] suivent la cascade
+#: 06.02 (bodyguards d'abord) ; `true` = elles restent au groupe CHARACTER imposé par 24.28.
+RUN_RULE_PRECISION_MW_TO_CHARACTER = "alloc.precision_mw_to_character"
+
+_SAVE_DEVASTATING_RE = re.compile(r"Save\s+\[DEVASTATING WOUNDS\]", re.IGNORECASE)
+_PRECISION_TOKEN_RE = re.compile(r"\[PRECISION\]", re.IGNORECASE)
+
+
+def character_allocation_fault(
+    action_desc: str,
+    *,
+    alloc_is_character: bool,
+    non_character_alive: bool,
+    is_mortal: bool,
+    precision_mw_to_character: Optional[bool],
+) -> Optional[str]:
+    """Une attaque allouée à un CHARACTER alors qu'un non-CHARACTER de l'unité est vivant :
+    faute, ou droit ? Rend la raison de la faute, ``None`` si l'allocation est légale.
+
+    - 05.03 « No CHARACTER group can be earlier in the allocation order than a non-CHARACTER
+      group » et 06.02 (blessures mortelles : « if that unit contains one or more non-CHARACTER
+      models, you must select one of those ») : un CHARACTER n'encaisse qu'après les bodyguards.
+    - 24.28 [PRECISION] : l'attaquant PEUT imposer un CHARACTER visible — sur les blessures
+      NORMALES. Sur les blessures MORTELLES ([DEVASTATING WOUNDS] 24.10), la clé du run tranche
+      (cf. `RUN_RULE_PRECISION_MW_TO_CHARACTER`) ; sans la clé (journal antérieur au
+      2026-09-18) le cas n'est pas décidable et n'est pas compté.
+
+    Le token [PRECISION] est posé par le moteur seulement quand l'override a JOUÉ sur le lot
+    (`precision_applied`) : sa présence sur la ligne est donc la preuve de l'allocation imposée.
+    """
+    if not alloc_is_character or not non_character_alive:
+        return None
+    precision = _PRECISION_TOKEN_RE.search(action_desc) is not None
+    if not precision:
+        return "06.02" if is_mortal else "05.03"
+    if not is_mortal:
+        return None  # 24.28 : CHARACTER imposé, blessure normale
+    if precision_mw_to_character is None:
+        return None  # journal sans la clé : indécidable
+    return None if precision_mw_to_character else "06.02+24.28"
+
+
+def line_inflicts_mortal_wound(action_desc: str) -> bool:
+    """Une ligne d'attaque dont la blessure est MORTELLE : `Save [DEVASTATING WOUNDS]` (24.10)
+    ou toute ligne `SUFFERS` (hazard 24.15, capacité 06.02, Deadly Demise 24.08, impact de
+    charge)."""
+    return _SAVE_DEVASTATING_RE.search(action_desc) is not None or " SUFFERS " in action_desc
+
+
 def note_rule_usage(stats: Dict[str, Any], rule_id: str, player: int) -> None:
     """Une OCCASION de vérifier cette règle vient d'être jugée, pour ce joueur.
 

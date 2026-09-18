@@ -98,9 +98,23 @@ def _resolve_manual_allocation(client, unit_id, body):
             order = [group["group_id"] for group in result["order_request"]["groups"]]
             body = client.act("squad_fight_declare_order", unitId=unit_id, order=order)
             continue
+        lot_request = result.get("lot_request")
+        if lot_request:
+            # 04.03 (option B) : l'attaquant humain choisit le lot suivant (et sa politique de
+            # relance) ; ce harnais prend le premier candidat, échecs seulement.
+            body = client.act(
+                "squad_fight_select_lot", unitId=unit_id,
+                lotId=lot_request["lots"][0]["lot_id"], hitReroll=False, woundReroll=False,
+            )
+            continue
         allocation = result.get("allocation")
         if not allocation:
             return body
+        if result.get("action") == "squad_hazard_manual_alloc":
+            body = client.act(
+                "squad_hazard_allocate_model", unitId=unit_id, modelId=allocation["choices"][0]["model_id"]
+            )
+            continue
         body = client.act(
             "squad_fight_manual_alloc", unitId=unit_id, modelId=allocation["choices"][0]["model_id"]
         )
@@ -305,6 +319,57 @@ class TestFightResolution:
         assert sum(hp_before.values()) - sum(hp_after.values()) - sum(
             hp_before[m] for m in killed
         ) >= 0
+
+
+    def test_split_attacks_between_two_engaged_units_through_the_api(self, game):
+        """04.02 SPLITTING MELEE ATTACKS, par l'API : une figurine engagée avec deux unités
+        répartit les attaques de son arme (au moins une par unité, somme = A). Si aucune
+        figurine éligible n'est engagée avec deux unités sur ce scénario, le refus du moteur est
+        vérifié à la place (cible hors engagement) — la route est atteinte dans les deux cas.
+        """
+        eligible = _drive_to_subphase(game, "fight")
+        chosen = None
+        for attacker in eligible:
+            game.act("activate_unit", unitId=attacker)
+            targets = [str(t) for t in game.state["valid_fight_targets"]]
+            for model_id in game.models_of(attacker):
+                model = game.state["models_cache"][model_id]
+                weapons = [w for w in model["CC_WEAPONS"] if isinstance(w.get("NB"), int) and w["NB"] >= 2]
+                engaged_with = [
+                    t for t in targets
+                    if game.act("squad_fight_weapon_qty_max", unitId=attacker, weaponCode=weapons[0]["code"], targetId=t, modelId=model_id)["result"]["qty_max"] == 1
+                ] if weapons else []
+                if len(engaged_with) >= 2:
+                    chosen = (attacker, model_id, weapons[0], engaged_with[:2])
+                    break
+            if chosen:
+                break
+        if chosen is None:
+            attacker = eligible[0]
+            game.act("activate_unit", unitId=attacker)
+            model_id = game.models_of(attacker)[0]
+            weapon = game.state["models_cache"][model_id]["CC_WEAPONS"][0]
+            accepted, body = game.try_act(
+                "squad_fight_split_weapon_attacks", unitId=attacker, modelId=model_id,
+                weaponCode=weapon["code"], split={"999": 1},
+            )
+            assert not accepted and body["result"]["error"] == "split_rejected", body
+            return
+        attacker, model_id, weapon, (t1, t2) = chosen
+        n = int(weapon["NB"])
+        body = game.act(
+            "squad_fight_split_weapon_attacks", unitId=attacker, modelId=model_id,
+            weaponCode=weapon["code"], split={t1: n - 1, t2: 1},
+        )
+        created = body["result"]["created"]
+        assert [(c["target_unit_id"], c["n_attacks_resolved"]) for c in created] == [(t1, n - 1), (t2, 1)]
+        accepted, refused = game.try_act(
+            "squad_fight_split_weapon_attacks", unitId=attacker, modelId=model_id,
+            weaponCode=weapon["code"], split={t1: n, t2: 1},
+        )
+        assert not accepted and refused["result"]["error"] == "split_rejected"
+        _resolve_manual_allocation(game, attacker, game.act("squad_fight_validate", unitId=attacker))
+        assert attacker in [str(u) for u in game.state["units_selected_to_fight"]]
 
 
 class TestConsolidation:

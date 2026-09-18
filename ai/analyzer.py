@@ -1563,6 +1563,9 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('squad_coherency_violations')
             # 20.03 : ingress au round 1 — compté dans le total MOVE (réserves = phase de mouvement).
             + _pair('reserves_too_early')
+            # 06.02 : blessure mortelle (Desperate Escape 09.07) allouée à un CHARACTER avant
+            # les bodyguards — même compteur que les autres phases, bucket de la phase.
+            + _pair('alloc_character_over_bodyguard', 'move')
         ),
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
@@ -1593,6 +1596,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('torrent_wrong_hit')
             + _pair('lethal_hits_wrong_wound')
             + _pair('blast_x_mismatch')
+            # 05.03 / 06.02 / 24.28 : CHARACTER allouée avant ses bodyguards (tir).
+            + _pair('alloc_character_over_bodyguard', 'shooting')
         ),
         'charge': (
             _pair('charge_from_adjacent')
@@ -1607,6 +1612,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('charge_impact_wrong_threshold')
             + _pair('charge_impact_wrong_damage')
             + _pair('charge_roll_out_of_range')
+            # 06.02 : blessure mortelle de la phase de charge allouée à un CHARACTER avant ses bodyguards.
+            + _pair('alloc_character_over_bodyguard', 'charge')
         ),
         'fight': (
             # Deux clés RETIRÉES de ce total, pas seulement remises à zéro — un terme mort dans un
@@ -1632,6 +1639,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             # 24.37 / 24.23 : miroir mêlée des compteurs de tir ci-dessus.
             + _pair('torrent_wrong_hit_fight')
             + _pair('lethal_hits_wrong_wound_fight')
+            # 05.03 / 06.02 / 24.28 : CHARACTER allouée avant ses bodyguards (mêlée).
+            + _pair('alloc_character_over_bodyguard', 'fight')
         ),
         'dead_units': (
             _pair('dead_unit_moving')
@@ -2007,6 +2016,15 @@ def parse_step_log(filepath: str) -> Dict:
         'lethal_hits_wrong_wound_fight': {1: 0, 2: 0},
         # 24.05 [BLAST] tir — valeur X du marqueur différente de celle déclarée dans l'armurerie.
         'blast_x_mismatch': {1: 0, 2: 0},
+        # 05.03 / 06.02 / 24.28 — attaque allouée à un CHARACTER alors qu'un bodyguard de
+        # l'unité est vivant (`[ALLOC_MODEL:]`), hors override [PRECISION] légal. Par PHASE de
+        # la ligne : chaque bucket d'`error_totals` porte le sien (chantier chaîne d'attaque
+        # 100 %, 2026-09-18 ; la clé `alloc.precision_mw_to_character` de l'entête tranche le
+        # cas [PRECISION] + blessure mortelle).
+        'alloc_character_over_bodyguard': {
+            'move': {1: 0, 2: 0}, 'shooting': {1: 0, 2: 0},
+            'charge': {1: 0, 2: 0}, 'fight': {1: 0, 2: 0},
+        },
         # 24.15 [HAZARDOUS] — blessures mortelles auto-infligées après tir ou combat.
         # `hazardous_mortal_wounds` est un compteur d'EXERCICE (MW totales) : valeur positive
         # attendue dès qu'une arme HAZARDOUS tire. `hazardous_no_hazardous_weapon` est une
@@ -2254,6 +2272,10 @@ def parse_step_log(filepath: str) -> Dict:
             'lethal_hits_wrong_wound': {1: None, 2: None},
             'lethal_hits_wrong_wound_fight': {1: None, 2: None},
             'blast_x_mismatch': {1: None, 2: None},
+            'alloc_character_over_bodyguard': {
+                'move': {1: None, 2: None}, 'shooting': {1: None, 2: None},
+                'charge': {1: None, 2: None}, 'fight': {1: None, 2: None},
+            },
         },
         'unit_position_collisions': [],
         'parse_errors': [],

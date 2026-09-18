@@ -257,6 +257,8 @@ def _e2e_gs() -> Dict[str, Any]:
                 "attacker_squad_id": "1", "target_sid": "2", "weapon": weapon,
                 "weapon_name": "Gun", "weapon_names": ["Gun"],
                 "ap": 0, "dmg_raw": 1, "dmg_bonus": 0, "precision": False,
+                # 04.03 : `attacks` > 0 = lot joue (la cloture ne l ecrit pas en `attacks_not_made`).
+                "attacks": 4, "shots": [],
                 "damage": 0, "kills": 0, "killed_model_ids": [],
             }],
             "batches": [{
@@ -279,12 +281,16 @@ def _hp(gs: Dict[str, Any], mid: str) -> Optional[int]:
     return None if m is None else int(m["HP_CUR"])
 
 
-def test_ordre_declare_respecte_par_allocation():
+def test_ordre_declare_respecte_par_allocation(monkeypatch):
     """[NW, NH, CW, CH] declare par le defenseur humain : les 3 premieres blessures tombent
     dans NW (figurine entamee forcee, tuee), PUIS dans NH (choix libre, puis figurine entamee
-    forcee) ; CW et CH ne sont pas touches. L ordre de CREATION des groupes (NH avant NW)
-    n a aucun effet : seul l ordre DECLARE compte."""
+    forcee, puis derniere figurine du groupe allouee d office — 05.04 n offre plus de choix) ;
+    CW et CH ne sont pas touches. L ordre de CREATION des groupes (NH avant NW) n a aucun
+    effet : seul l ordre DECLARE compte."""
     gs = _e2e_gs()
+    # Le lot va au bout : le journal de fin d allocation lit des cles de groupe que ce fixture
+    # minimal ne porte pas (positions, seuils) — il est neutralise, ce n est pas ce qui est mesure.
+    monkeypatch.setattr(su, "_emit_squad_shoot_log", lambda g_s, g, ctx: None)
 
     # 1. Le lot construit ses groupes sur le models_cache reel et rend la main pour l ordre.
     first = su._manual_allocation_step(gs, SHOOT_CTX)
@@ -306,18 +312,16 @@ def test_ordre_declare_respecte_par_allocation():
     assert second["allocation"]["wounds_remaining"] == 3
 
     # 3. Blessure 2 : le defenseur choisit nh_a (2 -> 1). Blessure 3 : nh_a entamee, forcee,
-    #    tuee. Blessure 4 : nh_b seule saine du groupe courant -> la main revient.
+    #    tuee. Blessure 4 : nh_b seule figurine du groupe courant -> allouee d office (aucun
+    #    choix, decision (a) du chantier chaine d attaque 100 %), le lot se ferme.
     third = su.apply_manual_shoot_allocation(gs, "nh_a", SHOOT_CTX)
     assert "nh_a" not in gs["models_cache"], "la 3e blessure devait finir nh_a (05.04, entamee)"
-    assert _hp(gs, "nh_b") == 2
-    assert third["waiting_for_player"] is True
-    assert third["allocation"]["current_group_id"] == NH
-    assert [c["model_id"] for c in third["allocation"]["choices"]] == ["nh_b"]
-    assert third["allocation"]["wounds_remaining"] == 1
+    assert _hp(gs, "nh_b") == 1, "la 4e blessure tombe sur nh_b sans question"
+    assert third.get("waiting_for_player") is False and third["done"] is True
 
     # Les groupes CHARACTER, derniers de l ordre declare, sont intacts.
     assert (_hp(gs, "cw"), _hp(gs, "ch")) == (3, 5)
     assert batch["declared_order"] == [NW, NH, CW, CH]
     assert batch["current_group_index"] == 1  # NW (index 0) detruit, NH (index 1) courant
-    assert gs[SHOOT_CTX.alloc_key]["summary"]["models_killed"] == 2
-    assert gs[SHOOT_CTX.alloc_key]["summary"]["damage_total"] == 3
+    assert third["shoot_result"]["models_killed"] == 2
+    assert third["shoot_result"]["damage_total"] == 4

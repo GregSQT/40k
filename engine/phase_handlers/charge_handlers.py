@@ -19,6 +19,7 @@ from shared.data_validation import require_key, require_present
 from engine.spatial_relations import get_engagement_zone_vertical
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
+from engine.constants import PENDING_HAZARD_RESUME_RESULT_KEY
 from engine.game_state import (
     WAAAGH_ABILITY_DISPLAY_NAME,
     objective_hex_sets,
@@ -38,7 +39,8 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
-    allocate_mortal_wounds,
+    queue_mortal_wounds,
+    drain_mortal_wound_queue,
     update_units_cache_position, translate_squad_to_destination, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position, require_unit_from_cache,
     resolve_model_effective_level,
@@ -4846,9 +4848,7 @@ def _apply_charge_impact(
     )
     if impact_hit_result == "HIT":
         impact_message += f" Wound:AUTO Save:NONE[MW] Dmg:{mortal_wounds}HP"
-    append_action_log(
-        game_state,
-        {
+    _impact_log_payload = {
             "type": "charge_impact",
             "message": impact_message,
             "turn": current_turn,
@@ -4869,11 +4869,34 @@ def _apply_charge_impact(
             "reward": 0.0,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
-        },
-    )
+    }
+    append_action_log(game_state, _impact_log_payload)
     add_console_log(game_state, impact_message)
     if mortal_wounds > 0:
-        allocate_mortal_wounds(game_state, str(target_id), mortal_wounds, True, _impact_details)
+        # 06.02 : « its controlling player must … select one of those models » — la file des
+        # blessures mortelles attribue en AUTO pour un defenseur programmatique et par
+        # l allocation manuelle pour un defenseur humain (choix reel seulement). Servie par
+        # `_settle_charge_mortal_wounds` a la fin du commit, l activation de charge terminee.
+        queue_mortal_wounds(
+            game_state, str(target_id), mortal_wounds, _impact_log_payload,
+            details_key="chargeImpactDetails",
+        )
+
+
+def _settle_charge_mortal_wounds(
+    game_state: Dict[str, Any], unit: Dict[str, Any], result: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Sert la file des blessures mortelles d une charge commise (impact de charge, puis toute
+    Deadly Demise qu il cause). Un defenseur HUMAIN qui a un choix recoit la main ; le resultat
+    de la charge est garde et rendu par `W40KEngine._resume_after_hazard` (origine `charge`) —
+    l activation de charge est deja terminee, seule l attribution reste."""
+    wait = drain_mortal_wound_queue(game_state)
+    if wait is None:
+        return True, result
+    game_state["hazard_origin"] = "charge"
+    game_state["hazard_origin_unit"] = str(unit["id"])
+    game_state[PENDING_HAZARD_RESUME_RESULT_KEY] = result
+    return True, wait
 
 
 def _charge_model_pos_is_closer(
@@ -6181,7 +6204,7 @@ def charge_commit_move_plan_handler(
     )
     if not game_state["charge_activation_pool"]:
         result.update(charge_phase_end(game_state))
-    return True, result
+    return _settle_charge_mortal_wounds(game_state, unit, result)
 
 
 def _count_engaged_models_after_charge(
@@ -6516,7 +6539,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             f"total_s={_t_pe1 - _t_dsel0:.6f}"
         )
 
-    return True, result
+    return _settle_charge_mortal_wounds(game_state, unit, result)
 
 
 def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_valid_destinations: bool = True) -> Tuple[bool, Dict[str, Any]]:

@@ -104,6 +104,7 @@ import {
 } from "../utils/objectiveControlKey";
 import { destroyLayerChild } from "../utils/pixiTeardown";
 import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
+import { attackLotReticleTargets, drawReticle } from "../utils/reticle";
 import type { TerrainEntry } from "../utils/terrainSelection";
 import { getNonRoundBasePixelLayout } from "../utils/unitBaseDisplay";
 import {
@@ -871,6 +872,15 @@ type BoardProps = {
     wounds_remaining: number;
   } | null;
   onAllocateModel?: (modelId: string) => void | Promise<void>;
+  /** Attente de l'ATTAQUANT (04.03) : lots candidats. Réticule rouge sur chaque unité
+   *  candidate ; clignotant quand l'unité en cours est imposée (`locked_target_unit_id`). */
+  attackLotRequest?: {
+    attacker_unit_id: string;
+    locked_target_unit_id: string | null;
+    lots: Array<{ lot_id: number; target_unit_id: string }>;
+  } | null;
+  /** Clic sur une unité candidate pendant l'attente de lot → l'appelant choisit le lot. */
+  onPickAttackLotTarget?: (targetUnitId: string) => void;
   onStartAttackPreview: (unitId: number, col: number, row: number) => void;
   onConfirmMove: () => void;
   onCancelMove: () => void;
@@ -1374,6 +1384,8 @@ export default function Board({
   onReportFightAssignable,
   manualAllocation = null,
   onAllocateModel,
+  attackLotRequest = null,
+  onPickAttackLotTarget,
   onStartAttackPreview,
   onConfirmMove,
   onCancelMove,
@@ -1523,6 +1535,8 @@ export default function Board({
   const chargeModelVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
   const shootSubgroupOverlayRef = useRef<PIXI.Graphics | null>(null);
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Réticule du lot en cours (attente de lot / allocation), distinct du réticule de désignation. */
+  const attackLotOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Réticule ambre 08.04 sur les figs des unités désignées par un Oath of Moment (les DEUX camps). */
   const oathTargetOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Gueule du Waaagh! — un `Container` : chaque couche×groupe de pulsation est un `Graphics`
@@ -2141,6 +2155,21 @@ export default function Board({
   manualAllocationRef.current = manualAllocation;
   const onAllocateModelRef = useRef(onAllocateModel);
   onAllocateModelRef.current = onAllocateModel;
+  const attackLotRequestRef = useRef(attackLotRequest);
+  attackLotRequestRef.current = attackLotRequest;
+  const onPickAttackLotTargetRef = useRef(onPickAttackLotTarget);
+  onPickAttackLotTargetRef.current = onPickAttackLotTarget;
+  /** Battement du réticule du lot en cours (après Shoot / Fight : une seule unité se résout). */
+  const [lotBlinkOn, setLotBlinkOn] = useState(true);
+  const lotBlinkActive = attackLotRequest !== null || manualAllocation !== null;
+  useEffect(() => {
+    if (!lotBlinkActive) {
+      setLotBlinkOn(true);
+      return;
+    }
+    const timer = setInterval(() => setLotBlinkOn((v) => !v), 450);
+    return () => clearInterval(timer);
+  }, [lotBlinkActive]);
   // Persiste entre les re-renders (contrairement à une variable locale dans useEffect).
   // Clic-cible tir : simple/double mutualisés (le simple est différé pour ne pas partir
   // avant un double → évite le doublon d'assign + los_overview coûteux).
@@ -6139,41 +6168,24 @@ export default function Board({
         pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
         pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
       ];
-      // 1. Voile JAUNE léger + RÉTICULE de visée (crosshair) — seulement si une cible est active.
-      const tgt = menu.activeTargetId
-        ? units.find((u) => String(u.id) === String(menu.activeTargetId))
-        : undefined;
-      const tgtByModel = menu.activeTargetId
-        ? uc?.[String(menu.activeTargetId)]?.occupied_hexes_by_model
-        : undefined;
-      if (tgt && tgtByModel) {
-        const tR =
-          resolveBaseSizeForUnitDisplay(tgt) > 1
-            ? (resolveBaseSizeForUnitDisplay(tgt) * 1.5 * HEX_RADIUS_H) / 2
-            : HEX_RADIUS_H * 0.7;
-        const rr = tR * 1.15; // rayon du réticule
-        const tickIn = rr * 0.75; // les traits cardinaux chevauchent le cercle
-        const tickOut = rr * 1.35;
-        const reticleW = Math.max(3, HEX_RADIUS_H * 0.38);
-        for (const pos of Object.values(tgtByModel)) {
-          const [cx, cy] = centerOf(pos);
-          // voile jaune léger (confirmation de sélection)
-          overlay.lineStyle(0);
-          overlay.beginFill(0xf5c518, 0.22);
-          overlay.drawCircle(cx, cy, tR);
-          overlay.endFill();
-          // réticule rouge par-dessus l'icône (cercle + 4 traits cardinaux)
-          overlay.lineStyle(reticleW, 0xff2b2b, 1);
-          overlay.drawCircle(cx, cy, rr);
-          overlay.moveTo(cx, cy - tickIn);
-          overlay.lineTo(cx, cy - tickOut);
-          overlay.moveTo(cx, cy + tickIn);
-          overlay.lineTo(cx, cy + tickOut);
-          overlay.moveTo(cx - tickIn, cy);
-          overlay.lineTo(cx - tickOut, cy);
-          overlay.moveTo(cx + tickIn, cy);
-          overlay.lineTo(cx + tickOut, cy);
-        }
+      // 1. RÉTICULE de visée (crosshair) sur TOUTES les figurines de chaque unité désignée
+      //    (déclarations du plan tir/combat) — décision du 2026-09-18 ; la cible active du menu
+      //    porte en plus un voile jaune léger (confirmation de sélection).
+      const declaredTargets = new Set<string>(
+        (squadShootPlan?.declarations ?? squadFightPlan?.declarations ?? []).map((d) =>
+          String(d.target_unit_id)
+        )
+      );
+      if (menu.activeTargetId) declaredTargets.add(String(menu.activeTargetId));
+      for (const targetId of declaredTargets) {
+        const tgt = units.find((u) => String(u.id) === targetId);
+        const tgtByModel = uc?.[targetId]?.occupied_hexes_by_model;
+        if (!tgt || !tgtByModel) continue;
+        const isActive = targetId === String(menu.activeTargetId);
+        drawReticle(overlay, HEX_RADIUS_H, centerOf, tgt, tgtByModel, {
+          veil: isActive,
+          alpha: isActive ? 1 : 0.8,
+        });
       }
       // 2. FONDS des figs de l'unité active :
       //  - fig sélectionnée → JAUNE plein ;
@@ -6233,7 +6245,143 @@ export default function Board({
       /* contexte non prêt : ignoré, le prochain rendu rattrapera */
     }
     // Pas de destruction ici : l'overlay est réutilisé d'un render à l'autre (voir cleanup au démontage).
-  }, [weaponSelectionMenu, boardConfig, units, gameState, hideIndicators]);
+  }, [
+    weaponSelectionMenu,
+    squadShootPlan,
+    squadFightPlan,
+    boardConfig,
+    units,
+    gameState,
+    hideIndicators,
+  ]);
+
+  // Lot en cours (après Shoot / Fight) : réticule rouge CLIGNOTANT sur la seule unité que le
+  // lot résout (attente de lot verrouillée sur une unité, ou allocation en cours) ; réticule
+  // fixe sur chaque unité candidate quand l'attaquant choisit encore l'unité (04.03).
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    let overlay = attackLotOverlayRef.current;
+    if (!overlay || overlay.destroyed) {
+      overlay = new PIXI.Graphics();
+      overlay.zIndex = 2706; // au-dessus du réticule de désignation (2705)
+      overlay.eventMode = "none";
+      app.stage.addChild(overlay);
+      attackLotOverlayRef.current = overlay;
+    }
+    overlay.visible = !hideIndicators;
+    overlay.clear();
+    if (boardConfig && (attackLotRequest || manualAllocation)) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      const uc = (
+        gameState as unknown as {
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
+        }
+      )?.units_cache;
+      const centerOf = (pos: [number, number]): [number, number] => [
+        pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H,
+        pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H,
+      ];
+      const { targets: candidates, blinking } = attackLotReticleTargets(
+        attackLotRequest,
+        manualAllocation ? String(manualAllocation.target_unit_id) : null
+      );
+      for (const targetId of candidates) {
+        if (blinking && !lotBlinkOn) continue; // phase éteinte du battement
+        const tgt = units.find((u) => String(u.id) === targetId);
+        const tgtByModel = uc?.[targetId]?.occupied_hexes_by_model;
+        if (!tgt || !tgtByModel) continue;
+        drawReticle(overlay, HEX_RADIUS_H, centerOf, tgt, tgtByModel, { veil: false, alpha: 1 });
+      }
+    }
+    try {
+      app.render();
+    } catch {
+      /* contexte non prêt : ignoré, le prochain rendu rattrapera */
+    }
+  }, [
+    attackLotRequest,
+    manualAllocation,
+    lotBlinkOn,
+    boardConfig,
+    units,
+    gameState,
+    hideIndicators,
+  ]);
+
+  useEffect(
+    () => () => {
+      const o = attackLotOverlayRef.current;
+      if (o && !o.destroyed) {
+        o.clear();
+        o.destroy();
+      }
+      attackLotOverlayRef.current = null;
+    },
+    []
+  );
+
+  // Attente de lot (04.03) : clic sur une figurine d'une unité candidate → l'appelant choisit le
+  // lot correspondant. Capture-phase, avant les handlers de plan.
+  useEffect(() => {
+    if (!attackLotRequest || !boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    const app = appRef.current;
+    if (!canvas || !app) return;
+    const HEX_HIT_TOLERANCE = 4;
+    const onLotPointerDown = (e: PointerEvent) => {
+      if (e.target !== canvas) return;
+      const req = attackLotRequestRef.current;
+      if (!req) return;
+      if (e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = app.renderer.width / app.renderer.resolution / rect.width;
+      const scaleY = app.renderer.height / app.renderer.resolution / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      const clickCube = offsetToCube(col, row);
+      const uc = (
+        gameState as unknown as {
+          units_cache?: Record<
+            string,
+            { occupied_hexes_by_model?: Record<string, [number, number]> }
+          >;
+        }
+      )?.units_cache;
+      const { targets: candidates } = attackLotReticleTargets(req, null);
+      let chosen: string | null = null;
+      let bestD = Infinity;
+      for (const targetId of candidates) {
+        for (const pos of Object.values(uc?.[targetId]?.occupied_hexes_by_model ?? {})) {
+          const d = cubeDistance(clickCube, offsetToCube(pos[0], pos[1]));
+          if (d <= HEX_HIT_TOLERANCE && d < bestD) {
+            bestD = d;
+            chosen = targetId;
+          }
+        }
+      }
+      if (chosen) {
+        e.stopImmediatePropagation();
+        onPickAttackLotTargetRef.current?.(chosen);
+      }
+    };
+    document.addEventListener("pointerdown", onLotPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onLotPointerDown, true);
+  }, [attackLotRequest, boardConfig, gameState]);
 
   // Détruit l'overlay tir uniquement au démontage du composant.
   useEffect(

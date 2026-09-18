@@ -22,7 +22,7 @@ from typing import Any, Dict, FrozenSet, List, Set, Tuple
 
 import pytest
 
-from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
+from engine.phase_handlers.attack_sequence import RerollProfile, build_weapon_attack_profile
 from engine.phase_handlers.shared_utils import RULE_LABEL_RAPID_FIRE
 from engine.utils.weapon_helpers import weapon_rule_signature
 
@@ -199,6 +199,8 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "102": {"col": 30, "row": 10, "player": 2, "VALUE": 100, "HP_CUR": 2, "HP_MAX": 2},
         },
         "config": {"game_rules": {"bonus_malus_cap": 0}},
+        # Attaquant programmatique : ordre de declaration, aucune question de lot (04.03).
+        "player_types": {"1": "ai", "2": "ai"},
         "squad_cache": {"1": {"model_count_at_start": len(models_cache)}, "101": {"model_count_at_start": 1}, "102": {"model_count_at_start": 1}},
         SHOOT_CTX.intents_key: {
             "1": [{"model_id": f"1#{i}", "weapon_index": 0, "target_unit_id": r["target_sid"],
@@ -246,8 +248,9 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
         "additive_rules_applied": (
             {RULE_LABEL_RAPID_FIRE: rapid_fire_applied} if rapid_fire_applied else {}
         ),
-        # 10.06 : aucun MONSTER/VEHICLE dans ce scenario.
+        # 10.06 / 17.03 : aucun MONSTER/VEHICLE dans ce scenario, ni tireur ni cible.
         "point_blank_malus": False,
+        "engaged_target_malus": False,
         "indirect_fire_fail_below": False,
         # 10.05 / 10.06 : verdicts du portier, publies par le roller au meme titre que
         # `point_blank_malus`. Le groupe les lit en `require_key`, donc un intent muet leve.
@@ -258,11 +261,17 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
         "oath_hit_reroll": False, "oath_wound_bonus": 0,
         # Waaagh! (08.04) : jumeau des deux clés ci-dessus, exigées par le groupement.
         "waaagh_melee_bonus": False, "waaagh_target_invul": False,
-        # 06.02 : blessures mortelles dues par l'intent, lues en `require_key` par le
-        # groupement — meme regime que les cles ci-dessus, un roller muet leve.
-        "pending_mortal_wounds": None,
-        "shot_records": [], "pending_wounds": [],
-        "counts": {"attacks": 1, "hits": 0, "wounds": 0},
+        # 04.03 (option B) : le roller ne jette plus, il PREPARE ; les des sont jetes au debut
+        # du lot par `roll_prepared_intent`, qui lit ce `roll_spec` (un tir, seuils du profil).
+        "roll_spec": {
+            "n_attacks": 1, "hit_target": 5, "wound_target": 4, "save_threshold_value": 5,
+            "profile": build_weapon_attack_profile(weapon, None), "rerolls": RerollProfile(),
+            "hit_fail_below": None, "attacker_unit_id": "1",
+            "reroll_1_towound": False, "reroll_towound_on_objective": False,
+            "oath_wound_bonus": 0, "hit_bonus_ability": None, "hit_malus_ability": None,
+            "wound_bonus_ability": None, "reroll_save1": False, "waaagh_melee": False,
+            "hold_still": None,
+        },
     }
 
 

@@ -269,13 +269,14 @@ def test_allocation_manuelle_hazard_va_au_bout_du_lot(monkeypatch):
         HAZARD_CTX, apply_manual_shoot_allocation, roll_hazard_for_unit,
     )
 
-    gs = _game_state(["HAZARDOUS"])
+    gs = _game_state(["HAZARDOUS"], shooters=2)
     gs["gym_training_mode"] = False
     gs["player_types"] = {"1": "human", "2": "human"}
     monkeypatch.setattr(random, "randint", lambda a, b: 1)
 
     total = roll_hazard_for_unit("1", gs, False, n_rolls=1, context_label="Hazardous")
     assert total == 1
+    # Deux figurines intactes : 06.02 laisse le choix entre egaux -> le defenseur designe.
     assert PENDING_HAZARD_ALLOCATION_KEY in gs, "le défenseur humain doit désigner la figurine"
 
     # Même entrée que l'action `squad_hazard_manual_alloc` du moteur (W40KEngine).
@@ -284,3 +285,19 @@ def test_allocation_manuelle_hazard_va_au_bout_du_lot(monkeypatch):
     assert not result.get("waiting_for_player"), result
     assert gs["models_cache"]["A0"]["HP_CUR"] == 1, "la blessure mortelle atteint le tireur"
     assert PENDING_HAZARD_ALLOCATION_KEY not in gs, "lot fermé : plus d'allocation en attente"
+
+
+def test_allocation_hazard_humaine_sans_choix_ne_demande_rien(monkeypatch):
+    """Une seule figurine dans l unite : 06.02 n offre aucun choix, la blessure mortelle est
+    infligee sans rendre la main (decision (a) du chantier chaine d attaque 100 %)."""
+    from engine.phase_handlers.shared_utils import roll_hazard_for_unit
+
+    gs = _game_state(["HAZARDOUS"])
+    gs["gym_training_mode"] = False
+    gs["player_types"] = {"1": "human", "2": "human"}
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+
+    total = roll_hazard_for_unit("1", gs, False, n_rolls=1, context_label="Hazardous")
+    assert total == 1
+    assert PENDING_HAZARD_ALLOCATION_KEY not in gs, "aucun choix : aucune attente"
+    assert gs["models_cache"]["A0"]["HP_CUR"] == 1, "la blessure mortelle atteint le tireur"

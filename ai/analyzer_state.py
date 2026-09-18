@@ -212,14 +212,15 @@ class AnalyzerState:
     # cause (`_apply_deadly_demise` : append_action_log avant allocate_mortal_wounds) ; la table
     # ne survit qu'au bloc DEAD/DEADLY DEMISE contigu et se vide à la première autre ligne.
     deadly_demise_pending: Dict[str, str] = field(default_factory=dict)
-    # 24.08 — dernière ligne `DEAD model=` du bloc DEAD/DEADLY DEMISE contigu : (unit_id,
-    # model_id), `None` hors bloc. La ligne DEADLY DEMISE ne nomme pas la figurine qui explose ;
-    # `destroy_model` la déclenche juste après avoir journalisé SA ligne DEAD, donc le DEAD qui
-    # précède immédiatement la PREMIÈRE ligne DEADLY DEMISE d'une source est le socle qui
-    # explose — jugé SEUL (ability CORE, non conférée à l'escouade par 19.04). Un DEAD d'une
-    # autre escouade ou aucun DEAD (journal tronqué) = abstention, jamais un socle périmé d'une
-    # mort antérieure ni une faute inventée.
-    last_dead: Optional[Tuple[str, str]] = None
+    # 24.08 — socles morts PAR ESCOUADE depuis la dernière explosion de cette escouade :
+    # unit_id -> [model_id…]. La ligne DEADLY DEMISE ne nomme pas la figurine qui explose ; et
+    # depuis le chantier « chaîne d'attaque 100 % » (25 DESTROYED), l'explosion d'un socle tué
+    # par une attaque n'est jouée qu'APRÈS les attaques de l'attaquant — sa ligne DEADLY DEMISE
+    # vient donc après les lignes SHOT/FOUGHT, plus juste après son DEAD. Les socles morts de la
+    # source sont donc gardés jusqu'à sa ligne DEADLY DEMISE, qui les consomme et les juge (ability
+    # CORE, non conférée à l'escouade par 19.04). Aucun DEAD gardé (journal tronqué) = abstention,
+    # jamais un socle périmé ni une faute inventée. Vidé à chaque épisode.
+    dead_models_since_explosion: Dict[str, List[str]] = field(default_factory=dict)
     # 24.08 — sources déjà relevées dans le bloc. Une explosion écrit UNE ligne par unité à 6",
     # la source comprise tant qu'il lui reste des socles : ses propres pertes `DEAD … reason=hazard`
     # s'intercalent entre deux lignes du même jet. Le relevé §1.7 se fait une fois par source ici

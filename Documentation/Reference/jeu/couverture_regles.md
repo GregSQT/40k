@@ -1,6 +1,6 @@
 # Warhammer 40,000 — Rules Implementation Coverage
 
-*Last updated: 2026-09-17*
+*Last updated: 2026-09-18*
 
 Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 
@@ -65,6 +65,8 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Close-Quarters Shooting (engaged, CLOSE-QUARTERS weapons) | 10.06 | ✅ |
 | Monster/Vehicle close-quarters: any weapon vs any target | 10.06 | ✅ |
 | BLAST forbidden on engaged target | 10.06 | ✅ |
+| Engaged MONSTER/VEHICLE targetable at range, −1 to hit (waived for CLOSE-QUARTERS from the engaged unit), BLAST forbidden (FAQ p. 88) | 17.03 | ✅ 2026-09-18 |
+| PISTOL vs other weapons chosen PER MODEL (not per unit), MONSTER/VEHICLE exempt | 24.07 | ✅ 2026-09-18 (was per unit) |
 | Indirect Fire (no LoS required, −1 to hit) | 10.07 | ✅ |
 | Indirect Fire: −1 waived if stationary + target visible | 10.07 | ✅ |
 | IGNORES_COVER neutralises indirect fire penalty | 10.07 | ✅ |
@@ -111,6 +113,8 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Pile-in: model in base contact does not move | 12.03 | ✅ |
 | Pile-in: must stay engaged if was engaged | 12.03 | ✅ |
 | Normal Fight (12.05) | 12.05 | ✅ |
+| One melee weapon per model (04.01), plus every EXTRA ATTACKS weapon (24.11) — enforced | 04.01 / 24.11 | ✅ 2026-09-18 |
+| Splitting melee attacks between engaged units (`squad_fight_split_weapon_attacks`) | 04.02 | ✅ 2026-09-18 |
 | Overrun Fight (when enemy eliminated) | 12.07 | ✅ |
 | Consolidation per model (3") | 12.08 | ✅ |
 | Ongoing / Engaging / Objective consolidation cascade | 12.08 | ✅ |
@@ -140,11 +144,16 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Save re-rolls (1s only) | — | ✅ |
 | Mortal Wounds (06.02) | 06.02 | ✅ |
 | Hazard Roll (1–2 = 1 mortal wound, 3 mortal wounds for M/V) | 06.03 | ✅ |
+| Resolution lot by lot: attacker picks the next unit then the profile, dice rolled at the start of the lot, all weapons of a unit before the next (option B, 2026-09-18) | 04.03 | ✅ |
+| Re-roll policy per lot: « failures only » / « all non-critical » (asked only when a critical triggers a rule: DEVASTATING WOUNDS, SUSTAINED HITS, LETHAL HITS) | 04.03 / 24.10 / 24.23 / 24.36 | ✅ 2026-09-18 |
 | Manual allocation of casualties | 05.03 | ✅ |
 | Character allocation priority (non-char first) | 05.03 | ✅ |
+| Defender picks the model only when there is a real choice (several intact or several wounded candidates); single candidate auto-allocated | 05.04 | ✅ 2026-09-18 |
 | Excess damage on destroyed unit lost | 05.04 | ✅ |
-| Feel No Pain X+ | 24.12 | ✅ |
-| Deadly Demise X (explosion on destruction) | 24.08 | ✅ |
+| Mortal wounds always follow the 06.02 cascade (Deadly Demise, hazard, Hold Still, DEVASTATING WOUNDS); PRECISION + mortal wounds ruled by `game_rules.precision_mortal_wounds_to_character` (default false, GW confirmation pending) — read by engine AND analyzer (`Run rules: alloc.precision_mw_to_character`) | 06.02 / 24.28 | ✅ 2026-09-18 |
+| Feel No Pain X+ (one roll per model at the best threshold, 24.02 duplicated abilities) | 24.12 / 24.02 | ✅ 2026-09-18 (was cumulative) |
+| Deadly Demise X — resolved AFTER the attacking unit has resolved all its attacks (PDF 25 DESTROYED), 6" measured to the closest model of each unit, human defender allocates | 24.08 | ✅ 2026-09-18 (was immediate) |
+| Human hazard allocation then end of the activation (`_resume_after_hazard`) | 24.15 | ✅ 2026-09-18 (activation stayed open before) |
 | Revived models (full wounds, back to starting strength) | PDF 25 | ❌ |
 
 ---

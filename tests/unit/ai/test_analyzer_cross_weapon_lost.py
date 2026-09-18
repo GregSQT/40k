@@ -65,6 +65,28 @@ def _stats(tmp_path, body: str, end: str = EPISODE_TAIL):
     return an.parse_step_log(str(log))
 
 
+def _not_made(weapon: str, n: int, target: str = "102", target_pos: str = T) -> str:
+    """Ligne `DID NOT ATTACK` (formateur `attacks_not_made`, 04.03) : le lot de `weapon` n'a
+    jamais été joué, sa cible ayant été détruite par un lot précédent de la même activation."""
+    return (
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} DID NOT ATTACK Unit {target}{target_pos} with [{weapon}]"
+        f" [TARGET DESTROYED] - {n} attack(s) not made [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+    )
+
+
+def test_un_lot_jamais_joue_compte_ses_attaques_declarees(tmp_path):
+    """Depuis le chantier 04.03 (2026-09-18), le moteur ne jette plus les dés d'un lot dont la
+    cible est morte : il écrit `DID NOT ATTACK … - K attack(s) not made`. Les K attaques sont
+    perdues ENTRE armes, comme l'étaient les lignes `Save [NOT ALLOCATED]` d'un tel lot."""
+    body = _DEAD_102 + _dmg(A) + _dmg(A) + _not_made(B, 3)
+    stats = _stats(tmp_path, body)
+    assert stats["shoot_cross_weapon_attacks_lost"][1] == 3
+    assert stats["shoot_cross_weapon_lost_groups"][1] == 1
+    sample = stats["shoot_cross_weapon_lost_sample"][1]
+    assert sample is not None and "DID NOT ATTACK" in sample["line"], sample
+    assert stats["shoot_cross_weapon_attacks_lost"][2] == 0
+
+
 def test_le_groupe_du_slot_1_perdu_derriere_le_slot_0_tueur_compte_chaque_ligne(tmp_path):
     """Scénario 1 : A tue (2 PV, 2 lignes Dmg + 1 overkill propre), B arrive sur un cadavre :
     ses 3 lignes sont perdues, et SEULEMENT elles — l'overkill propre de A ne compte pas."""

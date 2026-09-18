@@ -693,6 +693,26 @@ def test_format_replay_style_message_deadly_demise_jet_rate() -> None:
     ) == "Unit 4 DEADLY DEMISE Roll:3 → no effect [DEADLY DEMISE]"
 
 
+def test_attacks_not_made_is_mapped_and_does_not_increment_steps() -> None:
+    """04.03 — lot declare jamais joue (cible detruite avant son tour) : constat moteur, pas
+    une action d'agent."""
+    from engine.w40k_core import W40KEngine
+
+    assert W40KEngine._STEP_LOG_TYPE_MAP["attacks_not_made"] == "attacks_not_made"
+    assert "attacks_not_made" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+
+
+def test_format_replay_style_message_attacks_not_made() -> None:
+    """La ligne nomme l'arme, la cible et le nombre d'attaques DECLAREES non faites : c'est ce
+    que l'analyzer compte en attaques perdues entre armes."""
+    logger = StepLogger(enabled=False)
+    assert logger._format_replay_style_message(
+        "5", "attacks_not_made",
+        {"unit_with_coords": "5(10,12)", "target_id": "103", "target_coords": (14, 74),
+         "weapon_name": "Krak", "attacks_not_made": 3},
+    ) == "Unit 5(10,12) DID NOT ATTACK Unit 103(14,74) with [Krak] [TARGET DESTROYED] - 3 attack(s) not made"
+
+
 def test_format_replay_style_message_deadly_demise_requires_source() -> None:
     logger = StepLogger(enabled=False)
     with pytest.raises(ConfigurationError, match=r"source_unit_id"):

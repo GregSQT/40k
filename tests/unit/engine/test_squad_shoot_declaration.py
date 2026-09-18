@@ -728,3 +728,62 @@ class TestDeclareManualCombiProfiles:
         assert sorted((i["model_id"], i["weapon_index"]) for i in intents) == [
             ("1#0", 1), ("1#1", 1),
         ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [CLOSE-QUARTERS] 24.07 (SIDEARMS) — PAR FIGURINE, hors MONSTER/VEHICLE
+# PDF 04 : « When using another shooting type, for each model in that unit (excluding
+# MONSTER/VEHICLE models), you can only select one of the following to make attacks with:
+# one or more of its [CLOSE-QUARTERS] weapons ; one or more of its other ranged weapons. »
+# Une version precedente ne grisait le menu qu au niveau UNITE (un pistolet declare interdisait
+# les autres armes a toute l escouade) et n imposait rien a la declaration.
+# ─────────────────────────────────────────────────────────────────────────────
+PISTOL = get_weapons("SpaceMarine", ["bolt_pistol"])[0]
+RIFLE = get_weapons("SpaceMarine", ["bolt_rifle"])[0]
+PISTOL_CODE = "bolt_pistol"
+RIFLE_CODE = "bolt_rifle"
+
+
+class TestSidearms2407:
+    def _gs(self):
+        # Deux figurines portant chacune pistolet + fusil ; cible a portee de pistolet.
+        atk = _unit(1, 1, [_m(5, 5, [PISTOL, RIFLE]), _m(5, 6, [PISTOL, RIFLE])], [PISTOL])
+        tgt = _unit(2, 2, [_m(5, 12, [STORM]), _m(6, 12, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt])
+        _activate(gs, "1")
+        return gs
+
+    def test_une_figurine_qui_a_declare_son_pistolet_ne_peut_plus_declarer_son_fusil(self):
+        gs = self._gs()
+        created = squad_declare_shoot_weapon_qty(gs, "1", PISTOL_CODE, 1, "2")
+        locked = created[0]["model_id"]
+        # La borne du fusil ne compte plus que l AUTRE figurine.
+        assert squad_shoot_weapon_qty_max(gs, "1", RIFLE_CODE, "2") == 1
+        rifles = squad_declare_shoot_weapon_qty(gs, "1", RIFLE_CODE, 1, "2")
+        assert rifles[0]["model_id"] != locked, "24.07 : la figurine au pistolet ne tire pas aussi son fusil"
+        with pytest.raises(ValueError):
+            squad_declare_shoot_weapon_qty(gs, "1", RIFLE_CODE, 2, "2")
+
+    def test_l_autre_figurine_choisit_librement_sa_famille(self):
+        """La regle est par figurine : un pistolet chez l une n interdit rien a l autre."""
+        gs = self._gs()
+        squad_declare_shoot_weapon_qty(gs, "1", PISTOL_CODE, 1, "2")
+        assert squad_shoot_weapon_qty_max(gs, "1", RIFLE_CODE, "2") == 1
+        from engine.phase_handlers.shared_utils import squad_shoot_menu_weapons
+        menu = {w["weapon"]["code"]: w["can_use"] for w in squad_shoot_menu_weapons(gs, "1")}
+        assert menu[RIFLE_CODE] is True and menu[PISTOL_CODE] is True
+
+    def test_reediter_sa_propre_ligne_ne_se_bloque_pas(self):
+        gs = self._gs()
+        squad_declare_shoot_weapon_qty(gs, "1", PISTOL_CODE, 2, "2")
+        squad_declare_shoot_weapon_qty(gs, "1", PISTOL_CODE, 1, "2")  # semantique SET
+        assert len(gs["pending_squad_shoot_intents"]["1"]) == 1
+        assert squad_shoot_weapon_qty_max(gs, "1", PISTOL_CODE, "2") == 2
+
+    def test_quand_toutes_les_figurines_ont_choisi_le_pistolet_le_fusil_est_grise(self):
+        gs = self._gs()
+        squad_declare_shoot_weapon_qty(gs, "1", PISTOL_CODE, 2, "2")
+        from engine.phase_handlers.shared_utils import squad_shoot_menu_weapons
+        menu = {w["weapon"]["code"]: w["can_use"] for w in squad_shoot_menu_weapons(gs, "1")}
+        assert menu[RIFLE_CODE] is False
+        assert squad_shoot_weapon_qty_max(gs, "1", RIFLE_CODE, "2") == 0

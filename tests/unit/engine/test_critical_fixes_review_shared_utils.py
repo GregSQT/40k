@@ -99,16 +99,19 @@ class TestDevastatingWoundsSortOrder:
             "player_types": {"0": "ai", "1": "human"},
             "turn": 1, "phase": "shoot",
             "action_logs": [], "action_log_seq": 0,
-            "models_cache": {"1#0": attacker, "101#0": target_m},
-            "squad_models": {"1": ["1#0"], "101": ["101#0"]},
-            "squad_cache": {"1": {"model_count_at_start": 1}, "101": {"model_count_at_start": 1}},
+            # DEUX figurines intactes dans la cible : 05.04 laisse le choix au defenseur humain,
+            # donc le lot reste dans game_state (une seule figurine serait allouee d office).
+            "models_cache": {"1#0": attacker, "101#0": target_m,
+                             "101#1": {**target_m, "id": "101#1", "col": TARGET[0] + 1}},
+            "squad_models": {"1": ["1#0"], "101": ["101#0", "101#1"]},
+            "squad_cache": {"1": {"model_count_at_start": 1}, "101": {"model_count_at_start": 2}},
             "units_cache": {
                 "1": {**uc_entry, "col": SHOOTER[0], "row": SHOOTER[1], "player": 0,
                       "occupied_hexes_by_model": {"1#0": SHOOTER},
                       "floor_height_by_model": {"1#0": 0.0}},
                 "101": {**uc_entry, "col": TARGET[0], "row": TARGET[1], "player": 1,
-                        "occupied_hexes_by_model": {"101#0": TARGET},
-                        "floor_height_by_model": {"101#0": 0.0}},
+                        "occupied_hexes_by_model": {"101#0": TARGET, "101#1": (TARGET[0] + 1, TARGET[1])},
+                        "floor_height_by_model": {"101#0": 0.0, "101#1": 0.0}},
             },
             "units": [{"id": "1", "player": 0, "unitType": "SternguardVeteranBoltRifle"},
                       {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
@@ -119,7 +122,7 @@ class TestDevastatingWoundsSortOrder:
             "moved_distance_by_model": {"1#0": 0.0},
             "pending_squad_shoot_intents": {
                 "1": [{"model_id": "1#0", "target_unit_id": "101", "weapon_index": 0,
-                       "n_attacks_resolved": 2, "target_squad_size_at_declaration": 1}]
+                       "n_attacks_resolved": 2, "target_squad_size_at_declaration": 2}]
             },
         }
         seq = [4, 6, 4, 4, 2]

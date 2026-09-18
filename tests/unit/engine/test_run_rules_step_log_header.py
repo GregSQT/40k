@@ -84,3 +84,18 @@ def test_cle_manquante_leve_au_lieu_de_defaut_silencieux():
     del fake.game_state["config"]["move"]["can_move_through_enemy_model"]
     with pytest.raises(ConfigurationError):
         _run_rules(fake)
+
+
+def test_cle_precision_mw_to_character_journalisee():
+    """24.28 + 06.02 (chantier chaine d'attaque 100 %, 2026-09-18) : la decision du run sur les
+    blessures MORTELLES d'une arme [PRECISION] part dans l'entete, pour que l'analyzer juge la
+    regle du RUN (`ai/analyzer_rules.RUN_RULE_PRECISION_MW_TO_CHARACTER`) et non celle du
+    config du jour."""
+    fake = _FakeEngine(5)
+    fake.game_state["config"]["game_rules"]["precision_mortal_wounds_to_character"] = True
+    assert _run_rules(fake)["alloc.precision_mw_to_character"] is True
+    fake.game_state["config"]["game_rules"]["precision_mortal_wounds_to_character"] = False
+    assert _run_rules(fake)["alloc.precision_mw_to_character"] is False
+    del fake.game_state["config"]["game_rules"]["precision_mortal_wounds_to_character"]
+    with pytest.raises(ConfigurationError):
+        _run_rules(fake)

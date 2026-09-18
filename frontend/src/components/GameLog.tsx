@@ -305,6 +305,14 @@ export const GameLog: React.FC<GameLogProps> = ({
       "Close-quarters shooting (10.06): each time a MONSTER or VEHICLE model shoots, subtract 1 from the hit roll unless the attack is made with a [CLOSE-QUARTERS] weapon against a unit its own unit is engaged with.",
       false
     );
+    // 17.03 : règle de PHASE elle aussi (jumelle de POINT-BLANK), posée par le moteur sur le
+    // jet de touche contre une unité MONSTER/VEHICLE ennemie engagée.
+    setRuleDescription(
+      descriptions,
+      "ENGAGED TARGET",
+      "Monsters and Vehicles (17.03): an enemy MONSTER or VEHICLE unit can be targeted with ranged weapons even while engaged; subtract 1 from the hit roll unless the attack is made with a [CLOSE-QUARTERS] weapon by a unit engaged with it. [BLAST] weapons cannot target it.",
+      false
+    );
     // 05.01 / 05.02 : les deux critiques ne sont pas des règles d'ARME (donc absents de
     // `weapon_rules.json`) mais ce sont eux qui déclenchent [SUSTAINED HITS], [LETHAL HITS] et
     // [DEVASTATING WOUNDS] dans le détail par tir — sans bulle d'aide, le lecteur voit le token

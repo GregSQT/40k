@@ -387,3 +387,97 @@ class TestModelsStatus:
         _activate(gs, "1")
         s = squad_fight_models_status(gs, "1", "2")[0]
         assert s["can_shoot"] is False and s["exhausted"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 04.01 « one melee weapon » · 04.02 « Splitting melee attacks » · 24.11 [EXTRA ATTACKS]
+# Chantier « chaîne d'attaque 100 % » (2026-09-18).
+# ─────────────────────────────────────────────────────────────────────────────
+from engine.phase_handlers.fight_handlers import (
+    squad_fight_complete_extra_attacks,
+    squad_fight_split_weapon_attacks,
+)
+
+DOK = get_weapons("Ork", ["dok_tools"])[0]
+SYRINGE = get_weapons("Ork", ["urty_syringe"])[0]
+
+
+class TestOneMeleeWeapon0401:
+    def test_une_figurine_qui_a_declare_son_power_fist_ne_declare_pas_aussi_son_ccw(self):
+        """04.01 WHILE FIGHTING : « You must select ONE melee weapon that model has »."""
+        gs = _make_gs([_atk_squad(), _target2()])
+        _activate(gs, "1")
+        squad_declare_fight_weapon_qty(gs, "1", PF_CODE, 2, "2")  # 1#2 et 1#3 au power fist
+        # Le close combat weapon ne reste declarable que par les deux figurines sans power fist.
+        assert squad_fight_weapon_qty_max(gs, "1", CCW_CODE, "2") == 2
+        created = squad_declare_fight_weapon_qty(gs, "1", CCW_CODE, 2, "2")
+        assert {i["model_id"] for i in created} == {"1#0", "1#1"}
+
+
+class TestSplittingMeleeAttacks0402:
+    def _gs(self):
+        units = [_atk_squad(), _target2(),
+                 _unit(4, 2, [_m(7, 5, [CCW]), _m(7, 6, [CCW])], [CCW])]  # seconde cible engagee
+        gs = _make_gs(units)
+        _activate(gs, "1")
+        return gs
+
+    def test_repartit_les_trois_attaques_du_power_fist_entre_deux_unites(self):
+        gs = self._gs()
+        created = squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 2, "4": 1})
+        assert [(i["target_unit_id"], i["n_attacks_resolved"]) for i in created] == [("2", 2), ("4", 1)]
+        intents = gs["pending_squad_fight_intents"]["1"]
+        assert len(intents) == 2 and all(i["model_id"] == "1#2" for i in intents)
+
+    def test_la_somme_doit_valoir_la_caracteristique_a(self):
+        gs = self._gs()
+        with pytest.raises(ValueError, match="somme"):
+            squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 1, "4": 1})
+        assert gs["pending_squad_fight_intents"]["1"] == []
+
+    def test_au_moins_une_attaque_par_unite(self):
+        gs = self._gs()
+        with pytest.raises(ValueError, match="au moins une attaque"):
+            squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 3, "4": 0})
+
+    def test_une_cible_non_engagee_avec_la_figurine_est_refusee(self):
+        gs = self._gs()
+        far = _unit(9, 2, [_m(30, 30, [CCW])], [CCW])
+        gs["units"].append(far); gs["unit_by_id"]["9"] = far
+        from engine.phase_handlers.shared_utils import build_units_cache
+        build_units_cache(gs)
+        _activate(gs, "1")
+        with pytest.raises(ValueError, match="engagement"):
+            squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 2, "9": 1})
+
+    def test_la_repartition_remplace_la_declaration_precedente_de_l_arme(self):
+        gs = self._gs()
+        squad_declare_fight_weapon_qty(gs, "1", PF_CODE, 1, "2")
+        mid = gs["pending_squad_fight_intents"]["1"][0]["model_id"]
+        squad_fight_split_weapon_attacks(gs, "1", mid, PF_CODE, {"2": 1, "4": 2})
+        intents = [i for i in gs["pending_squad_fight_intents"]["1"] if i["model_id"] == mid]
+        assert sorted((i["target_unit_id"], i["n_attacks_resolved"]) for i in intents) == [("2", 1), ("4", 2)]
+
+
+class TestExtraAttacks2411:
+    def _gs(self):
+        painboy = _unit(1, 1, [_m(5, 5, [DOK, SYRINGE])], [DOK])
+        gs = _make_gs([painboy, _target2()])
+        _activate(gs, "1")
+        return gs
+
+    def test_declarer_l_arme_ordinaire_ajoute_toutes_les_extra_attacks_sur_la_meme_cible(self):
+        gs = self._gs()
+        squad_declare_fight_weapon_qty(gs, "1", "dok_tools", 1, "2")
+        added = squad_fight_complete_extra_attacks(gs, "1")
+        assert [(i["weapon_index"], i["target_unit_id"]) for i in added] == [(1, "2")]
+        assert len(gs["pending_squad_fight_intents"]["1"]) == 2
+        assert squad_fight_complete_extra_attacks(gs, "1") == [], "idempotent"
+
+    def test_declarer_seulement_l_extra_ajoute_l_unique_arme_ordinaire(self):
+        """« one of that model's other melee weapons, if possible » : une seule ordinaire
+        eligible -> selectionnee d office."""
+        gs = self._gs()
+        squad_declare_fight_weapon_qty(gs, "1", "urty_syringe", 1, "2")
+        added = squad_fight_complete_extra_attacks(gs, "1")
+        assert [(i["weapon_index"], i["target_unit_id"]) for i in added] == [(0, "2")]

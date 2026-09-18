@@ -225,18 +225,23 @@ def test_allocation_step_waits_for_human_in_pvp(monkeypatch):
 
 def _model_choice_state(auto: bool, monkeypatch) -> Dict[str, Any]:
     """Un SEUL groupe (ordre implicite) → la 1ʳᵉ décision est court-circuitée, on atteint la 2ᵉ."""
-    group = {"group_id": "g1", "model_ids": ["m1"]}
+    # DEUX figurines intactes : 05.04 ne laisse un choix qu entre plusieurs candidates (une
+    # seule serait allouee d office, sans rendre la main a personne).
+    group = {"group_id": "g1", "model_ids": ["m1", "m2"]}
     monkeypatch.setattr(su, "_build_alloc_groups", lambda gs, sid: [group])
     monkeypatch.setattr(su, "_group_alive", lambda gs, g: True)
     monkeypatch.setattr(su, "_current_live_group", lambda gs, batch: group)
     monkeypatch.setattr(su, "_select_allocation_model", lambda gs, sid, alive: "m1")
     monkeypatch.setattr(
         su, "_manual_waiting_payload",
-        lambda gs, batch, alive, ctx: {"waiting_for_player": True},
+        lambda gs, batch, alive, ctx, **kw: {"waiting_for_player": True},
     )
     monkeypatch.setattr(su, "_finalize_manual_allocation", lambda gs, ctx: {"done": True})
     gs = _gs(gym=auto, owner_type="human")
-    gs["models_cache"] = {"m1": {"HP_CUR": 2, "HP_MAX": 2}}
+    gs["models_cache"] = {"m1": {"HP_CUR": 2, "HP_MAX": 2}, "m2": {"HP_CUR": 2, "HP_MAX": 2}}
+    # Ce test mesure le decideur auto (`_select_allocation_model`), pas la decision d agent
+    # `allocation_model` qui s armerait ici avec deux candidates en gym.
+    gs["no_gym_allocation_model"] = True
     gs[SHOOT_CTX.alloc_key] = {
         "current_batch_index": 0,
         "batches": [{
@@ -248,7 +253,7 @@ def _model_choice_state(auto: bool, monkeypatch) -> Dict[str, Any]:
             "declared_order": None,
             "current_group_index": 0,
             "current_model_id": None,
-            "pool": ["w1"],
+            "pool": [{"rec": {}, "devastating": False}],
             "pool_index": 0,
             "pending_mortal_wounds": None,
         }],

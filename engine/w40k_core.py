@@ -27,6 +27,8 @@ from engine.constants import (
     PENDING_FIGHT_ALLOCATION_KEY,
     PENDING_SHOOT_ALLOCATION_KEY,
     PENDING_HAZARD_ALLOCATION_KEY,
+    PENDING_HAZARD_RESUME_RESULT_KEY,
+    MORTAL_WOUND_QUEUE_KEY,
 )
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.hex_utils import phantom_bottom_hexes
@@ -1773,6 +1775,9 @@ class W40KEngine(gym.Env):
         # `exhortation`, et le prochain Desperate Escape reprenait un combat de l episode
         # precedent au lieu du preview Fall Back.
         self.game_state.pop("hazard_origin", None)
+        self.game_state.pop("hazard_origin_unit", None)
+        self.game_state.pop(PENDING_HAZARD_RESUME_RESULT_KEY, None)
+        self.game_state.pop(MORTAL_WOUND_QUEUE_KEY, None)
         self.game_state.pop("_pending_exhortation_resume", None)
         self.game_state.pop("_pending_exhortation_fight", None)
         self.game_state.pop(FIGHT_SELECTION_EXHORTATION_KEY, None)
@@ -5587,6 +5592,11 @@ class W40KEngine(gym.Env):
         select_desperate_escape_mode(self.game_state, str(uid))
 
         auto_resolve = bool(self.game_state.get("gym_training_mode", False))
+        # Origine de la reprise : le Desperate Escape de CETTE unite. Explicite, parce qu une
+        # explosion (Deadly Demise) causee par ce hazard peut ouvrir une attribution chez une
+        # AUTRE unite avant la reprise du mouvement.
+        self.game_state["hazard_origin"] = "move"
+        self.game_state["hazard_origin_unit"] = str(uid)
         desperate_escape_pre_move(str(uid), self.game_state, auto_resolve)
 
         # Un choix d'attribution joueur est-il en attente ? → prompt (declaration d'ordre des
@@ -5648,11 +5658,22 @@ class W40KEngine(gym.Env):
           unité morte → fin d'activation sans move ; sinon → pool Fall Back + preview.
         """
         from engine.phase_handlers.shared_utils import (
-            clear_desperate_escape_state, fall_back_mode_of,
+            clear_desperate_escape_state, fall_back_mode_of, drain_mortal_wound_queue,
+            post_attack_effects, SHOOT_CTX,
         )
         from engine.phase_handlers import movement_handlers as _mh
-        sid = str(uid)
-        hazard_origin = self.game_state.pop("hazard_origin", "move")
+        # L attribution qui vient de se terminer peut avoir ete celle d une VICTIME (Deadly
+        # Demise, impact de charge) : l unite de l origine est celle qui a ete gardee, pas celle
+        # de l allocation.
+        sid = str(self.game_state.get("hazard_origin_unit", uid))  # get allowed : absent hors reprise
+        hazard_origin = self.game_state.get("hazard_origin", "move")  # get allowed : defaut historique
+        # Ce qui reste en file (explosions en chaine, autres victimes) se sert AVANT de reprendre
+        # l origine ; une nouvelle attente humaine laisse l origine en place.
+        wait = drain_mortal_wound_queue(self.game_state)
+        if wait is not None:
+            return True, wait
+        self.game_state.pop("hazard_origin", None)
+        self.game_state.pop("hazard_origin_unit", None)
         if hazard_origin == "exhortation":
             pending_exhort = self.game_state.pop("_pending_exhortation_resume", None)
             if pending_exhort is None:
@@ -5668,13 +5689,36 @@ class W40KEngine(gym.Env):
                 ),
             )
         if hazard_origin in ("shoot", "fight"):
-            return True, {
-                "action": f"squad_{hazard_origin}_manual_alloc",
-                "unitId": sid,
-                "activation_complete": True,
-                "waiting_for_player": False,
-                "done": True,
-            }
+            # Fin des attaques d une activation : Deadly Demise puis [HAZARDOUS] 24.15 puis les
+            # explosions de ces jets (`post_attack_effects`), chacun pouvant rendre la main ;
+            # l etat de reprise garde `shoot_result`, sans quoi la fin d activation (pool de
+            # tir, `units_shot`, `active_shooting_unit` ; machine V11 au combat) n aurait jamais
+            # lieu — c etait le cas d une premiere ecriture, qui rendait « done » sans rien
+            # terminer.
+            from engine.phase_handlers.fight_handlers import FIGHT_CTX, _fight_v11_manual_state
+            state = self.game_state.pop(PENDING_HAZARD_RESUME_RESULT_KEY, None)
+            if state is None:
+                raise RuntimeError(
+                    f"_resume_after_hazard: origine `{hazard_origin}` sans etat de reprise "
+                    "garde — l etat a ete efface pendant l attribution."
+                )
+            ctx = SHOOT_CTX if hazard_origin == "shoot" else FIGHT_CTX
+            outcome = post_attack_effects(self.game_state, ctx, state)
+            if outcome.get("waiting_for_player"):
+                return True, outcome
+            attacker_sid = str(require_key(state, "attacker_squad_id"))
+            if hazard_origin == "shoot":
+                return True, self._end_squad_shoot_activation(attacker_sid, outcome.get("shoot_result"))
+            return _fight_v11_manual_state(self.game_state)
+        if hazard_origin == "charge":
+            # Impact de charge (`charge_impact`) attribue par le defenseur humain : l activation
+            # de charge est deja terminee, le resultat de la charge garde est rendu maintenant.
+            charge_result = self.game_state.pop(PENDING_HAZARD_RESUME_RESULT_KEY, None)
+            if charge_result is None:
+                raise RuntimeError(
+                    "_resume_after_hazard: origine `charge` sans resultat de charge garde."
+                )
+            return True, charge_result
         if not is_unit_alive(sid, self.game_state):
             clear_desperate_escape_state(self.game_state, sid)
             _mh._invalidate_all_destination_pools_after_movement(self.game_state)
@@ -5846,7 +5890,9 @@ class W40KEngine(gym.Env):
         # (defenseur humain). Only the allocation action is allowed through.
         if (
             self.game_state.get(PENDING_SHOOT_ALLOCATION_KEY) is not None
-            and action.get("action") not in ("squad_shoot_allocate_model", "squad_shoot_declare_order")
+            and action.get("action") not in (
+                "squad_shoot_allocate_model", "squad_shoot_declare_order", "squad_shoot_select_lot",
+            )
         ):
             return True, manual_allocation_waiting_payload(self.game_state, SHOOT_CTX)
 
@@ -5854,7 +5900,10 @@ class W40KEngine(gym.Env):
         # actions d'allocation fight passent.
         if (
             self.game_state.get(PENDING_FIGHT_ALLOCATION_KEY) is not None
-            and action.get("action") not in ("squad_fight_manual_alloc", "squad_fight_declare_order", "squad_fight_cancel")
+            and action.get("action") not in (
+                "squad_fight_manual_alloc", "squad_fight_declare_order", "squad_fight_cancel",
+                "squad_fight_select_lot",
+            )
         ):
             return True, manual_allocation_waiting_payload(self.game_state, FIGHT_CTX)
 
@@ -6179,6 +6228,7 @@ class W40KEngine(gym.Env):
             build_manual_shoot_allocation,
             apply_manual_shoot_allocation,
             apply_manual_shoot_declare_order,
+            select_attack_lot,
             clear_pending_shoot_intent,
             SHOOT_CTX,
         )
@@ -6566,6 +6616,24 @@ class W40KEngine(gym.Env):
                 return True, alloc_result
             return True, self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
 
+        if name == "squad_shoot_select_lot":
+            # 04.03 (option B) : l ATTAQUANT choisit le prochain lot (unite puis profil) et sa
+            # politique de relance ; les des du lot sont jetes a cet instant.
+            lot_id = action.get("lotId")
+            if lot_id is None:
+                return False, {"error": "missing_lot_id"}
+            try:
+                alloc_result = select_attack_lot(
+                    self.game_state, SHOOT_CTX, int(lot_id),
+                    hit_non_crit=None if action.get("hitReroll") is None else bool(action.get("hitReroll")),
+                    wound_non_crit=None if action.get("woundReroll") is None else bool(action.get("woundReroll")),
+                )
+            except ValueError as exc:
+                return False, {"error": "lot_not_selectable", "reason": str(exc)}
+            if alloc_result.get("waiting_for_player"):
+                return True, alloc_result
+            return True, self._end_squad_shoot_activation(squad_id, alloc_result.get("shoot_result"))
+
         if name == "squad_shoot_declare_order":
             order = action.get("order")
             if order is None:
@@ -6913,31 +6981,29 @@ class W40KEngine(gym.Env):
         )
         append_action_log(self.game_state, log_entry)
         if mw_count > 0:
-            if is_programmatic_defender(self.game_state, target_eid):
-                # Defenseur pilote par la machine : attribution AUTO (`eligibles[0]`), regime
-                # d entrainement inchange.
-                allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
-            else:
-                # Defenseur HUMAIN : 06.02, « its controlling player must … select one of those
-                # models » — le choix lui appartient, comme pour Desperate Escape et [HAZARDOUS].
-                # Aucune allocation de combat n est encore ouverte (l Exhortation tombe a la
-                # SELECTION, avant les attaques), donc HAZARD_CTX est libre. Le combat de
-                # l attaquant reprend a la fin de l attribution (`_resume_after_hazard`,
-                # origine `exhortation`), avec la meme queue que le regime AUTO.
-                from engine.phase_handlers.shared_utils import build_manual_hazard_allocation
-                self.game_state["_pending_exhortation_resume"] = {
-                    "squad_id": squad_id, "target_slot": target_slot, "regime": regime,
-                }
-                self.game_state["hazard_origin"] = "exhortation"
-                alloc_result = build_manual_hazard_allocation(
-                    self.game_state, target_eid, mw_count, log_entry
-                )
-                if alloc_result.get("waiting_for_player"):
-                    return True, alloc_result
-                # Figurines forcees (une seule candidate a chaque blessure) : attribution
-                # terminee sans rendre la main — rien a reprendre plus tard.
-                self.game_state.pop("hazard_origin", None)
-                self.game_state.pop("_pending_exhortation_resume", None)
+            # 06.02, « its controlling player must … select one of those models » : la file des
+            # blessures mortelles attribue en AUTO pour un defenseur programmatique (regime
+            # d entrainement inchange) et par l allocation manuelle pour un defenseur humain —
+            # comme Desperate Escape, [HAZARDOUS] et Deadly Demise. Aucune allocation de combat
+            # n est encore ouverte (l Exhortation tombe a la SELECTION, avant les attaques), donc
+            # HAZARD_CTX est libre. Le combat de l attaquant reprend a la fin de l attribution
+            # (`_resume_after_hazard`, origine `exhortation`), avec la meme queue que le regime
+            # AUTO ; une explosion causee par ces blessures se sert dans la meme file.
+            from engine.phase_handlers.shared_utils import queue_mortal_wounds, drain_mortal_wound_queue
+            self.game_state["_pending_exhortation_resume"] = {
+                "squad_id": squad_id, "target_slot": target_slot, "regime": regime,
+            }
+            self.game_state["hazard_origin"] = "exhortation"
+            self.game_state["hazard_origin_unit"] = str(squad_id)
+            queue_mortal_wounds(self.game_state, target_eid, mw_count, log_entry, details_key="hazardDetails")
+            _wait = drain_mortal_wound_queue(self.game_state)
+            if _wait is not None:
+                return True, _wait
+            # Figurines forcees (une seule candidate a chaque blessure) ou defenseur
+            # programmatique : attribution terminee sans rendre la main — rien a reprendre.
+            self.game_state.pop("hazard_origin", None)
+            self.game_state.pop("hazard_origin_unit", None)
+            self.game_state.pop("_pending_exhortation_resume", None)
         return self._continue_fight_after_exhortation(squad_id, target_slot, regime=regime)
 
     def _continue_fight_after_exhortation(
@@ -7184,6 +7250,9 @@ class W40KEngine(gym.Env):
         "waaagh_call", "oath_selection",
         # Mort par-figurine : pas une action d'agent, pas un step gym.
         "dead",
+        # 04.03 — lot declare jamais joue (cible detruite avant son tour) : constat moteur, pas
+        # une action d'agent ; l activation qui le porte a deja ete comptee par ses autres lots.
+        "attacks_not_made",
         # 24.08 — jet de Deadly Demise, declenche par une mort de figurine : effet moteur, pas
         # une action d'agent. Meme statut que `dead`, dont la ligne le precede toujours.
         "deadly_demise",
@@ -7299,6 +7368,10 @@ class W40KEngine(gym.Env):
         # l'analyzer comptait « Dead unit fighting » quand la victime etait l'attaquant lui-meme
         # (ses lignes d'attaque suivent son DEAD, cf. `_finalize_manual_allocation`).
         "deadly_demise": "deadly_demise",
+        # 04.03 — lot declare jamais joue : la cible a ete detruite par un lot precedent de la
+        # meme activation. Formateur `attacks_not_made` ; l analyzer y lit les attaques perdues
+        # entre armes (`shoot_cross_weapon_attacks_lost`).
+        "attacks_not_made": "attacks_not_made",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
@@ -7534,6 +7607,10 @@ class W40KEngine(gym.Env):
         # bsBase = ATK de l'arme avant malus ; bs = ATK+1. Absent en mêlée (False par construction).
         elif raw_log.get("pointBlankMalus"):  # get allowed
             details["hit_rule_modifier"] = "POINT-BLANK"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # 17.03 — cible MONSTER/VEHICLE engagee : -1 au jet de touche (seuil degrade de 1).
+        elif raw_log.get("engagedTargetMalus"):  # get allowed
+            details["hit_rule_modifier"] = "ENGAGED TARGET"
             details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
         # §22.05 PLUNGING FIRE : +1 BS (seuil amélioré de 1). bsBase = ATK avant bonus.
         # Absent en mêlée (False par construction via get).
@@ -7860,6 +7937,14 @@ class W40KEngine(gym.Env):
             "cohesion.model_subhex": int(require_key(game_rules, "unit_model_cohesion_range")),
             "cohesion.global_subhex": int(require_key(game_rules, "unit_global_cohesion_range")),
             "cohesion.min_neighbors": int(require_key(game_rules, "squad_min_neighbors")),
+            # 24.28 + 06.02 : sort des blessures MORTELLES d une arme [PRECISION] (decision
+            # utilisateur du 2026-09-18, en attente de confirmation GW). Lue par l analyzer
+            # (`ai/analyzer_rules.RUN_RULE_PRECISION_MW_TO_CHARACTER`) pour juger la meme regle
+            # que le moteur (`shared_utils._precision_mortal_wounds_to_character`) — jamais le
+            # config du jour, qui peut avoir change depuis le run.
+            "alloc.precision_mw_to_character": bool(
+                require_key(game_rules, "precision_mortal_wounds_to_character")
+            ),
         }
 
     def _advance_phase_and_drain(self, advance_action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -8043,6 +8128,10 @@ class W40KEngine(gym.Env):
             ("sourceUnitId", "source_unit_id"),
             ("d6Roll", "d6_roll"),
             ("deadlyDemiseWounds", "deadly_demise_wounds"),
+            # 04.03 — lot jamais joue : cible, arme, attaques declarees non faites.
+            ("targetId", "target_id"),
+            ("weaponName", "weapon_name"),
+            ("attacksNotMade", "attacks_not_made"),
             # L24 — motif du skip (no_valid_move_destinations, no_valid_actions, …).
             ("skipReason", "skip_reason"),
             # L10 — type de move EXPLICITE dans step.log : normal / advance / fall_back /
@@ -8669,7 +8758,18 @@ class W40KEngine(gym.Env):
                 )
                 if _is_desp and not _is_alive:
                     # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
-                    # `_resume_after_hazard` → cas `not is_unit_alive`).
+                    # `_resume_after_hazard` → cas `not is_unit_alive`). Une Deadly Demise de
+                    # l unite morte se sert ici ; si une VICTIME humaine doit choisir, la main lui
+                    # est rendue et la reprise (`_resume_after_hazard`, origine move) constate
+                    # la mort de l unite exactement comme ci-dessous.
+                    from engine.phase_handlers.shared_utils import drain_mortal_wound_queue
+                    self.game_state["hazard_origin"] = "move"
+                    self.game_state["hazard_origin_unit"] = str(squad_id)
+                    _dd_wait = drain_mortal_wound_queue(self.game_state)
+                    if _dd_wait is not None:
+                        return True, _dd_wait
+                    self.game_state.pop("hazard_origin", None)
+                    self.game_state.pop("hazard_origin_unit", None)
                     clear_desperate_escape_state(self.game_state, str(squad_id))
                     _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                     _mh_de.movement_clear_preview(self.game_state)
@@ -9641,7 +9741,8 @@ class W40KEngine(gym.Env):
             "squad_shoot_activate", "squad_select_weapon", "squad_shoot_select_model",
             "squad_shoot_assign", "squad_shoot_unassign", "squad_shoot_validate", "squad_shoot_cancel",
             "squad_shoot_assign_weapon", "squad_shoot_unassign_weapon", "squad_shoot_weapon_targets",
-            "squad_shoot_allocate_model", "squad_shoot_declare_order", "squad_shoot_los_overview",
+            "squad_shoot_allocate_model", "squad_shoot_declare_order", "squad_shoot_select_lot",
+            "squad_shoot_los_overview",
             "squad_shoot_assign_weapon_qty", "squad_shoot_unassign_weapon_qty",
             "squad_shoot_weapon_qty_max", "squad_shoot_weapons_for_target",
             "squad_shoot_eligible_models", "squad_shoot_toggle_model_weapon",

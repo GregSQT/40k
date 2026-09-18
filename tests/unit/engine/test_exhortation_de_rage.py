@@ -77,7 +77,10 @@ def _gs():
             "ONLY_ENEMY": {"player": 0, "HP_CUR": 4, "col": 5, "row": 5},
         },
         "models_cache": {k: dict(v) for k, v in _MW_MODELS.items()},
-        "squad_models": {"ENEMY1": ["e1a", "e1b"], "ENEMY2": ["e2a"]},
+        # La file des blessures mortelles (06.02) verifie qu une victime a encore une figurine
+        # vivante (`select_eligible_models`) : chaque cible du stub doit etre dans squad_models.
+        "squad_models": {"ENEMY1": ["e1a", "e1b"], "ENEMY2": ["e2a"],
+                         "ENEMY": ["e1a", "e1b"], "ONLY_ENEMY": ["e1a", "e1b"]},
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,

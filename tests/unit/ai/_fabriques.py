@@ -292,8 +292,12 @@ def entete_step_log(
     metric_engagement: str = "hex",
     metric_ranged: str = "euclidean",
     log_grammar: int | None = None,
+    extra_rules: Dict[str, str] | None = None,
 ) -> str:
     """Entête complet d'un step.log à épisode unique, pour les tests qui appellent `parse_step_log`.
+
+    `extra_rules` ajoute des jetons à `Run rules:` (ex. `alloc.precision_mw_to_character`, clé
+    introduite le 2026-09-18 : l'omettre simule un journal antérieur, où le cas est indécidable).
 
     Était `_log` dans test_analyzer_scale_vehicle_fly.py — version publique. La ligne
     `Run rules:` est générée dynamiquement (clés triées, conformes au StepLogger) : un jeton
@@ -327,6 +331,8 @@ def entete_step_log(
         "move.thru_ez": "True",
         "move.thru_friendly": "True",
     })
+    if extra_rules:
+        rules.update(extra_rules)
     rules_txt = " ".join(f"{k}={v}" for k, v in sorted(rules.items()))
     if objectives is None:
         objectives_line = ""

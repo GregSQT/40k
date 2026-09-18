@@ -16,7 +16,7 @@ from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any, Mapping, Literal, get_args
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, HAZARD_CONTEXT_HOLD_STILL
-from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage
+from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage, weapon_has_rule
 from engine.action_log_utils import append_action_log
 from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 
@@ -112,6 +112,8 @@ from .shared_utils import (
     apply_manual_shoot_declare_order,
     apply_manual_shoot_allocation,
     manual_allocation_waiting_payload,
+    _resolve_intent_nb,
+    select_attack_lot,
     _target_highest_bodyguard_toughness,
     display_save_threshold_with_waaagh,
     get_fighting_models,
@@ -1228,6 +1230,163 @@ def squad_fight_toggle_model_weapon(
 ) -> str:
     """Clic sur fig verte au COMBAT — toggle l attribution de cette fig pour (code, cible)."""
     return toggle_attack_model_weapon(game_state, FIGHT_DECLARE_CTX, attacker_squad_id, model_id, weapon_code, target_squad_id)
+
+
+def squad_fight_split_weapon_attacks(
+    game_state: Dict[str, Any], attacker_squad_id: str, model_id: str, weapon_code: str,
+    split: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    """04.02 SPLITTING MELEE ATTACKS : repartit les attaques d UNE arme d UNE figurine entre
+    plusieurs unites engagees avec elle.
+
+    PDF 04 : « if you select more than one unit as the target of a melee weapon, you must split
+    that weapon's attacks between those target units. To do so, declare how many of that
+    weapon's attacks will be made against each unit (you must declare at least one attack per
+    unit targeted). In the Gather Attack Dice step […] only gather a number of attack dice for
+    that weapon equal to the number of attacks you declared ». Contraintes : chaque cible
+    engagee avec la figurine et vivante, au moins une attaque par cible, la SOMME egale a la
+    caracteristique A de l arme (toutes ses attaques sont faites). Une arme a A aleatoire (D6…)
+    ne se repartit pas : le nombre n est connu qu au jet (erreur explicite).
+
+    Semantique SET sur (figurine, arme) : les intents existants de cette arme sont remplaces,
+    un intent par cible avec son `n_attacks_resolved`. `_weapon_attacks_single_target` (CLEAVE)
+    lit ces cibles.
+    """
+    from .shared_utils import _weapon_group_key, init_pending_intents
+
+    init_pending_intents(game_state)
+    sid = str(attacker_squad_id)
+    if sid not in game_state["pending_squad_fight_intents"]:
+        raise RuntimeError(f"squad_fight_split_weapon_attacks called before activation start for {sid!r}")
+    models_cache = require_key(game_state, "models_cache")
+    m = models_cache.get(str(model_id))
+    if m is None or str(m.get("squad_id")) != sid:  # get allowed
+        raise ValueError(f"figurine {model_id!r} absente de l escouade {sid!r}")
+    weapons = melee_weapons(m)
+    local_idx = next(
+        (k for k, w in enumerate(weapons) if isinstance(w, dict) and w.get("code") == weapon_code),  # get allowed
+        None,
+    )
+    if local_idx is None:
+        raise ValueError(f"la figurine {model_id!r} ne porte pas l arme {weapon_code!r}")
+    weapon = weapons[local_idx]
+    nb_raw = require_key(weapon, "NB")
+    if not isinstance(nb_raw, int):
+        raise ValueError(
+            f"arme {weapon_code!r} : caracteristique A aleatoire ({nb_raw!r}) — la repartition "
+            "04.02 exige un nombre d attaques connu a la declaration"
+        )
+    if not split:
+        raise ValueError("repartition vide : au moins une cible (04.02)")
+    counts = {str(t): int(n) for t, n in split.items()}
+    if any(n < 1 for n in counts.values()):
+        raise ValueError("04.02 : au moins une attaque par unite ciblee")
+    if sum(counts.values()) != int(nb_raw):
+        raise ValueError(
+            f"04.02 : la somme des attaques reparties ({sum(counts.values())}) doit valoir la "
+            f"caracteristique A de l arme ({nb_raw})"
+        )
+    for tid in counts:
+        if not FIGHT_DECLARE_CTX.can_target_with_weapon(game_state, m, sid, tid, local_idx):
+            raise ValueError(f"la figurine {model_id!r} ne peut pas attaquer {tid!r} avec {weapon_code!r} (engagement)")
+    gkey = _weapon_group_key(weapons, local_idx)
+    current: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][sid]
+    remaining = [
+        i for i in current
+        if not (str(i["model_id"]) == str(model_id)
+                and _weapon_group_key(weapons, int(i["weapon_index"])) == gkey)
+    ]
+    squad_models = require_key(game_state, "squad_models")
+    created: List[Dict[str, Any]] = []
+    for tid, n in counts.items():
+        created.append({
+            "model_id": str(model_id),
+            "weapon_index": local_idx,
+            "target_unit_id": tid,
+            "target_squad_size_at_declaration": sum(
+                1 for mid in squad_models.get(tid, []) if mid in models_cache  # get allowed
+            ),
+            "n_attacks_resolved": int(n),
+        })
+    current[:] = remaining + created
+    return created
+
+
+def _extra_attacks_weapon_indices_of(model: Dict[str, Any]) -> List[int]:
+    weapons = melee_weapons(model)
+    return [
+        idx for idx, w in enumerate(weapons)
+        if isinstance(w, dict) and weapon_has_rule(w, "EXTRA_ATTACKS")
+    ]
+
+
+def squad_fight_complete_extra_attacks(
+    game_state: Dict[str, Any], attacker_squad_id: str
+) -> List[Dict[str, Any]]:
+    """[EXTRA ATTACKS] 24.11 : « for each of those models, you must select: all of that model's
+    [EXTRA ATTACKS] weapons ; one of that model's other melee weapons, if possible. »
+
+    Complete les declarations d une escouade : toute figurine qui a declare une arme ordinaire
+    sur une cible declare aussi CHACUNE de ses armes [EXTRA ATTACKS] non encore declarees, sur
+    la meme cible (elle y est engagee, l arme n a pas de portee). Rend les intents ajoutes.
+    Idempotent ; appele a chaque declaration manuelle et au verrouillage.
+    """
+    from .shared_utils import init_pending_intents
+
+    init_pending_intents(game_state)
+    sid = str(attacker_squad_id)
+    current: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"].get(sid, [])  # get allowed
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    added: List[Dict[str, Any]] = []
+    for mid in list({str(i["model_id"]) for i in current}):
+        m = models_cache.get(mid)
+        if m is None:
+            continue
+        weapons = melee_weapons(m)
+        mine = [i for i in current if str(i["model_id"]) == mid]
+        declared_idx = {int(i["weapon_index"]) for i in mine}
+        extra_idx = set(_extra_attacks_weapon_indices_of(m))
+        ordinary = [i for i in mine if int(i["weapon_index"]) not in extra_idx]
+        target = str((ordinary[0] if ordinary else mine[0])["target_unit_id"])
+        if not ordinary:
+            # « one of that model's other melee weapons, if possible » : une seule arme
+            # ordinaire eligible -> elle est selectionnee d office ; plusieurs -> le choix
+            # appartient au joueur, rien n est ajoute.
+            candidates = [
+                k for k, w in enumerate(weapons)
+                if isinstance(w, dict) and k not in extra_idx
+                and FIGHT_DECLARE_CTX.can_target_with_weapon(game_state, m, sid, target, k)
+            ]
+            if len(candidates) == 1:
+                k = candidates[0]
+                intent = {
+                    "model_id": mid, "weapon_index": k, "target_unit_id": target,
+                    "target_squad_size_at_declaration": sum(
+                        1 for x in squad_models.get(target, []) if x in models_cache  # get allowed
+                    ),
+                    "n_attacks_resolved": _resolve_intent_nb(weapons, k, f"fight_ordinary_{mid}_{k}"),
+                }
+                current.append(intent)
+                added.append(intent)
+                declared_idx.add(k)
+        for idx in _extra_attacks_weapon_indices_of(m):
+            if idx in declared_idx:
+                continue
+            if not FIGHT_DECLARE_CTX.can_target_with_weapon(game_state, m, sid, target, idx):
+                continue  # « if possible »
+            intent = {
+                "model_id": mid,
+                "weapon_index": idx,
+                "target_unit_id": target,
+                "target_squad_size_at_declaration": sum(
+                    1 for x in squad_models.get(target, []) if x in models_cache  # get allowed
+                ),
+                "n_attacks_resolved": _resolve_intent_nb(weapons, idx, f"fight_extra_attacks_{mid}_{idx}"),
+            }
+            current.append(intent)
+            added.append(intent)
+    return added
 
 
 def squad_fight_models_status(
@@ -4519,6 +4678,8 @@ def _fight_v11_consolidation_new_foes_step(
         if not intents:
             _fight_v11_log(game_state, f"NEW FOE validate {active} : aucune declaration -> ignore")
             return _fight_v11_manual_state(game_state)
+        # 24.11 : toutes les armes [EXTRA ATTACKS] d une figurine qui combat sont selectionnees.
+        squad_fight_complete_extra_attacks(game_state, active)
         _fight_v11_register_selection(game_state, active)
         game_state["active_fight_unit"] = None
         waiting = _fight_v11_allocate_declared(game_state, active)
@@ -4887,15 +5048,42 @@ def _manual_roll_fight_intent(
         hit_1=reroll_hit1, hit_any_fail=reroll_hit_any, wound_1=reroll_wound1,
         wound_any_fail=reroll_wound_obj, save_1=reroll_save1,
     )
-    rolled = roll_attack_pool(
-        n_attacks=int(n_attacks),
-        hit_target=ws,
-        wound_target=wth,
-        save_threshold_value=display_save_th,
-        profile=_attack_profile,
-        rerolls=_fight_rerolls,
-        roll_d6=lambda: random.randint(1, 6),
-    )
+    # AUCUN DE N EST JETE ICI (04.03, option B du chantier « chaine d attaque 100 % ») : les
+    # jets d un lot ont lieu au debut de CE lot, apres que l attaquant l a choisi, par
+    # `roll_prepared_intent` (shared_utils), qui lit ce `roll_spec`. JUMEAU du roller de tir.
+    # Hold Still and Say Aargh (mortal_wounds_on_critical_wound, chantier 06 Passe 4).
+    # Datasheet PAINBOY (Documentation/40k_rules/Armageddon/Datasheets - Orks.pdf, p4) :
+    # « When this model scores a critical wound with its 'urty syringe against a non-VEHICLE
+    # unit, it ALSO inflicts D6 mortal wounds to that unit. » Le mot est « also » : la blessure
+    # critique n est pas consommee (ce n est PAS [DEVASTATING WOUNDS] 24.10), la cible subit EN
+    # PLUS D6 blessures mortelles par crit — jetees au moment des jets du lot, appliquees a la
+    # fermeture du lot (06.02 « resolve all of the normal damage first, then … mortal wounds »).
+    _hold_still = None
+    _hs_args = _unit_get_primitive_b_rule_args(attacker, "mortal_wounds_on_critical_wound")
+    if _hs_args is not None:
+        _req_weapon_code = _hs_args.get("weapon")  # get allowed : absent -> None -> skip
+        if _req_weapon_code is not None and weapon.get("code") == _req_weapon_code:  # get allowed
+            _tgt_keywords = [k.upper() for k in target.get("keywords", [])]  # get allowed
+            if "VEHICLE" not in _tgt_keywords:
+                _hold_still = {"ability": HAZARD_CONTEXT_HOLD_STILL}
+    _roll_spec = {
+        "n_attacks": int(n_attacks),
+        "hit_target": ws, "wound_target": wth, "save_threshold_value": display_save_th,
+        "profile": _attack_profile, "rerolls": _fight_rerolls,
+        "hit_fail_below": None,
+        "attacker_unit_id": str(require_key(attacker_unit, "id")),
+        "reroll_1_towound": reroll_wound1, "reroll_towound_on_objective": reroll_wound_obj,
+        "oath_wound_bonus": _oath_wound_bonus,
+        # Primitive A (chantier 06) : les trois modificateurs de la melee, JUMEAU du site de tir.
+        "hit_bonus_ability": _hit_bonus_ability, "hit_malus_ability": _hit_malus_ability,
+        "wound_bonus_ability": _wound_bonus_ability,
+        # L27 — relance de sauvegarde COTE CIBLE (reroll_1_save_fight) : le nom est resolu au jet.
+        "reroll_save1": bool(reroll_save1),
+        # WAAAGH! : « add 1 to the Strength and Attacks characteristics of melee weapons ». Le
+        # drapeau est pose PAR ATTAQUE au jet : c est la granularite du record.
+        "waaagh_melee": bool(_waaagh_bonus),
+        "hold_still": _hold_still,
+    }
     # S11 : esperance de CET intent, sur les memes seuils, profil et relances que le roller.
     # `n_attacks` est deja RESOLU en melee (NB pre-tire par la declaration) : l esperance
     # conditionne sur ce nombre, cf. `intent_expected_damage`.
@@ -4907,87 +5095,8 @@ def _manual_roll_fight_intent(
         profile=_attack_profile, rerolls=_fight_rerolls,
         dmg_raw=dmg_raw, dmg_bonus=0, hit_fail_below=None,
     )
-    # Noms des ABILITES qui ont ouvert les relances — MEME helper que le tir, donc plus de
-    # divergence possible. Sans lui, `step.log` dit que la relance etait POSSIBLE, jamais
-    # qu elle a EU LIEU.
-    stamp_reroll_abilities(
-        rolled["shot_records"], attacker_unit,
-        reroll_1_towound=reroll_wound1,
-        reroll_towound_on_objective=reroll_wound_obj,
-    )
-    # +1 au jet de blessure d Oath. Meme helper que le tir (cf. `stamp_wound_bonus_ability`).
-    stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
-    # Primitive A (chantier 06) : les trois modificateurs de la melee, JUMEAU du site de tir.
-    stamp_roll_modifier_abilities(
-        rolled["shot_records"],
-        hit_bonus=_hit_bonus_ability,
-        hit_malus=_hit_malus_ability,
-        wound_bonus=_wound_bonus_ability,
-    )
-    # L27 — nom de la capacite de relance de sauvegarde (reroll_1_save_fight). La cause est
-    # COTE CIBLE (pas de l'attaquant) : le record porte deja `saveRollInitial` quand la relance
-    # a eu lieu (attack_sequence.py). On n'ajoute le nom que si la relance a REELLEMENT joue.
-    if reroll_save1:
-        _save_ability_name = _get_source_unit_rule_display_name_for_effect(target, "reroll_1_save_fight")
-        if _save_ability_name:
-            for _rec in rolled["shot_records"]:
-                if _rec.get("saveRollInitial") is not None:  # get allowed : relance effective
-                    _rec["saveAbility"] = _save_ability_name
-    # WAAAGH! : « add 1 to the Strength and Attacks characteristics of melee weapons ». Les deux
-    # moities sont appliquees plus haut (`strength += _waaagh_bonus`, `n_attacks += _waaagh_bonus`)
-    # mais RIEN ne le disait dans step.log — ni token, ni compteur. Consequence mesuree sur le run
-    # de 600 episodes : un WarTrakk (Choppa NB=5) portait 6 attaques, l analyzer plafonnait a 5 et
-    # remontait « Attacks over CC_NB » ; et la section « 1.7 Special rules usage » affichait 0
-    # utilisation de `waaagh` — un vert vacant, sur une capacite qui avait bel et bien tire.
-    # Le drapeau est pose par ATTAQUE et non par ligne d unite : c est la granularite du record,
-    # donc la seule qui ne puisse pas se desynchroniser du jet qu elle decrit.
-    if _waaagh_bonus:
-        for _rec in rolled["shot_records"]:
-            _rec["waaaghMelee"] = True
-    # Hold Still and Say Aargh (mortal_wounds_on_critical_wound, chantier 06 Passe 4).
-    # Datasheet PAINBOY (Documentation/40k_rules/Armageddon/Datasheets - Orks.pdf, p4) :
-    # « When this model scores a critical wound with its 'urty syringe against a non-VEHICLE
-    # unit, it ALSO inflicts D6 mortal wounds to that unit. »
-    #
-    # Le mot est « also », et le texte ne contient AUCUNE clause « the attack sequence ends » :
-    # la blessure critique n est pas consommee. Elle suit 05.03/05.04 comme n importe quelle
-    # blessure — sauvegarde comprise, ce n est PAS [DEVASTATING WOUNDS] 24.10 — et la cible
-    # subit EN PLUS D6 blessures mortelles par crit. Le code posait l inverse (retrait de
-    # `pending_wounds`, `counts["wounds"]` decremente, save marquee sautee) sur la foi d un
-    # commentaire qui citait le wording de DEVASTATING, pas celui de la datasheet : la
-    # blessure normale etait perdue, et step.log rendait `Save [NOT ALLOCATED]`.
-    #
-    # Le D6 est tire ICI, au crit, pour que l ordre des des reste celui de la sequence, et il
-    # est pose PAR RECORD : c est la granularite du jet, la seule qui ne puisse pas se
-    # desynchroniser du crit qu elle decrit. Son APPLICATION est en revanche differee a la fin
-    # du lot par `_build_manual_allocation` — 06.02, « MORTAL WOUNDS AND NORMAL DAMAGE » :
-    # « resolve all of the normal damage first, then resolve all of the mortal wounds ».
-    _hs_pending: Optional[Dict[str, Any]] = None
-    _hs_args = _unit_get_primitive_b_rule_args(attacker, "mortal_wounds_on_critical_wound")
-    if _hs_args is not None:
-        _req_weapon_code = _hs_args.get("weapon")  # get allowed : absent -> None -> skip
-        _this_weapon_code = weapon.get("code")  # get allowed
-        if _req_weapon_code is not None and _this_weapon_code == _req_weapon_code:
-            _tgt_keywords = [k.upper() for k in target.get("keywords", [])]  # get allowed
-            if "VEHICLE" not in _tgt_keywords:
-                _hs_dice: List[int] = []
-                for _hs_rec in rolled["shot_records"]:
-                    # TOUT critical wound, [DEVASTATING WOUNDS] compris : la datasheet n en
-                    # excepte aucun. Aucune arme de l armurerie ne porte les deux regles, donc
-                    # ce cas reste theorique — mais l ecrire ainsi est ce que dit le texte.
-                    if _hs_rec.get("criticalWound"):  # get allowed
-                        _hs_dice.append(random.randint(1, 6))
-                if _hs_dice:
-                    _hs_pending = {
-                        "ability": HAZARD_CONTEXT_HOLD_STILL,
-                        "dice": _hs_dice,
-                    }
     return {
-        # Blessures mortelles DUES par cet intent, non encore infligees (06.02). Ecrite meme
-        # a None : c est au producteur d affirmer qu aucune ne l est, pas au lecteur de le
-        # deviner d une cle absente. `_build_manual_allocation` les agrege par lot et les
-        # applique apres les degats normaux.
-        "pending_mortal_wounds": _hs_pending,
+        "roll_spec": _roll_spec,
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
         # [MELTA] 24.25 est indexee sur la demi-portee d une arme de TIR : aucune arme de melee
@@ -5009,6 +5118,8 @@ def _manual_roll_fight_intent(
         # ECRITE et non omise — c est au producteur d affirmer que la regle ne s applique pas,
         # pas au lecteur de le deviner par un defaut.
         "point_blank_malus": False,
+        # 17.03 est une regle de la phase de TIR : meme regime que `point_blank_malus`.
+        "engaged_target_malus": False,
         # [ASSAULT] 24.04 (10.05) et [CLOSE-QUARTERS] 24.07 (10.06) : memes regles d ELIGIBILITE
         # AU TIR, donc meme regime que `point_blank_malus` — ecrites `False` par le producteur
         # de melee, jamais laissees au defaut d un lecteur.
@@ -5045,8 +5156,6 @@ def _manual_roll_fight_intent(
         "waaagh_melee_bonus": bool(_waaagh_bonus),
         # Waaagh! de la CIBLE : sauvegarde invulnerable octroyee ET reellement meilleure.
         "waaagh_target_invul": _waaagh_target_invul,
-        "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
-        "counts": rolled["counts"],
     }
 
 
@@ -5395,6 +5504,23 @@ def _fight_v11_manual_step(
             if res.get("waiting_for_player"):
                 return True, res
             return _fight_v11_manual_state(game_state)
+        if atype == "squad_fight_select_lot":
+            # 04.03 (option B) : l ATTAQUANT choisit le prochain lot (unite puis profil) et sa
+            # politique de relance ; les des du lot sont jetes a cet instant. Jumeau du tir.
+            lot_id = action.get("lotId")
+            if lot_id is None:
+                return False, {"error": "missing_lot_id"}
+            try:
+                res = select_attack_lot(
+                    game_state, FIGHT_CTX, int(lot_id),
+                    hit_non_crit=None if action.get("hitReroll") is None else bool(action.get("hitReroll")),
+                    wound_non_crit=None if action.get("woundReroll") is None else bool(action.get("woundReroll")),
+                )
+            except ValueError as exc:
+                return False, {"error": "lot_not_selectable", "reason": str(exc)}
+            if res.get("waiting_for_player"):
+                return True, res
+            return _fight_v11_manual_state(game_state)
         if atype == "squad_fight_cancel":
             del game_state[PENDING_FIGHT_ALLOCATION_KEY]
             _fight_v11_log(game_state, "FIGHT allocation annulee par le joueur")
@@ -5426,11 +5552,26 @@ def _fight_v11_manual_step(
         "squad_fight_models_status", "squad_fight_models_weapons",
         "squad_fight_eligible_models", "squad_fight_weapon_qty_max",
         "squad_fight_assign_weapon_qty", "squad_fight_unassign_weapon_qty",
-        "squad_fight_toggle_model_weapon",
+        "squad_fight_toggle_model_weapon", "squad_fight_split_weapon_attacks",
     ):
         squad_id = str(require_key(action, "unitId"))
         # Idempotent : garantit pending_squad_fight_intents[squad_id] pour les lectures/menus.
         _fight_ensure_activation_started(game_state, squad_id)
+
+        if atype == "squad_fight_split_weapon_attacks":
+            # 04.02 SPLITTING MELEE ATTACKS : `split` = {cible: attaques}, somme = A de l arme.
+            try:
+                created = squad_fight_split_weapon_attacks(
+                    game_state, squad_id, str(require_key(action, "modelId")),
+                    str(require_key(action, "weaponCode")), dict(require_key(action, "split")),
+                )
+            except ValueError as exc:
+                return False, {"error": "split_rejected", "reason": str(exc)}
+            squad_fight_complete_extra_attacks(game_state, squad_id)
+            return True, {
+                "action": atype, "unitId": squad_id, "created": created,
+                "declarations": list(game_state["pending_squad_fight_intents"].get(squad_id, [])),  # get allowed
+            }
 
         if atype == "squad_fight_menu_weapons":
             return True, {
@@ -5686,6 +5827,8 @@ def _fight_v11_manual_step(
             if not intents:
                 _fight_v11_log(game_state, f"FIGHT validate {sel} : aucune declaration -> ignore")
                 return _fight_v11_manual_state(game_state)
+            # 24.11 : toutes les armes [EXTRA ATTACKS] d une figurine qui combat sont selectionnees.
+            squad_fight_complete_extra_attacks(game_state, sel)
             _fight_v11_register_selection(game_state, sel)
             game_state["active_fight_unit"] = None
             waiting = _fight_v11_allocate_declared(game_state, sel)

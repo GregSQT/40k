@@ -360,37 +360,32 @@ def test_roll_fnp_sequential_echoue_un_seul_seuil(monkeypatch):
     assert _roll_fnp_sequential(1, [5]) == 1
 
 
-def test_roll_fnp_sequential_deux_seuils_premier_sauve(monkeypatch):
-    """Jet 4, seuils [4, 6] : premier seuil 4 sauve -> 0 blessure restante."""
-    seq = [4]
+def test_roll_fnp_deux_seuils_un_seul_jet_au_meilleur_seuil(monkeypatch):
+    """24.02 DUPLICATED ABILITIES : deux Feel No Pain sur la meme figurine ne se cumulent pas —
+    le joueur choisit l instance qui s applique (le meilleur seuil), et UN seul de est jete.
+    Seuils [5, 4], jet 4 : sauve au 4+ (l instance retenue), un seul de consomme."""
+    seq = [4, 1]
 
     def fake(a, b):
-        return seq.pop(0) if seq else 1
+        return seq.pop(0)
 
     monkeypatch.setattr(random, "randint", fake)
-    assert _roll_fnp_sequential(1, [4, 6]) == 0
+    assert _roll_fnp_sequential(1, [5, 4]) == 0
+    assert seq == [1], "un seul de jete pour une blessure, quel que soit le nombre d instances"
 
 
-def test_roll_fnp_sequential_deux_seuils_deuxieme_sauve(monkeypatch):
-    """Jets 3 puis 5, seuils [4, 5] : premier echoue, deuxieme sauve -> 0 blessure."""
+def test_roll_fnp_deux_seuils_un_seul_jet_qui_echoue_ne_se_rejoue_pas(monkeypatch):
+    """Jets 3 puis 5, seuils [4, 5] : une version precedente tentait le second seuil sur un de
+    neuf et sauvait au 5 ; 24.02 n accorde qu une instance, donc un seul jet : 3 < 4, la
+    blessure passe et le second de n est jamais tire."""
     seq = [3, 5]
 
     def fake(a, b):
         return seq.pop(0)
 
     monkeypatch.setattr(random, "randint", fake)
-    assert _roll_fnp_sequential(1, [4, 5]) == 0
-
-
-def test_roll_fnp_sequential_deux_seuils_les_deux_echouent(monkeypatch):
-    """Jets 3 puis 2, seuils [4, 5] : aucun ne sauve -> 1 blessure restante."""
-    seq = [3, 2]
-
-    def fake(a, b):
-        return seq.pop(0)
-
-    monkeypatch.setattr(random, "randint", fake)
     assert _roll_fnp_sequential(1, [4, 5]) == 1
+    assert seq == [5]
 
 
 # ---------------------------------------------------------------------------

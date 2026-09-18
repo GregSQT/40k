@@ -97,11 +97,10 @@ def test_dmg_non_resoluble_leve_au_lieu_de_faire_1_degat(monkeypatch):
     """« D5 » n est pas une expression de des supportee : erreur explicite, pas 1 degat.
 
     Depuis S11 (2026-09-14) l'espérance de dégâts de l'intent est calculée A LA DECLARATION,
-    donc la valeur invalide lève dès le roller (contexte `intent_expected_dmg`), après les jets
-    de touche/blessure/sauvegarde et AVANT le dé de dégâts ; sans S11 elle levait à la résolution
-    des dégâts (`squad_shoot_dmg_A1`). Dans les deux cas : aucun dé de dégâts joué, aucun PV
-    retiré en douce."""
-    seq = _seq(monkeypatch, [4, 5, 1])  # touche, blesse, sauvegarde ratee -> resolution des degats
+    donc la valeur invalide lève dès le roller (contexte `intent_expected_dmg`) ; et depuis le
+    chantier 04.03 (option B) le roller ne jette plus aucun dé — les jets ont lieu au début du
+    lot, APRES cette préparation. Aucun dé n'est donc consommé, aucun PV retiré en douce."""
+    seq = _seq(monkeypatch, [4, 5, 1])  # aucun de ces des ne doit etre consomme
     gs = _game_state(_weapon(DMG="D5"))
 
     with pytest.raises(ValueError) as exc:
@@ -110,7 +109,7 @@ def test_dmg_non_resoluble_leve_au_lieu_de_faire_1_degat(monkeypatch):
     # L erreur NOMME la valeur rencontree et son contexte.
     assert "D5" in str(exc.value)
     assert "intent_expected_dmg" in str(exc.value)
-    assert seq == [], "touche, blessure et sauvegarde tirées ; le dé de dégâts, jamais"
+    assert seq == [4, 5, 1], "la preparation leve avant tout jet : aucun de consomme"
     # Et surtout : aucun degat n a ete applique en douce.
     assert gs["models_cache"]["T1"]["HP_CUR"] == 20
 

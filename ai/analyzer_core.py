@@ -13,8 +13,11 @@ from shared.data_validation import (
     HAZARD_CONTEXT_EXHORTATION, HAZARD_CONTEXT_HOLD_STILL, HAZARD_CONTEXT_TAGS,
 )
 from ai.analyzer_rules import (
-    MW_ABILITY_DICE_CHECKS, mw_ability_dice_error, note_rule_usage, note_special_rule_usage,
+    ALLOC_CHARACTER_BUCKET_BY_PHASE, MW_ABILITY_DICE_CHECKS, RUN_RULE_PRECISION_MW_TO_CHARACTER,
+    character_allocation_fault, line_inflicts_mortal_wound, mw_ability_dice_error,
+    note_rule_usage, note_special_rule_usage,
 )
+from ai.analyzer_config import get_run_rule_optional
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
 from ai.analyzer_state import AnalyzerState
@@ -221,6 +224,16 @@ _DEADLY_DEMISE_RE = re.compile(
     r'Unit\s+(\d+)\s+DEADLY DEMISE\s+Roll:\d+\s+→'
     r'(?:\s+Unit\s+(\d+)\(-?\d+,-?\d+\)\s+SUFFERS\s+\d+\s+MW)?'
 )
+#: 04.03 — lot jamais joué (formateur `attacks_not_made`, step_logger) :
+#: `Unit N(c,r) DID NOT ATTACK Unit M(c,r) with [arme] [TARGET DESTROYED] - K attack(s) not made`.
+_ATTACKS_NOT_MADE_RE = re.compile(
+    r'DID NOT ATTACK\s+Unit\s+\d+.*\[TARGET DESTROYED\]\s+-\s+(\d+)\s+attack\(s\) not made'
+)
+#: Lignes qui appartiennent à l'ACTIVATION d'attaque en cours (24.08 / 25 DESTROYED) : les
+#: attaques de l'attaquant (tir, mêlée) et le lot jamais joué (`DID NOT ATTACK`, 04.03). Entre le
+#: DEAD d'un porteur de Deadly Demise et sa ligne DEADLY DEMISE (jouée après les attaques), seules
+#: ces lignes, les SUFFERS de capacités et les événements moteur peuvent s'intercaler.
+_SAME_ACTIVATION_LINE_RE = attack_line_re(r"SHOT|ATTACKED|FOUGHT|DID NOT ATTACK", with_positions=False)
 #: Mort par-figurine : `Unit N DEAD model=<mid> reason=<raison>`. La raison est EXIGÉE par le
 #: formateur (`KeyError` sinon) : elle est donc sur chaque ligne DEAD de toute grammaire.
 _DEAD_EVENT_RE = re.compile(r'Unit (\d+)\S* DEAD model=(\S+) reason=(\w+)')
@@ -490,6 +503,69 @@ def _model_is_character(config: AnalyzerConfig, mtype: Optional[str]) -> bool:
 
     unit_data = require_key(config.unit_registry.units, mtype)
     return _is_character_role(_derive_model_role(require_key(unit_data, "UNIT_RULES")))
+
+
+def _judge_character_allocation(
+    state: AnalyzerState,
+    config: AnalyzerConfig,
+    stats: Dict[str, Any],
+    *,
+    action_desc: str,
+    line: str,
+    target_id: str,
+    alloc_model_id: Optional[str],
+    phase: str,
+    player: int,
+) -> None:
+    """05.03 / 06.02 / 24.28 — la figurine allouée (`[ALLOC_MODEL:]`) pouvait-elle l'être ?
+
+    Jugé sur l'état d'AVANT la blessure de cette ligne : les lignes d'un lot sont écrites dans
+    l'ordre de résolution (`_finalize_manual_allocation`), donc les bodyguards tombés plus tôt
+    dans le lot ont déjà quitté `unit_model_hp` quand la ligne du CHARACTER arrive. Une unité
+    sans CHARACTER, ou sans bodyguard vivant, n'est pas une occasion : rien n'est noté.
+    """
+    if alloc_model_id is None:
+        return
+    bucket = ALLOC_CHARACTER_BUCKET_BY_PHASE.get(phase)  # get allowed : COMMAND n'alloue pas
+    if bucket is None:
+        return
+    per_model = state.unit_model_hp.get(target_id)  # get allowed : escouade jamais vue
+    if not per_model or alloc_model_id not in per_model:
+        return
+    is_char = {
+        mid: _model_is_character(config, state.model_types.get(mid))  # get allowed
+        for mid in per_model
+    }
+    if not any(is_char.values()) or all(is_char.values()):
+        return  # unité homogène : 05.03/06.02 n'ont rien à départager
+    # Identifiant écrit EN CLAIR dans l'appel (conditionnelle) : `test_analyzer_rules_corpus`
+    # lit les sites par AST et déclarerait orpheline une règle notée depuis une variable.
+    note_rule_usage(
+        stats,
+        "PROJ.1.2.alloc_character" if bucket == "shooting"
+        else "PROJ.1.4.alloc_character" if bucket == "fight"
+        else "PROJ.1.3.alloc_character" if bucket == "charge"
+        else "PROJ.1.1.alloc_character",
+        player,
+    )
+    precision_mw = get_run_rule_optional(RUN_RULE_PRECISION_MW_TO_CHARACTER)
+    fault = character_allocation_fault(
+        action_desc,
+        alloc_is_character=is_char[alloc_model_id],
+        non_character_alive=any(
+            not c for mid, c in is_char.items() if mid != alloc_model_id
+        ),
+        is_mortal=line_inflicts_mortal_wound(action_desc),
+        precision_mw_to_character=None if precision_mw is None else precision_mw == "True",
+    )
+    if fault is None:
+        return
+    stats['alloc_character_over_bodyguard'][bucket][player] += 1
+    if stats['first_error_lines']['alloc_character_over_bodyguard'][bucket][player] is None:
+        stats['first_error_lines']['alloc_character_over_bodyguard'][bucket][player] = {
+            'episode': state.current_episode_num,
+            'line': f"[{fault}] {line.strip()}",
+        }
 
 
 def _ordered_living_mids(
@@ -1388,6 +1464,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     stats['shoot_at_dead_unit'][player] += 1
                                     if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+                            _judge_character_allocation(
+                                state, config, stats, action_desc=action_desc, line=line,
+                                target_id=target_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line),
+                                phase=phase, player=player,
+                            )
                             _apply_damage_and_handle_death(
                                 target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
                                 line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
@@ -1416,6 +1497,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                     if damage_match:
                         damage = int(damage_match.group(1))
+                        _judge_character_allocation(
+                            state, config, stats, action_desc=action_desc, line=line,
+                            target_id=target_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line),
+                            phase=phase, player=player,
+                        )
                         _apply_damage_and_handle_death(
                             target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
                             line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
@@ -1784,14 +1870,23 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 if not _is_engine_event:
                     state.deadly_demise_pending.clear()
                     state.deadly_demise_recorded.clear()
-                    state.last_dead = None
+                    # 25 DESTROYED : l'explosion d'un socle tué par une attaque suit les lignes
+                    # d'attaque de l'ACTIVATION qui l'a tué (SHOT / ATTACKED / FOUGHT, SUFFERS des
+                    # capacités, DID NOT ATTACK). Toute autre ligne (mouvement, charge, WAIT…)
+                    # ouvre une autre activation : un DEAD antérieur ne peut plus être l'exploseur.
+                    if not (
+                        _SAME_ACTIVATION_LINE_RE.search(action_desc) is not None
+                        or " SUFFERS " in action_desc
+                    ):
+                        state.dead_models_since_explosion.clear()
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
                     _dead_mid = _dead_event_m.group(2)
                     _dead_reason = _dead_event_m.group(3)
-                    # 24.08 : si ce socle porte Deadly Demise, sa ligne DEADLY DEMISE suit
-                    # immédiatement (`destroy_model`) — c'est lui qu'elle jugera.
-                    state.last_dead = (_dead_uid, _dead_mid)
+                    # 24.08 : si ce socle porte Deadly Demise, sa ligne DEADLY DEMISE vient
+                    # après les attaques de l'activation qui l'a tué (25 DESTROYED) — le socle
+                    # est gardé jusque-là, c'est lui qu'elle jugera.
+                    state.dead_models_since_explosion.setdefault(_dead_uid, []).append(_dead_mid)
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
@@ -2137,7 +2232,23 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     state.last_shoot_shooter_id = None
                     state.last_shoot_weapon = None
                     state.last_shoot_target_id = None
-                if re.search(
+                _not_made_m = _ATTACKS_NOT_MADE_RE.search(action_desc)
+                if _not_made_m is not None:
+                        # 04.03 — lot declare jamais joue : la cible a ete detruite par un lot
+                        # precedent de la MEME activation. Aucun de : ce sont des attaques
+                        # perdues ENTRE armes (choix de repartition de l'agent), la metrique que
+                        # les lignes `Save [NOT ALLOCATED]` d'un lot jete sur une cible morte
+                        # portaient avant que le moteur ne cesse de jeter des des fantomes.
+                        action_type = 'attacks_not_made'
+                        _lost = int(_not_made_m.group(1))
+                        stats['shoot_cross_weapon_attacks_lost'][player] += _lost
+                        stats['shoot_cross_weapon_lost_groups'][player] += 1
+                        if stats['shoot_cross_weapon_lost_sample'][player] is None:
+                            stats['shoot_cross_weapon_lost_sample'][player] = {
+                                'episode': state.current_episode_num,
+                                'line': line.strip(),
+                            }
+                elif re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
                     r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+\d+',
                     action_desc,
@@ -2364,6 +2475,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # est distincte, et le flush se produit au changement d'acteur.
                             if _hz_mw > 0:
                                 stats['hazardous_mortal_wounds'][player] += _hz_mw
+                                _judge_character_allocation(
+                                    state, config, stats, action_desc=action_desc, line=line,
+                                    target_id=_hz_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    phase=phase, player=player,
+                                )
                                 _apply_damage_and_handle_death(
                                     _hz_unit_id, _hz_unit_id, _hz_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,
@@ -2405,6 +2521,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     "(attendu : 'Unit N(' en tête d'action)"
                                 )
                             elif _de_mw > 0:
+                                _judge_character_allocation(
+                                    state, config, stats, action_desc=action_desc, line=line,
+                                    target_id=_de_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    phase=phase, player=player,
+                                )
                                 _apply_damage_and_handle_death(
                                     _de_unit_id, _de_unit_id, _de_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,
@@ -2475,6 +2596,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                             'line': f"{line.strip()} — {_mwa_err}",
                                         }
                             if _mwa_mw > 0:
+                                _judge_character_allocation(
+                                    state, config, stats, action_desc=action_desc, line=line,
+                                    target_id=_mwa_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    phase=phase, player=player,
+                                )
                                 _apply_damage_and_handle_death(
                                     _mwa_unit_id, _mwa_src, _mwa_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,
@@ -2500,7 +2626,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # bloc, cf. `deadly_demise_recorded` — pas une par unité à portée, ce
                         # qui ferait dépendre le compte de la densité du plateau), sur la SOURCE,
                         # sous le type de son escouade, jugé sur le SEUL socle qui vient
-                        # d'exploser (`last_dead`) : ability CORE, non conférée à l'escouade par
+                        # d'exploser (`dead_models_since_explosion`) : ability CORE, non conférée à l'escouade par
                         # 19.04 (cf. `living_datasheets`). Type inconnu (journal tronqué) :
                         # abstention, comme la branche MW ci-dessus ; DEAD absent : abstention.
                         # Le `player` de la ligne est le propriétaire de la source
@@ -2517,10 +2643,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 state.deadly_demise_recorded.add(_dd_src)
                                 _dd_src_type = state.unit_types.get(_dd_src)  # get allowed
                                 if _dd_src_type:
-                                    _dd_exploder = (
-                                        (state.last_dead[1],)
-                                        if state.last_dead is not None and state.last_dead[0] == _dd_src
-                                        else ()
+                                    _dd_exploder = tuple(
+                                        state.dead_models_since_explosion.pop(_dd_src, ())
                                     )
                                     note_special_rule_usage(
                                         stats, state, config, 'deadly_demise',

@@ -152,6 +152,12 @@ const INDIRECT_FIRE_TOKEN = /^INDIRECT FIRE:[46]\+$/;
 const NON_ABILITY_ROLL_TOKENS = new Set([
   "HEAVY",
   "COVER",
+  // Modificateurs de seuil de touche de PHASE, écrits par le moteur au même endroit que [COVER]
+  // (`w40k_core`, `hit_rule_modifier`) : 10.06 [POINT-BLANK], 22.05 [PLUNGING FIRE] et, depuis
+  // le 2026-09-18, 17.03 [ENGAGED TARGET]. Sans eux, chacun passait pour un nom de capacité.
+  "POINT-BLANK",
+  "PLUNGING FIRE",
+  "ENGAGED TARGET",
   SUSTAINED_HITS_TOKEN,
   // Les règles d'ARME entrées au journal le 2026-08-12 (grammaire 3). Elles sont accolées à un
   // jet — `[TORRENT]`, `[IGNORES COVER]` et `[PSYCHIC]` au segment `Hit`, `[LETHAL HITS]` au

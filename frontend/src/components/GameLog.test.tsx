@@ -153,6 +153,28 @@ describe("GameLog — tokens de relance", () => {
     fireEvent.mouseEnter(tags[0]);
     expect(document.body.textContent).toContain("5+ invulnerable save");
   });
+
+  it("expose la bulle d'aide de [ENGAGED TARGET], règle de phase 17.03 (2026-09-18)", () => {
+    // Jumeau de [POINT-BLANK] : le moteur pose le token sur le segment Hit de la ligne de
+    // synthèse (`shared_utils`, `engaged_target_malus`) ; sans entrée dédiée il resterait du
+    // texte nu.
+    render(
+      <GameLog
+        events={[
+          {
+            ...shootEvent({}),
+            message:
+              "Unit 1 SHOT at Unit 2 - Shots:2 - Hit:3+->4+ [ENGAGED TARGET] Wound:4+ Save:3+ - HP lost:1 Killed:0",
+          } as GameLogEvent,
+        ]}
+      />
+    );
+    const tag = screen.getByRole("button", {
+      name: "Afficher la description de la regle ENGAGED TARGET",
+    });
+    fireEvent.mouseEnter(tag);
+    expect(document.body.textContent).toContain("17.03");
+  });
 });
 
 describe("GameLog — jets relancés", () => {

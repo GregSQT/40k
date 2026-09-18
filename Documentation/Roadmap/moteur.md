@@ -7,6 +7,22 @@
 
 ---
 
+## Chaîne d'attaque 100 % {#chaine-attaque-100}
+
+✅ **Livré 2026-09-18** (`worktree-chaine-attaque-100`). Ordre des lots choisi par l'attaquant lot
+par lot (04.03 option B, dés jetés à l'ouverture du lot), popup de relance par lot, allocation
+défenseur sans clic inutile (05.04), 8 écarts de règle corrigés (17.03, 24.07 par figurine, FNP
+24.02, Deadly Demise 24.08/25 différée, cascade 06.02 + clé `precision_mortal_wounds_to_character`,
+`wounded[0]`, mêlée 04.01/04.02/24.11), reprise après hazard humain réparée. **Change les parties
+jouées → `--new`.** Détail, décisions et journal :
+`Documentation/Archives/chantiers/chaine_attaque_100.md`.
+
+**Reste ouvert (décision externe)** : `game_rules.precision_mortal_wounds_to_character` est à `false`
+(lecture littérale 06.02) **en attente de confirmation GW** ; basculer la clé suffit, moteur,
+analyzer et tests la lisent.
+
+---
+
 ## P3-0 — Retrait pour cohérence 03.03 {#p3-0}
 
 ✅ **Livré 2026-08-23.** TOTAL_ACTION_SIZE 1359 → 1379 (+20 slots COHERENCY). Queue multi-escouade, sièges muets auto-résolus, tête pointeur `coherency_query_net` sur `self_models`. 32 tests verts. Run `--new` requis.

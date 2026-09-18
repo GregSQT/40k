@@ -190,6 +190,21 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.1.1.alloc_character",
+      "section": "1.1",
+      "label": "Allocation 06.02 en phase de mouvement — blessure mortelle (Desperate Escape) sur un CHARACTER avant ses bodyguards",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "alloc_character_over_bodyguard",
+          "move"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
       "id": "PROJ.1.2.portee",
       "section": "1.2",
       "label": "Tir hors portée",
@@ -486,6 +501,21 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.1.2.alloc_character",
+      "section": "1.2",
+      "label": "Allocation 05.03 / 06.02 / 24.28 au tir — CHARACTER alloué avant ses bodyguards, hors [PRECISION] légal",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "alloc_character_over_bodyguard",
+          "shooting"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
       "id": "PROJ.1.3.depuis_engage",
       "section": "1.3",
       "label": "Charge depuis zone d'engagement",
@@ -587,6 +617,21 @@
         ],
         [
           "charge_impact_wrong_damage"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.3.alloc_character",
+      "section": "1.3",
+      "label": "Allocation 06.02 en phase de charge — blessure mortelle sur un CHARACTER avant ses bodyguards",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "alloc_character_over_bodyguard",
+          "charge"
         ]
       ],
       "status": "COUVERT"
@@ -812,6 +857,21 @@
       "controls": [
         [
           "lethal_hits_wrong_wound_fight"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.alloc_character",
+      "section": "1.4",
+      "label": "Allocation 05.03 / 06.02 / 24.28 en mêlée — CHARACTER alloué avant ses bodyguards, hors [PRECISION] légal",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "alloc_character_over_bodyguard",
+          "fight"
         ]
       ],
       "status": "COUVERT"
@@ -1398,8 +1458,12 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Groupes d'allocation et ordre déclaré absents du journal."
+      "status": "COUVERT",
+      "status_note": "Ordre CHARACTER-après-non-CHARACTER vérifié par `[ALLOC_MODEL:]` + rôle de la figurine (analyzer_core._judge_character_allocation, 2026-09-18). Le reste de l'ordre déclaré (groupes W/Sv/InSv, blessés d'abord) n'est pas journalisé.",
+      "co_verified_by": [
+        "PROJ.1.2.alloc_character",
+        "PROJ.1.4.alloc_character"
+      ]
     },
     {
       "id": "05.04",
@@ -1437,8 +1501,14 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "mid de la figurine sélectionnée absent du journal."
+      "status": "COUVERT",
+      "status_note": "Sélection non-CHARACTER-d'abord vérifiée par `[ALLOC_MODEL:]` (2026-09-18) ; la priorité « figurine déjà blessée » n'est pas vérifiée (PV par socle reconstruits, pas journalisés).",
+      "co_verified_by": [
+        "PROJ.1.1.alloc_character",
+        "PROJ.1.2.alloc_character",
+        "PROJ.1.3.alloc_character",
+        "PROJ.1.4.alloc_character"
+      ]
     },
     {
       "id": "06.03",
@@ -2880,8 +2950,12 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Groupe d'allocation courant absent du journal."
+      "status": "COUVERT",
+      "status_note": "Override [PRECISION] reconnu comme légal sur les blessures normales ; sur les blessures mortelles ([DEVASTATING WOUNDS]) la clé `alloc.precision_mw_to_character` de l'entête `Run rules:` tranche (2026-09-18).",
+      "co_verified_by": [
+        "PROJ.1.2.alloc_character",
+        "PROJ.1.4.alloc_character"
+      ]
     },
     {
       "id": "24.29",
@@ -3224,7 +3298,7 @@
       },
       "controls": [],
       "status": "PARTIEL",
-      "status_note": "Token [PRECISION] loggué et usage compté côté tir uniquement. Règle de tir : pas de token en mêlée (fight_handler.py:95). Allocation forcée sur CHARACTER non re-vérifiée."
+      "status_note": "Token [PRECISION] loggué et usage compté côté tir. Allocation forcée sur CHARACTER re-vérifiée par PROJ.1.2/1.4.alloc_character (2026-09-18)."
     },
     {
       "id": "weapon.PSYCHIC",

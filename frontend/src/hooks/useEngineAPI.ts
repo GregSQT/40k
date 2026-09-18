@@ -495,6 +495,12 @@ export interface ManualAllocation {
   choices: Array<{ model_id: string; col: number; row: number; HP_CUR: number; HP_MAX: number }>;
   current_group_id?: number | null;
   wounds_remaining: number;
+  /** "mortal" : lot de blessures mortelles (06.02, sans sauvegarde) ; absent sinon. */
+  damage_type?: "mortal";
+  /** Profil d'arme du lot en cours (absent sur un lot mortel). */
+  weapon_name?: string;
+  /** Noms distincts des armes regroupées sous ce profil (04.03). */
+  weapon_names?: string[];
 }
 
 export interface ManualOrderGroup {
@@ -509,10 +515,14 @@ export interface ManualOrderGroup {
   has_wounded: boolean;
 }
 
-/** Attentes du défenseur humain : suffixe d'action `squad_<famille>_<suffixe>` → clé du payload. */
+/** Attentes d'un joueur humain pendant une activation d'attaque : suffixe d'action
+ * `squad_<famille>_<suffixe>` → clé du payload. `manual_alloc` et `declare_order` sont des
+ * attentes du DÉFENSEUR (05.03/05.04, 06.02) ; `select_lot` est une attente de l'ATTAQUANT
+ * (04.03, option B du 2026-09-18 : ordre des lots et politique de relance, lot par lot). */
 const MANUAL_PROMPT_PAYLOAD_KEY = {
   manual_alloc: "allocation",
   declare_order: "order_request",
+  select_lot: "lot_request",
 } as const;
 
 /**
@@ -546,6 +556,35 @@ export function readManualAllocationPrompt(result: unknown): ManualAllocation | 
  */
 export function readManualOrderPrompt(result: unknown): ManualOrderRequest | null {
   return readManualPrompt<ManualOrderRequest>(result, "declare_order");
+}
+
+/** Un lot proposé à l'attaquant (04.03) : profil d'arme × cible, et les questions de politique
+ * de relance qui ont un sens pour lui. */
+export interface AttackLotChoice {
+  lot_id: number;
+  target_unit_id: string;
+  weapon_name: string;
+  weapon_code: string | null;
+  n_models: number;
+  n_attacks: number;
+  reroll_choices: { hit: boolean; wound: boolean };
+}
+
+/**
+ * Attente de l'ATTAQUANT : `{ action: squad_*_select_lot, lot_request }`. `policy_only` : le lot
+ * est imposé (un seul candidat), seule la politique de relance est demandée. `locked_target_unit_id` :
+ * 04.03, toutes les armes d'une unité avant la suivante — les candidats visent tous cette unité.
+ */
+export interface AttackLotRequest {
+  kind?: ManualPromptKind;
+  attacker_unit_id: string;
+  locked_target_unit_id: string | null;
+  policy_only: boolean;
+  lots: AttackLotChoice[];
+}
+
+export function readAttackLotPrompt(result: unknown): AttackLotRequest | null {
+  return readManualPrompt<AttackLotRequest>(result, "select_lot");
 }
 
 export interface ManualOrderRequest {
@@ -1132,20 +1171,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [manualOrderRequest, setManualOrderRequest] = useState<ManualOrderRequest | null>(null);
   const manualOrderRequestRef = useRef<ManualOrderRequest | null>(null);
   manualOrderRequestRef.current = manualOrderRequest;
-  /** Pose le prompt du DÉFENSEUR humain depuis un payload d'attente — ordre des groupes (05.03)
-   *  ou choix de figurine (05.04) — et rend true s'il en a posé un. Les deux états s'excluent :
-   *  poser l'un efface l'autre. */
+  /** Attente de l'ATTAQUANT (04.03) : choix du prochain lot et de sa politique de relance. */
+  const [attackLotRequest, setAttackLotRequest] = useState<AttackLotRequest | null>(null);
+  const attackLotRequestRef = useRef<AttackLotRequest | null>(null);
+  attackLotRequestRef.current = attackLotRequest;
+  /** Pose le prompt d'une activation d'attaque depuis un payload d'attente — choix du lot par
+   *  l'attaquant (04.03), ordre des groupes (05.03) ou choix de figurine (05.04) par le
+   *  défenseur — et rend true s'il en a posé un. Les trois états s'excluent : poser l'un
+   *  efface les autres. */
   const applyManualDefenderPrompt = useCallback((result: unknown): boolean => {
+    const lot = readAttackLotPrompt(result);
+    if (lot !== null) {
+      setAttackLotRequest(lot);
+      if (manualAllocationRef.current !== null) setManualAllocation(null);
+      if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+      return true;
+    }
     const order = readManualOrderPrompt(result);
     if (order !== null) {
       setManualOrderRequest(order);
       if (manualAllocationRef.current !== null) setManualAllocation(null);
+      if (attackLotRequestRef.current !== null) setAttackLotRequest(null);
       return true;
     }
     const allocation = readManualAllocationPrompt(result);
     if (allocation !== null) {
       setManualAllocation(allocation);
       if (manualOrderRequestRef.current !== null) setManualOrderRequest(null);
+      if (attackLotRequestRef.current !== null) setAttackLotRequest(null);
       return true;
     }
     return false;
@@ -2186,6 +2239,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           if (manualOrderRequestRef.current !== null) {
             setManualOrderRequest(null);
+          }
+          if (attackLotRequestRef.current !== null) {
+            setAttackLotRequest(null);
           }
 
           // Last move emptied move pool: PvP defers shooting init to a second request — chain it.
@@ -5694,6 +5750,29 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, noteActionOutcome]
   );
 
+  /** 04.03 (option B) : l'attaquant choisit le lot suivant et, si la question se pose, sa
+   *  politique de relance (« échecs seulement » = false, « tous les non-critiques » = true). */
+  const handleSelectAttackLot = useCallback(
+    async (lotId: number, rerolls?: { hit?: boolean; wound?: boolean }) => {
+      const req = attackLotRequestRef.current;
+      if (!req) return;
+      const payload: Record<string, unknown> = {
+        action: req.kind === "fight" ? "squad_fight_select_lot" : "squad_shoot_select_lot",
+        unitId: String(req.attacker_unit_id),
+        lotId,
+      };
+      if (rerolls?.hit !== undefined) payload.hitReroll = rerolls.hit;
+      if (rerolls?.wound !== undefined) payload.woundReroll = rerolls.wound;
+      try {
+        noteActionOutcome(await executeAction(payload), "Choix du lot");
+      } catch (e) {
+        console.error("[ATTACK-LOT] select_lot FAILED", e);
+        setError(`Select lot failed: ${formatApiConnectionError(e)}`);
+      }
+    },
+    [executeAction, noteActionOutcome]
+  );
+
   const shouldShowRetreatAlert = useCallback((): boolean => {
     return readRequiredBooleanSetting(RETREAT_ALERT_STORAGE_KEY, true);
   }, []);
@@ -8754,6 +8833,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onAllocateModel: async () => {},
       manualOrderRequest: null,
       onDeclareOrder: async () => {},
+      attackLotRequest: null,
+      onSelectAttackLot: async () => {},
       onStartAttackPreview: () => {},
       onConfirmMove: () => {},
       onCancelMove: () => {},
@@ -9221,6 +9302,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onAllocateModel: handleAllocateModel,
     manualOrderRequest,
     onDeclareOrder: handleDeclareOrder,
+    attackLotRequest,
+    onSelectAttackLot: handleSelectAttackLot,
     onStartAttackPreview: onStartAttackPreviewMemo,
     onConfirmMove: handleConfirmMove,
     onCancelMove: handleCancelMove,

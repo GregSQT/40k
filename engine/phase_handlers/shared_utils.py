@@ -50,6 +50,8 @@ from engine.constants import (
     PENDING_FIGHT_ALLOCATION_KEY,
     PENDING_SHOOT_ALLOCATION_KEY,
     PENDING_HAZARD_ALLOCATION_KEY,
+    PENDING_HAZARD_RESUME_RESULT_KEY,
+    MORTAL_WOUND_QUEUE_KEY,
 )
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
@@ -2769,16 +2771,22 @@ def _collect_fnp_thresholds_mortal(
 
 
 def _roll_fnp_sequential(n_wounds: int, thresholds: List[int]) -> int:
-    """Retourne les blessures non sauvées après jets FNP séquentiels (24.12).
+    """Retourne les blessures non sauvées après le jet Feel No Pain (24.12) : UN jet par blessure.
 
-    Pour chaque blessure, on tente chaque seuil en ordre : dès qu'un jet >= seuil, la
-    blessure est ignorée. Utilisé quand plusieurs FNP (génériques ou conditionnels) s'appliquent.
+    24.02 DUPLICATED ABILITIES : « Multiple instances of the same core ability […] are not
+    cumulative, regardless of any numbers […] the controlling player must select which instance
+    will apply at any one time. » Plusieurs Feel No Pain sur la même figurine (unité + « this
+    model », ou générique + anti-psychique) ne donnent donc qu UN jet, à l instance choisie —
+    le meilleur seuil, seul choix rationnel. Une version précédente tentait CHAQUE seuil sur un
+    dé neuf (« dès qu'un jet >= seuil »), soit deux sauvegardes pour deux capacités.
     """
     import random
+    if not thresholds:
+        return int(n_wounds)
+    best = min(int(th) for th in thresholds)
     remaining = 0
     for _ in range(n_wounds):
-        saved = any(random.randint(1, 6) >= th for th in thresholds)
-        if not saved:
+        if random.randint(1, 6) < best:
             remaining += 1
     return remaining
 
@@ -4460,29 +4468,32 @@ def update_model_hp(game_state: Dict[str, Any], model_id: str, new_hp_cur: int) 
         units_entry["HP_CUR"] = squad_total
 
 
-def _apply_deadly_demise(
-    game_state: Dict[str, Any], squad_id: str,
-    dead_col: int, dead_row: int, deadly_demise_value: Any,
-) -> None:
-    """Declenche la regle Deadly Demise §24.08 pour un modele venant d etre detruit.
+def _roll_deadly_demise(game_state: Dict[str, Any], entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Jet de Deadly Demise §24.08 d un modele detruit (entree de la file) : sur 6, chaque
+    unite a 6" ou moins du modele subit X blessures mortelles (X resolu SEPAREMENT par unite).
 
-    Jet D6 UNIQUE par modele detruit. Sur 6 : chaque unite a ≤6" subit X blessures
-    mortelles (X = deadly_demise_value, int ou expression de de comme « D3 »). Si X est
-    aleatoire, jet SEPARE par unite (PDF : « roll separately for each unit within 6" »).
-    Resolution APRES l emergency disembark (PDF §24.08 exemple). Tag [DEADLY DEMISE].
+    Rend les VICTIMES a servir — `{"kind": "victim", "uid", "n_wounds", "log_payload",
+    "details_key"}` — sans infliger : c est `drain_mortal_wound_queue` qui attribue, en AUTO
+    (proprietaire programmatique) ou par l allocation manuelle 06.02 (proprietaire humain).
+
+    Distance : « each unit within 6" of that model » — mesuree de la figurine detruite a la
+    figurine LA PLUS PROCHE de chaque unite (01.04, 17.02), pas a l ancre de l unite. La ligne
+    de journal est emise ici, au jet, et ses details sont completes a l attribution.
     """
     import random
     import math
+    squad_id = str(entry["squad_id"])
+    dead_col = int(entry["col"])
+    dead_row = int(entry["row"])
+    deadly_demise_value = entry["value"]
     d6_roll = random.randint(1, 6)
     turn = game_state["turn"]
     phase = game_state.get("phase", "")
     units_cache = require_key(game_state, "units_cache")
     # `player` = PROPRIETAIRE DE LA SOURCE, sur les deux formes de la ligne (jet rate comme jet
-    # reussi) : c est lui qui exerce 24.08, et c est ce joueur que l analyzer credite. La valeur
-    # `-1` qui vivait ici rendait `P-1` dans step.log, hors de la grammaire `P(\d+)` de toutes les
-    # lignes — le jet rate devenait une erreur de parse des que le type a ete journalise. L entree
-    # est encore dans units_cache : `destroy_model` ne la retire qu APRES cet appel.
-    owner_player = _squad_owner_player(game_state, squad_id)
+    # reussi) : c est lui qui exerce 24.08, et c est ce joueur que l analyzer credite. Lu dans
+    # l entree de file (pose a la mort) : la source peut avoir quitte units_cache depuis.
+    owner_player = int(entry["player"])
 
     if d6_roll < 6:
         # Jet raté : un seul log "no effect", aucun jet de dé supplémentaire.
@@ -4497,7 +4508,7 @@ def _apply_deadly_demise(
             "player": owner_player,
             "deadlyDemiseDetails": [],
         })
-        return
+        return []
 
     ish = int(require_key(game_state, "inches_to_subhex"))
     radius = 6 * ish
@@ -4508,26 +4519,33 @@ def _apply_deadly_demise(
             return float(calculate_hex_distance(dead_col, dead_row, u_col, u_row))
         return math.sqrt((dead_col - u_col) ** 2 + (dead_row - u_row) ** 2)
 
+    def _unit_distance(uentry: Dict[str, Any]) -> Optional[float]:
+        by_model = uentry.get("occupied_hexes_by_model")  # get allowed : unite hors table = absent
+        positions = list(by_model.values()) if by_model else []
+        if not positions:
+            u_col = int(uentry.get("col", -1))  # get allowed
+            u_row = int(uentry.get("row", -1))  # get allowed
+            if u_col < 0 or u_row < 0:
+                return None
+            positions = [(u_col, u_row)]
+        return min(_dist(int(pos[0]), int(pos[1])) for pos in positions)
+
+    victims: List[Dict[str, Any]] = []
     # Toutes les unites (y compris l unite source si elle a encore des figs) dans les 6".
     for uid, uentry in list(units_cache.items()):
-        u_col = int(uentry.get("col", -1))
-        u_row = int(uentry.get("row", -1))
-        if u_col < 0 or u_row < 0:
-            continue
-        if _dist(u_col, u_row) > radius:
+        distance = _unit_distance(uentry)
+        if distance is None or distance > radius:
             continue
         # « each unit within 6" » : une escouade sans figurine vivante n est plus une unite sur
-        # le plateau. C est le cas de la SOURCE quand la figurine qui explose etait sa derniere :
-        # `destroy_model` ne la retire d units_cache qu APRES cet appel. `allocate_mortal_wounds`
-        # n aurait rien inflige, mais la ligne `SUFFERS N MW` aurait ete ecrite quand meme —
-        # mesure sur l eval du 2026-09-13 (E4 T3 : `Unit 4 DEADLY DEMISE … → Unit 4(27,30)
-        # SUFFERS 1 MW`, unite 4 vide).
+        # le plateau.
         if not select_eligible_models(game_state, str(uid)):
             continue
         # X peut etre aleatoire : resolu SEPAREMENT par unite.
         x_wounds = int(resolve_dice_value(deadly_demise_value, f"deadly_demise_{squad_id}_{uid}"))
         _dd_details: List[Dict[str, Any]] = []
-        append_action_log(game_state, {
+        u_col = int(uentry.get("col", -1))  # get allowed
+        u_row = int(uentry.get("row", -1))  # get allowed
+        log_payload = {
             "type": "deadly_demise",
             "unitId": str(uid),
             "sourceUnitId": str(squad_id),
@@ -4539,9 +4557,61 @@ def _apply_deadly_demise(
             "phase": phase,
             "player": owner_player,
             "deadlyDemiseDetails": _dd_details,
-        })
+        }
+        append_action_log(game_state, log_payload)
         if x_wounds > 0:
-            allocate_mortal_wounds(game_state, str(uid), x_wounds, True, _dd_details)
+            victims.append({
+                "kind": "victim", "uid": str(uid), "n_wounds": x_wounds,
+                "log_payload": log_payload, "details_key": "deadlyDemiseDetails",
+            })
+    return victims
+
+
+def queue_mortal_wounds(
+    game_state: Dict[str, Any], uid: str, n_wounds: int, log_payload: Dict[str, Any],
+    *, details_key: str,
+) -> None:
+    """Met en file `n_wounds` blessures mortelles pour `uid` (06.02), a attribuer par
+    `drain_mortal_wound_queue` : AUTO si le proprietaire est programmatique, allocation manuelle
+    sinon. `log_payload` est la ligne DEJA emise ; `details_key` y recoit le detail par figurine."""
+    game_state.setdefault(MORTAL_WOUND_QUEUE_KEY, []).append({
+        "kind": "victim", "uid": str(uid), "n_wounds": int(n_wounds),
+        "log_payload": log_payload, "details_key": details_key,
+    })
+
+
+def drain_mortal_wound_queue(game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Sert la file des blessures mortelles en attente, dans l ordre, jusqu a epuisement ou
+    jusqu au premier point de decision HUMAIN (06.02, plusieurs figurines egalement eligibles).
+
+    Entrees : `deadly_demise` (un modele detruit, a jeter — ses victimes s inserent EN TETE, une
+    explosion en chaine se resolvant avant le reste) et `victim` (une unite, N blessures).
+    Rend le payload d attente de l allocation manuelle (HAZARD_CTX) s il y en a une, sinon None
+    quand la file est vide. L appelant qui recoit une attente doit avoir pose `hazard_origin`
+    (et ce qu il faut pour reprendre) : `W40KEngine._resume_after_hazard` re-draine la file
+    avant de reprendre son origine.
+    """
+    queue = game_state.get(MORTAL_WOUND_QUEUE_KEY)  # get allowed : absent = rien en attente
+    while queue:
+        entry = queue.pop(0)
+        if entry["kind"] == "deadly_demise":
+            victims = _roll_deadly_demise(game_state, entry)
+            queue[0:0] = victims
+            continue
+        uid = str(entry["uid"])
+        if not select_eligible_models(game_state, uid):
+            continue  # unite detruite entre-temps : plus rien a blesser
+        details_key = str(entry["details_key"])
+        log_payload = entry["log_payload"]
+        n_wounds = int(entry["n_wounds"])
+        if is_programmatic_owner(game_state, require_key(require_key(game_state, "units_cache")[uid], "player")):
+            allocate_mortal_wounds(game_state, uid, n_wounds, True, log_payload[details_key])
+            continue
+        build_manual_hazard_allocation(game_state, uid, n_wounds, log_payload, details_key=details_key)
+        if PENDING_HAZARD_ALLOCATION_KEY in game_state:
+            return manual_allocation_waiting_payload(game_state, HAZARD_CTX)
+    game_state.pop(MORTAL_WOUND_QUEUE_KEY, None)
+    return None
 
 
 def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> None:
@@ -4669,10 +4739,22 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
         "row": old_row,
     })
 
-    # §24.08 DEADLY DEMISE — APRES l emergency disembark (PDF §24.08 exemple), AVANT la cascade
-    # qui retire l escouade. La position (old_col, old_row) est celle du modele juste detruit.
+    # §24.08 DEADLY DEMISE — 25 DESTROYED : « if the model was destroyed as the result of an
+    # attack, […] those rules are only resolved […] after the attacking unit's attacks have been
+    # resolved ». La regle est donc MISE EN FILE ici, avec la position du modele detruit, et
+    # jouee aux points surs par `drain_mortal_wound_queue` : fin de l allocation d attaques, fin
+    # d une attribution de blessures mortelles, reprise d un hazard. Une version precedente
+    # l appliquait a l instant de la mort : la cible et l attaquant encaissaient l explosion au
+    # milieu du lot.
     if _deadly_demise_val is not None:
-        _apply_deadly_demise(game_state, squad_id, old_col, old_row, _deadly_demise_val)
+        game_state.setdefault(MORTAL_WOUND_QUEUE_KEY, []).append({
+            "kind": "deadly_demise",
+            "squad_id": str(squad_id), "model_id": str(model_id),
+            "col": old_col, "row": old_row, "value": _deadly_demise_val,
+            # Proprietaire de la SOURCE, lu MAINTENANT : l explosion est jouee plus tard, quand
+            # l escouade peut avoir quitte units_cache (derniere figurine).
+            "player": int(require_key(model, "player")),
+        })
 
     # 3/4/5. Cascade vers units_cache.
     units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
@@ -8351,6 +8433,16 @@ def _shoot_engagement_blocks_target(
     elif enemy_adjacent_to_shooter and not weapon_is_close_quarters:
         return True
 
+    # 17.03 (FAQ p. 88) : « When my unit shoots at an engaged MONSTER/VEHICLE unit, can models
+    # in my unit target that unit with [BLAST] weapons? A: No. » L engagement de la cible se
+    # mesure avec n importe quelle unite du camp du tireur (`_is_adjacent_to_enemy_within_cc_range`).
+    if weapon_is_blast:
+        from engine.phase_handlers.shooting_handlers import target_is_monster_or_vehicle_unit
+        if target_is_monster_or_vehicle_unit(game_state, tid) and _is_adjacent_to_enemy_within_cc_range(
+            game_state, require_unit_by_id(game_state, tid)
+        ):
+            return True
+
     # 04.02 : cible engagee avec une unite alliee au tireur -> Unengaged viole.
     shooter_player_int = int(shooter_entry["player"])
     if _friendly_engagement_blocks_ranged_shot(
@@ -8885,10 +8977,37 @@ def _declare_qty_candidates(
                 and (only_model_id is None or str(i["model_id"]) == str(only_model_id)))
     ]
     consumed: Dict[str, set] = {}
+    # [CLOSE-QUARTERS] 24.07 (SIDEARMS, PDF 04), au TIR et hors MONSTER/VEHICLE : « for each
+    # model in that unit […] you can only select one of the following: one or more of its
+    # [CLOSE-QUARTERS] weapons ; one or more of its other ranged weapons ». La famille deja
+    # declaree PAR FIGURINE verrouille l autre ; elle se lit sur les intents conserves (la ligne
+    # editee est deja retiree : la re-declarer ne se bloque pas elle-meme). Sous 10.06 (unite
+    # engagee) seules les [CLOSE-QUARTERS] sont declarables, la clause est alors sans objet.
+    family_declared: Dict[str, set] = {}
+    is_ranged = ctx.weapons_key == "RNG_WEAPONS"
+    # 04.01 WHILE FIGHTING : « You must select ONE melee weapon that model has » — plus toutes
+    # ses armes [EXTRA ATTACKS] (24.11), qui s ajoutent. Une figurine qui a deja declare une
+    # arme ordinaire ne peut donc pas en declarer une seconde (cle d arme physique differente).
+    ordinary_declared: Dict[str, str] = {}
     for i in remaining:
         gkey = _intent_weapon_group_key(models_cache, i, ctx.weapons_key)
         if gkey is not None:
             consumed.setdefault(str(i["model_id"]), set()).add(gkey)
+        if not is_ranged and gkey is not None:
+            _mi = models_cache.get(str(i["model_id"]))
+            _wi = _mi.get(ctx.weapons_key, []) if _mi is not None else []  # get allowed
+            _idx = int(i.get("weapon_index", -1))  # get allowed
+            if 0 <= _idx < len(_wi) and isinstance(_wi[_idx], dict) and not weapon_has_rule(_wi[_idx], "EXTRA_ATTACKS"):
+                ordinary_declared[str(i["model_id"])] = gkey
+        if is_ranged:
+            _mi = models_cache.get(str(i["model_id"]))
+            if _mi is not None:
+                _wi = _mi.get(ctx.weapons_key, [])  # get allowed
+                _idx = int(i.get("weapon_index", -1))  # get allowed
+                if 0 <= _idx < len(_wi) and isinstance(_wi[_idx], dict):
+                    family_declared.setdefault(str(i["model_id"]), set()).add(
+                        weapon_has_rule(_wi[_idx], "CLOSE_QUARTERS")
+                    )
 
     from engine.hex_utils import min_distance_between_sets
     tgt_uc = require_key(game_state, "units_cache")[str(target_squad_id)]
@@ -8911,6 +9030,15 @@ def _declare_qty_candidates(
             continue
         if _weapon_group_key(weapons, local_idx) in consumed.get(str(mid), set()):
             continue
+        if is_ranged and not _model_is_monster_or_vehicle(m):
+            _this_family = weapon_has_rule(weapons[local_idx], "CLOSE_QUARTERS")
+            _declared = family_declared.get(str(mid), set())
+            if _declared and _this_family not in _declared:
+                continue  # 24.07 : cette figurine a deja choisi l autre famille
+        if not is_ranged and not weapon_has_rule(weapons[local_idx], "EXTRA_ATTACKS"):
+            _prev = ordinary_declared.get(str(mid))
+            if _prev is not None and _prev != _weapon_group_key(weapons, local_idx):
+                continue  # 04.01 : une seule arme de melee ordinaire par figurine
         if not ctx.can_target_with_weapon(game_state, m, attacker_squad_id, target_squad_id, local_idx):
             continue
         dist = min_distance_between_sets({(int(m["col"]), int(m["row"]))}, tgt_fp)
@@ -10273,21 +10401,22 @@ def squad_shoot_menu_weapons(
     squad_models = require_key(game_state, "squad_models")
     init_pending_intents(game_state)
 
-    # Type d arme deja engage par l unite (Close-quarters vs non-Close-quarters) — via les declarations.
+    # [CLOSE-QUARTERS] 24.07 : famille (pistolet / autre) deja declaree PAR FIGURINE, hors
+    # MONSTER/VEHICLE — la regle est par figurine, pas par unite : un Boy peut tirer son slugga
+    # pendant qu un autre tire son shoota. Meme lecture que `_declare_qty_candidates`, qui
+    # IMPOSE la clause ; ici elle ne fait que griser le menu.
     intents = game_state["pending_squad_shoot_intents"].get(attacker_squad_id, [])  # get allowed
-    declared_close_quarters = False
-    declared_non_close_quarters = False
+    family_by_model: Dict[str, set] = {}
     for it in intents:
         m = models_cache.get(str(it["model_id"]))
-        if m is None:
+        if m is None or _model_is_monster_or_vehicle(m):
             continue
         ws = ranged_weapons(m)
         wi = int(it["weapon_index"])
         if 0 <= wi < len(ws) and isinstance(ws[wi], dict):
-            if weapon_has_rule(ws[wi], "CLOSE_QUARTERS"):
-                declared_close_quarters = True
-            else:
-                declared_non_close_quarters = True
+            family_by_model.setdefault(str(it["model_id"]), set()).add(
+                weapon_has_rule(ws[wi], "CLOSE_QUARTERS")
+            )
 
     mids = squad_models.get(attacker_squad_id, [])  # get allowed
     player = int(models_cache[mids[0]]["player"]) if mids and mids[0] in models_cache else None
@@ -10309,17 +10438,15 @@ def squad_shoot_menu_weapons(
             )
             if local_idx is None:
                 continue
+            _declared = family_by_model.get(str(mid), set())
+            if _declared and is_close_quarters not in _declared:
+                continue  # 24.07 : cette figurine a deja choisi l autre famille
             if any(
                 _model_can_shoot_target_with_weapon(game_state, m, sid, local_idx)
                 for sid in enemy_sids
             ):
                 usable = True
                 break
-        # Exclusion Close-quarters / non-Close-quarters au niveau unite (10.06).
-        if declared_close_quarters and not is_close_quarters:
-            usable = False
-        if declared_non_close_quarters and is_close_quarters:
-            usable = False
         result.append({"index": idx, "weapon": w, "can_use": usable, "reason": None})
     return result
 
@@ -10890,6 +11017,10 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     # une regle d arme — elle n a pas d entree dans weapon_rules.json.
     if require_key(g, "point_blank_malus"):
         hit_part = f"{hit_part} [POINT-BLANK]"
+    # 17.03 : -1 au jet de touche sur une unite MONSTER/VEHICLE engagee. Regle de PHASE, meme
+    # regime que [POINT-BLANK] : pas d entree dans weapon_rules.json.
+    if require_key(g, "engaged_target_malus"):
+        hit_part = f"{hit_part} [ENGAGED TARGET]"
     # Tokens de REGLES D ARME du groupe, ranges par segment. Construits ICI, une seule fois par
     # groupe : toutes leurs sources sont portees par `g` (les rollers ne les fabriquent plus par
     # intent, ou 9 dicts sur 10 finissaient jetes).
@@ -11015,6 +11146,8 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # L26 — 10.06 volet MONSTER/VEHICLE : -1 au jet de touche hors arme CQ engagée.
         # Drapeau toujours présent dans le groupe (False en mêlée par construction).
         "pointBlankMalus": bool(g.get("point_blank_malus", False)),
+        # 17.03 : -1 au jet sur une unite MONSTER/VEHICLE engagee (False en melee par construction).
+        "engagedTargetMalus": bool(g.get("engaged_target_malus", False)),
         # [RAPID FIRE] 24.30 : X APPLIQUE, lu dans `additive_rules_applied` — le seul porteur du
         # fait (cf. `gkey`). L'absence de cle vaut 0, comme pour les deux autres regles
         # additives : la melee n'ecrit jamais cette entree, [RAPID FIRE] n'y existe pas.
@@ -11940,6 +12073,16 @@ def _manual_roll_intent(
         and "CLOSE_QUARTERS" in _weapon_rules
         and _squads_are_engaged(game_state, _atk_sid, str(target_sid))
     )
+    # 17.03 SHOOTING AT ENGAGED MONSTERS AND VEHICLES : la cible est une unite MONSTER/VEHICLE
+    # engagee -> -1 au jet de touche (seuil degrade de 1, plafond 6), sauf arme [CLOSE-QUARTERS]
+    # d une unite engagee avec elle. Cumulable avec le -1 de 10.06 ci-dessous (deux regles, deux
+    # « subtract 1 » ; aucun plafond de modificateurs dans les PDF).
+    from engine.phase_handlers.shooting_handlers import engaged_monster_vehicle_target_malus
+    _engaged_target_malus = engaged_monster_vehicle_target_malus(
+        game_state, _atk_sid, str(target_sid), weapon
+    )
+    if _engaged_target_malus:
+        bs = min(6, bs + 1)
     # [10.06] tir a bout portant, volet MONSTER/VEHICLE : « Each time a MONSTER/VEHICLE model in
     # your unit makes an attack: unless that attack is made with a [CLOSE-QUARTERS] weapon AND
     # targets a unit your unit is engaged with, subtract 1 from the hit roll. » -1 au jet =
@@ -12103,70 +12246,53 @@ def _manual_roll_intent(
         game_state=game_state,
         is_melee=False,
     )
-    rolled = roll_attack_pool(
-        n_attacks=int(n_attacks),
-        hit_target=bs,
-        wound_target=wth,
-        save_threshold_value=display_save_th,
-        profile=_attack_profile,
-        rerolls=RerollProfile(
-            # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee.
-            # JUMEAU du site de melee — c est le motif d echec n°1 du depot : une relance
-            # cablee au tir seulement ferait de la mitraille orke un cas particulier silencieux.
-            # « You can re-roll the Hit roll » : INCONDITIONNELLE des que la cible est la bonne
-            # — ni le detachement ni les sous-factions ne la touchent, contrairement au +1 Wound.
-            # 10.07 : « You cannot re-roll hit rolls » — l interdiction est ABSOLUE et prime sur
-            # la capacite, d ou le `and not`. Elle ne touche QUE la touche : les relances de
-            # blessure ci-dessous (capacites d unite, [TWIN-LINKED]) restent ouvertes, la regle
-            # n en parle pas.
-            hit_any_fail=_is_oath_target and _indirect_fail_below is None,
-            wound_1=reroll_wound1,
-            wound_any_fail=reroll_wound_obj,
-        ),
-        roll_d6=lambda: random.randint(1, 6),
-        # 10.07 : plancher d echec sur le de NON MODIFIE. `None` -> le socle garde le plancher
-        # naturel de 05.01 (seul le 1 echoue), donc aucune attaque ordinaire ne change.
-        **({} if _indirect_fail_below is None else {"hit_fail_below": _indirect_fail_below}),
+    _rerolls = RerollProfile(
+        # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee.
+        # JUMEAU du site de melee — c est le motif d echec n°1 du depot : une relance
+        # cablee au tir seulement ferait de la mitraille orke un cas particulier silencieux.
+        # « You can re-roll the Hit roll » : INCONDITIONNELLE des que la cible est la bonne
+        # — ni le detachement ni les sous-factions ne la touchent, contrairement au +1 Wound.
+        # 10.07 : « You cannot re-roll hit rolls » — l interdiction est ABSOLUE et prime sur
+        # la capacite, d ou le `and not`. Elle ne touche QUE la touche : les relances de
+        # blessure (capacites d unite, [TWIN-LINKED]) restent ouvertes, la regle n en parle pas.
+        hit_any_fail=_is_oath_target and _indirect_fail_below is None,
+        wound_1=reroll_wound1,
+        wound_any_fail=reroll_wound_obj,
     )
-    # Noms des ABILITES qui ont ouvert chaque relance. Le socle rend la CAUSE, les deux
-    # `resolve_*_reroll_ability` la traduisent — memes helpers que la melee, pour que les deux
-    # chemins ne puissent pas diverger. Resolution memoisee sur l intent, et PARESSEUSE : on ne
-    # lit le nom d affichage que si une relance a REELLEMENT eu lieu
-    # (`get_source_unit_rule_display_name_for_effect` exige un `displayName` non vide sur la
-    # regle source — inutile de l exiger d une unite dont aucune relance n a joue).
-    stamp_reroll_abilities(
-        rolled["shot_records"], attacker_unit,
-        reroll_1_towound=reroll_wound1,
-        reroll_towound_on_objective=reroll_wound_obj,
-    )
-    # S11 : esperance de CET intent, sur les memes seuils, profil et relances que le roller.
+    # AUCUN DE N EST JETE ICI (04.03, option B du chantier « chaine d attaque 100 % ») : les
+    # jets d un lot ont lieu au debut de CE lot, apres que l attaquant l a choisi, par
+    # `roll_prepared_intent` qui lit ce `roll_spec`. Ce qui precede est le PROFIL de l attaque,
+    # constant pour l activation ; ce qui suit (jets, marquage des relances) en depend.
+    _roll_spec = {
+        "n_attacks": int(n_attacks),
+        "hit_target": bs, "wound_target": wth, "save_threshold_value": display_save_th,
+        "profile": _attack_profile, "rerolls": _rerolls,
+        # 10.07 : plancher d echec sur le de NON MODIFIE. `None` -> plancher naturel de 05.01.
+        "hit_fail_below": _indirect_fail_below,
+        "attacker_unit_id": str(require_key(attacker_unit, "id")),
+        "reroll_1_towound": reroll_wound1, "reroll_towound_on_objective": reroll_wound_obj,
+        "oath_wound_bonus": _oath_wound_bonus,
+        # Primitive A (chantier 06) : au tir, seul le malus de suppression peut avoir joue — le
+        # bonus de melee est None par construction (`is_melee=False`) et le +1 de blessure n a
+        # pas de jumeau au tir.
+        "hit_bonus_ability": _hit_bonus_ability, "hit_malus_ability": _hit_malus_ability,
+        "wound_bonus_ability": None,
+        "reroll_save1": False, "waaagh_melee": False, "hold_still": None,
+    }
+    # S11 : esperance de CET intent, sur les memes seuils, profil et relances que le roller
+    # (politique de relance par defaut : la decision du joueur n est pas connue a la declaration).
     _expected_damage = intent_expected_damage(
         game_state,
         weapon=weapon, target_sid=target_sid,
         n_attacks_expected=float(n_attacks) + _nb_expected_delta,
         hit_target=bs, wound_target=wth, save_threshold_value=display_save_th,
         profile=_attack_profile,
-        rerolls=RerollProfile(
-            hit_any_fail=_is_oath_target and _indirect_fail_below is None,
-            wound_1=reroll_wound1,
-            wound_any_fail=reroll_wound_obj,
-        ),
+        rerolls=_rerolls,
         dmg_raw=dmg_raw, dmg_bonus=dmg_bonus, hit_fail_below=_indirect_fail_below,
-    )
-    # +1 au jet de blessure d Oath. Meme helper que la melee (cf. `stamp_wound_bonus_ability`).
-    stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
-    # Primitive A (chantier 06) : au tir, seul le malus de suppression peut avoir joue — le
-    # bonus de melee est None par construction (`is_melee=False`) et le +1 de blessure n a pas
-    # de jumeau au tir. Les trois arguments sont passes explicitement pour que le site de tir et
-    # celui de melee restent lisibles l un a cote de l autre.
-    stamp_roll_modifier_abilities(
-        rolled["shot_records"],
-        hit_bonus=_hit_bonus_ability,
-        hit_malus=_hit_malus_ability,
-        wound_bonus=None,
     )
 
     return {
+        "roll_spec": _roll_spec,
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap,
         "dmg_raw": dmg_raw, "dmg_bonus": dmg_bonus,
@@ -12206,6 +12332,8 @@ def _manual_roll_intent(
         # JAMAIS lu — il ne restait donc plus qu un seul modificateur du seuil affiche sans
         # cause visible, alors que [HEAVY] et [COVER] avaient la leur.
         "point_blank_malus": _cq_malus_applied,
+        # 17.03 : -1 au jet de touche sur une unite MONSTER/VEHICLE engagee (cf. plus haut).
+        "engaged_target_malus": _engaged_target_malus,
         # Regles additives ayant JOUE pour CETTE figurine, et leur X DECLARE : [BLAST] 24.05 (une
         # tranche de 5 par porteuse) et [RAPID FIRE] 24.30 (X par porteuse a demi-portee). C est
         # ce X que le token affiche (cf. `weapon_rule_log_tokens`) ; le nombre de des ajoutes,
@@ -12239,19 +12367,12 @@ def _manual_roll_intent(
         # Waaagh! de la CIBLE, lui, joue aussi au tir : la sauvegarde invulnerable 5+ octroyee
         # s oppose a toutes les attaques, pas seulement a la melee.
         "waaagh_target_invul": _waaagh_target_invul,
-        # Blessures mortelles dues par l intent (06.02), agregees par lot et infligees APRES
-        # les degats normaux. Aucune regle de TIR n en produit dans ce depot : la cle est
-        # ecrite `None` par le producteur plutot qu omise, meme regime que `waaagh_melee_bonus`
-        # ci-dessus — l affirmation vient du site qui sait, pas d une cle absente.
-        "pending_mortal_wounds": None,
-        "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
-        "counts": rolled["counts"],
     }
 
 
 def _manual_waiting_payload(
     game_state: Dict[str, Any], batch: Dict[str, Any], alive_group: List[str],
-    ctx: ManualAllocCtx,
+    ctx: ManualAllocCtx, *, mortal: bool = False,
 ) -> Dict[str, Any]:
     """Payload rendu au frontend quand le defenseur doit choisir une figurine.
 
@@ -12284,10 +12405,15 @@ def _manual_waiting_payload(
         "current_group_id": cur_gid,
         "wounds_remaining": len(batch["pool"]) - batch["pool_index"],
     }
-    if _batch_is_mortal(ctx, batch):
-        # Meme marqueur que la declaration d ordre : le client sait qu il alloue des blessures
-        # MORTELLES (1 PV, sans sauvegarde), pas les blessures d une arme.
+    if mortal or _batch_is_mortal(ctx, batch):
+        # Le client sait qu il alloue des blessures MORTELLES (cascade 06.02 : lot mortel, ou
+        # [DEVASTATING WOUNDS] d un lot d attaques), pas les blessures d une arme.
         allocation["damage_type"] = "mortal"
+    if batch.get("weapon_group_idx") is not None:  # get allowed : lot mortel sans arme
+        # Le panneau de lot du client nomme l arme du lot en cours (chantier 04.03).
+        wg = require_key(game_state, ctx.alloc_key)["weapon_groups"][batch["weapon_group_idx"]]
+        allocation["weapon_name"] = wg["weapon_name"]
+        allocation["weapon_names"] = list(wg.get("weapon_names", [wg["weapon_name"]]))  # get allowed
     return {
         "action": ctx.manual_alloc_action,
         "waiting_for_player": True,
@@ -12391,7 +12517,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         # L12 — jets FNP dans step.log (24.12) : saves/seuil+/tentatives.
         rec["fnpSaves"] = _fnp_attempts - dmg_dealt
         rec["fnpAttempts"] = _fnp_attempts
-        rec["fnpThreshold"] = _fnp_ths[0]
+        rec["fnpThreshold"] = min(_fnp_ths)  # 24.02 : l instance appliquee, le meilleur seuil
     if dmg_dealt <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
@@ -12480,6 +12606,47 @@ def _auto_declared_order(
     return [g["group_id"] for g in sorted(live_groups, key=_rank)]
 
 
+def _emit_attacks_not_made_log(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], gidx: int, g: Dict[str, Any], ctx: ManualAllocCtx,
+) -> None:
+    """Ligne de journal d un lot jamais joue (04.03, cible detruite avant son tour).
+
+    Porte le nombre d attaques DECLAREES et non faites (somme des `n_attacks` des intents du
+    lot) : c est la mesure « attaques perdues entre armes » que l analyzer tenait jusqu ici des
+    lignes `Save [NOT ALLOCATED]` d un lot jete sur une cible morte — lot qui n existe plus.
+    """
+    batch = next(
+        (b for b in alloc["batches"] if b.get("weapon_group_idx") == gidx), None  # get allowed
+    )
+    intents = batch["intents"] if batch is not None else []
+    attacks_lost = sum(int(require_key(require_key(r, "roll_spec"), "n_attacks")) for r in intents)
+    if attacks_lost <= 0:
+        return
+    tgt_unit = next((u for u in game_state["units"] if str(u["id"]) == str(g["target_sid"])), None)
+    append_action_log(game_state, {
+        "type": "attacks_not_made",
+        "message": (
+            f"Unit {g['attacker_squad_id']} did not attack Unit {g['target_sid']} with "
+            f"[{g['weapon_name']}] : target destroyed before this lot — {attacks_lost} attack(s) not made"
+        ),
+        "turn": game_state.get("turn", 0),  # get allowed
+        "phase": ctx.phase_label,
+        "unitId": str(g["attacker_squad_id"]),
+        "shooterId": str(g["attacker_squad_id"]),
+        "targetId": str(g["target_sid"]),
+        "targetUnitType": tgt_unit.get("unitType") if tgt_unit else None,  # get allowed
+        "weaponName": g["weapon_name"],
+        "player": g["player"],
+        "col": int(require_key(g, "attacker_col")),
+        "row": int(require_key(g, "attacker_row")),
+        "targetCol": int(require_key(g, "target_col")),
+        "targetRow": int(require_key(g, "target_row")),
+        "attacksNotMade": int(attacks_lost),
+        "timestamp": "server_time",
+        "is_ai_action": g["player"] == 1,
+    })
+
+
 def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Emet les logs (apres allocation complete) + nettoie l etat. Retourne le summary."""
     alloc = require_key(game_state, ctx.alloc_key)
@@ -12488,7 +12655,15 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
     if ctx.finalize_log_fn is not None:
         ctx.finalize_log_fn(game_state, alloc, ctx)
     else:
-        for g in alloc["weapon_groups"]:
+        for gidx, g in enumerate(alloc["weapon_groups"]):
+            if int(g["attacks"]) == 0 and not g["shots"]:
+                # 04.03 : lot jamais joue — sa cible etait detruite avant son tour (« Select one
+                # of the enemy units targeted » n en offre plus). Aucune attaque n est faite ;
+                # la ligne `attacks_not_made` le dit, pour que l analyzer mesure les attaques
+                # perdues ENTRE armes (metrique de qualite de l agent) sans que le moteur jette
+                # des des fantomes.
+                _emit_attacks_not_made_log(game_state, alloc, gidx, g, ctx)
+                continue
             _emit_squad_shoot_log(game_state, g, ctx)
     targets_meta = summary.get("targets_meta", {})  # get allowed
     summary["squads_wiped"] = [
@@ -12533,28 +12708,70 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
         "attacker_squad_id": attacker_squad_id,
         "primary_target_sid": primary_target_sid,
     }
-    # [HAZARDOUS] 24.15 : « Each time a unit is selected to shoot or selected to fight, AFTER
-    # THAT UNIT HAS RESOLVED ALL OF ITS ATTACKS, make a number of hazard rolls (06.03) for that
-    # unit equal to the number of [HAZARDOUS] weapons you selected in the Select Weapons step. »
-    # C est exactement ce point : l allocation de l activation vient de se terminer.
-    # Le porteur des blessures mortelles est le TIREUR/COMBATTANT lui-meme.
-    if hazardous_count > 0 and ctx.hazard_origin:
+    if ctx.mortal:
+        # Allocation de blessures mortelles (HAZARD_CTX) : aucun effet de fin d activation ici,
+        # c est l appelant (`_resume_after_hazard`) qui re-draine la file et reprend son origine.
+        return result
+    return post_attack_effects(game_state, ctx, {
+        "result": result,
+        "attacker_squad_id": attacker_squad_id,
+        "hazardous_count": hazardous_count,
+        "hazard_done": False,
+    })
+
+
+def post_attack_effects(
+    game_state: Dict[str, Any], ctx: ManualAllocCtx, state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Effets qui suivent la resolution de TOUTES les attaques d une activation, dans l ordre :
+
+    1. Deadly Demise §24.08 des modeles detruits par ces attaques (25 DESTROYED : « only
+       resolved […] after the attacking unit's attacks have been resolved ») et toute blessure
+       mortelle mise en file pendant l allocation ;
+    2. [HAZARDOUS] 24.15 : « after that unit has resolved all of its attacks, make a number of
+       hazard rolls (06.03) for that unit equal to the number of [HAZARDOUS] weapons you selected
+       in the Select Weapons step » — porteur : le tireur/combattant lui-meme ;
+    3. les explosions que ces jets de hasard ont pu causer.
+
+    Chaque etape peut rendre la main a un joueur HUMAIN (06.02, choix de figurine) : l etat de
+    reprise (`state`, avec `hazard_done`) est alors garde sous `PENDING_HAZARD_RESUME_RESULT_KEY`
+    et `hazard_origin` designe l origine ; `W40KEngine._resume_after_hazard` rappelle cette
+    fonction avec le meme `state` jusqu a ce qu elle rende le resultat de l activation.
+    """
+    attacker_squad_id = str(state["attacker_squad_id"])
+
+    def _stash() -> None:
+        game_state["hazard_origin"] = ctx.hazard_origin
+        game_state[PENDING_HAZARD_RESUME_RESULT_KEY] = state
+
+    wait = drain_mortal_wound_queue(game_state)
+    if wait is not None:
+        _stash()
+        return wait
+    hazardous_count = int(state["hazardous_count"])
+    if hazardous_count > 0 and ctx.hazard_origin and not state["hazard_done"]:
+        state["hazard_done"] = True
+        units_cache = require_key(game_state, "units_cache")
         auto = is_programmatic_owner(
-            game_state, require_key(require_key(game_state, "units_cache")[attacker_squad_id], "player")
-        ) if attacker_squad_id in require_key(game_state, "units_cache") else True
+            game_state, require_key(units_cache[attacker_squad_id], "player")
+        ) if attacker_squad_id in units_cache else True
         game_state["hazard_origin"] = ctx.hazard_origin
         roll_hazard_for_unit(
             attacker_squad_id, game_state, auto,
             n_rolls=hazardous_count, context_label="Hazardous",
         )
-        if not auto and PENDING_HAZARD_ALLOCATION_KEY in game_state:
-            # Joueur humain : l attribution des MW est un point de decision (05.03/06.02).
-            # La main lui est rendue ; la reprise post-allocation lit `hazard_origin`.
+        if PENDING_HAZARD_ALLOCATION_KEY in game_state:
+            # Joueur humain : l attribution des MW est un point de decision (06.02). Sans l etat
+            # garde, une premiere ecriture rendait « done » sans jamais terminer l activation.
+            _stash()
             return manual_allocation_waiting_payload(game_state, HAZARD_CTX)
-        game_state.pop("hazard_origin", None)
-    return result
-
-
+        wait = drain_mortal_wound_queue(game_state)
+        if wait is not None:
+            _stash()
+            return wait
+    game_state.pop("hazard_origin", None)
+    game_state.pop(PENDING_HAZARD_RESUME_RESULT_KEY, None)
+    return state["result"]
 def _apply_precision_allocation_override(
     game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any],
 ) -> None:
@@ -12634,29 +12851,398 @@ def _precision_group_is_visible(
     return False
 
 
+def _attacker_is_programmatic(game_state: Dict[str, Any], alloc: Dict[str, Any]) -> bool:
+    """L attaquant de cette allocation est-il pilote par la machine (gym, bot) ?
+
+    C est lui qui choisit l ordre des lots (04.03) et la politique de relance : un siege
+    programmatique prend l ordre de declaration et « echecs seulement », sans question.
+    """
+    sid = str(alloc["attacker_squad_id"])
+    units_cache = require_key(game_state, "units_cache")
+    if sid in units_cache:
+        return is_programmatic_owner(game_state, require_key(units_cache[sid], "player"))
+    # Attaquant entierement detruit pendant sa propre activation : plus personne a interroger.
+    return True
+
+
+def _batch_target_alive(game_state: Dict[str, Any], batch: Dict[str, Any]) -> bool:
+    return is_unit_alive(str(batch["target_sid"]), game_state)
+
+
+def _batch_is_rolled(batch: Dict[str, Any]) -> bool:
+    """Le lot a-t-il deja ses des ? Un lot sans la cle `rolled` est un lot construit AVEC son
+    pool (etat sauvegarde avant le chantier 04.03, ou lot mortel) : ses des sont faits."""
+    return bool(batch["rolled"]) if "rolled" in batch else True
+
+
+def _lot_candidates(game_state: Dict[str, Any], alloc: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Lots que l attaquant peut choisir MAINTENANT, et la cible verrouillee s il y en a une.
+
+    04.03 : « If there are any weapons targeting the same unit that have not yet been used to
+    make attacks, return to the Gather Attack Dice step. Otherwise, if there are any weapons
+    with unresolved attacks targeting a different unit, return to the Select Enemy Unit step. »
+    La cible du dernier lot jete reste donc imposee tant qu il lui reste des lots (et qu elle est
+    en vie) ; sinon toute cible vivante encore visee est ouverte.
+    """
+    batches = alloc["batches"]
+    cbi = int(alloc["current_batch_index"])
+    remaining = [b for b in batches[cbi:] if not _batch_is_rolled(b)]
+    locked: Optional[str] = None
+    for b in reversed(batches[:cbi]):
+        if b.get("weapon_group_idx") is not None:  # get allowed : lot mortel insere = pas un lot d arme
+            locked = str(b["target_sid"])
+            break
+    if locked is not None and not any(
+        str(b["target_sid"]) == locked and _batch_target_alive(game_state, b) for b in remaining
+    ):
+        locked = None
+    candidates = [
+        b for b in remaining
+        if _batch_target_alive(game_state, b) and (locked is None or str(b["target_sid"]) == locked)
+    ]
+    return candidates, locked
+
+
+def _lot_reroll_questions(batch: Dict[str, Any]) -> Dict[str, bool]:
+    """Union, sur les intents du lot, des questions de politique de relance qui ont un sens."""
+    from engine.phase_handlers.attack_sequence import reroll_policy_choices
+    hit = wound = False
+    for r in batch["intents"]:
+        spec = require_key(r, "roll_spec")
+        q = reroll_policy_choices(require_key(spec, "profile"), require_key(spec, "rerolls"))
+        hit = hit or q["hit"]
+        wound = wound or q["wound"]
+    return {"hit": hit, "wound": wound}
+
+
+def _lot_request_payload(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], ctx: ManualAllocCtx,
+    candidates: List[Dict[str, Any]], locked_target: Optional[str], *, policy_only: bool,
+) -> Dict[str, Any]:
+    """Payload d ATTENTE de l attaquant : choisir le prochain lot (et sa politique de relance).
+
+    `policy_only` : le lot est deja impose (un seul candidat) et seule la politique de relance
+    est demandee — le client repond par la meme action `squad_<phase>_select_lot` avec le
+    `lot_id` fourni et `hitReroll` / `woundReroll`.
+    """
+    lots = []
+    for b in candidates:
+        g = alloc["weapon_groups"][b["weapon_group_idx"]]
+        lots.append({
+            "lot_id": int(b["lot_id"]),
+            "target_unit_id": str(b["target_sid"]),
+            "weapon_name": g["weapon_name"],
+            "weapon_code": require_key(g, "weapon").get("code"),  # get allowed : profil sans code = affichage seul
+            "n_models": len(b["intents"]),
+            "n_attacks": sum(int(require_key(require_key(r, "roll_spec"), "n_attacks")) for r in b["intents"]),
+            "reroll_choices": _lot_reroll_questions(b),
+        })
+    return {
+        "action": f"squad_{ctx.phase_label}_select_lot",
+        "waiting_for_player": True,
+        "phase": ctx.phase_label,
+        "lot_request": {
+            "attacker_unit_id": str(alloc["attacker_squad_id"]),
+            "locked_target_unit_id": locked_target,
+            "policy_only": bool(policy_only),
+            "lots": lots,
+        },
+    }
+
+
+def pending_lot_payload(game_state: Dict[str, Any], alloc: Dict[str, Any], ctx: ManualAllocCtx) -> Optional[Dict[str, Any]]:
+    """Payload d attente de l attaquant sur le lot courant (read-only), ou None si la machine
+    n attend rien de lui (lot deja jete, ou choix automatique)."""
+    batches = alloc["batches"]
+    cbi = int(alloc["current_batch_index"])
+    if cbi >= len(batches) or _batch_is_rolled(batches[cbi]):
+        return None
+    if _attacker_is_programmatic(game_state, alloc):
+        return None
+    candidates, locked = _lot_candidates(game_state, alloc)
+    if not candidates:
+        return None
+    if len(candidates) >= 2:
+        return _lot_request_payload(game_state, alloc, ctx, candidates, locked, policy_only=False)
+    only = candidates[0]
+    q = _lot_reroll_questions(only)
+    if only["reroll_policy"] is None and (q["hit"] or q["wound"]):
+        return _lot_request_payload(game_state, alloc, ctx, [only], locked, policy_only=True)
+    return None
+
+
+def select_attack_lot(
+    game_state: Dict[str, Any], ctx: ManualAllocCtx, lot_id: int,
+    *, hit_non_crit: Optional[bool] = None, wound_non_crit: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Reponse de l attaquant a `squad_<phase>_select_lot` : le lot `lot_id` est le prochain.
+
+    Valide que le lot est un candidat (04.03 : cible verrouillee respectee, cible vivante) —
+    sinon erreur explicite, aucune mutation. La politique de relance est facultative ; si la
+    question se pose pour ce lot et qu elle n est pas donnee, la machine la redemande.
+    """
+    alloc = require_key(game_state, ctx.alloc_key)
+    candidates, _locked = _lot_candidates(game_state, alloc)
+    if not any(int(b["lot_id"]) == int(lot_id) for b in candidates):
+        raise ValueError(
+            f"select_attack_lot ({ctx.phase_label}) : lot {lot_id!r} n est pas selectionnable "
+            f"(candidats : {[int(b['lot_id']) for b in candidates]})"
+        )
+    choice: Dict[str, Any] = {"lot_id": int(lot_id)}
+    if hit_non_crit is not None:
+        choice["hit_non_crit"] = bool(hit_non_crit)
+    if wound_non_crit is not None:
+        choice["wound_non_crit"] = bool(wound_non_crit)
+    alloc["lot_choice"] = choice
+    return _manual_allocation_step(game_state, ctx)
+
+
+def roll_prepared_intent(
+    game_state: Dict[str, Any], prepared: Dict[str, Any], policy: Dict[str, bool],
+) -> Dict[str, Any]:
+    """Jets d UN intent prepare (`roll_spec` pose par le roller de tir ou de melee) : touche ->
+    blessure -> sauvegarde BRUTE, puis marquage des capacites sur les records. Appele au debut
+    du LOT (04.03), avec la politique de relance choisie par l attaquant pour ce lot.
+
+    Rend ``{"shot_records", "pending_wounds", "counts", "pending_mortal_wounds"}`` — la forme que
+    `_build_manual_allocation` consommait quand les deux rollers jetaient eux-memes.
+    """
+    import random
+    from dataclasses import replace as _dc_replace
+    from engine.phase_handlers.attack_sequence import roll_attack_pool
+
+    spec = require_key(prepared, "roll_spec")
+    rerolls = _dc_replace(
+        require_key(spec, "rerolls"),
+        hit_non_crit=bool(policy.get("hit", False)),  # get allowed : politique par defaut
+        wound_non_crit=bool(policy.get("wound", False)),  # get allowed
+    )
+    fail_below = require_key(spec, "hit_fail_below")
+    rolled = roll_attack_pool(
+        n_attacks=int(require_key(spec, "n_attacks")),
+        hit_target=int(require_key(spec, "hit_target")),
+        wound_target=int(require_key(spec, "wound_target")),
+        save_threshold_value=int(require_key(spec, "save_threshold_value")),
+        profile=require_key(spec, "profile"),
+        rerolls=rerolls,
+        roll_d6=lambda: random.randint(1, 6),
+        **({} if fail_below is None else {"hit_fail_below": int(fail_below)}),
+    )
+    records = rolled["shot_records"]
+    attacker_unit = require_unit_by_id(game_state, str(require_key(spec, "attacker_unit_id")))
+    # Noms des ABILITES qui ont ouvert chaque relance — memes helpers tir et melee.
+    stamp_reroll_abilities(
+        records, attacker_unit,
+        reroll_1_towound=bool(require_key(spec, "reroll_1_towound")),
+        reroll_towound_on_objective=bool(require_key(spec, "reroll_towound_on_objective")),
+    )
+    stamp_wound_bonus_ability(records, require_key(spec, "oath_wound_bonus"))
+    stamp_roll_modifier_abilities(
+        records,
+        hit_bonus=require_key(spec, "hit_bonus_ability"),
+        hit_malus=require_key(spec, "hit_malus_ability"),
+        wound_bonus=require_key(spec, "wound_bonus_ability"),
+    )
+    target_sid = str(require_key(prepared, "target_sid"))
+    if require_key(spec, "reroll_save1"):
+        # L27 — nom de la capacite de relance de sauvegarde, COTE CIBLE ; seulement si elle a joue.
+        target_unit = require_unit_by_id(game_state, target_sid)
+        _save_ability_name = _get_source_unit_rule_display_name_for_effect(target_unit, "reroll_1_save_fight")
+        if _save_ability_name:
+            for _rec in records:
+                if _rec.get("saveRollInitial") is not None:  # get allowed : relance effective
+                    _rec["saveAbility"] = _save_ability_name
+    if require_key(spec, "waaagh_melee"):
+        for _rec in records:
+            _rec["waaaghMelee"] = True
+    # Hold Still and Say Aargh : D6 blessures mortelles PAR blessure critique, jetees ici, dans
+    # l ordre de la sequence, appliquees a la fermeture du lot (06.02).
+    pending_mw: Optional[Dict[str, Any]] = None
+    hold_still = require_key(spec, "hold_still")
+    if hold_still is not None:
+        dice = [random.randint(1, 6) for _rec in records if _rec.get("criticalWound")]  # get allowed
+        if dice:
+            pending_mw = {"ability": require_key(hold_still, "ability"), "dice": dice}
+    return {
+        "shot_records": records,
+        "pending_wounds": rolled["pending_wounds"],
+        "counts": rolled["counts"],
+        "pending_mortal_wounds": pending_mw,
+    }
+
+
+def _roll_batch(game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any], ctx: ManualAllocCtx) -> None:
+    """Jette les des du lot (tous ses intents), construit son pool trie (05.04) et ses
+    blessures mortelles en attente (06.02). Un seul passage par lot."""
+    models_cache = require_key(game_state, "models_cache")
+    summary = alloc["summary"]
+    g = alloc["weapon_groups"][batch["weapon_group_idx"]]
+    policy = batch["reroll_policy"] or {"hit": False, "wound": False}
+    pool: List[Dict[str, Any]] = []
+    mw_group: Optional[Dict[str, Any]] = None
+    for r in batch["intents"]:
+        attacker_mid = str(r["attacker_mid"])
+        if attacker_mid not in models_cache:
+            continue  # figurine retiree depuis la declaration (coherence 03.03) : ses attaques sont perdues
+        rolled = roll_prepared_intent(game_state, r, policy)
+        counts = rolled["counts"]
+        summary["attacks_made"] += counts["attacks"]
+        summary["hits"] += counts["hits"]
+        summary["wounds"] += counts["wounds"]
+        g["attacks"] += counts["attacks"]
+        g["shots"].extend(rolled["shot_records"])
+        for pw in rolled["pending_wounds"]:
+            pool.append({
+                "save_roll": pw["save_roll"],
+                "rec": pw["rec"], "attacker_mid": attacker_mid,
+                # DEVASTATING_WOUNDS : propage le flag crit-sans-save jusqu a l allocation.
+                "devastating": bool(pw.get("devastating")),
+            })
+        # Blessures MORTELLES dues par cet intent (06.02), accumulees sur le lot : elles seront
+        # infligees APRES ses blessures normales (« resolve all of the normal damage first »).
+        _mw_intent = rolled["pending_mortal_wounds"]
+        if _mw_intent is not None:
+            if mw_group is None:
+                mw_group = {"ability": require_key(_mw_intent, "ability"), "dice": []}
+            elif mw_group["ability"] != _mw_intent["ability"]:
+                raise ValueError(
+                    "deux capacites de blessures mortelles differentes sur le meme profil "
+                    f"d arme : {mw_group['ability']!r} et {_mw_intent['ability']!r} — la ligne "
+                    "de journal ne peut en nommer qu une"
+                )
+            mw_group["dice"].extend(require_key(_mw_intent, "dice"))
+    # Regle 05.04 (INFLICT DAMAGE) : du save_roll le plus bas au plus haut (tri stable, l ordre
+    # d attaque departage les egalites). DEVASTATING_WOUNDS (24.10) : les blessures MORTELLES
+    # (crit sans save) sont infligees « after resolving any normal damage » -> triees en fin de
+    # lot (cle devastating False<True) tout en gardant l ordre save croissant par categorie.
+    batch["pool"] = sorted(pool, key=lambda pw: (bool(pw.get("devastating")), pw.get("save_roll") or 0))
+    batch["pool_index"] = 0
+    batch["pending_mortal_wounds"] = mw_group
+    batch["rolled"] = True
+    # Ordre REEL de resolution des lots (04.03) : c est ce que l attaquant a choisi, lisible
+    # par les tests et le journal — l ordre de `weapon_groups` est celui de la declaration.
+    summary.setdefault("lot_order", []).append(g["weapon_name"])
+
+
+def _precision_mortal_wounds_to_character(game_state: Dict[str, Any]) -> bool:
+    """Clé `game_rules.precision_mortal_wounds_to_character` (decision utilisateur du
+    2026-09-18, en attente de confirmation GW) : `true` = les blessures mortelles d une arme
+    [PRECISION] dont l override 24.28 a joue vont au groupe CHARACTER courant ; `false` (lecture
+    litterale de 06.02) = elles suivent la cascade 06.02 comme toute blessure mortelle."""
+    rules = require_key(require_key(game_state, "config"), "game_rules")
+    return bool(require_key(rules, "precision_mortal_wounds_to_character"))
+
+
+def _defender_is_programmatic(game_state: Dict[str, Any], ctx: ManualAllocCtx, target_sid: str) -> bool:
+    return ctx.auto_decider is not None and ctx.auto_decider(game_state, target_sid)
+
+
+def _item_uses_mortal_cascade(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any],
+    pw: Optional[Dict[str, Any]], ctx: ManualAllocCtx,
+) -> bool:
+    """La prochaine blessure du lot se designe-t-elle par la cascade 06.02 (toute l unite) ?
+
+    Oui pour un lot mortel et pour une blessure [DEVASTATING WOUNDS] — sauf, pour cette
+    derniere, quand l override [PRECISION] 24.28 a joue sur le lot ET que la cle
+    `precision_mortal_wounds_to_character` la garde au groupe CHARACTER courant."""
+    if pw is None:
+        return False
+    if not (_batch_is_mortal(ctx, batch) or bool(pw.get("devastating"))):  # get allowed
+        return False
+    wg = (
+        alloc["weapon_groups"][batch["weapon_group_idx"]]
+        if batch.get("weapon_group_idx") is not None else None  # get allowed : lot mortel
+    )
+    keep_current_group = (
+        wg is not None and bool(wg.get("precision_applied"))  # get allowed
+        and _precision_mortal_wounds_to_character(game_state)
+    )
+    return not keep_current_group
+
+
 def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> Dict[str, Any]:
     """Machine a etats : avance jusqu au prochain point de decision.
 
     Resout LOT PAR LOT (cible x profil d arme, regle 04.03). Pour chaque lot :
+    0) l ATTAQUANT choisit le lot (04.03 : cible verrouillee tant qu il lui reste des lots) et
+       sa politique de relance — question posee seulement s il y a un vrai choix ; puis les des
+       du lot sont jetes (`_roll_batch`) ;
     1) cree les groupes d allocation (05.03) sur l etat COURANT de la cible (les blessures
        infligees par les lots precedents sont donc prises en compte) ;
     2) exige la declaration de l ordre des groupes (>=2 groupes vivants) ;
-    3) resout les blessures du lot (pool deja trie save croissant, 05.04) groupe par groupe :
-       une fig blessee est forcee, sinon waiting (choix libre dans le groupe courant).
+    3) resout les blessures du lot (pool trie save croissant, 05.04) groupe par groupe :
+       le DEFENSEUR ne repond que s il a un choix (plusieurs figurines intactes, ou plusieurs
+       figurines entamees — « must be a model that has lost one or more wounds if possible ») ;
+       une seule candidate est allouee d office. Les blessures MORTELLES (lot mortel, ou
+       [DEVASTATING WOUNDS] d un lot d attaques) suivent la cascade 06.02 sur toute l unite.
     Passe au lot suivant quand son pool est epuise ou la cible entierement detruite.
     Termine par _finalize_manual_allocation."""
     alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
     while alloc["current_batch_index"] < len(alloc["batches"]):
-        batch = alloc["batches"][alloc["current_batch_index"]]
+        cbi = int(alloc["current_batch_index"])
+        batch = alloc["batches"][cbi]
+        # 0. Lot non jete : choix de l attaquant, puis jets.
+        if not _batch_is_rolled(batch):
+            if not _batch_target_alive(game_state, batch):
+                # 04.03 : plus d unite a attaquer — les attaques de ce profil ne sont pas faites.
+                batch["rolled"] = True
+                batch["wasted"] = True
+                alloc["current_batch_index"] += 1
+                continue
+            candidates, locked = _lot_candidates(game_state, alloc)
+            if not candidates:
+                # Toutes les cibles restantes sont mortes : rien a jeter, on les solde.
+                for b in alloc["batches"][cbi:]:
+                    if not _batch_is_rolled(b):
+                        b["rolled"] = True
+                        b["wasted"] = True
+                alloc["current_batch_index"] = len(alloc["batches"])
+                break
+            programmatic = _attacker_is_programmatic(game_state, alloc)
+            choice = alloc.get("lot_choice")  # get allowed : None hors reponse
+            chosen: Optional[Dict[str, Any]] = None
+            if choice is not None:
+                alloc["lot_choice"] = None
+                chosen = next((b for b in candidates if int(b["lot_id"]) == int(choice["lot_id"])), None)
+                if chosen is None:
+                    raise ValueError(
+                        f"lot {choice['lot_id']!r} n est plus selectionnable "
+                        f"(candidats : {[int(b['lot_id']) for b in candidates]})"
+                    )
+                if "hit_non_crit" in choice or "wound_non_crit" in choice:
+                    chosen["reroll_policy"] = {
+                        "hit": bool(choice.get("hit_non_crit", False)),  # get allowed
+                        "wound": bool(choice.get("wound_non_crit", False)),  # get allowed
+                    }
+            elif programmatic or len(candidates) == 1:
+                chosen = candidates[0]
+            else:
+                return _lot_request_payload(game_state, alloc, ctx, candidates, locked, policy_only=False)
+            # Le lot choisi passe en tete des lots restants : la machine reste sequentielle.
+            idx = alloc["batches"].index(chosen)
+            if idx != cbi:
+                alloc["batches"].pop(idx)
+                alloc["batches"].insert(cbi, chosen)
+            if chosen["reroll_policy"] is None:
+                q = _lot_reroll_questions(chosen)
+                if (q["hit"] or q["wound"]) and not programmatic:
+                    return _lot_request_payload(game_state, alloc, ctx, [chosen], locked, policy_only=True)
+                chosen["reroll_policy"] = {"hit": False, "wound": False}
+            _roll_batch(game_state, alloc, chosen, ctx)
+            continue
         # 1. Creation des groupes d allocation au debut du lot (etat courant de la cible).
         if batch["alloc_groups"] is None:
             batch["alloc_groups"] = _build_alloc_groups(game_state, batch["target_sid"])
+        # Lot MORTEL (hazard 06.03, capacite 06.02) : pas de groupes ni d ordre a declarer — la
+        # cascade 06.02 designe la figurine ; les etapes 2 et 2bis ne concernent que les attaques.
+        is_mortal_batch = _batch_is_mortal(ctx, batch)
         # 2. Declaration de l ordre des groupes du lot si necessaire (apres les jets).
-        if batch["declared_order"] is None:
+        if not is_mortal_batch and batch["declared_order"] is None:
             live_groups = [g for g in batch["alloc_groups"] if _group_alive(game_state, g)]
             if len(live_groups) >= 2:
-                if ctx.auto_decider is not None and ctx.auto_decider(game_state, batch["target_sid"]):
+                if _defender_is_programmatic(game_state, ctx, batch["target_sid"]):
                     batch["declared_order"] = _auto_declared_order(game_state, live_groups)
                     batch["current_group_index"] = 0
                 else:
@@ -12667,17 +13253,53 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
         # 2bis. [PRECISION] 24.28 : l attaquant peut imposer un groupe CHARACTER visible comme
         # groupe courant, une seule fois par lot (l override est idempotent : il ne s applique
         # qu au moment ou l ordre vient d etre fixe).
-        if not batch.get("precision_applied"):  # get allowed (cle posee a la 1re application)
+        if not is_mortal_batch and not batch.get("precision_applied"):  # get allowed (cle posee a la 1re application)
             batch["precision_applied"] = True
             _apply_precision_allocation_override(game_state, alloc, batch)
-        # 3. Allocation groupe par groupe (du lot).
+        # 3. Allocation blessure par blessure (du lot).
         advanced_batch = False
+        auto_defender = _defender_is_programmatic(game_state, ctx, batch["target_sid"])
+        target_sid = str(batch["target_sid"])
         while True:
             if batch["pool_index"] >= len(batch["pool"]):
                 _apply_batch_mortal_wounds(game_state, alloc, batch, ctx)
                 alloc["current_batch_index"] += 1
                 advanced_batch = True
                 break
+            pw = batch["pool"][batch["pool_index"]]
+            if _item_uses_mortal_cascade(game_state, alloc, batch, pw, ctx):
+                # Cascade 06.02 sur TOUTE l unite : non-CHARACTER entame -> non-CHARACTER ->
+                # CHARACTER entame -> CHARACTER. Le choix n existe qu entre egaux.
+                cands = select_eligible_models(game_state, target_sid)
+                if not cands:
+                    _mark_manual_overkill_wasted(batch)  # cible wipe : blessures restantes perdues
+                    _apply_batch_mortal_wounds(game_state, alloc, batch, ctx)
+                    alloc["current_batch_index"] += 1
+                    advanced_batch = True
+                    break
+                cur = batch["current_model_id"]
+                if cur is None or cur not in cands:
+                    if len(cands) == 1:
+                        batch["current_model_id"] = cands[0]
+                    elif auto_defender:
+                        pick = _gym_allocation_pick(game_state, batch, cands, ctx)
+                        if pick is None:
+                            return {"waiting_for_player": True, "action": "allocation_model_pending"}
+                        batch["current_model_id"] = pick
+                    else:
+                        return _manual_waiting_payload(game_state, batch, cands, ctx, mortal=True)
+                # Lot MORTEL de capacite (06.02) : 1 PV par blessure, aucune sauvegarde, FNP
+                # « mortal » — jamais le profil d arme du ctx. Sinon le resolveur du contexte
+                # (hazard : `_resolve_one_hazard_wound` ; attaque [DEVASTATING] : degats D sur
+                # UNE figurine, exces perdu — 24.10).
+                _mortal_details = batch.get("mortal_details")  # get allowed : absent sur un lot d attaques
+                if _mortal_details is not None:
+                    _resolve_one_mortal_wound(game_state, alloc, batch, _mortal_details)
+                else:
+                    (ctx.resolve_wound_fn or _resolve_one_manual_wound)(game_state, alloc, batch, ctx)
+                continue
+            # Blessure d ATTAQUE (ou mortelle gardee au groupe courant par la cle [PRECISION]) :
+            # groupes 05.03 dans l ordre declare, figurine choisie dans le groupe courant (05.04).
             grp = _current_live_group(game_state, batch)
             if grp is None:
                 _mark_manual_overkill_wasted(batch)  # cible wipe : tirs restants perdus
@@ -12692,40 +13314,48 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                     m for m in alive_grp
                     if int(models_cache[m]["HP_CUR"]) < int(models_cache[m]["HP_MAX"])
                 ]
-                if wounded:
-                    batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
-                elif ctx.auto_decider is not None and ctx.auto_decider(game_state, batch["target_sid"]):
-                    # get allowed : absent = False ; ≥2 candidats requis par le mécanisme décision
-                    # En bot-eval (BotControlledEnv), `controlled_player` identifie l'agent entraîné.
-                    # La décision n'est armée que si le défenseur EST cet agent — pas quand c'est
-                    # le bot. En self-play (pas de BotControlledEnv), controlled_player est absent :
-                    # on arme pour les deux sides (comportement P3-4 original).
-                    _def_player = str(require_key(
-                        require_key(game_state, "units_cache")[str(batch["target_sid"])], "player"))
-                    _controlled = game_state.get("controlled_player")
-                    _is_agent_defending = (
-                        _controlled is None or int(_def_player) == int(_controlled)
-                    )
-                    if (game_state.get("gym_training_mode") and _is_agent_defending
-                            and len(alive_grp) >= 2
-                            and not game_state.get("no_gym_allocation_model")):
-                        _arm_allocation_model_decision(
-                            game_state, batch["target_sid"], alive_grp, ctx)
-                        return {"waiting_for_player": True, "action": "allocation_model_pending"}
-                    batch["current_model_id"] = _select_allocation_model(
-                        game_state, batch["target_sid"], alive_grp)
+                # 05.04 : « this must be a model that has lost one or more wounds if possible » —
+                # les candidates sont les entamees s il y en a, sinon tout le groupe ; le
+                # defenseur ne repond que s il en reste plus d une.
+                cands = wounded if wounded else alive_grp
+                if len(cands) == 1:
+                    batch["current_model_id"] = cands[0]
+                elif auto_defender:
+                    if wounded:
+                        batch["current_model_id"] = wounded[0]
+                    else:
+                        pick = _gym_allocation_pick(game_state, batch, cands, ctx)
+                        if pick is None:
+                            return {"waiting_for_player": True, "action": "allocation_model_pending"}
+                        batch["current_model_id"] = pick
                 else:
-                    return _manual_waiting_payload(game_state, batch, alive_grp, ctx)  # choix libre
-            # Lot MORTEL de capacite (06.02, defenseur humain) : 1 PV par blessure, aucune
-            # sauvegarde, FNP « mortal » — jamais le profil d arme du ctx.
-            _mortal_details = batch.get("mortal_details")  # get allowed : absent sur un lot d attaques
-            if _mortal_details is not None:
-                _resolve_one_mortal_wound(game_state, alloc, batch, _mortal_details)
-            else:
-                (ctx.resolve_wound_fn or _resolve_one_manual_wound)(game_state, alloc, batch, ctx)
+                    return _manual_waiting_payload(game_state, batch, cands, ctx)  # choix libre
+            (ctx.resolve_wound_fn or _resolve_one_manual_wound)(game_state, alloc, batch, ctx)
         if not advanced_batch:
             break
     return _finalize_manual_allocation(game_state, ctx)
+
+
+def _gym_allocation_pick(
+    game_state: Dict[str, Any], batch: Dict[str, Any], cands: List[str], ctx: ManualAllocCtx,
+) -> Optional[str]:
+    """Choix de figurine d un defenseur PROGRAMMATIQUE parmi `cands` (>= 2).
+
+    En entrainement, si le defenseur EST l agent, la decision `allocation_model` lui est armee
+    et `None` est rendu (la machine rend la main au gym) ; sinon `_select_allocation_model`
+    tranche (bot, self-play cote adverse, PvE). En bot-eval (BotControlledEnv), `controlled_player`
+    identifie l agent entraine ; absent (self-play), les deux sieges sont armes (P3-4).
+    """
+    target_sid = str(batch["target_sid"])
+    _def_player = str(require_key(require_key(game_state, "units_cache")[target_sid], "player"))
+    _controlled = game_state.get("controlled_player")  # get allowed : absent en self-play
+    _is_agent_defending = _controlled is None or int(_def_player) == int(_controlled)
+    if (game_state.get("gym_training_mode") and _is_agent_defending  # get allowed
+            and len(cands) >= 2
+            and not game_state.get("no_gym_allocation_model")):  # get allowed
+        _arm_allocation_model_decision(game_state, target_sid, list(cands), ctx)
+        return None
+    return _select_allocation_model(game_state, target_sid, list(cands))
 
 
 def _apply_batch_mortal_wounds(
@@ -12890,6 +13520,9 @@ def _new_mortal_batch(
         "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
         "pending_mortal_wounds": None,
         "mortal_details": mortal_details,
+        # Un lot mortel n a pas de des d attaque : il est « jete » des sa creation, et n est
+        # jamais un candidat au choix de lot de l attaquant (04.03).
+        "rolled": True, "reroll_policy": None, "intents": [], "lot_id": -1,
     }
 
 
@@ -13014,20 +13647,17 @@ def _build_manual_allocation(
     targets_meta: Dict[str, Dict[str, Any]] = {}
     weapon_groups: List[Dict[str, Any]] = []
     group_index_by_key: Dict[tuple, int] = {}
-    batch_pool_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
-    mw_pending_by_gidx: Dict[int, Dict[str, Any]] = {}
 
+    intents_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
     for intent in intents:
+        # PROFIL de l attaque seulement : aucun de n est jete ici (04.03, option B) — les jets
+        # d un lot ont lieu au debut de ce lot, dans `_roll_batch`.
         r = roll_intent_fn(game_state, intent, targets_meta)
         if r is None:
             continue
         attacker_mid = r["attacker_mid"]
         attacker = r["attacker"]
         target_sid = r["target_sid"]
-        counts = r["counts"]
-        summary["attacks_made"] += counts["attacks"]
-        summary["hits"] += counts["hits"]
-        summary["wounds"] += counts["wounds"]
         _exp_by_target = summary["expected_damage_by_target"]
         _exp_by_target[target_sid] = _exp_by_target.get(target_sid, 0.0) + float(require_key(r, "expected_damage"))
 
@@ -13113,6 +13743,8 @@ def _build_manual_allocation(
                 # toutes deux figees pour l activation — constante sur le groupe comme `bs`,
                 # dont elle explique justement une part.
                 "point_blank_malus": bool(require_key(r, "point_blank_malus")),
+                # 17.03 : constant sur le groupe (cible et arme dans `gkey`, tireur = escouade).
+                "engaged_target_malus": bool(require_key(r, "engaged_target_malus")),
                 # Regles additives ayant joue ([RAPID FIRE]/[BLAST]/[CLEAVE]) -> leur X declare.
                 # Constant sur le groupe par CONSTRUCTION comme tous ses voisins : les deux X qui
                 # dependent de la figurine sont dans `gkey`, celui de [BLAST] ne depend que de la
@@ -13171,50 +13803,27 @@ def _build_manual_allocation(
         if weapon_name not in g["weapon_names"]:
             g["weapon_names"].append(weapon_name)
             g["weapon_name"] = " / ".join(g["weapon_names"])
-        g["attacks"] += counts["attacks"]
-        g["shots"].extend(r["shot_records"])
         if attacker_mid not in g["shooter_mids"]:
             g["shooter_mids"].append(attacker_mid)
+        # L intent PREPARE (profil + `roll_spec`), sans le dict de la figurine attaquante : le
+        # lot le garde dans game_state jusqu a ses jets, et `attacker_mid` suffit pour les jets.
+        _prepared = {k: v for k, v in r.items() if k != "attacker"}
+        intents_by_gidx.setdefault(gidx, []).append(_prepared)
 
-        # Blessures MORTELLES dues par cet intent (06.02), accumulees sur le meme profil que
-        # les blessures normales : elles seront infligees APRES elles, a la fermeture du lot
-        # (« resolve all of the normal damage first, then resolve all of the mortal wounds »).
-        # `require_key` et non `.get` : les deux rollers ecrivent la cle, un producteur qui
-        # l oublierait leve au lieu de valoir « aucune blessure mortelle ».
-        _mw_intent = require_key(r, "pending_mortal_wounds")
-        if _mw_intent is not None:
-            _mw_group = mw_pending_by_gidx.setdefault(
-                gidx, {"ability": require_key(_mw_intent, "ability"), "dice": []}
-            )
-            if _mw_group["ability"] != _mw_intent["ability"]:
-                raise ValueError(
-                    "deux capacites de blessures mortelles differentes sur le meme profil "
-                    f"d arme (gidx={gidx}) : {_mw_group['ability']!r} et "
-                    f"{_mw_intent['ability']!r} — la ligne de journal ne peut en nommer qu une"
-                )
-            _mw_group["dice"].extend(require_key(_mw_intent, "dice"))
-
-        # Blessures accumulees PAR PROFIL d arme (gidx) : chaque profil = un lot resolu
-        # independamment (regle 04.03). Triees save croissant a la construction du lot.
-        if gidx not in batch_pool_by_gidx:
-            batch_pool_by_gidx[gidx] = []
-        for pw in r["pending_wounds"]:
-            batch_pool_by_gidx[gidx].append({
-                "save_roll": pw["save_roll"],
-                "rec": pw["rec"], "attacker_mid": attacker_mid,
-                # DEVASTATING_WOUNDS : propage le flag crit-sans-save jusqu a l allocation.
-                "devastating": bool(pw.get("devastating")),
-            })
-
-        # decrement attacks_left (tir : 1 par intent ; combat : nb d attaques de l intent)
+        # decrement attacks_left (tir : 1 par intent ; combat : nb d attaques de l intent). Les
+        # attaques sont SELECTIONNEES ici (04.01), qu elles soient jetees plus tard ou perdues
+        # sur une cible detruite entre-temps.
         if attacker_mid in models_cache:
             al = int(models_cache[attacker_mid].get(ctx.attacks_left_attr, 0))  # get allowed
-            dec = int(counts["attacks"]) if ctx.decrement_by_attacks else 1
+            dec = int(require_key(require_key(r, "roll_spec"), "n_attacks")) if ctx.decrement_by_attacks else 1
             models_cache[attacker_mid][ctx.attacks_left_attr] = max(0, al - dec)
 
-    # Construction des lots (cible x profil d arme, regle 04.03) : tous les profils d une
-    # meme cible sont resolus consecutivement (ordre de premiere apparition), avant la
-    # cible suivante. Un lot par profil ayant au moins une blessure a resoudre.
+    # Construction des lots (cible x profil d arme, regle 04.03), NON JETES : l ordre de la liste
+    # est l ordre de declaration (cibles par premiere apparition, puis profils), qui est l ordre
+    # d un attaquant programmatique. Un attaquant humain choisit lot par lot, dans
+    # `_attacker_lot_selection`, sous la contrainte 04.03 (toutes les armes d une cible avant la
+    # suivante) ; le lot choisi est deplace en tete des lots restants. Un lot par profil, meme
+    # s il ne blessera pas : on ne le sait qu apres ses jets.
     target_order: List[str] = []
     for g in weapon_groups:
         if g["target_sid"] not in target_order:
@@ -13224,28 +13833,24 @@ def _build_manual_allocation(
         for gidx, g in enumerate(weapon_groups):
             if g["target_sid"] != tsid:
                 continue
-            pool = batch_pool_by_gidx.get(gidx, [])  # get allowed
-            if not pool:
-                continue  # ce profil n a inflige aucune blessure -> aucun lot a resoudre
-            # 06.02 : les blessures mortelles du profil voyagent AVEC son lot. Un crit est
-            # toujours une blessure, donc un profil qui en produit a forcement un pool non
-            # vide — aucune blessure mortelle ne peut se perdre sur le `continue` ci-dessus.
-            # Regle 05.04 (INFLICT DAMAGE) : du save_roll le plus bas au plus haut (tri
-            # stable, l ordre d attaque departage les egalites). DEVASTATING_WOUNDS (24.10) :
-            # les blessures MORTELLES (crit sans save) sont infligees « after resolving any
-            # normal damage » -> triees en fin de lot (cle devastating False<True) tout en
-            # gardant l ordre save croissant a l interieur de chaque categorie.
-            pool_sorted = sorted(pool, key=lambda pw: (bool(pw.get("devastating")), pw.get("save_roll") or 0))
             batches.append({
+                # Identite STABLE du lot (le client la renvoie dans `select_lot`) : l index de
+                # construction, insensible aux deplacements ulterieurs dans la liste.
+                "lot_id": len(batches),
                 "target_sid": tsid,
                 "weapon_group_idx": gidx,
                 "defender_player": int(targets_meta[tsid]["player"]),
+                "intents": intents_by_gidx.get(gidx, []),  # get allowed : profil sans intent = impossible
+                "rolled": False,
+                # Politique de relance de l attaquant pour ce lot (`RerollProfile.*_non_crit`) :
+                # None = pas encore decidee ; posee par `select_lot` ou par defaut (echecs seuls).
+                "reroll_policy": None,
                 "alloc_groups": None,  # cree au debut du lot (etat courant de la cible)
                 "declared_order": None, "current_group_index": 0,
-                "current_model_id": None, "pool": pool_sorted, "pool_index": 0,
+                "current_model_id": None, "pool": [], "pool_index": 0,
                 # 06.02 : infligees a la FERMETURE du lot, apres tous ses degats normaux.
-                # `None` quand aucune capacite n en produit sur ce profil.
-                "pending_mortal_wounds": mw_pending_by_gidx.get(gidx),  # get allowed
+                # Renseigne par les jets du lot ; `None` quand aucune capacite n en produit.
+                "pending_mortal_wounds": None,
             })
 
     summary["targets_meta"] = targets_meta
@@ -13254,6 +13859,9 @@ def _build_manual_allocation(
         "weapon_groups": weapon_groups,
         "batches": batches,
         "current_batch_index": 0,
+        # Reponse de l attaquant a `select_lot` (lot + politique de relance), consommee par
+        # `_attacker_lot_selection` au pas suivant ; None hors attente.
+        "lot_choice": None,
         "summary": summary,
         # [HAZARDOUS] 24.15 : « make a number of hazard rolls equal to the number of
         # [HAZARDOUS] weapons you SELECTED IN THE SELECT WEAPONS STEP ». Le compte se fait
@@ -13295,7 +13903,7 @@ def _finalize_hazard_alloc_log(
     donc ecrire ici dans le meme dict met a jour la ligne existante — il ne faut SURTOUT PAS
     la re-emettre (elle apparaitrait deux fois)."""
     payload = alloc["hazard_log_payload"]
-    payload["hazardDetails"] = alloc["hazard_details"]
+    payload[require_key(alloc, "hazard_details_key")] = alloc["hazard_details"]
 
 
 HAZARD_CTX = ManualAllocCtx(
@@ -13314,7 +13922,8 @@ HAZARD_CTX = ManualAllocCtx(
 
 
 def build_manual_hazard_allocation(
-    game_state: Dict[str, Any], squad_id: str, n_wounds: int, log_payload: Dict[str, Any]
+    game_state: Dict[str, Any], squad_id: str, n_wounds: int, log_payload: Dict[str, Any],
+    *, details_key: str = "hazardDetails",
 ) -> Dict[str, Any]:
     """Allocation manuelle de blessures mortelles HORS lot d attaques, defenseur humain :
     Desperate Escape 09.07, [HAZARDOUS] 24.15, et Exhortation of Rage (06.02, infligee a la
@@ -13345,6 +13954,9 @@ def build_manual_hazard_allocation(
         "summary": summary,
         "hazard_details": [],
         "hazard_log_payload": log_payload,
+        # Cle de la ligne emise qui recoit le detail par figurine : `hazardDetails` (24.15,
+        # 09.07, Exhortation), `deadlyDemiseDetails` (24.08), `chargeImpactDetails`.
+        "hazard_details_key": details_key,
     }
     return _manual_allocation_step(game_state, HAZARD_CTX)
 
@@ -13420,6 +14032,20 @@ def apply_manual_shoot_allocation(game_state: Dict[str, Any], chosen_model_id: s
     if bi >= len(alloc["batches"]):
         return _finalize_manual_allocation(game_state, ctx)
     batch = alloc["batches"][bi]
+    if not _batch_is_rolled(batch):
+        raise ValueError("le lot courant attend le choix de l attaquant, pas celui du defenseur")
+    # Blessure MORTELLE (lot mortel, ou [DEVASTATING WOUNDS] d un lot d attaques) : la figurine
+    # se choisit dans la cascade 06.02 sur toute l unite, pas dans un groupe 05.03.
+    pw = batch["pool"][batch["pool_index"]] if batch["pool_index"] < len(batch["pool"]) else None
+    if _item_uses_mortal_cascade(game_state, alloc, batch, pw, ctx):
+        eligibles = select_eligible_models(game_state, str(batch["target_sid"]))
+        if chosen_model_id not in eligibles:
+            raise ValueError(
+                f"chosen_model_id {chosen_model_id!r} n est pas une figurine eligible a la "
+                f"blessure mortelle (06.02) : eligibles={eligibles}"
+            )
+        batch["current_model_id"] = chosen_model_id
+        return _manual_allocation_step(game_state, ctx)
     order = batch["declared_order"]
     if order is None:
         raise ValueError("ordre des groupes non declare avant l allocation")
@@ -13451,18 +14077,28 @@ def manual_allocation_waiting_payload(game_state: Dict[str, Any], ctx: ManualAll
     l attente sans muter l etat. Suppose qu une allocation est pending (sinon leve)."""
     alloc = require_key(game_state, ctx.alloc_key)
     models_cache = require_key(game_state, "models_cache")
+    lot_wait = pending_lot_payload(game_state, alloc, ctx)
+    if lot_wait is not None:
+        return lot_wait
     batch = alloc["batches"][alloc["current_batch_index"]]
-    if batch["declared_order"] is None:
-        live_groups = [g for g in batch["alloc_groups"] if _group_alive(game_state, g)]
+    is_mortal_batch = _batch_is_mortal(ctx, batch)
+    if not is_mortal_batch and batch["declared_order"] is None:
+        live_groups = [g for g in (batch["alloc_groups"] or []) if _group_alive(game_state, g)]
         if len(live_groups) >= 2:
             return _declare_order_payload(game_state, batch, live_groups, ctx)
+    target_sid = str(batch["target_sid"])
+    pw = batch["pool"][batch["pool_index"]] if batch["pool_index"] < len(batch["pool"]) else None
+    if _item_uses_mortal_cascade(game_state, alloc, batch, pw, ctx):
+        cands = select_eligible_models(game_state, target_sid)
+        return _manual_waiting_payload(game_state, batch, cands, ctx, mortal=True)
     order = batch["declared_order"]
     grp = None
     if order is not None and batch["current_group_index"] < len(order):
         gid = order[batch["current_group_index"]]
         grp = next((g for g in batch["alloc_groups"] if g["group_id"] == gid), None)
     alive_grp = [m for m in (grp["model_ids"] if grp else []) if m in models_cache]
-    return _manual_waiting_payload(game_state, batch, alive_grp, ctx)
+    wounded = [m for m in alive_grp if int(models_cache[m]["HP_CUR"]) < int(models_cache[m]["HP_MAX"])]
+    return _manual_waiting_payload(game_state, batch, wounded if wounded else alive_grp, ctx)
 
 
 # ============================================================================

@@ -1429,6 +1429,23 @@ class StepLogger:
                 return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix} [ALL FNP SAVED]"
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix} [ALLOC_MODEL: {target_model_id}]"
 
+        elif action_type == "attacks_not_made":
+            # 04.03 — lot declare jamais joue : « Select one of the enemy units targeted » n'offre
+            # plus la cible, detruite par un lot precedent de la meme activation. Aucun de n'est
+            # jete ; l'analyzer compte ces attaques comme perdues ENTRE armes.
+            target_id = require_key(details, "target_id")
+            weapon_name = require_key(details, "weapon_name")
+            n_lost = require_key(details, "attacks_not_made")
+            _uwc = details.get("unit_with_coords")  # get allowed : col/row du payload -> traduction generique
+            if not isinstance(_uwc, str) or not _uwc:
+                raise KeyError("attacks_not_made action missing required unit_with_coords")
+            _tc = details.get("target_coords")  # get allowed : pose par la traduction generique
+            _tc_str = f"({_tc[0]},{_tc[1]})" if _tc else ""
+            return (
+                f"Unit {_uwc} DID NOT ATTACK Unit {target_id}{_tc_str} with [{weapon_name}] "
+                f"[TARGET DESTROYED] - {n_lost} attack(s) not made"
+            )
+
         elif action_type == "deadly_demise":
             # §24.08 DEADLY DEMISE — déclenchée dans destroy_model, après emergency disembark.
             # Clés snake_case posées par `_build_step_log_details` (w40k_core), comme tout autre

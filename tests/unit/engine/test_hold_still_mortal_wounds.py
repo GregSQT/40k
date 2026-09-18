@@ -24,6 +24,7 @@ import engine.phase_handlers.fight_handlers as fh
 import engine.phase_handlers.shared_utils as su
 import engine.phase_handlers.attack_sequence as aseq
 from shared.data_validation import HAZARD_CONTEXT_HOLD_STILL
+from tests.unit.engine._roll_helpers import roll_fight_intent
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +165,7 @@ def _patch_fight_harness(monkeypatch, fake_rolled):
     monkeypatch.setattr(fh, "resolve_oath_effects", lambda *a, **kw: (False, 0, 4))
     monkeypatch.setattr(fh, "resolve_hit_roll_modifiers", lambda *a, **kw: (3, None, None))
     monkeypatch.setattr(fh, "resolve_melee_wound_bonus", lambda *a, **kw: (4, None))
-    monkeypatch.setattr(aseq, "build_weapon_attack_profile", lambda *a, **kw: None)
+    monkeypatch.setattr(aseq, "build_weapon_attack_profile", lambda *a, **kw: aseq.WeaponAttackProfile())
     monkeypatch.setattr(aseq, "roll_attack_pool", lambda **kw: fake_rolled)
     # S11 : l'espérance de l'intent lit le même profil (ici neutralisé) — neutralisée avec lui.
     monkeypatch.setattr(aseq, "expected_attack_pool_damage", lambda **kw: 0.0)
@@ -182,7 +183,7 @@ def test_crit_reste_dans_pending_wounds(monkeypatch):
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
-    result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    result = roll_fight_intent(_gs(), _intent(), {})
     assert result is not None
     assert len(result["pending_wounds"]) == 1, (
         f"le crit doit rester alloué normalement, got {result['pending_wounds']}"
@@ -202,7 +203,7 @@ def test_crit_porte_son_d6(monkeypatch):
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
 
-    result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    result = roll_fight_intent(_gs(), _intent(), {})
     assert result is not None
     assert result["pending_mortal_wounds"] == {
         "ability": HAZARD_CONTEXT_HOLD_STILL, "dice": [4],
@@ -215,7 +216,7 @@ def test_un_d6_par_crit(monkeypatch):
     _rolls = iter([3, 5])
     monkeypatch.setattr(random, "randint", lambda a, b: next(_rolls))
 
-    result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    result = roll_fight_intent(_gs(), _intent(), {})
     assert result is not None
     assert result["pending_mortal_wounds"]["dice"] == [3, 5]
     assert result["counts"]["wounds"] == 3, "les trois blessures restent des blessures"
@@ -228,7 +229,7 @@ def test_aucune_bm_appliquee_au_jet(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
     gs = _gs()
-    fh._manual_roll_fight_intent(gs, _intent(), {})
+    roll_fight_intent(gs, _intent(), {})
     assert gs["models_cache"]["TGT#0"]["HP_CUR"] == 2, "aucun PV ne doit bouger au jet"
     assert gs["action_logs"] == [], f"aucune ligne au jet, got {gs['action_logs']}"
 
@@ -240,7 +241,7 @@ def test_aucune_bm_appliquee_au_jet(monkeypatch):
 def test_sans_crit_pas_de_bm(monkeypatch):
     _patch_fight_harness(monkeypatch, _noncrit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
-    result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    result = roll_fight_intent(_gs(), _intent(), {})
     assert result is not None
     assert result["pending_mortal_wounds"] is None
 
@@ -249,7 +250,7 @@ def test_mauvaise_arme_pas_de_bm(monkeypatch):
     """weapon_index=0 = dok_tools : la règle nomme 'urty syringe et elle seule."""
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
-    result = fh._manual_roll_fight_intent(_gs(), _intent(weapon_index=0), {})
+    result = roll_fight_intent(_gs(), _intent(weapon_index=0), {})
     assert result is not None
     assert result["pending_mortal_wounds"] is None
 
@@ -258,7 +259,7 @@ def test_target_vehicle_pas_de_bm(monkeypatch):
     """« against a non-VEHICLE unit »."""
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
-    result = fh._manual_roll_fight_intent(_gs(vehicle=True), _intent(), {})
+    result = roll_fight_intent(_gs(vehicle=True), _intent(), {})
     assert result is not None
     assert result["pending_mortal_wounds"] is None
 
@@ -269,7 +270,7 @@ def test_crit_devastating_produit_aussi_ses_bm(monkeypatch):
     _patch_fight_harness(monkeypatch, _crit_devastating_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 2)
 
-    result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
+    result = roll_fight_intent(_gs(), _intent(), {})
     assert result is not None
     assert result["pending_mortal_wounds"]["dice"] == [2]
     assert len(result["pending_wounds"]) == 1

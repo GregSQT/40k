@@ -12,6 +12,7 @@ import "../App.css";
 import { getAuthSession } from "../auth/authStorage";
 import { type RawObjective, useNormalizedObjectives } from "../hooks/useBoardHexMemos";
 import {
+  type AttackLotRequest,
   type ManualOrderGroup,
   type ManualOrderRequest,
   type PendingAgentDecision,
@@ -40,6 +41,7 @@ import {
   terrainsForMode,
 } from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
+import { AttackLotPanel } from "./AttackLotPanel";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -563,6 +565,13 @@ export const BoardWithAPI: React.FC = () => {
   const [currentLevel, setCurrentLevel] = useState(0);
   const currentLevelRef = useRef(0);
   currentLevelRef.current = currentLevel;
+  // Attente de lot (04.03) : unité cliquée sur le plateau. Un seul lot sans question de relance
+  // → choisi directement ; sinon le panneau de lot se restreint à cette unité. Le filtre est lié
+  // à l'attente qui l'a vu naître : une nouvelle attente (autre objet) repart sans filtre.
+  const [lotTargetFilter, setLotTargetFilter] = useState<{
+    request: AttackLotRequest;
+    target: string;
+  } | null>(null);
 
   // Terrain list loaded from terrain_list.json via API ; gate useGameConfig until available.
   // Déclarée AVANT `useEngineAPI` : le démarrage de partie l'attend lui aussi, pour envoyer le
@@ -596,6 +605,10 @@ export const BoardWithAPI: React.FC = () => {
     terrainList,
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
+  const activeLotTargetFilter =
+    lotTargetFilter && lotTargetFilter.request === apiProps.attackLotRequest
+      ? lotTargetFilter.target
+      : null;
 
   // Chargement d'un save-point / d'une partie : époque de reset pour réaligner les états frontend
   // accumulés (ghosts de figs mortes) et tronquer le Game Log au moment chargé.
@@ -4757,6 +4770,43 @@ export const BoardWithAPI: React.FC = () => {
         />
       )}
 
+      {/* Lot d'attaque en cours (04.03 / 05.04) : choix du lot et de sa politique de relance par
+          l'attaquant, puis figurines candidates du défenseur — s'affiche de lui-même dès que le
+          moteur attend (décision du 2026-09-18). */}
+      {(apiProps.attackLotRequest || apiProps.manualAllocation) && (
+        <AttackLotPanel
+          key={
+            apiProps.attackLotRequest
+              ? `lot:${apiProps.attackLotRequest.attacker_unit_id}:${apiProps.attackLotRequest.lots.map((l) => l.lot_id).join("-")}`
+              : `alloc:${apiProps.manualAllocation?.attacker_unit_id}:${apiProps.manualAllocation?.target_unit_id}:${apiProps.manualAllocation?.weapon_name ?? "mortal"}`
+          }
+          lotRequest={
+            apiProps.attackLotRequest && activeLotTargetFilter
+              ? {
+                  ...apiProps.attackLotRequest,
+                  lots: apiProps.attackLotRequest.lots.filter(
+                    (l) => String(l.target_unit_id) === activeLotTargetFilter
+                  ),
+                }
+              : apiProps.attackLotRequest
+          }
+          allocation={apiProps.manualAllocation}
+          unitLabel={(id) => {
+            const u = unitsById.get(String(id));
+            return u?.DISPLAY_NAME ? `${u.DISPLAY_NAME} #${id}` : `Unit #${id}`;
+          }}
+          onSelectLot={
+            isGameOver
+              ? () => {}
+              : (lotId, rerolls) => {
+                  setLotTargetFilter(null);
+                  void apiProps.onSelectAttackLot(lotId, rerolls);
+                }
+          }
+          onAllocateModel={isGameOver ? () => {} : apiProps.onAllocateModel}
+        />
+      )}
+
       {/* REFUS DU MOTEUR — bandeau NON FATAL, à ne pas confondre avec le panneau d'erreur.
           Le moteur a répondu non à un geste : le plateau reste jouable et le message s'efface au
           geste suivant (`useEngineAPI`, point d'effacement en tête d'`executeAction`). Avant ce
@@ -5109,6 +5159,24 @@ export const BoardWithAPI: React.FC = () => {
             onReportFightAssignable={apiProps.onReportFightAssignable}
             manualAllocation={apiProps.manualAllocation}
             onAllocateModel={isGameOver ? async () => {} : apiProps.onAllocateModel}
+            attackLotRequest={apiProps.attackLotRequest}
+            onPickAttackLotTarget={
+              isGameOver
+                ? () => {}
+                : (targetUnitId) => {
+                    const req = apiProps.attackLotRequest;
+                    if (!req) return;
+                    const lots = req.lots.filter((l) => String(l.target_unit_id) === targetUnitId);
+                    if (lots.length === 0) return;
+                    const only = lots.length === 1 ? lots[0] : null;
+                    if (only && !only.reroll_choices.hit && !only.reroll_choices.wound) {
+                      setLotTargetFilter(null);
+                      void apiProps.onSelectAttackLot(only.lot_id);
+                      return;
+                    }
+                    setLotTargetFilter({ request: req, target: targetUnitId });
+                  }
+            }
             onStartAttackPreview={isGameOver ? () => {} : apiProps.onStartAttackPreview}
             onDeployUnit={
               isGameOver ||
