@@ -382,7 +382,7 @@
     {
       "id": "PROJ.1.2.indirect",
       "section": "1.2",
-      "label": "Tir indirect — détection (règle non implémentée)",
+      "label": "Tir indirect — [COVER] obligatoire sur [INDIRECT FIRE:X+] (10.07)",
       "applicability": {
         "kind": "weapon_rule_in_roster",
         "rule_id": "INDIRECT_FIRE",
@@ -1782,8 +1782,19 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Poser le token annoncerait un effet qui n'a pas lieu."
+      "co_verified_by": [
+        "PROJ.1.2.indirect"
+      ],
+      "log_evidence": [
+        {
+          "id": "10.07-IF",
+          "description": "Le token [INDIRECT FIRE:X+] (plancher d'échec posé par le moteur, `indirect_fire_fail_below`) apparaît sur la ligne shoot, accompagné du [COVER] obligatoire (couvert accordé inconditionnellement à la cible d'un tir indirect).",
+          "log_field": "action_desc contient [INDIRECT FIRE:X+] et [COVER]",
+          "check_type": "presence"
+        }
+      ],
+      "status": "COUVERT",
+      "status_note": "Implémentée dans le moteur (`indirect_fire_fail_below`, shared_utils) et contrôlée par `check_indirect_fire_rule` (analyzer_hit) : [COVER] obligatoire sur toute ligne [INDIRECT FIRE:X+], compteurs indirect_fire_checked / indirect_fire_mismatch (exercice PROJ.1.2.indirect). Le plancher X+ n'est pas répercuté dans `hit_target` : le seuil affiché peut être < X sans faute, seul le [COVER] est jugé. [IGNORES COVER] court-circuite le couvert (24.18 prime). Statut corrigé le 2026-09-18 : l'ancienne note déclarait la règle absente du moteur, à tort."
     },
     {
       "id": "11.01",
