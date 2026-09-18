@@ -576,6 +576,20 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.1.3.contact",
+      "section": "1.3",
+      "label": "Charge — au-delà de 1\" alors qu'une case à ≤ 1\" était atteignable (11.04 WHILE MOVING)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "charge_no_contact"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
       "id": "PROJ.1.3.reroll_charge",
       "section": "1.3",
       "label": "Re-roll charge — capacité reroll_charge exercée",
@@ -702,6 +716,48 @@
         [
           "fight_move_invalid",
           "consolidation"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.conso_toutes_selectionnees",
+      "section": "1.4",
+      "label": "Consolidation engaging — cible sélectionnée non engagée (12.08 AFTER MOVING)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_consolidation_not_all_selected"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.pile_in_engage",
+      "section": "1.4",
+      "label": "Pile-in — hors engagement alors qu'une case engagée était atteignable (12.03 WHILE MOVING)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_pile_in_no_engage"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.engagees_inactives",
+      "section": "1.4",
+      "label": "Mêlée — figurine engagée sans attaque (04.01 / 04.02 / 24.11)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_engaged_idle"
         ]
       ],
       "status": "COUVERT"

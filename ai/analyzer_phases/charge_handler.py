@@ -3,7 +3,7 @@ charge_handler.py — gestion des actions CHARGE dans parse_step_log.
 """
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Set, Tuple
 
 from ai.analyzer_perfig import unit_effect_in_force
 from ai.analyzer_rules import note_rule_usage, note_special_rule_usage
@@ -172,6 +172,80 @@ def _judge_charge_after_advance(
         })
 
 
+def _judge_charge_contact(
+    state: "AnalyzerState",
+    stats: Dict[str, Any],
+    line: str,
+    action_desc: str,
+    unit_id: str,
+    player: int,
+    budget: int,
+    is_fly: bool,
+    occupied_positions: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+) -> None:
+    """PROJ.1.3.contact — 11.04 WHILE MOVING « Each model that can end its move within 1" of one
+    or more charge targets must do so ». Une figurine qui finit au-delà de 1" d'une cible alors
+    qu'une case à ≤ 1" d'une cible était libre et atteignable dans le jet est une faute (une par
+    ligne). Cibles = toutes les unités de la ligne CHARGED ; charge volante : mesure à vol
+    d'oiseau, hors de ce contrôle (le BFS n'y a pas de sens). Sans socles d'avant/après : non
+    jugeable."""
+    from ai.analyzer import _get_inches_to_subhex_for_analyzer
+    from ai.analyzer_perfig import (
+        cells_taken_by_other_models,
+        model_engaged_with_unit,
+        reachable_cell_engaging,
+        surviving_start_models,
+    )
+
+    if is_fly:
+        return
+    prev_models = surviving_start_models(
+        state.positions_by_model.get(unit_id),  # get allowed
+        state.current_line_models.get(unit_id),  # get allowed
+    )
+    new_models = state.current_line_models.get(unit_id)  # get allowed
+    if not prev_models or not new_models:
+        return
+    head = action_desc.split(" from (", 1)[0]
+    target_ids = [
+        t for t in re.findall(r'Unit (\d+)', head.split("CHARGED", 1)[1])
+        if state.unit_hp.get(t, 0) > 0  # get allowed : cible morte = plus de cible
+    ] if "CHARGED" in head else []
+    if not target_ids:
+        return
+    within_1 = _get_inches_to_subhex_for_analyzer()
+    note_rule_usage(stats, "PROJ.1.3.contact", int(player))
+    for mid, dest in new_models.items():
+        if mid not in prev_models:
+            continue
+        if any(
+            model_engaged_with_unit(
+                state=state, unit_id=unit_id, model_id=mid, cell=dest, target_id=t, zone=within_1,
+                unit_positions=state.unit_positions, unit_hp=state.unit_hp,
+                positions_by_model=state.positions_by_model,
+            )
+            for t in target_ids
+        ):
+            continue
+        cell = reachable_cell_engaging(
+            state=state, unit_id=unit_id, model_id=mid, start=prev_models[mid], budget=budget,
+            target_ids=target_ids, zone=within_1, wall_hexes=state.wall_hexes,
+            occupied_positions=occupied_positions, enemy_adjacent_hexes=enemy_adjacent_hexes,
+            taken_cells=cells_taken_by_other_models(state, unit_id, new_models, mid),
+            unit_positions=state.unit_positions, unit_hp=state.unit_hp,
+            positions_by_model=state.positions_by_model,
+        )
+        if cell is not None:
+            stats["charge_no_contact"][int(player)] += 1
+            if stats["first_error_lines"]["charge_no_contact"][int(player)] is None:
+                stats["first_error_lines"]["charge_no_contact"][int(player)] = {
+                    "episode": state.current_episode_num, "line": line.strip(),
+                    "model": mid, "contact_cell": list(cell),
+                }
+            return
+
+
 def handle_charge(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -278,6 +352,10 @@ def handle_charge(
                 stats['charge_invalid'][player]['distance_over_roll'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
                     stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+            _judge_charge_contact(
+                state, stats, line, action_desc, charge_unit_id, player, charge_budget,
+                charge_is_fly, occupied_positions, enemy_adjacent_hexes,
+            )
 
         stats['position_log_mismatch']['charge']['total'] += 1
         if charge_unit_id not in state.unit_positions:

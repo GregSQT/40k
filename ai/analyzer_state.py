@@ -343,6 +343,11 @@ class AnalyzerState:
     shoot_last_activator: Optional[str] = None
     last_fight_fighter_id: Optional[str] = None
     last_fight_weapon: Optional[str] = None
+    #: PROJ.1.4.engagees_inactives — par ACTIVATION de mêlée `(épisode, phase, escouade)` :
+    #: figurines engagées au premier FOUGHT (04.02, tout ennemi), socles qui ont frappé
+    #: (`[SHOOTER_MODELS:]`, union des lignes), joueur et première ligne. Verdict rendu une fois,
+    #: journal lu (`flush_engaged_idle`), comme les groupes de tir.
+    fight_idle_activations: Dict = field(default_factory=dict)
     #: Socles ayant frappé sur la dernière ligne de combat (`[SHOOTER_MODELS:]`). Entre dans la
     #: clé du compteur d'attaques PARCE QU'IL DÉTERMINE LE PLAFOND : sans lui, la somme de deux
     #: groupes (une escouade répartissant ses attaques entre deux cibles) était opposée au

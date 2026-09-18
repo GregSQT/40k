@@ -3,9 +3,15 @@ fight_handler.py — gestion des actions FIGHT dans parse_step_log.
 """
 
 import re
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Tuple
 
-from ai.analyzer_perfig import WEAPON_NAME_RE, parse_shooter_models_segment
+from ai.analyzer_perfig import (
+    WEAPON_NAME_RE,
+    cells_taken_by_other_models,
+    model_engaged_with_unit,
+    parse_shooter_models_segment,
+    reachable_cell_engaging,
+)
 from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage, note_special_rule_usage
 from ai.analyzer_phases import claim_kill_context, died_before_phase, died_in_own_activation
 from shared.data_validation import require_key
@@ -211,6 +217,180 @@ def _note_melee_weapon_rule_usage(
         )
 
 
+def _note_engaged_idle_activation(
+    state: "AnalyzerState",
+    line: str,
+    fighter_id: str,
+    player: int,
+    positions: Dict[str, Tuple[int, int]],
+    hps: Dict[str, int],
+    models_by_unit: Dict[str, Dict[str, Tuple[int, int]]],
+) -> None:
+    """PROJ.1.4.engagees_inactives — relève, ligne FOUGHT par ligne FOUGHT, l'activation
+    `(épisode, phase de combat, escouade)` : au PREMIER relevé, les figurines engagées (04.02,
+    avec n'importe quel ennemi, socles d'AVANT la ligne) ; à chaque relevé, les socles qui
+    frappent (`[SHOOTER_MODELS:]`). Une activation dont aucune ligne ne porte le segment n'est
+    pas jugeable (journal antérieur au segment) et reste hors verdict."""
+    from ai.analyzer import _get_engagement_zone_for_analyzer, _iter_engaging_enemy_ids
+
+    key = (state.current_episode_num, state.fight_phase_seq_id, fighter_id)
+    record = state.fight_idle_activations.get(key)  # get allowed : première ligne → création
+    if record is None:
+        own_models = models_by_unit.get(fighter_id) or {}  # get allowed : sans socle → non jugeable
+        engaged = set()
+        for mid, pos in own_models.items():
+            if any(True for _ in _iter_engaging_enemy_ids(
+                fighter_id, state.unit_player, positions, hps, _get_engagement_zone_for_analyzer(),
+                None, models_by_unit, state.unit_base, {mid: pos},
+                None, None, None, None,
+            )):
+                engaged.add(mid)
+        record = {
+            "player": int(player), "engaged": engaged, "shooters": set(),
+            "judgeable": bool(own_models), "line": line.strip(),
+        }
+        state.fight_idle_activations[key] = record
+    shooters = parse_shooter_models_segment(line)
+    if shooters:
+        record["shooters"].update(str(m) for m in shooters)
+    else:
+        record["judgeable"] = False
+
+
+def flush_engaged_idle(state: "AnalyzerState", stats: Dict[str, Any]) -> None:
+    """Verdict PROJ.1.4.engagees_inactives de toutes les activations du journal — une fois, en
+    fin de lecture (la clé porte l'épisode). 04.01 / 04.02 / 24.11 : chaque figurine engagée
+    sélectionne une arme et frappe ; une figurine engagée absente de tous les
+    `[SHOOTER_MODELS:]` de son activation est une attaque perdue — mesuré le 2026-09-18 bot
+    contre bot (moteur 5b2422dd5) : 318 figurines frappent sur 598 engagées."""
+    for key, record in state.fight_idle_activations.items():
+        if not record["judgeable"]:
+            continue
+        player = int(record["player"])
+        note_rule_usage(stats, "PROJ.1.4.engagees_inactives", player)
+        idle = record["engaged"] - record["shooters"]
+        if idle:
+            stats["fight_engaged_idle"][player] += len(idle)
+            if stats["first_error_lines"]["fight_engaged_idle"][player] is None:
+                stats["first_error_lines"]["fight_engaged_idle"][player] = {
+                    "episode": key[0], "line": record["line"], "idle_models": sorted(idle),
+                }
+
+
+def _judge_pile_in_engagement(
+    state: "AnalyzerState",
+    stats: Dict[str, Any],
+    line: str,
+    action_desc: str,
+    unit_id: str,
+    player: int,
+    prev_models: Optional[Dict[str, Tuple[int, int]]],
+    new_models: Optional[Dict[str, Tuple[int, int]]],
+    budget: int,
+    occupied_positions: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+) -> None:
+    """PROJ.1.4.pile_in_engage — 12.03 WHILE MOVING « each model that is moved must end its move
+    closer to the closest pile-in target, and engaged with it if possible ». Une figurine qui
+    finit HORS engagement alors qu'une case engagée avec sa cible la plus proche était libre et
+    atteignable en 3" est une faute. Cibles = `[targets: …]` de la ligne (12.03 BEFORE MOVING),
+    sinon tous les ennemis vivants. Sans socles d'avant/après : non jugeable."""
+    from ai.analyzer import _get_engagement_zone_for_analyzer
+    from engine.combat_utils import calculate_hex_distance
+
+    if not prev_models or not new_models:
+        return
+    targets_match = re.search(r'\[targets: ([^\]]+)\]', action_desc)
+    if targets_match:
+        target_ids = [t.strip() for t in targets_match.group(1).split(",") if t.strip()]
+    else:
+        target_ids = [
+            uid for uid, hp in state.unit_hp.items()
+            if hp is not None and hp > 0 and int(require_key(state.unit_player, uid)) != int(player)
+        ]
+    target_ids = [t for t in target_ids if state.unit_hp.get(t, 0) > 0]  # get allowed : cible morte = plus de cible
+    if not target_ids:
+        return
+    zone = _get_engagement_zone_for_analyzer()
+    note_rule_usage(stats, "PROJ.1.4.pile_in_engage", int(player))
+    for mid, dest in new_models.items():
+        if mid not in prev_models:
+            continue
+        if any(
+            model_engaged_with_unit(
+                state=state, unit_id=unit_id, model_id=mid, cell=dest, target_id=t, zone=zone,
+                unit_positions=state.unit_positions, unit_hp=state.unit_hp,
+                positions_by_model=state.positions_by_model,
+            )
+            for t in target_ids
+        ):
+            continue
+        start = prev_models[mid]
+
+        def _dist_to(t: str) -> int:
+            cells = list((state.positions_by_model.get(t) or {}).values()) or [state.unit_positions[t]]  # get allowed
+            return min(calculate_hex_distance(start[0], start[1], c, r) for c, r in cells)
+
+        closest = min(target_ids, key=_dist_to)
+        cell = reachable_cell_engaging(
+            state=state, unit_id=unit_id, model_id=mid, start=start, budget=budget,
+            target_ids=[closest], zone=zone, wall_hexes=state.wall_hexes,
+            occupied_positions=occupied_positions, enemy_adjacent_hexes=enemy_adjacent_hexes,
+            taken_cells=cells_taken_by_other_models(state, unit_id, new_models, mid),
+            unit_positions=state.unit_positions, unit_hp=state.unit_hp,
+            positions_by_model=state.positions_by_model,
+        )
+        if cell is not None:
+            stats["fight_pile_in_no_engage"][int(player)] += 1
+            if stats["first_error_lines"]["fight_pile_in_no_engage"][int(player)] is None:
+                stats["first_error_lines"]["fight_pile_in_no_engage"][int(player)] = {
+                    "episode": state.current_episode_num, "line": line.strip(),
+                    "model": mid, "engaging_cell": list(cell),
+                }
+            return  # une faute par ligne, comme les autres contrôles de déplacement
+
+
+def _judge_consolidation_selection(
+    state: "AnalyzerState",
+    stats: Dict[str, Any],
+    line: str,
+    action_desc: str,
+    unit_id: str,
+    player: int,
+    new_models: Optional[Dict[str, Tuple[int, int]]],
+) -> None:
+    """PROJ.1.4.conso_toutes_selectionnees — 12.08 AFTER MOVING, Engaging : « Your unit must be
+    engaged with all of the selected enemy units ». Ligne `CONSOLIDATED … [ENGAGING] [targets:
+    a,b]` : chaque cible sélectionnée doit être engagée par au moins une figurine à l'arrivée."""
+    from ai.analyzer import _get_engagement_zone_for_analyzer
+
+    if "[ENGAGING]" not in action_desc.upper():
+        return
+    targets_match = re.search(r'\[targets: ([^\]]+)\]', action_desc)
+    if not targets_match or not new_models:
+        return
+    target_ids = [t.strip() for t in targets_match.group(1).split(",") if t.strip()]
+    zone = _get_engagement_zone_for_analyzer()
+    note_rule_usage(stats, "PROJ.1.4.conso_toutes_selectionnees", int(player))
+    missing = [
+        t for t in target_ids
+        if not any(
+            model_engaged_with_unit(
+                state=state, unit_id=unit_id, model_id=mid, cell=dest, target_id=t, zone=zone,
+                unit_positions=state.unit_positions, unit_hp=state.unit_hp,
+                positions_by_model=state.positions_by_model,
+            )
+            for mid, dest in new_models.items()
+        )
+    ]
+    if missing:
+        stats["fight_consolidation_not_all_selected"][int(player)] += 1
+        if stats["first_error_lines"]["fight_consolidation_not_all_selected"][int(player)] is None:
+            stats["first_error_lines"]["fight_consolidation_not_all_selected"][int(player)] = {
+                "episode": state.current_episode_num, "line": line.strip(), "not_engaged": missing,
+            }
+
+
 def handle_fight(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -269,6 +449,10 @@ def handle_fight(
         )
         engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
             frozen_target, target_id
+        )
+        _note_engaged_idle_activation(
+            state, line, fighter_id, attacker_player,
+            engagement_positions, engagement_hp, engagement_models,
         )
         fight_attacks_by_unit = require_key(stats, 'fight_attacks_by_unit')
         fight_attacks_by_player = require_key(fight_attacks_by_unit, attacker_player)
@@ -653,14 +837,23 @@ def handle_fight_move(
     )
     new_models = state.current_line_models.get(unit_id)  # get allowed
     moved = anchor_from != anchor_to
+    # Obstacles de transit : construits pour le contrôle de budget (ancre déplacée) ET pour le
+    # contrôle « engagée si possible » du pile-in, qui juge aussi une ligne à ancre immobile.
+    occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+        state.positions_by_model, state.unit_positions, state.unit_base,
+        state.unit_player, state.unit_hp, unit_id,
+    )
+    if kind == "pile_in":
+        _judge_pile_in_engagement(
+            state, stats, line, action_desc, unit_id, player, prev_models, new_models,
+            3 * _get_inches_to_subhex_for_analyzer(), occupied_positions, enemy_adjacent_hexes,
+        )
+    else:
+        _judge_consolidation_selection(state, stats, line, action_desc, unit_id, player, new_models)
     # Pile-in invalide (budget dépassé) : ne pas marquer comme ayant combattu afin que
     # la violation d'alternance 12.04 reste détectable si une unité non-chargée combat ensuite.
     pile_in_move_valid = True
     if moved:
-        occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
-            state.positions_by_model, state.unit_positions, state.unit_base,
-            state.unit_player, state.unit_hp, unit_id,
-        )
         # Occasion JUGÉE, pour CELLE des deux règles que cette ligne exerce (12.03 pile-in ou
         # 12.08 consolidation) : le budget va être mesuré par figurine juste en dessous.
         note_rule_usage(
