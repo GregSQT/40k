@@ -54,9 +54,11 @@ class ShootAllocGroup:
     first_not_allocated_line: Optional[str] = None
 
 
-#: (épisode, tour, phase, attaquant, cible, arme, signature `shoot_group_signature`) — le lot
-#: (cible × profil d'arme, 04.03) d'une activation, tir comme mêlée. Cf.
-#: `AnalyzerState.alloc_character_pending`.
+#: (épisode, activation, phase, attaquant, cible, arme, signature `shoot_group_signature`) — le
+#: lot (cible × profil d'arme, 04.03) d'une activation, tir comme mêlée. « activation » =
+#: `analyzer_core._activation_id` : le tour hors combat, l'entrée en phase FIGHT
+#: (`fight_phase_seq_id`) en combat — un tour porte deux phases de combat et le `P` de la ligne
+#: est celui de l'unité, pas de la phase. Cf. `AnalyzerState.alloc_character_groups`.
 AllocCharacterKey = Tuple[int, int, str, str, str, str, Tuple[str, str, str]]
 
 
@@ -84,10 +86,6 @@ class AllocCharacterGroup:
     is_char: Dict[str, bool]
     candidates: List[AllocCharacterCandidate] = field(default_factory=list)
     non_character_alive: bool = True
-
-    @property
-    def actor_id(self) -> str:
-        return self.key[3]
 
     @property
     def target_id(self) -> str:
@@ -333,12 +331,12 @@ class AnalyzerState:
     #: `_roll_batch`), donc la ligne de l'Ancient peut précéder celles des bodyguards que le
     #: même lot a tués AVANT lui. Un CHARACTER n'est fautif que si, à la FIN du lot, un
     #: non-CHARACTER de son unité est encore vivant (les morts d'un lot sont monotones : vivant
-    #: à la fin ⟺ vivant à chaque allocation du lot). Un seul lot en attente : le moteur émet
-    #: les lignes d'un lot d'un bloc (`_emit_squad_shoot_log` → une `log_action` par jet,
-    #: consécutives), donc le lot se ferme au premier jet d'un AUTRE lot (clé différente), dès
-    #: qu'une AUTRE unité agit (`[MODELS:]` étranger : deux combats d'une même paire dans un
-    #: même round portent la même clé) ou en fin de lecture (`_flush_character_allocation`).
-    alloc_character_pending: Optional[AllocCharacterGroup] = None
+    #: à la fin ⟺ vivant à chaque allocation du lot). Même régime que `shoot_alloc_groups` :
+    #: un lot par clé (l'activation y est, via `fight_phase_seq_id` en combat), l'état de fin
+    #: de lot relevé après les dégâts de chacune de ses lignes, et le verdict rendu une seule
+    #: fois, journal lu (`_flush_character_allocation`) — aucune fermeture à deviner d'après
+    #: l'ordre d'émission des unités.
+    alloc_character_groups: Dict[AllocCharacterKey, AllocCharacterGroup] = field(default_factory=dict)
     #: Dernière unité dont un SHOT a déclenché un marqueur d'activation SHOOT (frontière
     #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT et au changement
     #: de tour. Mis à jour uniquement sur les lignes SHOT (pas sur les actions non-tir).

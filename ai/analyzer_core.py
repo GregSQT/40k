@@ -577,6 +577,25 @@ def _count_character_allocation_fault(
         }
 
 
+def _fight_phase_id(state: AnalyzerState) -> int:
+    """Identifiant de la phase FIGHT portant la ligne courante. `fight_phase_seq_id` compte les
+    ENTRÉES en phase de combat, mais n'est incrémenté qu'à la frontière de phase traitée APRÈS
+    les blocs d'attaque et d'activation (avec les autres remises à zéro) : la PREMIÈRE ligne
+    d'une phase de combat verrait encore l'identifiant de la précédente, et la seconde le
+    nouveau — deux clés pour la même phase. D'où la même détection de frontière, appliquée sur
+    place."""
+    return state.fight_phase_seq_id + (1 if state.last_phase != 'FIGHT' else 0)
+
+
+def _activation_id(state: AnalyzerState, *, turn: int, phase: str) -> int:
+    """Grandeur qui identifie l'ACTIVATION portant la ligne d'attaque courante, avec l'unité :
+    le tour hors combat (une activation de tir par unité et par tour), l'entrée en phase de
+    combat sinon — un tour porte DEUX phases FIGHT (12.04) et le `P` de la ligne est celui de
+    l'unité qui agit, pas celui de la phase, donc (tour, phase) ne distingue pas les deux
+    combats d'une même paire dans un même round."""
+    return _fight_phase_id(state) if phase == 'FIGHT' else turn
+
+
 def _judge_character_allocation(
     state: AnalyzerState,
     config: AnalyzerConfig,
@@ -629,15 +648,16 @@ def _note_character_allocation_in_lot(
     alloc_model_id: Optional[str],
     phase: str,
     player: int,
-) -> None:
-    """05.03 / 06.02 / 24.28 sur une ligne SHOT / FOUGHT : range la ligne dans son LOT ; le
-    verdict est rendu à la fermeture du lot (`_flush_character_allocation`).
+) -> Optional[AllocCharacterGroup]:
+    """05.03 / 06.02 / 24.28 sur une ligne SHOT / FOUGHT : range la ligne dans son LOT et le
+    rend (None si la ligne n'est pas une occasion) ; le verdict est rendu en fin de lecture
+    (`_flush_character_allocation`).
 
     JAMAIS ligne à ligne : dans un lot, l'ordre des lignes est celui des JETS (`g["shots"]`
     étendu intent par intent dans `_roll_batch`) alors que l'allocation suit le pool trié par
     sauvegarde croissante (05.04). La ligne de l'Ancient peut donc précéder celles des
     bodyguards que le même lot a tués AVANT lui, et l'état d'avant la ligne dirait à tort
-    « bodyguards vivants ». Cf. `AnalyzerState.alloc_character_pending`.
+    « bodyguards vivants ». Cf. `AnalyzerState.alloc_character_groups`.
 
     `tags` : les tokens entre le verbe et la cible, capturés par la grammaire du site d'appel
     (groupe `tags`) — ils entrent dans la signature de lot, la même que `note_shoot_allocation`.
@@ -665,61 +685,58 @@ def _note_character_allocation_in_lot(
             f"inidentifiable — E{state.current_episode_num} T{turn} : {line.strip()}"
         )
     key: AllocCharacterKey = (
-        state.current_episode_num, turn, phase, actor_id, target_id, weapon.group(1),
-        shoot_group_signature(action_desc, tags),
+        state.current_episode_num, _activation_id(state, turn=turn, phase=phase), phase,
+        actor_id, target_id, weapon.group(1), shoot_group_signature(action_desc, tags),
     )
-    pending = state.alloc_character_pending
-    if pending is not None and pending.key != key:
-        _flush_character_allocation(state, stats)
-        pending = None
-    if pending is None:
-        pending = AllocCharacterGroup(key=key, player=player, bucket=bucket, is_char=is_char)
-        state.alloc_character_pending = pending
+    group = state.alloc_character_groups.get(key)  # get allowed : premier jet du lot
+    if group is None:
+        group = AllocCharacterGroup(key=key, player=player, bucket=bucket, is_char=is_char)
+        state.alloc_character_groups[key] = group
     if alloc_is_character:
-        pending.candidates.append(AllocCharacterCandidate(line=line, action_desc=action_desc))
+        group.candidates.append(AllocCharacterCandidate(line=line, action_desc=action_desc))
+    return group
 
 
-def _note_character_allocation_outcome(state: AnalyzerState, target_id: str) -> None:
-    """À appeler APRÈS les dégâts d'une ligne SHOT / FOUGHT : l'état de fin de lot est celui
-    d'après sa dernière ligne. Relevé ligne après ligne pour ne dépendre ni du moment de la
-    fermeture ni de ce que d'autres lignes auront fait de la cible d'ici là. Le rôle par
-    figurine est celui résolu à l'ouverture du lot (`is_char`) : un lot ne voit que des morts,
-    jamais une figurine nouvelle."""
-    pending = state.alloc_character_pending
-    if pending is None or pending.target_id != target_id:
-        return
-    pending.non_character_alive = any(
-        not pending.is_char[mid]
-        for mid in state.unit_model_hp.get(target_id, {})  # get allowed : escouade anéantie
+def _note_character_allocation_outcome(state: AnalyzerState, group: AllocCharacterGroup) -> None:
+    """À appeler APRÈS les dégâts d'une ligne SHOT / FOUGHT, sur le lot qu'elle vient de
+    compléter : l'état de fin de lot est celui d'après sa dernière ligne. Relevé ligne après
+    ligne pour ne dépendre ni du moment du verdict ni de ce que d'autres lignes auront fait de
+    la cible d'ici là. Le rôle par figurine est celui résolu à l'ouverture du lot (`is_char`) :
+    un lot ne voit que des morts, jamais une figurine nouvelle."""
+    group.non_character_alive = any(
+        not group.is_char[mid]
+        for mid in state.unit_model_hp.get(group.target_id, {})  # get allowed : escouade anéantie
     )
 
 
 def _flush_character_allocation(state: AnalyzerState, stats: Dict[str, Any]) -> None:
-    """Rend le verdict du lot en attente : une ligne allouée à un CHARACTER est une faute ssi,
-    à la FIN du lot, un non-CHARACTER de la cible est encore vivant (`character_allocation_fault`
-    tranche [PRECISION] et blessures mortelles). Les morts d'un lot sont monotones : un
-    bodyguard vivant à la fin l'était à chaque allocation du lot."""
-    pending = state.alloc_character_pending
-    if pending is None:
-        return
-    state.alloc_character_pending = None
-    if not pending.candidates:
+    """Rend le verdict de TOUS les lots du journal, une fois, en fin de lecture — même régime que
+    `flush_cross_weapon_lost` (l'épisode est dans la clé). Une ligne allouée à un CHARACTER est
+    une faute ssi, à la FIN du lot, un non-CHARACTER de la cible est encore vivant
+    (`character_allocation_fault` tranche [PRECISION] et blessures mortelles). Les morts d'un
+    lot sont monotones : un bodyguard vivant à la fin l'était à chaque allocation du lot. Les
+    lots sont parcourus dans l'ordre du journal (insertion), donc la première faute comptée est
+    la première écrite."""
+    groups = list(state.alloc_character_groups.values())
+    state.alloc_character_groups = {}
+    if not any(group.candidates for group in groups):
         return
     # Constante de la passe : `set_run_rules` est appelé une fois par journal, avant la lecture.
     precision_mw_to_character = _precision_mw_to_character_run_rule()
-    for cand in pending.candidates:
-        fault = character_allocation_fault(
-            cand.action_desc,
-            alloc_is_character=True,
-            non_character_alive=pending.non_character_alive,
-            is_mortal=line_inflicts_mortal_wound(cand.action_desc),
-            precision_mw_to_character=precision_mw_to_character,
-        )
-        if fault is not None:
-            _count_character_allocation_fault(
-                stats, bucket=pending.bucket, player=pending.player, fault=fault,
-                line=cand.line, episode=pending.key[0],
+    for group in groups:
+        for cand in group.candidates:
+            fault = character_allocation_fault(
+                cand.action_desc,
+                alloc_is_character=True,
+                non_character_alive=group.non_character_alive,
+                is_mortal=line_inflicts_mortal_wound(cand.action_desc),
+                precision_mw_to_character=precision_mw_to_character,
             )
+            if fault is not None:
+                _count_character_allocation_fault(
+                    stats, bucket=group.bucket, player=group.player, fault=fault,
+                    line=cand.line, episode=group.key[0],
+                )
 
 
 def _resolve_attack_damage_line(
@@ -750,7 +767,7 @@ def _resolve_attack_damage_line(
     from ai.analyzer import _apply_damage_and_handle_death
 
     alloc_model_id = _alloc_model_from_line(state, action_desc, line)
-    _note_character_allocation_in_lot(
+    group = _note_character_allocation_in_lot(
         state, config, stats, action_desc=action_desc, line=line, turn=turn,
         actor_id=actor_id, target_id=target_id, tags=tags, alloc_model_id=alloc_model_id,
         phase=phase, player=player,
@@ -764,7 +781,8 @@ def _resolve_attack_damage_line(
         pending_model_removals=state.pending_model_removals,
         dead_model_ids_episode=state.dead_model_ids_episode,
     )
-    _note_character_allocation_outcome(state, target_id)
+    if group is not None:
+        _note_character_allocation_outcome(state, group)
     state.pending_removals_actor = dmg_actor_id
 
 
@@ -1091,15 +1109,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             state.positions_by_model.pop(_duid, None)
                     state.pending_model_removals = {}
                     state.pending_removals_actor = None
-            # Même frontière pour le lot d'allocation CHARACTER en attente : une AUTRE unité
-            # agit ⇒ l'activation est finie, son dernier lot est complet. Nécessaire en plus
-            # du changement de clé : deux combats de la même paire dans le même round (FIGHT
-            # de chaque joueur) portent la même clé, et se jugeraient ensemble.
-            if (
-                state.alloc_character_pending is not None and state.current_line_models
-                and state.alloc_character_pending.actor_id not in state.current_line_models
-            ):
-                _flush_character_allocation(state, stats)
             # `[TARGET_MODELS:]` ne nomme qu'une cible, mais ses socles sont groupés par
             # préfixe `<unit_id>#` comme partout ailleurs : aucune hypothèse sur l'unité.
             state.current_line_target_models = {}
@@ -1927,16 +1936,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # `fight_phase_seq_id` compte les ENTRÉES en phase de combat : c'est la
                         # seule grandeur qui identifie une phase.
                         if phase == 'FIGHT':
-                            # ⚠️ `fight_phase_seq_id` n'est incrémenté qu'APRÈS ce bloc (avec les
-                            # autres remises à zéro de frontière de phase). La PREMIÈRE ligne
-                            # d'une phase de combat verrait donc encore l'identifiant de la
-                            # précédente, et la seconde le nouveau : deux clés différentes pour
-                            # la même phase, et le vrai doublon passait inaperçu. On applique donc
-                            # ici la même détection de frontière que le bloc ci-dessous.
-                            _fight_phase_id = state.fight_phase_seq_id + (
-                                1 if phase != state.last_phase else 0
-                            )
-                            phase_key = (phase, _fight_phase_id, int(player))
+                            # ⚠️ Frontière de phase appliquée sur place, voir `_fight_phase_id`.
+                            phase_key = (phase, _fight_phase_id(state), int(player))
                         else:
                             phase_key = (turn, phase, int(player))
                         seen_units = state.phase_activation_seen.setdefault(phase_key, set())
@@ -1975,11 +1976,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if phase == 'FIGHT' and ") PILED IN " in action_desc_upper:
                         if player is None:
                             raise ValueError("player is required for the pile-in check")
-                        _pile_in_phase_id = state.fight_phase_seq_id + (
-                            1 if phase != state.last_phase else 0
-                        )
                         _pile_in_seen = state.pile_in_seen.setdefault(
-                            (_pile_in_phase_id, int(player)), set()
+                            (_fight_phase_id(state), int(player)), set()
                         )
                         # L'ensemble de la phase vient d'être résolu : le doublon est jugeable
                         # dans les deux sens.
@@ -2887,6 +2885,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     # Attaques perdues inter-armes : verdict par groupe, clé portant l'épisode — rendu une
     # seule fois, journal entièrement lu (dernier épisode sans `EPISODE END` compris).
     flush_cross_weapon_lost(state, stats)
-    # Dernier lot d'allocation CHARACTER du journal : aucune ligne ne viendra plus le fermer.
+    # Allocation CHARACTER : même régime, verdict par lot rendu une seule fois, journal lu.
     _flush_character_allocation(state, stats)
 

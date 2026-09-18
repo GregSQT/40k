@@ -55,14 +55,10 @@ def _fought(alloc: str, *, save: str = "Save 2(3+)", tags: str = "") -> str:
     )
 
 
-def _riposte_102() -> str:
-    """L'unité 102 frappe l'unité 1 : une AUTRE unité agit (son `[MODELS:]`), ce qui ferme
-    l'activation de l'unité 1. Sauvegarde réussie : aucun dégât, l'unité 1 reste entière."""
-    return (
-        f"[10:00:03] E1 T1 P2 FIGHT : Unit 102{T} FOUGHT Unit 1{S} with [Bolt Pistol]"
-        f" - Hit 4(3+) - Wound 5(4+) - Save 6(3+) - Dmg:0HP [R:+0.0]"
-        f" [MODELS: 102#0@(80,50) 102#1@(80,51) 102#2@(80,52)] [ALLOC_MODEL: 1#0] [SUCCESS]\n"
-    )
+def _command_p2() -> str:
+    """Première ligne du tour de P2 : la phase change, la phase FIGHT qui suivra est une NOUVELLE
+    entrée en combat (`fight_phase_seq_id`), donc une autre activation pour l'unité 1."""
+    return f"[10:00:03] E1 T1 P2 COMMAND : Unit 102{T} WAITED [SUCCESS]\n"
 
 
 def _stats(tmp_path, body: str, *, precision_mw: str | None = "False") -> dict:
@@ -223,14 +219,15 @@ def test_un_autre_lot_de_la_meme_activation_ne_blanchit_pas_le_precedent(tmp_pat
 
 
 def test_deux_combats_de_la_meme_paire_dans_le_meme_round_sont_deux_lots(tmp_path):
-    """Même clé (épisode, tour, phase, attaquant, cible, arme, seuils) pour les deux combats de
-    l'unité 1 sur l'unité 102 dans le round 1 ; entre les deux, l'unité 102 riposte (une AUTRE
-    unité agit) : le premier lot se ferme là, sa faute reste comptée même si le second lot tue
-    les bodyguards. Le même corps SANS la riposte est un seul lot et ne compte rien :
+    """L'unité 1 combat l'unité 102 dans les DEUX phases FIGHT du round 1 (12.04) : même
+    (épisode, tour, phase, attaquant, cible, arme, seuils), et le `P` des lignes est celui de
+    l'unité, pas de la phase. Seule l'entrée en phase de combat (`fight_phase_seq_id`) sépare les
+    deux activations : la faute du premier lot reste comptée même si le second tue les
+    bodyguards. Le même corps SANS changement de phase est un seul lot et ne compte rien :
     `test_melee_ligne_du_character_avant_celles_des_bodyguards_aucune_erreur`."""
     body = (
         _fought("102#2")                                        # lot 1 : faute
-        + _riposte_102()                                        # frontière d'activation
+        + _command_p2()                                         # tour de P2 → nouvelle phase FIGHT
         + _fought("102#0") + _fought("102#0")                   # lot 2 : tue les bodyguards
         + _fought("102#1") + _fought("102#1")
     )
