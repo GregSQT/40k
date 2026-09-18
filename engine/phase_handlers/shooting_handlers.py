@@ -5368,6 +5368,28 @@ def _apply_move_after_shooting(
         "reactive_waiting_for_player": bool(reactive_result["waiting_for_player"]),
     }
 
+def move_after_shooting_seat_is_model_driven(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> bool:
+    """Le repositionnement post-tir de CETTE unité est-il une décision d'AGENT (`CHOICE_k`) ?
+
+    Vrai pour le siège gym (les deux joueurs répondent par le masque) et pour le bot PvE (joueur
+    2 sous `pve_mode`) ; faux pour un joueur humain, qui reçoit le prompt
+    `move_after_shooting_select_destination` du PvP.
+
+    SOURCE UNIQUE, lue par les deux côtés de la même attente : l'ARMEMENT
+    (`_handle_shooting_end_activation`) et la RÉPONSE en requête du siège IA hors gym
+    (`W40KEngine._resolve_move_after_shooting_decision_for_ai_seat`). Un siège armé par un
+    prédicat et répondu par un autre laisserait une décision sans répondeur — la partie s'arrête.
+    """
+    cfg = require_key(game_state, "config")
+    is_gym_training = bool(
+        cfg.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
+    )
+    is_pve_ai = bool(cfg.get("pve_mode", False)) and int(require_key(unit, "player")) == 2
+    return is_gym_training or is_pve_ai
+
+
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                                      arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1,
                                      action_type: Optional[str] = None, include_attack_results: bool = True,
@@ -5431,10 +5453,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
                 game_state, unit, move_after_shooting_distance
             )
             if destinations:
-                cfg = require_key(game_state, "config")
-                is_gym_training = bool(cfg.get("gym_training_mode", False) or game_state.get("gym_training_mode", False))
-                is_pve_ai = bool(cfg.get("pve_mode", False)) and int(require_key(unit, "player")) == 2
-                if is_gym_training or is_pve_ai:
+                if move_after_shooting_seat_is_model_driven(game_state, unit):
                     # J2 — le repositionnement post-tir est une DÉCISION, pas un calcul : c'est
                     # l'agent qui la prend, par intentions scorées (§9.0bis réserve 2). La fin
                     # d'activation est différée jusqu'à sa réponse `CHOICE_k`, exactement comme
