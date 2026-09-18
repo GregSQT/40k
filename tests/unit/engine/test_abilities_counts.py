@@ -176,7 +176,12 @@ def test_famille_a_reactive_move_agent_counted() -> None:
 def test_famille_a_charge_impact_opp_counted() -> None:
     """Un log charge_impact de l'adversaire incrémente charge_impact_opp, pas _agent."""
     engine = _build(_config(_UNITS_FAR, controlled_player=1))
-    engine.game_state["action_logs"].append({"type": "charge_impact", "player": 2})
+    # Contrat de la ligne de production (charge_handlers, `_impact_log_payload`) : la victime
+    # (`targetId`) et ses blessures mortelles attribuees (`chargeImpactDetails`) — la passe
+    # terminale les lit pour l'attrition (`mortal_wound_log_hp_lost`), pas seulement le camp.
+    engine.game_state["action_logs"].append({
+        "type": "charge_impact", "player": 2, "targetId": "1", "chargeImpactDetails": [],
+    })
     tactical = _run_to_end(engine)
     assert tactical["abilities_counts"]["charge_impact_opp"] == 1
     assert tactical["abilities_counts"]["charge_impact_agent"] == 0

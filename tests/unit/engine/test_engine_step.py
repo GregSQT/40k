@@ -553,7 +553,19 @@ class TestBuildTerminalInfoIdempotence:
             charge_log_line(2, "charge"),
             charge_log_line(2, "charge_fail"),
             {"type": "reactive_move", "player": 1, "turn": 1, "phase": "shoot"},
-            {"type": "charge_impact", "player": 1, "turn": 1, "phase": "charge"},
+            # Contrat de la ligne de production (charge_handlers, `_impact_log_payload`) : la
+            # victime et ses blessures mortelles attribuees — la passe les lit pour l'attrition
+            # (`mortal_wound_log_hp_lost`) AVANT de compter l'usage de la capacite. Une blessure
+            # appliquee et une sauvee par FNP : seule la premiere entre dans damage_dealt.
+            {"type": "charge_impact", "player": 1, "turn": 1, "phase": "charge",
+             "targetId": "2", "chargeImpactDetails": [
+                 {"modelId": "2_0", "col": 10, "row": 10, "died": False},
+                 {"modelId": "2_0", "col": 10, "row": 10, "died": False, "fnpSaved": True},
+             ]},
+            # Blessures mortelles hors chaine d'attaque sur le camp controle (Desperate Escape
+            # 09.07) : `player` y est la victime elle-meme, l'autre forme de la meme branche.
+            {"type": "hazard", "player": 1, "turn": 1, "phase": "move", "unitId": "1",
+             "hazardDetails": [{"modelId": "1_0", "col": 3, "row": 3, "died": False}]},
             {"type": "move_after_shooting", "player": 1, "turn": 1, "phase": "shoot"},
             _attack_log(
                 1, kind="shoot", turn=1, shooter="s1", damage=3,
@@ -597,6 +609,10 @@ class TestBuildTerminalInfoIdempotence:
         assert after_first["charge_distance"]["agent"]["fail_n"], (
             "scénario muet sur les échecs de charge déclarés"
         )
+        # Attrition = des d'attaque (3 tir + 4 melee) + blessures mortelles hors chaine
+        # d'attaque (1 impact de charge, la seconde sauvee par FNP) ; recue = 2 tir + 1 hazard.
+        assert after_first["damage_dealt"] == 3 + 4 + 1
+        assert after_first["damage_received"] == 2 + 1
 
         engine._build_terminal_info()
         after_second = engine.episode_tactical_data

@@ -103,6 +103,9 @@ def _weapon_group() -> Dict[str, Any]:
         "attack_profile": WeaponAttackProfile(),
         "additive_rules_applied": {},
         "point_blank_malus": False,
+        # 17.03 : -1 sur MONSTER/VEHICLE engagée, posé par la même construction de `_grp`
+        # (`bool(require_key(r, "engaged_target_malus"))`) ; cible d'infanterie → False.
+        "engaged_target_malus": False,
         "dmg_bonus": 0,
         # [PRECISION] 24.28 : posé à l'Allocation Order step, jamais à la déclaration de l'arme.
         "precision_applied": False,

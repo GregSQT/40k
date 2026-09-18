@@ -59,6 +59,7 @@ from engine.phase_handlers.shared_utils import (
     ManualAllocCtx,
     _squad_owner_player,
     manual_allocation_waiting_payload,
+    mortal_wound_log_hp_lost,
     mortal_wounds_ability_log_entry,
     model_datasheet_name,
     drive_reactive_move_window,
@@ -2720,7 +2721,9 @@ class W40KEngine(gym.Env):
         # a l'origine et comme le vocabulaire 40K l'impose — accuracy = precision au tir
         # (BS), que melanger avec la melee (WS) rendrait ininterpretable. Les deux viennent
         # du meme filtre, donc hits <= shots_fired par construction. damage_dealt et
-        # damage_received, eux, couvrent tir ET melee : c'est l'attrition totale.
+        # damage_received, eux, couvrent tir, melee ET blessures mortelles hors chaine
+        # d'attaque (lignes de `MORTAL_WOUND_LOG_VICTIM_KEYS`) : c'est l'attrition totale,
+        # PV pour PV egale a ce que le plateau a perdu.
         #
         # KILLS — DEFINITION : une FIGURINE detruite = 1, dans les deux phases. Le compte se
         # fait donc sur `shootDetails[i]["targetDied"]` (pose par attaque, sur celle qui
@@ -2863,6 +2866,28 @@ class W40KEngine(gym.Env):
                             f"{_rule_eff}_{'agent' if _by_controlled else 'opp'}"
                         ] += 1
                 continue
+            # BLESSURES MORTELLES HORS CHAINE D'ATTAQUE (06.02) : Desperate Escape 09.07, arme
+            # [HAZARDOUS] 24.15, Deadly Demise 24.08, impact de charge, Exhortation. Ce sont des
+            # pertes de PV que les lignes `shoot` / `combat` ne portent pas (leur `damage` ne
+            # somme que les des d'attaque), donc l'attrition les manquait : mesure sur un
+            # episode d'actions legales au hasard, un hazard de Desperate Escape retirait 1 PV
+            # a l'adversaire sans qu'aucune ligne ne l'incremente — damage_dealt en retard de
+            # 1 PV sur le plateau. Le choix du mode de fall-back (acaab98ab) a rendu ce jet
+            # courant : avant lui, seule une escouade battle-shocked le subissait.
+            #
+            # Comptees ICI, sur LA LIGNE que le jet emet, par le meme lecteur que les
+            # attributions (`mortal_wound_log_hp_lost` lit les records ecrits par
+            # `_inflict_one_mortal_wound`) : la victime est celle de la ligne, PAS son `player`
+            # — sur `deadly_demise` et `charge_impact`, ce champ est le proprietaire de la
+            # SOURCE. AVANT le tri Famille A ci-dessous : `charge_impact` y est compte comme
+            # usage de capacite et la boucle passe a la ligne suivante.
+            _mw = mortal_wound_log_hp_lost(self.game_state, log)
+            if _mw is not None:
+                _victim_player, _hp_lost = _mw
+                if _victim_player == controlled_player:
+                    damage_received += _hp_lost
+                else:
+                    damage_dealt += _hp_lost
             # Abilities — Famille A : reactive_move, charge_impact, move_after_shooting.
             # Ces trois types n'ont pas de branche dédiée dans la boucle existante (ils
             # tombaient dans `if log_type not in ('shoot', 'combat'): continue`).
@@ -9528,6 +9553,7 @@ class W40KEngine(gym.Env):
                 squad_shooting_type_clear,
                 get_enemy_slot_mapping,
                 build_manual_shoot_allocation,
+                purge_undeclarable_from_remaining,
             )
 
             _pending_sw2 = self.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
@@ -9568,8 +9594,37 @@ class W40KEngine(gym.Env):
             _pending_sw2["pending_weapon"] = None
             _pending_sw2["pending_weapon_slot"] = None
 
+            # Déclaration IMMÉDIATE, dans l'ordre des choix de l'agent : les déclarations
+            # posées consomment des figurines (arme physique tirée, famille 24.07 choisie par
+            # la figurine — pistolets OU autres armes), et c'est sur ces intents que le masque
+            # calcule les cibles de l'arme suivante et les slots encore déclarables. Différer
+            # les déclarations à la fin (ancienne pré-validation sur l'état initial) offrait
+            # au masque des armes que le commit refusait ensuite (« count > figurines
+            # eligibles ») ; `squad_declare_shoot` (tir mono-cible) tranche 24.07 par figurine
+            # de la même façon, ici c'est l'ordre des choix de l'agent qui tranche.
+            try:
+                _maxq = squad_shoot_weapon_qty_max(
+                    self.game_state, sw2_squad_id, sw2_weapon_code, _tsid2
+                )
+                if _maxq == 0:
+                    raise RuntimeError(
+                        f"squad_shoot_split_target: qty_max==0 pour arme {sw2_weapon_code!r}"
+                        f" → cible {_tsid2!r} — rupture masque/commit ({sw2_squad_id!r})"
+                    )
+                squad_declare_shoot_weapon_qty(
+                    self.game_state, sw2_squad_id, sw2_weapon_code, _maxq, _tsid2
+                )
+                purge_undeclarable_from_remaining(
+                    self.game_state, sw2_squad_id, _enemy_slots2,
+                    _pending_sw2["remaining_weapon_slots"],
+                )
+            except Exception:
+                del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
+                squad_shooting_type_clear(self.game_state, sw2_squad_id)
+                raise
+
             if _pending_sw2["remaining_weapon_slots"]:
-                # D'autres groupes d'armes restent à assigner.
+                # D'autres groupes d'armes restent déclarables.
                 self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = _pending_sw2
                 return True, {
                     "action": "squad_shoot_split_target",
@@ -9579,28 +9634,9 @@ class W40KEngine(gym.Env):
                     "waiting_for_next_weapon_sel": True,
                 }
 
-            # Toutes les armes assignées → résolution.
+            # Plus aucune arme déclarable → résolution.
             del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
             try:
-                # Pré-valider toutes les armes sur l'état initial (avant toute déclaration)
-                # pour éviter qu'une déclaration précédente consomme le groupe d'arme
-                # d'une arme suivante (ex. bolt_pistol consomme le slot du même modèle).
-                _precheck: List[Tuple[str, str, int]] = []
-                for _wcode2, _assign2 in _pending_sw2["assignments"].items():
-                    _tgt2 = str(require_key(_assign2, "target_id"))
-                    _maxq = squad_shoot_weapon_qty_max(
-                        self.game_state, sw2_squad_id, _wcode2, _tgt2
-                    )
-                    if _maxq == 0:
-                        raise RuntimeError(
-                            f"squad_shoot_split_target: qty_max==0 pour arme {_wcode2!r}"
-                            f" → cible {_tgt2!r} — rupture masque/commit ({sw2_squad_id!r})"
-                        )
-                    _precheck.append((_wcode2, _tgt2, _maxq))
-                for _wcode2, _tgt2, _maxq in _precheck:
-                    squad_declare_shoot_weapon_qty(
-                        self.game_state, sw2_squad_id, _wcode2, _maxq, _tgt2
-                    )
                 squad_lock_shoot(self.game_state, sw2_squad_id)
                 _alloc2 = build_manual_shoot_allocation(self.game_state, sw2_squad_id)
                 if _alloc2.get("waiting_for_player"):  # get allowed

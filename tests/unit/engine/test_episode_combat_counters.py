@@ -35,7 +35,9 @@ import pytest
 
 from ai.metrics_tracker import W40KMetricsTracker
 from engine.observation_builder import ObservationBuilder
-from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
+from engine.phase_handlers.shared_utils import (
+    SQUAD_ACTION_WAIT, mortal_wound_log_hp_lost, roll_hazard_for_unit,
+)
 from engine.reward_calculator import RewardCalculator
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import charge_log_line
@@ -586,6 +588,59 @@ def test_counters_follow_the_controlled_seat(controlled_player: int) -> None:
 
     assert tactical["damage_dealt"] == hp_lost[opponent]
     assert tactical["damage_received"] == hp_lost[controlled_player]
+
+
+@pytest.mark.parametrize("controlled_player", [1, 2])
+def test_mortal_wounds_outside_the_attack_chain_count_as_attrition(
+    monkeypatch: pytest.MonkeyPatch, controlled_player: int,
+) -> None:
+    """Un hazard (06.03) retire des PV sans ligne ``shoot``/``combat`` : l'attrition doit le voir.
+
+    Depuis que le mode de fall-back se CHOISIT (09.07, commit acaab98ab), un episode d'actions
+    legales au hasard joue couramment un Desperate Escape, dont le jet rate retire 1 PV a la
+    victime. ``damage_dealt`` ne lisait que le ``damage`` des lignes d'attaque : il restait en
+    retard de 1 PV sur le plateau. Le montage joue le jet REEL (``roll_hazard_for_unit``, de
+    epingle sur 1 = echec, 1 figurine = 1 blessure mortelle) sur une unite de CHAQUE camp, pour
+    verifier les deux colonnes et le siege ; le de sur 1 fait aussi rater toute attaque, donc
+    ces deux blessures sont la seule attrition de l'episode.
+    """
+    _pinned_die(monkeypatch, 1)
+    opponent = 2 if controlled_player == 1 else 1
+    engine = _build(_config(_melee_units(controlled_player), controlled_player))
+    victim_by_player = {1: "1", 2: "3"}
+    assert roll_hazard_for_unit(victim_by_player[opponent], engine.game_state, True) == 1
+    assert roll_hazard_for_unit(victim_by_player[controlled_player], engine.game_state, True) == 1
+    tactical = _run_to_end(engine, _POLICIES["first"])
+    hp_lost = _hp_lost_by_player(engine)
+
+    # Non vacant : chaque camp a perdu AU MOINS le PV de son jet, lu sur le plateau (la
+    # politique peut y ajouter d'autres fall-backs en Desperate Escape, tous rates sur 1)...
+    assert hp_lost[opponent] >= 1
+    assert hp_lost[controlled_player] >= 1
+    # ...et AUCUNE ligne d'attaque n'a porte de degat : toute l'attrition vient des blessures
+    # mortelles, donc ces deux egalites ne tiennent que si le compteur les lit.
+    for player in (1, 2):
+        assert _damage_of(engine, "shoot", player) + _damage_of(engine, "combat", player) == 0
+    assert tactical["damage_dealt"] == hp_lost[opponent]
+    assert tactical["damage_received"] == hp_lost[controlled_player]
+
+
+def test_mortal_wound_log_hp_lost_reads_the_victim_not_the_line_player() -> None:
+    """Sur ``deadly_demise`` et ``charge_impact``, ``player`` est le proprietaire de la SOURCE :
+    la victime vient de la cle d'unite de la ligne, et une blessure sauvee par FNP ne coute rien.
+    """
+    game_state = {"unit_by_id": {"3": {"id": 3, "player": 2}, "1": {"id": 1, "player": 1}}}
+    hit = {"modelId": "3_0", "col": 1, "row": 1, "died": False}
+    saved = {"modelId": "3_0", "col": 1, "row": 1, "died": False, "fnpSaved": True}
+    assert mortal_wound_log_hp_lost(game_state, {
+        "type": "deadly_demise", "unitId": "3", "player": 1,
+        "deadlyDemiseDetails": [hit, saved, hit],
+    }) == (2, 2)
+    assert mortal_wound_log_hp_lost(game_state, {
+        "type": "charge_impact", "unitId": "3", "targetId": "1", "player": 2,
+        "chargeImpactDetails": [hit],
+    }) == (1, 1)
+    assert mortal_wound_log_hp_lost(game_state, {"type": "move", "unitId": "3"}) is None
 
 
 @pytest.mark.parametrize("seed", _EPISODE_SEEDS)

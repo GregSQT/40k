@@ -3817,17 +3817,30 @@ def coherency_violation_flags(
     coh = get_coherency_subhex(game_state)
     coh_max = get_cohesion_max_subhex(game_state)
     min_neighbors = get_min_neighbors(game_state)
-    game_rules = require_key(require_key(game_state, "config"), "game_rules")
-    mode = require_key(game_rules, "cohesion_distance_mode")
-    if geometry_is_hex(game_state):
-        mode = "footprint"
+    mode = coherency_distance_mode(game_state)
     if mode == "euclidean":
         return _coherency_flags_euclidean(models, coh, coh_max, min_neighbors)
-    if mode == "footprint":
-        return _coherency_flags_footprint(models, game_state, coh, coh_max, min_neighbors)
-    raise ValueError(
-        f"Invalid game_rules.cohesion_distance_mode: {mode!r} (expected 'euclidean' or 'footprint')"
-    )
+    return _coherency_flags_footprint(models, game_state, coh, coh_max, min_neighbors)
+
+
+def coherency_distance_mode(game_state: Dict[str, Any]) -> str:
+    """Mode de mesure EFFECTIF de la coherency 03.03 — ``euclidean`` | ``footprint``.
+
+    Source unique du point de bascule decrit dans `coherency_violation_flags` : le mode configure
+    (`game_rules.cohesion_distance_mode`) vaut pour les boards ou un socle couvre plusieurs cases ;
+    a `inches_to_subhex <= 1` (`geometry_is_hex`) la mesure est celle des empreintes mono-cellule.
+    Partagee par le verdict ET par `charge_build_valid_plan`, dont le departage des destinations
+    (`_formation_gap`) doit mesurer la MEME chose que le verdict qui juge son plan.
+    """
+    game_rules = require_key(require_key(game_state, "config"), "game_rules")
+    mode = require_key(game_rules, "cohesion_distance_mode")
+    if mode not in ("euclidean", "footprint"):
+        raise ValueError(
+            f"Invalid game_rules.cohesion_distance_mode: {mode!r} (expected 'euclidean' or 'footprint')"
+        )
+    if geometry_is_hex(game_state):
+        return "footprint"
+    return mode
 
 
 def _positions_in_coherency(
@@ -3893,6 +3906,35 @@ def _coherency_verdict(
     return flags
 
 
+def _coherency_cart(col: int, row: int) -> Tuple[float, float]:
+    """Centre de rendu d'une case (geometrie `_hex_center`, hex_radius=1, sans demi-marge)."""
+    sqrt3 = 3.0 ** 0.5
+    return (col * 1.5, row * sqrt3 + (col % 2) * sqrt3 / 2.0)
+
+
+def _coherency_base_radius(base_size: int) -> float:
+    """Rayon de socle en unites de rendu (`BASE_SIZE` cases × 1,5 / 2 ; mono-case = 0,7)."""
+    return base_size * 1.5 / 2.0 if base_size > 1 else 0.7
+
+
+def coherency_euclidean_gap(
+    col_a: int, row_a: int, base_a: int, col_b: int, row_b: int, base_b: int
+) -> float:
+    """Ecart BORD A BORD de deux figurines en mode 'euclidean' — la grandeur que
+    `_coherency_flags_euclidean` compare a `coh × ENGAGEMENT_NORM_HEX_WIDTH`.
+
+    Exposee pour `charge_build_valid_plan` : depuis que les seuils sont a l'echelle du move (1,5 par
+    sous-hexe), une distance HEX de `coh` entre deux centres ne garantit plus la coherency — 10 pas
+    d'hexagone en colonne font 17,3 unites de rendu quand le seuil de 2" en fait 15. Un departage
+    des destinations mesure en hex retenait donc une case que le verdict euclidien refusait juste
+    apres, et l'escouade ne chargeait jamais.
+    """
+    from math import hypot
+    ax, ay = _coherency_cart(col_a, row_a)
+    bx, by = _coherency_cart(col_b, row_b)
+    return hypot(ax - bx, ay - by) - _coherency_base_radius(base_a) - _coherency_base_radius(base_b)
+
+
 def _coherency_flags_euclidean(
     models: List[Dict[str, Any]], coh: int, coh_max: int, min_neighbors: int
 ) -> List[bool]:
@@ -3907,19 +3949,9 @@ def _coherency_flags_euclidean(
     de 10 Hormagaunts sur 9" dont le dernier est pousse de 2" restait `coherency_ok`.
     """
     from math import hypot
-    sqrt3 = 3.0 ** 0.5
     n = len(models)
-
-    def cart(m: Dict[str, Any]) -> Tuple[float, float]:
-        c, r = int(m["col"]), int(m["row"])
-        return (c * 1.5, r * sqrt3 + (c % 2) * sqrt3 / 2.0)
-
-    def base_radius(m: Dict[str, Any]) -> float:
-        s = int(m["BASE_SIZE"])
-        return s * 1.5 / 2.0 if s > 1 else 0.7
-
-    pts = [cart(m) for m in models]
-    radii = [base_radius(m) for m in models]
+    pts = [_coherency_cart(int(m["col"]), int(m["row"])) for m in models]
+    radii = [_coherency_base_radius(int(m["BASE_SIZE"])) for m in models]
     model_range = coh * ENGAGEMENT_NORM_HEX_WIDTH      # 2" en unites de rendu (hex_radius=1)
     global_range = coh_max * ENGAGEMENT_NORM_HEX_WIDTH  # ecart max fig-a-fig (9"), bord a bord
     neighbor = [[False] * n for _ in range(n)]
@@ -7528,8 +7560,15 @@ def charge_target_edge_distance_subhex(
     charger_entry: Dict[str, Any],
     target_entry: Dict[str, Any],
     max_distance: int,
-) -> Optional[int]:
+) -> Optional[float]:
     """Distance 11.04 chargeur→cible, en subhex — la VALEUR du gate juste au-dessus.
+
+    NON ARRONDIE. La valeur etait ramenee au subhex entier (`int(round(...))`) : en metrique
+    euclidienne une cible a 10,38 subhex (2,08", donc HORS engagement range, 03.04) se journalisait
+    a 10 subhex = 2,0", soit une charge declaree depuis l'engagement range — ce que 11.02 interdit
+    (« a unit cannot be within engagement range (2") when it attempts a charge », encart FAILED
+    CHARGES du PDF 11). Le journal, ses moyennes et le verrou `test_charge_declaration_distances`
+    lisent la mesure exacte ; le formateur de step.log arrondit lui-meme a l'affichage (`.1f`).
 
     Mesure de journalisation, pas de decision : c'est la grandeur que 11.04 compare au jet
     (« within the maximum distance of your unit »), donc la seule directement comparable a un
@@ -7569,7 +7608,7 @@ def charge_target_edge_distance_subhex(
         engagement_distance_metric(),
         max_distance=int(max_distance),
     )
-    return None if distance > int(max_distance) else int(round(distance))
+    return None if distance > int(max_distance) else float(distance)
 
 
 def charge_engage_memo(
@@ -7866,7 +7905,16 @@ def charge_build_valid_plan(
     from engine.phase_handlers.charge_handlers import _charge_distance_metric
     _charge_metric = _charge_distance_metric(game_state)
 
-    def _formation_gap(col: int, row: int) -> int:
+    # Le departage mesure ce que le verdict final (`_validate_plan_coherency`) mesure : en mode
+    # 'euclidean' l'ecart bord a bord de rendu, en mode 'footprint' la distance hex. Un ecart hex
+    # ne garantit plus la coherency euclidienne depuis que ses seuils sont a l'echelle du move
+    # (cf. `coherency_euclidean_gap`) : a egalite de distance a la cible, le balayage retenait la
+    # case hex-equidistante mais euclidiennement la plus loin, et le plan entier etait rejete.
+    # Mode resolu a la PREMIERE figurine suivante seulement, comme le verdict lui-meme
+    # (`coherency_violation_flags` ne lit pas la config pour une escouade d'une figurine).
+    _coherency_mode: List[str] = []
+
+    def _formation_gap(m: Dict[str, Any], col: int, row: int) -> float:
         """Ecart a la derniere figurine deja placee — departage les candidats a egalite.
 
         Sans ce critere, deux destinations aussi bonnes (meme distance a la cible, meme trajet)
@@ -7874,11 +7922,18 @@ def charge_build_valid_plan(
         figurines partent en eventail et la coherency (03.03) rejette le plan complet.
         """
         if not plan:
-            return 0
-        _prev_mid, prev_col, prev_row, _prev_lvl = plan[-1]
-        return calculate_hex_distance(prev_col, prev_row, col, row)
+            return 0.0
+        prev_mid, prev_col, prev_row, _prev_lvl = plan[-1]
+        if not _coherency_mode:
+            _coherency_mode.append(coherency_distance_mode(game_state))
+        if _coherency_mode[0] == "euclidean":
+            return coherency_euclidean_gap(
+                prev_col, prev_row, int(models_cache[prev_mid]["BASE_SIZE"]),
+                col, row, int(m["BASE_SIZE"]),
+            )
+        return float(calculate_hex_distance(prev_col, prev_row, col, row))
 
-    def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: int) -> tuple:
+    def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: float) -> tuple:
         """Clé de tri pour les candidats d'engagement, paramétrée par l'intention L10."""
         if intent == 1:  # Objectif : priorité à la cellule la plus proche d'un objectif
             return (_dist_field.get((nc, nr), 0), d_orig, gap, nc, nr)
@@ -7940,7 +7995,7 @@ def charge_build_valid_plan(
             if not _eng_v:
                 continue
             engaged_candidates.append(
-                (_engaged_sort_key(nc, nr, d_orig, _formation_gap(nc, nr)), nc, nr)
+                (_engaged_sort_key(nc, nr, d_orig, _formation_gap(m, nc, nr)), nc, nr)
             )
         picked: Optional[Tuple[int, int]] = None
         if engaged_candidates:
@@ -7955,7 +8010,7 @@ def charge_build_valid_plan(
             )
             tc, tr = nearest_target
             # (dist_to_target, ecart a la fig precedente, col, row)
-            best_cand: Optional[Tuple[int, int, int, int]] = None
+            best_cand: Optional[Tuple[int, float, int, int]] = None
             # Anneaux DECROISSANTS depuis le budget : la figurine qui ne peut pas engager doit
             # suivre le reste de l'escouade, pas avancer d'un seul subhex. Avec l'ordre croissant
             # (etat anterieur au 2026-08-01), elle s'arretait au premier anneau utile pendant que
@@ -7989,7 +8044,7 @@ def charge_build_valid_plan(
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
                             continue  # doit etre strictement plus proche
-                        cand = (cand_d, _formation_gap(nc, nr), nc, nr)
+                        cand = (cand_d, _formation_gap(m, nc, nr), nc, nr)
                         if best_cand is None or cand < best_cand:
                             best_cand = cand
                 if best_cand is not None:
@@ -10262,6 +10317,36 @@ def shoot_weapon_remaining_eligible_slots(
         ):
             result[slot_j] = code
     return result
+
+
+def purge_undeclarable_from_remaining(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    enemy_slot_ids: List[Optional[str]],
+    remaining: Dict[int, str],
+) -> None:
+    """Retire de `remaining` tout slot dont l'arme n'a plus AUCUNE figurine déclarable.
+
+    Appelé après chaque déclaration du split-fire (`squad_shoot_split_target`). Les
+    déclarations déjà posées consomment des figurines : arme physique déjà tirée
+    (`_weapon_group_key`) et, hors MONSTER/VEHICLE, famille 24.07 choisie par la figurine —
+    [CLOSE-QUARTERS] OU autres armes, jamais les deux. `squad_shoot_weapon_qty_max` lit ces
+    contraintes sur les intents courants : un slot qui ne compte plus aucune figurine
+    éligible sur aucune cible posée ne peut plus être commité, donc le masque ne l'offre plus.
+    Sans cette purge, le masque offrait le pistolet après la carabine et le commit levait
+    « count > figurines eligibles ». Mute `remaining` en place.
+    """
+    _uc = require_key(game_state, "units_cache")
+    on_table = [
+        tsid for tsid in enemy_slot_ids
+        if tsid is not None and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
+    ]
+    for slot_j, code in list(remaining.items()):
+        if not any(
+            squad_shoot_weapon_qty_max(game_state, squad_id, code, tsid) > 0
+            for tsid in on_table
+        ):
+            del remaining[slot_j]
 
 
 def purge_combi_siblings_from_remaining(
@@ -13534,6 +13619,45 @@ def _count_mortal_details_in_summary(summary: Dict[str, Any], details: List[Dict
         summary["damage_total"] += 1
         if _d["died"]:
             summary["models_killed"] += 1
+
+
+#: Lignes d action_log qui portent des blessures mortelles HORS chaine d attaque (06.02), avec
+#: la cle de l unite QUI ENCAISSE et celle de la liste `{modelId, col, row, died[, fnpSaved]}`
+#: remplie par `_inflict_one_mortal_wound` — un record par blessure resolue, quel que soit le
+#: regime (AUTO ou allocation manuelle). `player` n y designe PAS toujours la victime : sur
+#: `deadly_demise` et `charge_impact` c est le proprietaire de la SOURCE (24.08, credite par
+#: l analyzer), d ou la cle d unite plutot que le joueur de la ligne.
+MORTAL_WOUND_LOG_VICTIM_KEYS: Dict[str, Tuple[str, str]] = {
+    "hazard": ("unitId", "hazardDetails"),                      # 09.07 Desperate Escape, 24.15
+    "mortal_wounds_ability": ("unitId", "hazardDetails"),       # Hold Still, Exhortation
+    "deadly_demise": ("unitId", "deadlyDemiseDetails"),         # 24.08
+    "charge_impact": ("targetId", "chargeImpactDetails"),       # impact de charge
+}
+
+
+def mortal_wound_log_hp_lost(game_state: Dict[str, Any], log: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    """``(joueur de la victime, PV reellement perdus)`` d une ligne de blessures mortelles, ou None
+    si la ligne n en est pas une.
+
+    Meme regle que `_count_mortal_details_in_summary` : une blessure mortelle vaut 1 PV, sauf
+    celle que le FNP a arretee. Le proprietaire est lu dans `unit_by_id` (roster complet, jamais
+    purge) : la victime peut avoir quitte `units_cache` en mourant de ces blessures memes.
+
+    Consommee par la passe terminale de `W40KEngine._build_terminal_info` pour l attrition
+    (`damage_dealt` / `damage_received`) : sans elle, les PV perdus par Desperate Escape, arme
+    [HAZARDOUS], Deadly Demise, impact de charge ou Exhortation manquaient au compteur, qui ne
+    lisait que le `damage` des lignes `shoot` / `combat`.
+    """
+    keys = MORTAL_WOUND_LOG_VICTIM_KEYS.get(str(log.get("type")))  # get allowed : autre type = pas de MW
+    if keys is None:
+        return None
+    victim_key, details_key = keys
+    victim = require_unit_by_id(game_state, str(require_key(log, victim_key)))
+    hp_lost = sum(
+        1 for _d in require_key(log, details_key)
+        if not _d.get("fnpSaved")  # get allowed : absent = blessure non sauvee
+    )
+    return int(require_key(victim, "player")), hp_lost
 
 
 def _resolve_one_mortal_wound(

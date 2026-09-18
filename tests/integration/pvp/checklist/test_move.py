@@ -44,7 +44,6 @@ import pytest
 import engine.phase_handlers.movement_handlers as movement_handlers
 import services.api_server as api_server
 from engine.hex_utils import downscale_cell, hex_distance
-from tests.integration.pvp.checklist.conftest import CHECKLIST_SCENARIO
 
 pytestmark = pytest.mark.integration
 

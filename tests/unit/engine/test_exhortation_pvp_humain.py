@@ -16,7 +16,9 @@ frontend) :
     dé → toute autre action refusée (inerte) → agent_decision → D6 → attribution par le
     DÉFENSEUR humain (HAZARD_CTX) → reprise MANUELLE : l'unité reste active, non enregistrée,
     et déclare ses attaques contre les survivants ; verrou d'activation ; un seul dé par phase.
-  PvP, 1 ennemi engagé : jet immédiat à l'activation, sans décision.
+  PvP, 1 ennemi engagé : jet immédiat à l'activation, sans décision ; défenseur humain à
+    figurine unique : attribution d'office, sans clic (une seule candidate — décision (a) du
+    chantier « chaîne d'attaque 100 % », 2026-09-18).
   PvE, siège humain : MÊME machine manuelle (décision, dé, reprise) ; le défenseur bot se voit
     attribuer les blessures mortelles headless (06.02, siège machine).
 """
@@ -181,7 +183,8 @@ def test_pvp_deux_ennemis_le_joueur_choisit_puis_le_defenseur_attribue(monkeypat
 
 
 # ---------------------------------------------------------------------------
-# PvP hot-seat, un seul ennemi engagé : jet immédiat, figurine forcée, reprise manuelle
+# PvP hot-seat, un seul ennemi engagé : jet immédiat, figurine forcée (allouée d'office, sans
+# clic), reprise manuelle
 # ---------------------------------------------------------------------------
 
 def test_pvp_un_seul_ennemi_jet_immediat_a_l_activation(monkeypatch):
@@ -198,12 +201,13 @@ def test_pvp_un_seul_ennemi_jet_immediat_a_l_activation(monkeypatch):
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["hazardousMortalWounds"] == 3, lines
     assert lines[0]["unitId"] == "2" and lines[0]["abilityTriggerRoll"] == 6
-    # Défenseur humain : premier clic sur l'unique figurine, les deux autres blessures vont
-    # d'office à la figurine entamée (06.02).
-    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
-    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "2", "modelId": "2#0"})
-    assert ok is True, out
+    # Défenseur humain, figurine UNIQUE : aucune question — une seule candidate à chaque blessure
+    # est allouée d'office (décision (a) du chantier « chaîne d'attaque 100 % », 2026-09-18 ;
+    # `_manual_allocation_step`), les trois blessures tombent sur 2#0 dans la même requête et
+    # rien ne reste en attente (`_apply_exhortation_de_rage`).
     assert gs["models_cache"]["2#0"]["HP_CUR"] == 2
+    assert [d["modelId"] for d in lines[0]["hazardDetails"]] == ["2#0", "2#0", "2#0"], lines
+    assert gs.get("hazard_origin") is None and gs.get("_pending_exhortation_resume") is None
     assert out["action"] == "wait" and out["active_fight_unit"] == "1", out
     assert out["valid_targets"] == ["2"]
     assert "1" not in gs["units_selected_to_fight"]
@@ -319,10 +323,15 @@ def test_pve_siege_ia_la_decision_est_tranchee_sur_le_champ(monkeypatch):
     assert gs.get("_pending_exhortation_fight") is None
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["unitId"] == "3" and lines[0]["hazardousMortalWounds"] == 3
-    # Défenseur HUMAIN : l'attribution lui revient (HAZARD_CTX), puis la reprise GYM du bot.
-    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
-    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "3", "modelId": "3#0"})
-    assert ok is True, out
+    # Défenseur HUMAIN mais figurine UNIQUE : aucune question — une seule candidate à chaque
+    # blessure est allouée d'office (décision (a) du chantier « chaîne d'attaque 100 % »,
+    # 2026-09-18 ; `_manual_allocation_step`), puis la reprise GYM du bot dans la même requête
+    # (`_apply_exhortation_de_rage`) ; le clic humain sur deux figurines intactes est verrouillé
+    # par `test_exhortation_defenseur_humain`.
+    assert gs["models_cache"]["3#0"]["HP_CUR"] == 2
+    assert [d["modelId"] for d in lines[0]["hazardDetails"]] == ["3#0", "3#0", "3#0"], lines
+    assert gs.get("hazard_origin") is None and gs.get("_pending_exhortation_resume") is None
     assert resumed == [("5", 1, "gym")]
+    assert out == {"action": "squad_fight", "squad_id": "5"}, out
     # Une action humaine n'est plus refusée : la décision n'existe plus.
     assert eng._reject_action_while_exhortation_pending({"action": "activate_unit"}) is None
