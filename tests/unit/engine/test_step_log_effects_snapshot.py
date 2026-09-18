@@ -63,7 +63,10 @@ def test_les_deux_moities_du_waaagh_sont_chiffrees(tmp_path) -> None:
     assert "T3 EFFECTS:" in line, line
     assert "waaagh_melee_atk=+1" in line, line
     assert "waaagh_melee_str=+1" in line, line
-    assert "waaagh_invul" not in line, "waaagh_invul supprimé du snapshot EFFECTS"
+    # Troisième volet (« a 5+ invulnerable save ») : retiré le 2026-08 comme champ mort, rendu
+    # le 2026-09-18 parce qu'un lecteur existe — `ai/analyzer_save.check_save_threshold` le LIT
+    # pour le seuil de sauvegarde attendu au lieu de redeviner la constante du moteur.
+    assert "waaagh_invul=5+" in line, line
 
 
 def test_oath_passe_par_la_meme_ligne(tmp_path) -> None:
