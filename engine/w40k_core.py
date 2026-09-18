@@ -4449,10 +4449,8 @@ class W40KEngine(gym.Env):
         )
         if self.step_logger and self.step_logger.enabled:
             phase_raw = prompt.get("phase")
-            phase_for_log = (
-                phase_raw.strip() if isinstance(phase_raw, str) and phase_raw.strip()
-                else str(require_key(self.game_state, "phase"))
-            )
+            _stripped = phase_raw.strip() if isinstance(phase_raw, str) else ""
+            phase_for_log = _stripped or str(require_key(self.game_state, "phase"))
             self.step_logger.log_action(
                 unit_id=unit_id,
                 action_type="ability_call",
@@ -7432,7 +7430,9 @@ class W40KEngine(gym.Env):
                         candidates.append(t)
             if len(candidates) == 1:
                 target_id = candidates[0]
-                undecided = self._fight_auto_declare_subset(squad_id, target_id, sorted(leftover))
+                undecided = squad_auto_declare_fight_weapons(
+                    self.game_state, squad_id, target_id, only_model_ids=sorted(leftover)
+                )
                 if undecided:
                     return self._fight_ask_weapon_or_continue(squad_id, target_id, undecided)
                 continue
@@ -7463,15 +7463,6 @@ class W40KEngine(gym.Env):
         raise RuntimeError(
             f"_fight_continue_declarations n'a pas convergé pour {squad_id!r} "
             f"({SQUAD_ACTION_FIGHT_SLOT_COUNT + 1} passes)"
-        )
-
-    def _fight_auto_declare_subset(
-        self, squad_id: str, target_id: str, model_ids: List[str]
-    ) -> Dict[str, List[str]]:
-        from engine.phase_handlers.shared_utils import squad_auto_declare_fight_weapons
-
-        return squad_auto_declare_fight_weapons(
-            self.game_state, squad_id, target_id, only_model_ids=model_ids
         )
 
     def _fight_allocate_and_end(self, squad_id: str) -> Tuple[bool, Dict[str, Any]]:
@@ -9074,6 +9065,7 @@ class W40KEngine(gym.Env):
             build_manual_shoot_allocation,
             squad_fight_restart_activation,
             squad_declare_fight,
+            squad_auto_declare_fight_weapons,
             commit_move,
             charge_build_valid_plan,
             get_enemy_slot_mapping,
@@ -10077,7 +10069,9 @@ class W40KEngine(gym.Env):
                     f"{pending_fw['model_ids']} ne porte {weapon_code!r} — rupture masque/commit"
                 )
             remaining = [mid for mid in pending_fw["model_ids"] if mid not in answered]
-            undecided = self._fight_auto_declare_subset(fw_squad_id, fw_target_id, remaining)
+            undecided = squad_auto_declare_fight_weapons(
+                self.game_state, fw_squad_id, fw_target_id, only_model_ids=remaining
+            )
             return self._fight_ask_weapon_or_continue(fw_squad_id, fw_target_id, undecided)
 
         # ── split-fire (P3-8) ─────────────────────────────────────────────────
