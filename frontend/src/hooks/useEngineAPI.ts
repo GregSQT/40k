@@ -6822,6 +6822,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     noteActionOutcome(await executeAction({ action: "skip_fight" }), "Passer le combat");
   }, [executeAction, noteActionOutcome]);
 
+  // Bouton « Passer » (A5, PDF 25) : le sélecteur rend la main à l'adversaire sans marquer
+  // d'unité — offert seulement quand toutes ses unités éligibles sont à plus de 5" de tout
+  // ennemi (`fight_can_pass` du moteur).
+  const handleFightPass = useCallback(async () => {
+    noteActionOutcome(await executeAction({ action: "fight_pass" }), "Passer la sélection");
+  }, [executeAction, noteActionOutcome]);
+
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(
     async (unitId: number) => {
@@ -8799,6 +8806,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onUnplacePileInModel: () => {},
       onEndPileIn: () => {},
       onSkipFight: () => {},
+      onFightPass: () => {},
       onCommitPileInPlan: async () => {},
       onCancelPileInModelMove: async () => {},
       onSetPileInFocus: (_mode: "defensive" | "offensive") => {},
@@ -9338,6 +9346,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onFightPhaseRightClick: handleRightClick,
     onEndPileIn: handleEndPileIn,
     onSkipFight: handleSkipFight,
+    onFightPass: handleFightPass,
     onCharge: emptyCallback,
     onActivateCharge: handleActivateCharge,
     onChargeEnemyUnit: handleChargeEnemyUnit,

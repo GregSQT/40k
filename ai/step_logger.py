@@ -1879,6 +1879,10 @@ class StepLogger:
         elif action_type == "wait":
             return f"{unit_label} WAIT"
 
+        elif action_type == "fight_pass":
+            # A5 (PDF 25) : le joueur passe la sélection FIGHT — aucune unité sélectionnée.
+            return f"{unit_label} PASSED FIGHT"
+
         elif action_type == "skip":
             reason = (details.get("skip_reason") or "").strip()
             if reason:
@@ -1931,6 +1935,10 @@ class StepLogger:
                 _conso_mode = details.get("consolidation_mode")
                 if _conso_mode is not None:
                     base_msg += f" [{_conso_mode.upper()}]"
+                # A3 — sélection réelle 12.08, même token que le pile-in ; absent en objective.
+                _conso_tids = details.get("consolidation_target_ids")
+                if _conso_tids:
+                    base_msg += f" [targets: {','.join(str(t) for t in _conso_tids)}]"
             reward = details.get("reward")
             if reward is not None:
                 base_msg += f" [R:{reward:+.1f}]"

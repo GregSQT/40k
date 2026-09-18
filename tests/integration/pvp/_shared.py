@@ -190,11 +190,45 @@ class GameClient:
             }
         return None
 
+    def pending_ability_call(self) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """Le refus d'un appel de capacité servi au siège humain (« you can … »), ou None.
+
+        Le moteur bloque toute autre action tant que `active_rule_choice_prompt` est posé
+        (`waiting_for_rule_choice`) ; la partie ne peut donc plus avancer par `skip` seul.
+        L'action nominale PASSE (candidat `declines`) : elle fait avancer la partie sans rien
+        tenter d'autre — activer Da Jump repositionnerait l'escouade ou lui infligerait des
+        blessures mortelles. Un prompt qui n'offrirait aucun refus n'est pas un appel de capacité
+        (`push_ability_call` en pose toujours un) : c'est une rupture de contrat, pas un cas à
+        jouer.
+        """
+        prompt = self.state.get("active_rule_choice_prompt")
+        if prompt is None:
+            return None
+        # Un `rule_choice` de datasheet n'a pas de `kind` (`is_ability_call_prompt`).
+        if prompt.get("kind") != "ability_call":
+            raise AssertionError(
+                f"choix de règle actif {prompt.get('rule_id')!r} (pas un appel de capacité) : "
+                "aucune réponse nominale connue"
+            )
+        declines = [o for o in prompt["options"] if o["declines"]]
+        if len(declines) != 1:
+            raise AssertionError(
+                f"appel de capacité {prompt['rule_id']!r} sans candidat de refus unique : {prompt['options']}"
+            )
+        return "select_rule_choice", {
+            "unitId": prompt["unit_id"],
+            "player": prompt["player"],
+            "selectedRuleId": declines[0]["display_rule_id"],
+        }
+
     def nominal_action(self) -> Tuple[str, Dict[str, Any]]:
         """L'action qui fait avancer la partie depuis l'état courant, sans rien tenter d'autre."""
         faction_decision = self.pending_faction_decision()
         if faction_decision is not None:
             return faction_decision
+        ability_call = self.pending_ability_call()
+        if ability_call is not None:
+            return ability_call
         if self.phase == "fight":
             subphase = self.state["fight_subphase"]
             if subphase not in self.FIGHT_SUBPHASE_EXIT:

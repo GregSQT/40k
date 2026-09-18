@@ -39,6 +39,37 @@ def test_gym_choice_k_supprime_la_touchee_designee_par_le_candidat(monkeypatch):
     assert "1" not in gs["shoot_activation_pool"], "la fin d'activation différée a repris"
 
 
+def test_le_choice_k_traverse_le_reward_calculator_et_ne_paie_rien(monkeypatch):
+    """Jumeau de `test_the_shot_is_paid_at_the_shot_step_and_the_choice_pays_nothing`
+    (move_after_shooting) : le tir a été payé au step `squad_shoot` qui a posé la décision ;
+    le step `CHOICE_k` rend le résultat du handler (`shoot` sans tir) et paie 0.
+
+    ROUGE avant le fix : la branche renommait ce résultat `squad_shoot` sans `shoot_result`, et
+    `RewardCalculator.calculate_reward` levait `Required key 'shoot_result' is missing` —
+    mesuré sur trois tests de bout en bout du gym (`test_charge_intent_memo_contract`,
+    `test_charge_memo_steplog_footprint`, `test_s11_reward_on_expectation_e2e`)."""
+    from tests.unit.engine.test_move_after_shooting_gym_path import _reward_calculator
+
+    gs = _posed(monkeypatch)
+    # Ce que `calculate_reward` lit et que le fixture de tir n'a pas besoin de porter : le ledger
+    # de marge VP, et le profil du tireur (`_enrich_unit_for_reward_mapper` : type et armes).
+    gs["victory_points"] = {1: 0, 2: 0}
+    gs["vp_margin_paid"] = 0.0
+    shooter = gs["unit_by_id"]["1"]
+    shooter["unitType"] = "WarTrakk"
+    shooter["RNG_WEAPONS"] = list(gs["models_cache"]["1#0"]["RNG_WEAPONS"])
+    shooter["CC_WEAPONS"] = []
+    engine = _engine(gs)
+    rc = _reward_calculator(engine)
+
+    success, result = engine._process_squad_action(
+        engine.action_decoder.convert_squad_action(CHOICE_BASE + 1, gs)
+    )
+    assert success is True and result["suppressedTargetId"] == "103"
+    assert result["action"] == "shoot" and "shoot_result" not in result
+    assert rc.calculate_reward(True, result, gs) == 0.0, result
+
+
 def test_bot_pve_repond_par_la_politique_declaree(monkeypatch):
     """Bot PvE : désignée (101) touchée → 101, résolu dans la même requête."""
     gs = _posed(monkeypatch, player_types={"1": "ai", "2": "human"})

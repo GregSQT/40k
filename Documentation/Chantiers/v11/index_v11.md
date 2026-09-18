@@ -385,6 +385,18 @@ l'auto-jeu du moteur ne porte QUE sur `wait`, jamais sur `fight_slot`. Un combat
 reste donc une décision de l'agent, et cette porte reste ouverte sans rien à défaire — c'est un
 choix délibéré, pris alors que l'auto-jouer aurait économisé 3,4 steps par épisode (1,7 %).
 
+**Complété le 2026-09-18 (D+, lot melee-100).** La question d'arme telle que livrée le 2026-08-23
+était posée à TOUTE activation avec cible, et la réponse ne déclarait que les porteuses du code
+choisi — les autres figurines engagées ne frappaient pas (53 % de frappeuses sur 40 parties bot
+contre bot). 04.01 n'ouvre un choix qu'à une figurine qui porte ≥ 2 armes de mêlée ordinaires :
+`squad_auto_declare_fight_weapons` déclare d'office l'arme ordinaire unique et toutes les
+[EXTRA ATTACKS] (24.11), la question n'est posée qu'aux figurines indécises (`model_ids` du
+pending, `fight_weapon_eligible_slots` restreint) et reposée tant qu'il en reste ; les figurines
+engagées seulement avec un autre ennemi frappent celui-ci (04.02) — d'office s'il est unique,
+sinon par une question de cible restreinte (`PENDING_FIGHT_TARGET_KEY` + `model_ids`). Aucun
+modèle des rosters Armageddon ne porte deux armes ordinaires : sur ce régime la question n'est
+jamais posée et le slot FIGHT_WEAPON ne s'ouvre plus. Détail : `Documentation/Archives/chantiers/melee_100.md`.
+
 <a id="s0.67"></a>
 ### 0.67 Les chantiers 01/03/04 ont cassé les DEUX contrats — plus aucun modèle ni aucune mesure ne décrit le code courant — 🔴 OUVERT (2026-08-07)
 

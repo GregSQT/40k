@@ -181,7 +181,10 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for i in range(len(rolled))
     }
     _units = [
-        {"id": "1", "player": 1, "col": 10, "row": 10, "unitType": "Stubber", "UNIT_RULES": []},
+        # Cible DESIGNEE de l'activation (grammaire 11) : posee par `designate_shoot_target` au
+        # demarrage de tout tir de production, exigee par `_emit_squad_shoot_log`.
+        {"id": "1", "player": 1, "col": 10, "row": 10, "unitType": "Stubber", "UNIT_RULES": [],
+         "designated_shoot_target_id": "101"},
         {"id": "101", "player": 2, "col": 20, "row": 10, "unitType": "StubTarget", "UNIT_RULES": []},
         {"id": "102", "player": 2, "col": 30, "row": 10, "unitType": "StubTarget", "UNIT_RULES": []},
     ]
