@@ -179,6 +179,9 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             # regroupement (ici une seule figurine, donc l etat de l intent).
             "additive_rules_applied": r["additive_rules_applied"],
             "point_blank_malus": r["point_blank_malus"],
+            # 17.03 : -1 sur MONSTER/VEHICLE engagee, pose sur l intent et recopie par le vrai
+            # regroupement (`bool(require_key(r, "engaged_target_malus"))`).
+            "engaged_target_malus": r["engaged_target_malus"],
             # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : l arme Gun ne declare ni l un ni
             # l autre ; ces deux cles sont exigees par require_key a l emission.
             "assault_applied": False,

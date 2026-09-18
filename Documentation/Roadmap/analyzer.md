@@ -179,7 +179,7 @@ Verrous : `test_analyzer_dakkablitz.py` (4 verts), `test_analyzer_overlapping_de
 
 ## ✅ Allocation à un CHARACTER — 05.03 / 06.02 / 24.28 (2026-09-18) {#alloc-character}
 
-Livré avec le chantier « chaîne d'attaque 100 % » (`Archives/chantiers/chaine_attaque_100.md`).
+Livré avec le chantier « chaîne d'attaque 100 % » (`Documentation/Archives/chantiers/chaine_attaque_100.md`).
 Contrôle `alloc_character_over_bodyguard[<bucket>]` (`analyzer_core._note_character_allocation_in_lot`
 + `_flush_character_allocation` pour `SHOT`/`FOUGHT`, `_judge_character_allocation` pour `SUFFERS`,
 verdict `analyzer_rules.character_allocation_fault`) : figurine allouée (`[ALLOC_MODEL:]`) CHARACTER

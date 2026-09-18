@@ -93,6 +93,20 @@ def _engine(units: List[Dict[str, Any]], *, current_player: int = 1,
     return eng
 
 
+def _two_model_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
+    """Escouade de deux figurines intactes (3 PV) en (col, row) et (col+1, row) : le défenseur
+    humain a un VRAI choix 05.04 — une seule candidate est allouée d'office (décision (a) du
+    chantier « chaîne d'attaque 100 % », 2026-09-18 ; `_manual_allocation_step`)."""
+    base = _unit_cfg(uid, player, col, row)
+    base["HP_CUR"] = 3
+    base["HP_MAX"] = 3
+    base["models"] = [
+        {"col": col, "row": row, "VALUE": 50},
+        {"col": col + 1, "row": row, "VALUE": 50},
+    ]
+    return base
+
+
 def _fight_step(eng: W40KEngine) -> Dict[str, Any]:
     gs = eng.game_state
     fight_v11_start(gs)
@@ -204,7 +218,8 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     """ROUGE avant le fix : le clic `squad_fight_manual_alloc` de l'humain partait dans
     `_fight_v11_auto_step`, jamais dans `apply_manual_shoot_allocation`."""
     slot_of_1 = None
-    eng = _engine([_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 21, 20)], current_player=2)
+    # Unité humaine de DEUX figurines intactes : le choix 05.04 existe, la question lui est posée.
+    eng = _engine([_two_model_cfg(1, 1, 19, 20), _unit_cfg(2, 2, 21, 20)], current_player=2)
     gs = _fight_step(eng)
     slot_of_1 = get_enemy_slot_mapping(gs, 2).index("1")
     eng.pve_controller.actions = [  # type: ignore[attr-defined]
@@ -225,7 +240,7 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     assert ok is True, out
     assert out["action"] == "squad_fight_manual_alloc" and out["waiting_for_player"] is True, out
     assert PENDING_FIGHT_ALLOCATION_KEY in gs
-    assert {c["model_id"] for c in out["allocation"]["choices"]} == {"1#0"}
+    assert {c["model_id"] for c in out["allocation"]["choices"]} == {"1#0", "1#1"}
 
     # Tant que l'humain n'a pas alloué, le bot ne joue pas (et n'interroge pas la politique).
     ok, out = _ai_turn(eng)
@@ -237,6 +252,7 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     )
     assert ok is True, out
     assert gs["models_cache"]["1#0"]["HP_CUR"] == hp_before - 1, "l'allocation a été appliquée"
+    assert gs["models_cache"]["1#1"]["HP_CUR"] == 3, "la figurine non choisie est intacte"
     assert PENDING_FIGHT_ALLOCATION_KEY not in gs
     # Machine cohérente après la reprise manuelle : le bot a combattu, la main est à l'humain.
     assert "2" in gs["units_selected_to_fight"] and "2" in gs["units_fought"]

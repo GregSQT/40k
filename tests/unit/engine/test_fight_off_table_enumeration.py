@@ -226,6 +226,15 @@ def test_a_friendly_off_table_blocks_no_ranged_shot(gs: Dict[str, Any]) -> None:
     # Le tireur est `mover` (joueur ACTING) ; `allie` est en (4,5), la cible en (5,5).
     cible = _entry(5, 5, FOE)
     gs["units_cache"]["cible"] = cible
+    # 17.03 : la fonction lit d'abord si la cible est une unite MONSTER/VEHICLE (chaque figurine
+    # vivante porte le mot-cle). `build_units_cache` pose `models_cache` + `squad_models` dans le
+    # meme passage que `units_cache` : une figurine `<sid>#0` par unite, `UNIT_KEYWORDS` propres
+    # copies de l'unite. Cible d'infanterie (aucun mot-cle) → le check d'engagement est atteint.
+    gs["models_cache"] = {
+        "cible#0": {"squad_id": "cible", "col": 5, "row": 5, "player": FOE, "HP_CUR": 1,
+                    "UNIT_KEYWORDS": []},
+    }
+    gs["squad_models"] = {"cible": ["cible#0"]}
 
     assert _friendly_engagement_blocks_ranged_shot(
         gs, "mover", ACTING, cible, "cible", False, gs["units_cache"]

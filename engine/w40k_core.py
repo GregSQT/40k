@@ -60,6 +60,7 @@ from engine.phase_handlers.shared_utils import (
     ManualAllocCtx,
     _squad_owner_player,
     manual_allocation_waiting_payload,
+    mortal_wound_log_hp_lost,
     mortal_wounds_ability_log_entry,
     model_datasheet_name,
     drive_reactive_move_window,
@@ -2737,7 +2738,9 @@ class W40KEngine(gym.Env):
         # a l'origine et comme le vocabulaire 40K l'impose — accuracy = precision au tir
         # (BS), que melanger avec la melee (WS) rendrait ininterpretable. Les deux viennent
         # du meme filtre, donc hits <= shots_fired par construction. damage_dealt et
-        # damage_received, eux, couvrent tir ET melee : c'est l'attrition totale.
+        # damage_received, eux, couvrent tir, melee ET blessures mortelles hors chaine
+        # d'attaque (lignes de `MORTAL_WOUND_LOG_VICTIM_KEYS`) : c'est l'attrition totale,
+        # PV pour PV egale a ce que le plateau a perdu.
         #
         # KILLS — DEFINITION : une FIGURINE detruite = 1, dans les deux phases. Le compte se
         # fait donc sur `shootDetails[i]["targetDied"]` (pose par attaque, sur celle qui
@@ -2880,6 +2883,28 @@ class W40KEngine(gym.Env):
                             f"{_rule_eff}_{'agent' if _by_controlled else 'opp'}"
                         ] += 1
                 continue
+            # BLESSURES MORTELLES HORS CHAINE D'ATTAQUE (06.02) : Desperate Escape 09.07, arme
+            # [HAZARDOUS] 24.15, Deadly Demise 24.08, impact de charge, Exhortation. Ce sont des
+            # pertes de PV que les lignes `shoot` / `combat` ne portent pas (leur `damage` ne
+            # somme que les des d'attaque), donc l'attrition les manquait : mesure sur un
+            # episode d'actions legales au hasard, un hazard de Desperate Escape retirait 1 PV
+            # a l'adversaire sans qu'aucune ligne ne l'incremente — damage_dealt en retard de
+            # 1 PV sur le plateau. Le choix du mode de fall-back (acaab98ab) a rendu ce jet
+            # courant : avant lui, seule une escouade battle-shocked le subissait.
+            #
+            # Comptees ICI, sur LA LIGNE que le jet emet, par le meme lecteur que les
+            # attributions (`mortal_wound_log_hp_lost` lit les records ecrits par
+            # `_inflict_one_mortal_wound`) : la victime est celle de la ligne, PAS son `player`
+            # — sur `deadly_demise` et `charge_impact`, ce champ est le proprietaire de la
+            # SOURCE. AVANT le tri Famille A ci-dessous : `charge_impact` y est compte comme
+            # usage de capacite et la boucle passe a la ligne suivante.
+            _mw = mortal_wound_log_hp_lost(self.game_state, log)
+            if _mw is not None:
+                _victim_player, _hp_lost = _mw
+                if _victim_player == controlled_player:
+                    damage_received += _hp_lost
+                else:
+                    damage_dealt += _hp_lost
             # Abilities — Famille A : reactive_move, charge_impact, move_after_shooting.
             # Ces trois types n'ont pas de branche dédiée dans la boucle existante (ils
             # tombaient dans `if log_type not in ('shoot', 'combat'): continue`).

@@ -447,7 +447,7 @@ Une **primitive** est un mécanisme moteur irréductible, absent au moment de la
 - **Primitive A** : **LIVRÉE** (passe 1, 2026-08-30). `hit_any_fail` venait du chantier 03 ; les quatre autres modificateurs sont vifs — `def resolve_hit_roll_modifiers` et `def resolve_melee_wound_bonus` (`shared_utils.py`, appelés par les DEUX rollers), `def unit_charge_roll_bonus` lu dans `def roll_charge_distance`. Statut `suppressed` stocké dans `game_state["suppressed_squads"]` (`squad_id -> joueur suppresseur`), purgé au début de la phase de commande du suppresseur ; aucune datasheet ne le POSE encore — c'est la passe 6 (Indiscriminate Detonations).
 - **Primitive B/F** : `invul_save_override`, `melee_strength_bonus`, `melee_attacks_bonus` rendent **0 hit** dans tout le dépôt — le Waaagh! est passé par des fonctions dédiées (`waaagh_melee_bonus`, `effective_invul_save`, §3). Les primitives génériques sont à **créer**, ne pas partir du principe qu'il suffit de les câbler.
 - **Primitive C** : mécanisme moteur livré (voir passe 3) ; aucune datasheet ne porte encore `feel_no_pain` (`grep feel_no_pain frontend/src/roster` → 0 hit).
-- **Primitive D** : le helper commun **existe** — `def allocate_mortal_wounds` (`shared_utils.py`), consommé par `def _apply_deadly_demise` (Deadly Demise) et `def roll_hazard_for_unit` (`[HAZARDOUS]`). `deadly_demise` est au registre (`config/unit_rules.json`, paramètre `value`) et câblée sur le WeirdBoy (prérequis posé hors passe, 2026-08-25, cf. Roadmap). Restent à unifier : `charge_impact` (`def _apply_charge_impact`, `charge_handlers.py`, chemin direct) et le lien avec `[DEVASTATING WOUNDS]`.
+- **Primitive D** : le helper commun **existe** — `def allocate_mortal_wounds` (`shared_utils.py`), consommé par `def drain_mortal_wound_queue` (file 06.02 : Deadly Demise via `def _roll_deadly_demise`, impact de charge) et `def roll_hazard_for_unit` (`[HAZARDOUS]`). `deadly_demise` est au registre (`config/unit_rules.json`, paramètre `value`) et câblée sur le WeirdBoy (prérequis posé hors passe, 2026-08-25, cf. Roadmap). Restent à unifier : `charge_impact` (`def _apply_charge_impact`, `charge_handlers.py`, chemin direct) et le lien avec `[DEVASTATING WOUNDS]`.
 - **Primitive E** : le mécanisme « secured » existe comme propriété d'objectif (logique `control_method` « secured »/« default » de `def _sum_objective_control_oc`, `game_state.py`).
 
 ---
@@ -528,7 +528,7 @@ Le mot-clé `PSYCHIC` existe déjà sur les armes (`config/weapon_rules.json`). 
 
 ### Point d'intégration
 
-Le helper commun « infliger N blessures mortelles à une unité » existe : `def allocate_mortal_wounds` (`shared_utils.py`), déjà appelé par Deadly Demise (`def _apply_deadly_demise`) et `[HAZARDOUS]` (`def roll_hazard_for_unit`). Restent deux chemins à **unifier**, pas dupliquer :
+Le helper commun « infliger N blessures mortelles à une unité » existe : `def allocate_mortal_wounds` (`shared_utils.py`), déjà appelé par la file des blessures mortelles (`def drain_mortal_wound_queue`, servie par Deadly Demise `def _roll_deadly_demise` et l'impact de charge) et `[HAZARDOUS]` (`def roll_hazard_for_unit`). Restent deux chemins à **unifier**, pas dupliquer :
 
 - `[DEVASTATING WOUNDS]` — `attack_sequence.py`, résolu à l'allocation par l'appelant ;
 - `charge_impact` — `def _apply_charge_impact` (`engine/phase_handlers/charge_handlers.py`), qui décrémente les PV en direct sans passer par le helper.
