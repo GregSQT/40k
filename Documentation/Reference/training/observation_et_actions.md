@@ -624,7 +624,7 @@ decision_ctx_bin[11]     = decision_type_reserves_declaration       # 0.0 / 1.0 
 decision_ctx_bin[12]     = decision_type_reactive_move              # 0.0 / 1.0 — move réactif (L5) : accepter ou refuser la fenêtre
 decision_ctx_bin[13]     = decision_type_fall_back_mode             # 0.0 / 1.0 — mode de fall-back 09.07 : CHOICE_0 Desperate Escape, CHOICE_1 Ordered Retreat (declines)
 decision_ctx_bin[14]     = decision_type_suppress_target            # 0.0 / 1.0 — Indiscriminate Detonations : quelle escouade TOUCHÉE supprimer (candidats = entités ennemies, CHOICE_k)
-decision_ctx_bin[15]     = decision_type_consolidation_engaging     # 0.0 / 1.0 — consolidation 12.07 « with all of their eligible units they CHOOSE to move », mode engaging seul : CHOICE_0 consolide vers l'ennemi à 3" (et s'expose aux New Foes 12.08), CHOICE_1 reste sur place (`declines`)
+decision_ctx_bin[15]     = decision_type_consolidation_engaging     # 0.0 / 1.0 — consolidation 12.07 « with all of their eligible units they CHOOSE to move », mode engaging seul : CHOICE_0 consolide (3" max) vers les ennemis sélectionnés, engagé si possible — d'où les New Foes to Face 12.08 AFTER, qui rendent éligibles les ennemis engagés pas encore sélectionnés pour combattre ; CHOICE_1 reste sur place (`declines`)
 # RÉSERVÉ J4/J5 — AGENT_DECISION_TYPE_SLOTS 16→24 le 2026-09-18 (payé par le `--new` de la
 # refonte du bloc candidat) ; slots restants nuls jusqu'à implémentation. Candidats prévus :
 # decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention (§15.11) ; le reste
