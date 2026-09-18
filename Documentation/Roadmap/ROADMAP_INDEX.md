@@ -40,7 +40,7 @@ Marines / Orks, décision 2026-07-19), prouvé par une mesure quantitative (win-
 contre le panel) et une validation qualitative par un joueur externe.
 
 **Moteur FIGÉ pour la démo — gel LEVÉ le 2026-09-18 (après-midi) par le lot melee-100, décision utilisateur du 2026-09-16 (soir) pour le principe.**
-Nouveau moteur de référence : le commit de merge du lot melee-100 dans `main` (D+, A1–A5, B2, B3 :
+Nouveau moteur de référence : le commit de merge du lot melee-100 dans `main`, `f29ed900e` (D+, A1–A5, B2, B3 :
 le jeu joué change, cf. [moteur.md#melee-100](moteur.md#melee-100)) — **la lignée repart en
 `--new`** (`bash scripts/train.sh --agent ArmageddonAgent_x1 --training-config x1_long --scenario
 bot --resolution 1 --new`), P0′ et les archives du cycle 3 deviennent des juges d'un autre jeu.
