@@ -14,7 +14,9 @@
 « contact si possible » (11.04) ; A3/A4 consolidation gym : sélection engaging réelle, objective
 « closer if not » (12.08) ; A5 passe de l'étape Fight (PDF 25) ; B2 consolidation engaging =
 décision de l'agent (14e type) ; B3 pile-in d'overrun dirigé vers la cible désignée ; P8 quatre
-courbes `06_fight/` ; P9 quatre contrôles analyzer (#70–#73). **Change les parties jouées →
+courbes `06_fight/` ; P9 quatre contrôles analyzer (#70–#73) ; corrections de review avant merge (passe A5 sur toutes
+les éligibles + handoff à l'adversaire, driver PvE et décision B2, analyzer #70 et ER non-cible,
+`fight_can_pass` — `melee_100.md` §7). **Change les parties jouées →
 `--new` de la lignée.** Banc de référence `scripts/melee_bench.py` (40 parties bot contre bot, x1) :
 
 | Mesure (deux joueurs) | Avant (`5b2422dd5`) | Après |
