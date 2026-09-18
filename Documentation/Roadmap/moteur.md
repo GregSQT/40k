@@ -301,6 +301,8 @@ Suite 141 (2026-09-18) : fin de tir d'escouade par la fin d'activation de DATASH
 
 Suite 142 (2026-09-18) : descente 13.06 facturée au sol en métrique HEX sur le chemin par-figurine PvP (branche `_floor_start` hex : BFS amputé de la hauteur du plancher, étage vu par `ascent_field_for_model`, cases d'étage = celles que le commit résout) ; verrou FLY 21.03 (M − 2, sans descente). Détail suite 142.
 
+Suite 147 (2026-09-18) : plan de charge gym — la figurine suiveuse (`_formation_gap`, `charge_build_valid_plan`) départage ses candidates dans la MÉTRIQUE DE LA COHERENCY (`def cohesion_pair_distance`, `engine/phase_handlers/shared_utils.py`) et plus en distance hex : à x5 euclidien, une escouade de 3 figurines en file ne pouvait plus charger depuis les seuils ×1,5 de la suite 138 (diagonale à 10 pas hex = 15,9 > 15 unités de rendu → plan refusé). Détail `ROADMAP_INDEX.md` suite 147.
+
 ---
 
 ## Replis `unit_by_id` {#unit-by-id}
