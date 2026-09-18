@@ -825,7 +825,14 @@ def self_model_bin_index(field: str) -> int:
 #: `effect_ids`, séparés par `declines` : `CHOICE_0` consolide vers les ennemis à 3" (et subit les
 #: New Foes), `CHOICE_1` reste sur place. Posé par `arm_consolidation_engaging_decision` depuis le
 #: driver gym (`_fight_v11_gym_settle`) AVANT le plan ; les modes ongoing et objective restent
-#: automatiques (sans contenu tactique). Ajouté en FIN, après `suppress_target` (merge du lot melee-100 dans `main`, 2026-09-18).
+#: automatiques (sans contenu tactique). Ajouté en FIN. Son rang et celui de `suppress_target` ont
+#: été tranchés par la RÉSOLUTION DE CONFLIT du merge `bf49835087` (`main` → `worktree-melee-100`,
+#: 2026-09-18) : les deux types ont été écrits sur des branches parallèles, et `suppress_target`
+#: (793080134) n'est pas un ancêtre du commit qui déclare celui-ci (0c92f4e2b), où il était encore
+#: le 14e. Un merge peut donc renuméroter un type DÉJÀ déclaré, contrairement à ce que promet le
+#: commentaire de `DECISION_CTX_BIN_FIELDS` ci-dessous ; c'est sans effet ici (les deux types
+#: naissent dans le même `--new`), et `ai/training_contract.py` reste le seul garde d'un
+#: réordonnancement subi par un modèle déjà entraîné.
 AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move", "fall_back_mode", "suppress_target", "consolidation_engaging")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
@@ -845,9 +852,8 @@ MAX_DECISION_OPTIONS = 6
 #: comme `OBS_ID_VOCAB_SIZE` la rend gratuite pour une capacité. Les colonnes en trop restent à
 #: zéro et ne reçoivent aucun gradient.
 #:
-#: 24 depuis le 2026-09-18 (16 auparavant : 8 types + 8 réservés, puis 14 types déclarés dont
-#: `suppress_target`) : 14 types actuels + 10 réservés pour J4/J5. Estimé : fire_overwatch +
-#: heroic_intervention (2) + 8 de marge. Le coût par colonne est 1 scalaire par observation ; le
+#: 24 depuis le 2026-09-18 (8 puis 16 auparavant) : 15 types actuels + 9 réservés pour J4/J5.
+#: Estimé : fire_overwatch + heroic_intervention (2) + 7 de marge. Le coût par colonne est 1 scalaire par observation ; le
 #: coût d'un --new est plusieurs dizaines d'heures à x1 et plusieurs centaines à x5 — la marge
 #: large est délibérée, et ce passage à 24 est payé par le `--new` de la refonte du bloc candidat.
 #: Dépasser ce nombre LÈVE ci-dessous — jamais de troncature, un type non observé serait une
