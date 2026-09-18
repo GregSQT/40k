@@ -229,15 +229,12 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     rolls = iter([6, 6, 1])
     monkeypatch.setattr(random, "randint", lambda a, b: next(rolls, 1))
 
-    ok, out = _ai_turn(eng)
-    assert ok is True and out.get("waiting_for_weapon_select") is True, out
-    assert "2" in gs["units_selected_to_fight"]
-    pending_fw = gs[PENDING_FIGHT_WEAPON_KEY]
-    weapon_slot = next(iter(pending_fw["slot_to_code"]))
-    eng.pve_controller.actions = [{"action": "squad_fight_weapon", "weapon_slot": weapon_slot}]  # type: ignore[attr-defined]
-
+    # D+ (04.01) : une figurine mono-arme n'a pas de choix d'arme, le combat est déclaré et
+    # résolu dans la même requête — jusqu'à l'allocation que l'humain doit trancher.
     ok, out = _ai_turn(eng)
     assert ok is True, out
+    assert "2" in gs["units_selected_to_fight"]
+    assert PENDING_FIGHT_WEAPON_KEY not in gs
     assert out["action"] == "squad_fight_manual_alloc" and out["waiting_for_player"] is True, out
     assert PENDING_FIGHT_ALLOCATION_KEY in gs
     assert {c["model_id"] for c in out["allocation"]["choices"]} == {"1#0", "1#1"}
@@ -383,13 +380,10 @@ def test_les_new_foes_du_bot_sont_joues_par_la_politique(monkeypatch):
     ]
     monkeypatch.setattr(random, "randint", lambda a, b: 1)  # tout rate : pas d'allocation
 
-    ok, out = _ai_turn(eng)
-    assert ok is True and out.get("waiting_for_weapon_select") is True, out
-    assert gs["fight_subphase"] == "consolidate", "squad_fight accepté en consolidate (New Foe)"
-    weapon_slot = next(iter(gs[PENDING_FIGHT_WEAPON_KEY]["slot_to_code"]))
-    eng.pve_controller.actions = [{"action": "squad_fight_weapon", "weapon_slot": weapon_slot}]  # type: ignore[attr-defined]
+    # D+ (04.01) : mono-arme, pas de question d'arme — le New Foe combat dans la requête.
     ok, out = _ai_turn(eng)
     assert ok is True, out
+    assert PENDING_FIGHT_WEAPON_KEY not in gs
     assert "2" in gs["units_selected_to_fight"]
     assert "consolidation_new_foes_pending" not in gs, "liste épuisée → purgée par le driver"
     # 2 « was eligible to fight this phase » : le driver l'a consolidée dans la foulée (groupe

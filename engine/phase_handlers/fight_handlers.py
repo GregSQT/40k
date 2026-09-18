@@ -13,7 +13,7 @@ de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au 
 import sys
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any, Mapping, Literal, get_args
+from typing import Dict, Iterable, List, Tuple, Set, Optional, Any, Mapping, Literal, get_args
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, HAZARD_CONTEXT_HOLD_STILL
 from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage, weapon_has_rule
@@ -1438,13 +1438,21 @@ def fight_weapon_eligible_slots(
     game_state: Dict[str, Any],
     squad_id: str,
     target_id: str,
+    model_ids: Optional[Iterable[str]] = None,
 ) -> Dict[int, str]:
     """Slots d'armes CC éligibles pour le masque de sélection d'arme (V11 §0.69).
 
     Retourne `{slot_j: weapon_code}` pour chaque slot de mêlée j dans
-    [0, K_WEAPONS_MELEE) où ≥1 figurine en engagement peut déclarer cette arme sur
-    `target_id`. L'ordre des slots est celui de `collect_weapon_profiles("CC_WEAPONS")`
-    (porteurs décroissants) — même ordonnancement que l'obs melee j (invariant D1 armes).
+    [0, K_WEAPONS_MELEE) où ≥1 figurine de ``model_ids`` (défaut : toute l'escouade) en
+    engagement peut ENCORE déclarer cette arme sur `target_id`. L'ordre des slots est celui de
+    `collect_weapon_profiles("CC_WEAPONS")` sur TOUTES les figurines vivantes (porteurs
+    décroissants) — même ordonnancement que l'obs melee j (invariant D1 armes), quel que soit le
+    sous-ensemble interrogé.
+
+    Seules les armes ORDINAIRES sont proposées : 04.01 WHILE FIGHTING ne laisse choisir
+    qu'« une arme de mêlée » et 24.11 impose TOUTES les [EXTRA ATTACKS], qui ne sont donc jamais
+    un choix (déclarées d'office par `squad_auto_declare_fight_weapons`). Une figurine dont
+    l'arme ordinaire est déjà déclarée n'ouvre rien (`weapon_qty_max` la compte consommée).
 
     ⚠️ `squad_fight_restart_activation` DOIT avoir été appelé avant cette fonction :
     `weapon_qty_max` retourne 0 si l'activation n'est pas démarrée.
@@ -1454,16 +1462,23 @@ def fight_weapon_eligible_slots(
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    alive_models = [
-        models_cache[mid]
-        for mid in squad_models.get(squad_id, [])  # fallback allowed: squad détruite → liste vide
+    alive_ids = [
+        mid for mid in squad_models.get(squad_id, [])  # fallback allowed: squad détruite → liste vide
         if mid in models_cache
     ]
-    profiles = collect_weapon_profiles(alive_models, "CC_WEAPONS")
+    asked_ids = alive_ids if model_ids is None else [
+        mid for mid in alive_ids if mid in {str(m) for m in model_ids}
+    ]
+    profiles = collect_weapon_profiles([models_cache[mid] for mid in alive_ids], "CC_WEAPONS")
     result: Dict[int, str] = {}
     for slot_j, (weapon, _) in enumerate(profiles[:_K]):
+        if weapon_has_rule(weapon, "EXTRA_ATTACKS"):
+            continue
         code = require_key(weapon, "code")
-        if weapon_qty_max(game_state, FIGHT_DECLARE_CTX, squad_id, code, target_id) > 0:
+        if any(
+            weapon_qty_max(game_state, FIGHT_DECLARE_CTX, squad_id, code, target_id, mid) > 0
+            for mid in asked_ids
+        ):
             result[slot_j] = code
     return result
 

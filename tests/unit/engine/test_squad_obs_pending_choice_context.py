@@ -155,6 +155,10 @@ def _melee_engine() -> W40KEngine:
         _unit_cfg(3, 2, [(33, 20)]),
     ])
     gs = eng.game_state
+    # D+ (04.01) : la question d'arme n'est posée qu'aux figurines qui ont un CHOIX — une
+    # seconde arme ordinaire est greffée sur l'escouade 1 pour que le point d'arrêt existe.
+    for mid in gs["squad_models"]["1"]:
+        gs["models_cache"][mid]["CC_WEAPONS"].append(_weapon_cfg("test_axe", 0, 5))
     gs["phase"] = "fight"
     gs["current_player"] = 1
     gs["units_fought"] = set()

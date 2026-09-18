@@ -6980,45 +6980,169 @@ class W40KEngine(gym.Env):
         """Résout le combat de `squad_id` sur `best_target_id` (None = combat à vide).
 
         Extrait pour être partagé par le flux ordinaire et par la re-sélection de cible
-        (`squad_fight_target_sel`), qui reprend EXACTEMENT ici : le pile-in overrun a déjà
-        été commité et l'escouade déjà enregistrée dans la pool 12.04.
+        (`squad_fight_target_sel` après la mort de la cible désignée), qui reprend EXACTEMENT
+        ici : le pile-in overrun a déjà été commité et l'escouade déjà enregistrée dans la
+        pool 12.04.
+
+        D+ (04.01, 04.02, 24.11) : TOUTES les figurines engagées frappent. La cible désignée par
+        l'agent est celle des figurines engagées avec elle (`squad_auto_declare_fight_weapons` :
+        une arme ordinaire unique d'office + toutes les [EXTRA ATTACKS]) ; la question d'arme
+        n'est posée que pour les figurines qui portent ≥ 2 armes ordinaires ; les figurines
+        engagées SEULEMENT avec d'autres ennemis frappent l'unique autre ennemi d'office, ou
+        se voient poser une question de cible restreinte (`_fight_continue_declarations`).
         """
-        from engine.phase_handlers.fight_handlers import (
-            build_manual_fight_allocation,
-            fight_weapon_eligible_slots,
-        )
         from engine.phase_handlers.shared_utils import squad_fight_restart_activation
 
         squad_fight_restart_activation(self.game_state, squad_id)
-        if best_target_id is not None:
+        if best_target_id is None:
+            return self._fight_allocate_and_end(squad_id)
+        return self._fight_declare_toward(squad_id, best_target_id, None)
+
+    def _fight_declare_toward(
+        self, squad_id: str, target_id: str, model_ids: Optional[List[str]]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Déclare vers `target_id` les figurines engagées avec elle (`model_ids` = sous-ensemble
+        d'une reprise, None = toutes), puis pose la question d'arme s'il en reste une, sinon
+        poursuit (`_fight_continue_declarations`)."""
+        from engine.phase_handlers.shared_utils import squad_auto_declare_fight_weapons
+
+        undecided = squad_auto_declare_fight_weapons(
+            self.game_state, squad_id, target_id, only_model_ids=model_ids
+        )
+        return self._fight_ask_weapon_or_continue(squad_id, target_id, undecided)
+
+    def _fight_ask_weapon_or_continue(
+        self, squad_id: str, target_id: str, undecided: Dict[str, List[str]]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """`undecided` = figurines engagées avec `target_id` à ≥ 2 armes ordinaires : la
+        question d'arme (V11 §0.69) leur est posée, et reposée tant qu'il en reste (la réponse
+        vaut pour toutes les porteuses du profil choisi, miroir de la boucle split-fire)."""
+        from engine.phase_handlers.fight_handlers import fight_weapon_eligible_slots
+
+        if undecided:
             slot_to_code = fight_weapon_eligible_slots(
-                self.game_state, squad_id, best_target_id
+                self.game_state, squad_id, target_id, model_ids=list(undecided)
             )
             if not slot_to_code:
                 raise RuntimeError(
-                    f"_continue_squad_fight: aucune arme CC éligible pour {squad_id!r} vs "
-                    f"{best_target_id!r}"
+                    f"_fight_ask_weapon: {len(undecided)} figurine(s) de {squad_id!r} à choix "
+                    f"d'arme vs {target_id!r} mais aucun slot d'arme CC éligible "
+                    f"(codes {sorted({c for cs in undecided.values() for c in cs})})"
                 )
             self.game_state[PENDING_FIGHT_WEAPON_KEY] = {
                 "squad_id": squad_id,
-                "target_id": best_target_id,
+                "target_id": target_id,
                 "slot_to_code": slot_to_code,
+                "model_ids": sorted(undecided),
             }
             return True, {
                 "action": "squad_fight",
                 "squad_id": squad_id,
-                "target_squad_id": best_target_id,
+                "target_squad_id": target_id,
                 "waiting_for_weapon_select": True,
             }
+        return self._fight_continue_declarations(squad_id)
+
+    def _fight_continue_declarations(self, squad_id: str) -> Tuple[bool, Dict[str, Any]]:
+        """04.02 pour les figurines engagées SEULEMENT avec des ennemis non encore déclarés :
+        chacune frappe un ennemi engagé avec elle. Un seul candidat commun → déclaré d'office ;
+        plusieurs → question de cible restreinte à ces figurines (`PENDING_FIGHT_TARGET_KEY`
+        avec `model_ids`), rejouée par un FIGHT_SLOT. Termine par l'allocation."""
+        from engine.phase_handlers.fight_handlers import (
+            _fight_build_valid_target_pool,
+            _model_can_fight_target,
+        )
+        from engine.phase_handlers.shared_utils import (
+            SQUAD_ACTION_FIGHT_SLOT_COUNT,
+            get_enemy_slot_mapping,
+            get_fighting_models,
+        )
+        from engine.utils.weapon_helpers import melee_weapons
+
+        gs = self.game_state
+        models_cache = require_key(gs, "models_cache")
+        unit = require_unit_by_id(gs, squad_id)
+        for _ in range(SQUAD_ACTION_FIGHT_SLOT_COUNT + 1):
+            intents = require_key(gs, "pending_squad_fight_intents").get(squad_id, [])  # get allowed
+            declared_targets = {str(i["target_unit_id"]) for i in intents}
+            with_intent = {str(i["model_id"]) for i in intents}
+            pool = [str(t) for t in _fight_build_valid_target_pool(gs, unit)]
+            leftover: Dict[str, List[str]] = {}
+            for mid in get_fighting_models(gs, squad_id, None):
+                if mid in with_intent or not melee_weapons(models_cache[mid]):
+                    continue
+                mine = [t for t in pool if _model_can_fight_target(gs, models_cache[mid], squad_id, t)]
+                if not mine or any(t in declared_targets for t in mine):
+                    continue  # déjà servie par une cible déclarée (sans arme ordinaire : rien de plus)
+                leftover[mid] = mine
+            if not leftover:
+                return self._fight_allocate_and_end(squad_id)
+            candidates: List[str] = []
+            for mine in leftover.values():
+                for t in mine:
+                    if t not in candidates:
+                        candidates.append(t)
+            if len(candidates) == 1:
+                target_id = candidates[0]
+                undecided = self._fight_auto_declare_subset(squad_id, target_id, sorted(leftover))
+                if undecided:
+                    return self._fight_ask_weapon_or_continue(squad_id, target_id, undecided)
+                continue
+            enemy_slot_ids = get_enemy_slot_mapping(
+                gs, int(require_key(require_key(gs, "units_cache")[squad_id], "player"))
+            )
+            slot_to_target = {
+                slot_i: str(esid)
+                for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT])
+                if esid is not None and str(esid) in candidates
+            }
+            if not slot_to_target:
+                raise RuntimeError(
+                    f"_fight_continue_declarations: {len(leftover)} figurine(s) de {squad_id!r} "
+                    f"engagées avec {candidates} sans aucun slot ennemi mappé — cible(s) "
+                    f"infrappable(s)"
+                )
+            gs[PENDING_FIGHT_TARGET_KEY] = {
+                "squad_id": str(squad_id),
+                "slot_to_target": slot_to_target,
+                "model_ids": sorted(leftover),
+            }
+            return True, {
+                "action": "squad_fight",
+                "squad_id": squad_id,
+                "waiting_for_target_select": True,
+            }
+        raise RuntimeError(
+            f"_fight_continue_declarations n'a pas convergé pour {squad_id!r} "
+            f"({SQUAD_ACTION_FIGHT_SLOT_COUNT + 1} passes)"
+        )
+
+    def _fight_auto_declare_subset(
+        self, squad_id: str, target_id: str, model_ids: List[str]
+    ) -> Dict[str, List[str]]:
+        from engine.phase_handlers.shared_utils import squad_auto_declare_fight_weapons
+
+        return squad_auto_declare_fight_weapons(
+            self.game_state, squad_id, target_id, only_model_ids=model_ids
+        )
+
+    def _fight_allocate_and_end(self, squad_id: str) -> Tuple[bool, Dict[str, Any]]:
+        """Alloue les attaques déclarées (le défenseur décide, headless en gym) et clôt
+        l'activation 12.04 ; `target_squad_id` = première cible déclarée (None = combat à vide)."""
+        from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
+        from engine.phase_handlers.generic_handlers import end_activation
+
+        intents = require_key(self.game_state, "pending_squad_fight_intents").get(squad_id, [])  # get allowed
+        primary_target: Optional[str] = str(intents[0]["target_unit_id"]) if intents else None
         _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
         if _fight_alloc.get("waiting_for_player"):
             return True, _fight_alloc
         if not _fight_alloc.get("done"):
             raise RuntimeError(
-                f"_continue_squad_fight: allocation combat non terminée en auto pour {squad_id}"
+                f"_fight_allocate_and_end: allocation combat non terminée en auto pour "
+                f"{squad_id!r} (défenseur non-IA ?) — action={_fight_alloc.get('action')}"
             )
         fight_result = _fight_alloc["shoot_result"]
-        from engine.phase_handlers.generic_handlers import end_activation
         unit = require_unit_by_id(self.game_state, squad_id)
         end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
         end_result.pop("phase_complete", None)
@@ -7026,7 +7150,7 @@ class W40KEngine(gym.Env):
             **end_result,
             "action": "squad_fight",
             "squad_id": squad_id,
-            "target_squad_id": None,
+            "target_squad_id": primary_target,
             "fight_result": fight_result,
         }
         self._fight_v11_gym_settle()
@@ -9470,6 +9594,13 @@ class W40KEngine(gym.Env):
                     f"squad_fight_target_sel: slot {ft_slot} non éligible "
                     f"(éligibles : {sorted(slot_to_target)}) — rupture masque/commit"
                 )
+            if "model_ids" in pending_ft:
+                # Question de cible RESTREINTE (04.02, figurines engagées seulement avec
+                # d'autres ennemis) : l'activation est en cours, les déclarations déjà posées
+                # restent — on ne repart pas de zéro.
+                return self._fight_declare_toward(
+                    ft_squad_id, str(slot_to_target[ft_slot]), list(pending_ft["model_ids"])
+                )
             return self._fight_resolve_with_target(
                 ft_squad_id, str(slot_to_target[ft_slot])
             )
@@ -9495,38 +9626,31 @@ class W40KEngine(gym.Env):
             weapon_code = slot_to_code[weapon_slot]
 
             from engine.phase_handlers.fight_handlers import (
-                build_manual_fight_allocation,
                 squad_declare_fight_weapon_qty,
                 squad_fight_weapon_qty_max,
             )
-            max_qty = squad_fight_weapon_qty_max(
-                self.game_state, fw_squad_id, weapon_code, fw_target_id
-            )
-            squad_declare_fight_weapon_qty(
-                self.game_state, fw_squad_id, weapon_code, max_qty, fw_target_id
-            )
 
-            _fight_alloc = build_manual_fight_allocation(self.game_state, fw_squad_id)
-            if _fight_alloc.get("waiting_for_player"):
-                return True, _fight_alloc
-            if not _fight_alloc.get("done"):
-                raise RuntimeError(
-                    f"squad_fight_weapon: allocation combat non terminee en auto pour squad "
-                    f"{fw_squad_id!r} (defenseur non-IA ?) — action={_fight_alloc.get('action')}"
+            # La réponse vaut pour TOUTES les porteuses du profil parmi les figurines
+            # interrogées (restriction documentée : pas de choix figurine par figurine) ; les
+            # autres se voient reposer la question par `_fight_ask_weapon_or_continue`.
+            answered: List[str] = []
+            for mid in pending_fw["model_ids"]:
+                if squad_fight_weapon_qty_max(
+                    self.game_state, fw_squad_id, weapon_code, fw_target_id, only_model_id=mid
+                ) > 0:
+                    squad_declare_fight_weapon_qty(
+                        self.game_state, fw_squad_id, weapon_code, 1, fw_target_id,
+                        only_model_id=mid,
+                    )
+                    answered.append(mid)
+            if not answered:
+                raise ValueError(
+                    f"squad_fight_weapon: aucune des figurines interrogées "
+                    f"{pending_fw['model_ids']} ne porte {weapon_code!r} — rupture masque/commit"
                 )
-            fight_result = _fight_alloc["shoot_result"]
-
-            unit = require_unit_by_id(self.game_state, fw_squad_id)
-            end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
-            end_result.pop("phase_complete", None)
-            result = {
-                **end_result,
-                "action": "squad_fight",
-                "squad_id": fw_squad_id,
-                "target_squad_id": fw_target_id,
-                "fight_result": fight_result,
-            }
-            self._fight_v11_gym_settle()
+            remaining = [mid for mid in pending_fw["model_ids"] if mid not in answered]
+            undecided = self._fight_auto_declare_subset(fw_squad_id, fw_target_id, remaining)
+            return self._fight_ask_weapon_or_continue(fw_squad_id, fw_target_id, undecided)
 
         # ── split-fire (P3-8) ─────────────────────────────────────────────────
         elif action_name == "squad_shoot_weapon_sel":

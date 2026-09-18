@@ -48,6 +48,13 @@ class _FakeEngine:
         wcore.W40KEngine._fight_target_after_designated_death
     )
     _fight_resolve_with_target = wcore.W40KEngine._fight_resolve_with_target
+    # Flux D+ (04.01 / 04.02 / 24.11) : déclaration automatique, question d'arme seulement s'il
+    # reste un choix, figurines engagées ailleurs, allocation.
+    _fight_declare_toward = wcore.W40KEngine._fight_declare_toward
+    _fight_ask_weapon_or_continue = wcore.W40KEngine._fight_ask_weapon_or_continue
+    _fight_continue_declarations = wcore.W40KEngine._fight_continue_declarations
+    _fight_auto_declare_subset = wcore.W40KEngine._fight_auto_declare_subset
+    _fight_allocate_and_end = wcore.W40KEngine._fight_allocate_and_end
     _process_squad_action = wcore.W40KEngine._process_squad_action
     _pending_manual_alloc_ctx = wcore.W40KEngine._pending_manual_alloc_ctx
 
@@ -84,6 +91,7 @@ def _gs() -> Dict[str, Any]:
         # maintenant) + garde « one additional pile-in move » (alimentée par le commit gym).
         "engaged_at_fight_step_start": {_SQUAD: True},
         "overrun_pile_in_done": set(),
+        "pending_squad_fight_intents": {_SQUAD: []},
     }
 
 
@@ -101,8 +109,19 @@ def _patch_overrun(
     monkeypatch.setattr(fh, "_model_can_fight_target", lambda gs, m, uid, eid: True)
     monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
     monkeypatch.setattr(wcore, "require_unit_by_id", lambda gs, uid: {"id": uid, "player": 1})
+    _patch_weapon_choice(monkeypatch)
+
+
+def _patch_weapon_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La figurine unique porte DEUX armes ordinaires : la question d'arme reste posée après la
+    cible (D+ ne la pose plus quand il n'y a pas de choix)."""
     monkeypatch.setattr(
-        fh, "fight_weapon_eligible_slots", lambda gs, sid, tid: {0: "chainsword"}
+        su, "squad_auto_declare_fight_weapons",
+        lambda gs, sid, tid, only_model_ids=None: {"atk#0": ["chainsword", "fist"]},
+    )
+    monkeypatch.setattr(
+        fh, "fight_weapon_eligible_slots",
+        lambda gs, sid, tid, model_ids=None: {0: "chainsword", 1: "fist"},
     )
 
 
@@ -189,9 +208,7 @@ def test_designated_target_alive_non_adjacent_after_overrun_no_valueerror(monkey
     )
     monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
     monkeypatch.setattr(wcore, "require_unit_by_id", lambda gs, uid: {"id": uid, "player": 1})
-    monkeypatch.setattr(
-        fh, "fight_weapon_eligible_slots", lambda gs, sid, tid: {0: "chainsword"}
-    )
+    _patch_weapon_choice(monkeypatch)
 
     eng = _FakeEngine(gs)
     # Ne doit pas lever ValueError même si target_A est vivante et dans units_cache.

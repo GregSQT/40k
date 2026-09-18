@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import AbstractSet, Dict, FrozenSet, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
+from typing import AbstractSet, Dict, FrozenSet, Iterable, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
 from dataclasses import dataclass
 import copy
 import inspect
@@ -15063,6 +15063,80 @@ def squad_declare_fight(
         if total_attacks > 0:
             m["ATTACK_LEFT"] = total_attacks
     return intents
+
+
+def squad_auto_declare_fight_weapons(
+    game_state: Dict[str, Any],
+    attacker_squad_id: str,
+    target_squad_id: str,
+    only_model_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, List[str]]:
+    """Déclaration AUTOMATIQUE 04.01 / 24.11 des figurines engagées avec ``target_squad_id``.
+
+    Pour chaque figurine de l'escouade engagée avec la cible (04.02 : « each target must be
+    engaged with the model that has that weapon ») et sans arme ordinaire déjà déclarée :
+      - TOUTES ses armes [EXTRA ATTACKS] sont déclarées sur la cible (24.11) ;
+      - si elle porte UNE seule arme de mêlée ordinaire, elle est déclarée d'office (04.01
+        « You must select one melee weapon that model has » : aucun choix) ;
+      - si elle en porte PLUSIEURS, rien n'est déclaré pour elles : le choix appartient au
+        joueur, et la figurine est rendue dans ``{model_id: [codes ordinaires]}``.
+
+    Dérivée de `squad_declare_fight` SANS sa branche d'espérance de dégâts : ici le moteur ne
+    choisit jamais une arme à la place du joueur, il ne fait que ce que la règle impose. Sert le
+    chemin gym / bot PvE (`W40KEngine._fight_resolve_with_target`), où le choix restant est posé
+    à l'agent par `PENDING_FIGHT_WEAPON_KEY`. Idempotente : une figurine déjà déclarée est
+    laissée telle quelle. ``only_model_ids`` restreint le balayage (reprise après un choix de
+    cible restreint à quelques figurines).
+
+    Retour : les figurines restées SANS arme ordinaire faute de choix, avec les codes candidats.
+    """
+    from engine.phase_handlers.fight_handlers import (
+        _extra_attacks_weapon_indices_of,
+        squad_declare_fight_weapon_qty,
+    )
+
+    init_pending_intents(game_state)
+    sid = str(attacker_squad_id)
+    tid = str(target_squad_id)
+    if sid not in game_state["pending_squad_fight_intents"]:
+        raise RuntimeError(
+            f"squad_auto_declare_fight_weapons called before squad_fight_unit_activation_start "
+            f"for squad {sid!r}"
+        )
+    models_cache = require_key(game_state, "models_cache")
+    fighting = get_fighting_models(game_state, sid, tid)
+    if only_model_ids is not None:
+        allowed = {str(m) for m in only_model_ids}
+        fighting = [m for m in fighting if m in allowed]
+    undecided: Dict[str, List[str]] = {}
+    for mid in fighting:
+        m = models_cache[mid]
+        weapons = melee_weapons(m)
+        extra_idx = set(_extra_attacks_weapon_indices_of(m))
+        mine = [
+            i for i in game_state["pending_squad_fight_intents"][sid] if str(i["model_id"]) == mid
+        ]
+        declared_idx = {int(i["weapon_index"]) for i in mine}
+        for idx in sorted(extra_idx - declared_idx):
+            squad_declare_fight_weapon_qty(
+                game_state, sid, require_key(weapons[idx], "code"), 1, tid, only_model_id=mid
+            )
+        if any(idx not in extra_idx for idx in declared_idx):
+            continue  # arme ordinaire déjà choisie (04.01 : une seule)
+        ordinary_codes = [
+            require_key(w, "code") for k, w in enumerate(weapons)
+            if isinstance(w, dict) and k not in extra_idx
+        ]
+        if len(ordinary_codes) == 1:
+            squad_declare_fight_weapon_qty(
+                game_state, sid, ordinary_codes[0], 1, tid, only_model_id=mid
+            )
+            m["selectedCcWeaponIndex"] = next(
+                k for k, w in enumerate(weapons) if isinstance(w, dict) and k not in extra_idx
+            )
+        elif len(ordinary_codes) >= 2:
+            undecided[mid] = ordinary_codes
+    return undecided
 
 
 def squad_consolidate_plan(
