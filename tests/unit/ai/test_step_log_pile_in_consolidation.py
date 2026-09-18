@@ -4,7 +4,8 @@ Débloque les contrôles analyzer 12.03, 12.08.
 
 Format attendu :
   PILED IN … [targets: M,K]
-  CONSOLIDATED … [ONGOING|ENGAGING|OBJECTIVE]
+  CONSOLIDATED … [ONGOING|ENGAGING|OBJECTIVE] [targets: M,K]   (A3 : sélection réelle 12.08,
+                 absente en mode objective et sur le chemin PvP)
 
 Cycle rouge→vert : supprimer le bloc `if action_type in ("pile_in", …)` dans
 `ai/step_logger._format_replay_style_message` fait passer les tests en rouge.
@@ -105,3 +106,22 @@ def test_l17_consolidation_no_mode_no_token(tmp_path: Path) -> None:
     assert "[ONGOING]" not in content
     assert "[ENGAGING]" not in content
     assert "[OBJECTIVE]" not in content
+
+
+def test_a3_consolidation_targets_in_log(tmp_path: Path) -> None:
+    """A3 — sélection réelle 12.08 : `[ENGAGING] [targets: 20,30]` (même token que le pile-in)."""
+    log = tmp_path / "step.log"
+    logger = _logger(log)
+    _log(logger, "consolidation", {
+        **_base_details(), "consolidation_mode": "engaging", "consolidation_target_ids": ["20", "30"],
+    })
+    content = _read(log)
+    assert "[ENGAGING] [targets: 20,30]" in content, content
+
+
+def test_a3_consolidation_without_targets_has_no_targets_token(tmp_path: Path) -> None:
+    """Mode objective (ou chemin PvP) : pas de sélection d'ennemis → pas de token."""
+    log = tmp_path / "step.log"
+    logger = _logger(log)
+    _log(logger, "consolidation", {**_base_details(), "consolidation_mode": "objective"})
+    assert "[targets:" not in _read(log)

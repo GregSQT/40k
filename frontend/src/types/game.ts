@@ -369,6 +369,9 @@ export interface GameState {
   fight_subphase?: FightSubPhase;
   // Unités actionnables dans la sous-phase fight courante (exposé moteur).
   fight_eligible_units?: string[];
+  // A5 (PDF 25) : le sélecteur peut passer — toutes ses unités éligibles sont à plus de 5"
+  // de tout ennemi. Posé par la machine manuelle à chaque état d'attente FIGHT.
+  fight_can_pass?: boolean;
   fight_step?: "fights_first" | "remaining" | null;
   fight_selector?: number | null;
   active_fight_unit?: string | null;

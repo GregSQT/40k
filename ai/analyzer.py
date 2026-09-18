@@ -1629,6 +1629,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('charge_roll_out_of_range')
             # 06.02 : blessure mortelle de la phase de charge allouée à un CHARACTER avant ses bodyguards.
             + _pair('alloc_character_over_bodyguard', 'charge')
+            # 11.04 WHILE MOVING : « within 1" … must do so » (lot melee-100, PROJ.1.3.contact).
+            + _pair('charge_no_contact')
         ),
         'fight': (
             # Deux clés RETIRÉES de ce total, pas seulement remises à zéro — un terme mort dans un
@@ -1647,6 +1649,11 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_hit_threshold_mismatch')
             + _pair('fight_alternation_violations')
             + _pair('fight_double_pile_in')
+            # Lot melee-100 (2026-09-18) : 04.02 figurine engagée sans attaque ; 12.03 pile-in
+            # hors engagement possible ; 12.08 engaging sans toutes les cibles sélectionnées.
+            + _pair('fight_engaged_idle')
+            + _pair('fight_pile_in_no_engage')
+            + _pair('fight_consolidation_not_all_selected')
             # 24.15 HAZARDOUS : déclenchements en mêlée seulement (tir dans le total shooting).
             + _pair('hazardous_no_hazardous_weapon_fight')
             # 06.02 par capacité : les deux capacités du corpus se déclenchent en mêlée.
@@ -2194,6 +2201,18 @@ def parse_step_log(filepath: str) -> Dict:
         # pouvait pas le voir : son marqueur d'activation de combat est `CONSOLIDATED` (12.07),
         # et un double pile-in ne produit aucune consolidation supplémentaire.
         'fight_double_pile_in': {1: 0, 2: 0},
+        # Lot melee-100 (2026-09-18) :
+        # 04.01/04.02/24.11 — figurines engagées (tout ennemi) absentes de tous les
+        # [SHOOTER_MODELS:] de leur activation (verdict en fin de lecture, `flush_engaged_idle`) ;
+        'fight_engaged_idle': {1: 0, 2: 0},
+        # 12.03 WHILE MOVING — pile-in fini hors engagement alors qu'une case engagée avec la
+        # cible la plus proche était libre et atteignable en 3" ;
+        'fight_pile_in_no_engage': {1: 0, 2: 0},
+        # 12.08 AFTER MOVING (engaging) — une cible sélectionnée (`[targets:]`) non engagée ;
+        'fight_consolidation_not_all_selected': {1: 0, 2: 0},
+        # 11.04 WHILE MOVING — figurine finie au-delà de 1" d'une cible alors qu'une case à ≤ 1"
+        # était libre et atteignable dans le jet.
+        'charge_no_contact': {1: 0, 2: 0},
         # 07.02 — ordre COMMAND→MOVE→SHOOT→CHARGE→FIGHT violé (phase antérieure réapparaît).
         'phase_order_violations': 0,
         # P2 — partie terminée au-delà du tour prévu par le scénario.
@@ -2278,6 +2297,10 @@ def parse_step_log(filepath: str) -> Dict:
             },
             'fight_alternation_violations': {1: None, 2: None},
             'fight_double_pile_in': {1: None, 2: None},
+            'fight_engaged_idle': {1: None, 2: None},
+            'fight_pile_in_no_engage': {1: None, 2: None},
+            'fight_consolidation_not_all_selected': {1: None, 2: None},
+            'charge_no_contact': {1: None, 2: None},
             'phase_order_violation': None,
             'game_turn_exceeded': None,
             'win_method_mismatch': None,
@@ -3810,6 +3833,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_charge_over = stats['charge_invalid'][1]['distance_over_roll']
     bot_charge_over = stats['charge_invalid'][2]['distance_over_roll']
     _table_row("Charge au-dela du budget:", _fmt_count(agent_charge_over), _fmt_count(bot_charge_over))
+    _cnc = require_key(stats, 'charge_no_contact')
+    _table_row("Charge sans contact possible (11.04):", _fmt_count(_cnc[1]), _fmt_count(_cnc[2]))
+    for _p in (1, 2):
+        _first = stats['first_error_lines']['charge_no_contact'][_p]
+        if _cnc[_p] > 0 and _first:
+            log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
     if stats['first_error_lines']['charge_invalid'][1]:
         first_err = stats['first_error_lines']['charge_invalid'][1]
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
@@ -3869,6 +3898,17 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         for _pl in (1, 2):
             if _fm[_kind][_pl] > 0 and stats['first_error_lines']['fight_move_invalid'][_kind][_pl]:
                 _fe = stats['first_error_lines']['fight_move_invalid'][_kind][_pl]
+                log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
+    for _key, _label in (
+        ('fight_engaged_idle', 'Figurines engagees sans attaque (04.02):'),
+        ('fight_pile_in_no_engage', 'Pile-in sans engagement possible (12.03):'),
+        ('fight_consolidation_not_all_selected', 'Conso engaging cibles non engagees (12.08):'),
+    ):
+        _c = require_key(stats, _key)
+        _table_row(_label, _fmt_count(_c[1]), _fmt_count(_c[2]))
+        for _pl in (1, 2):
+            _fe = stats['first_error_lines'][_key][_pl]
+            if _c[_pl] > 0 and _fe:
                 log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
     # ACTION PHASE ACCURACY
     _switch_section("1.5")

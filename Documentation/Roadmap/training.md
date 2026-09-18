@@ -1386,6 +1386,7 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 - ✅ `02_combat/m_charge_attempts` **non nul**
 - ✅ `02_combat/n_charge_success_rate` **non nul** (en V11 la déclaration est gratuite — l'agent déclare « au cas où » puis choisit ses cibles après le jet ; un taux bas ne signifie pas un dysfonctionnement)
 - ✅ Courbes `reserves/*` et `05_charge/*` **peuplées** (`charge_distance/*` était le nom de la clé interne, le tag TensorBoard réel est `05_charge/*`)
+- ✅ Courbes `06_fight/b_engaging_consolidations_{agent,opponent}`, `c_new_foes_subies`, `d_fights_multi_niveaux`, `e_engaged_idle_models` **ajoutées le 2026-09-18** (lot melee-100, `metriques.md` § Phase de combat) : `e_` doit valoir 0 (garde D+), `d_` reste à 0 tant que A6 n'est pas livré, `b_`/`c_` disent si l'agent prend l'option engaging et ce qu'elle lui coûte en New Foes
 
 ⚠️ Pour tout re-run : `--new` et non `--append` — `--append` réapplique `ent_coef = 0,1` et écrase le modèle canonique.
 

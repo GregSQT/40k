@@ -378,6 +378,7 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 | 24 | ~~`charge_invalid.fled`~~ | — | **sous-clé SUPPRIMÉE** (2026-09-07) : elle n'a jamais eu d'écrivain, la faute vit dans le #26 |
 | 25 | `charge_invalid.distance_over_roll` | `:132` | BFS par socle, budget `2D6×échelle` (−2" si `[FLY]`, obstacles ignorés si vol) |
 | 26 | `charge_after_flee` | `:227` | `units_fled` ∧ pas de `charge_after_flee` — SEUL site de la faute |
+| **70** | `charge_no_contact` | `charge_handler._judge_charge_contact` (lot melee-100, 2026-09-18) | **11.04 WHILE MOVING « Each model that can end its move within 1" of one or more charge targets must do so »** — par figurine : finie au-delà de 1" (bord à bord, primitive du moteur) de toute cible de la ligne alors qu'une case à ≤ 1" d'une cible était LIBRE (autres figurines, alliées comprises), ATTEIGNABLE dans le jet (BFS par socle, mêmes obstacles que le budget, `analyzer_perfig.reachable_cell_engaging`) et HORS de la zone d'engagement de tout ennemi NON-cible (11.04 AFTER MOVING « cannot be engaged with … enemy units that are not charge targets » — cases que le moteur refuse, `_hex_legal_for_charge` ; `forbidden_ids` / `forbidden_zone`, review 2026-09-18). Une faute par ligne ; charge `[FLY]` hors contrôle (vol d'oiseau) ; sans socles d'avant/après : non jugeable. Corpus `PROJ.1.3.contact` |
 
 ### §1.4 FIGHT ERRORS
 
@@ -387,6 +388,9 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 | 28 | `fight_over_cc_nb` | `:216` (plafond : `_cc_cap_for_line`, `:16`, appelé `:188`) | séquence vs plafond **par figurine** : `[SHOOTER_MODELS:]` donne les socles qui ont frappé, `[MODEL_TYPES:]` la datasheet de chacun, `T{tour} EFFECTS:` le bonus `waaagh_melee_atk` (`:39`). Le groupe de frappeurs entre dans la clé de séquence. Repli explicite sur `NB d'escouade × effectif` si le journal n'a pas ces segments. `[SUSTAINED HITS]` exclu. ⚠️ **Réellement par-figurine seulement depuis `baf4859a` (2026-08-10)** — avant, `[MODEL_TYPES:]` répétait le type d'escouade sur chaque socle (cf. §1.1). **Le comptage lui-même a quitté ce fichier le 2026-08-10** : il est mutualisé avec le tir dans `analyzer_perfig.per_model_attack_cap` (`:262`), et `_cc_cap_for_line` ne porte plus que le bonus de Waaagh, propre à la mêlée |
 | 29 | `fight_alternation_violations` | `:151` | une unité ayant chargé, encore engagée et non encore activée, existait au moment où une autre a frappé |
 | 30-31 | `fight_move_invalid.pile_in` / `.consolidation` | `:423` | BFS par socle, budget `3"×échelle` |
+| **71** | `fight_engaged_idle` | `fight_handler._note_engaged_idle_activation` (relevé ligne FOUGHT) / `flush_engaged_idle` (verdict en fin de lecture, lot melee-100, 2026-09-18) | **04.01 / 04.02 / 24.11** — par ACTIVATION `(épisode, phase de combat, escouade)` : figurines ENGAGÉES au premier FOUGHT (tout ennemi, socles d'avant la ligne, mesure par figurine) moins l'union des `[SHOOTER_MODELS:]` de ses lignes ; le compte est en FIGURINES. Activation sans segment `[SHOOTER_MODELS:]` : non jugeable. Corpus `PROJ.1.4.engagees_inactives` |
+| **72** | `fight_pile_in_no_engage` | `fight_handler._judge_pile_in_engagement` (bloc `PILED IN`, lot melee-100) | **12.03 WHILE MOVING « engaged with it if possible »** — par figurine : finie hors engagement de sa cible la plus proche (`[targets:]` de la ligne, sinon tout ennemi vivant) alors qu'une case engagée avec elle était libre et atteignable en 3" (même `reachable_cell_engaging` que #70, zone = EZ). Une faute par ligne. Corpus `PROJ.1.4.pile_in_engage` |
+| **73** | `fight_consolidation_not_all_selected` | `fight_handler._judge_consolidation_selection` (bloc `CONSOLIDATED`, lot melee-100) | **12.08 AFTER MOVING, Engaging « engaged with all of the selected enemy units »** — ligne `[ENGAGING] [targets: a,b]` : chaque cible sélectionnée doit être engagée par au moins une figurine à l'arrivée. Sans `[targets:]` (chemin PvP) ou hors engaging : non jugé. Corpus `PROJ.1.4.conso_toutes_selectionnees` |
 | 31bis | `alloc_character_over_bodyguard['fight']` | `analyzer_core._note_character_allocation_in_lot` / `_flush_character_allocation`, `_judge_character_allocation` | miroir mêlée de §1.2 #21ter (lignes `FOUGHT`/`ATTACKED` par lot, blessures mortelles de la phase ligne à ligne) |
 
 ### §1.5–§1.8
@@ -727,7 +731,7 @@ Lot 5 a migré les matrices §3/§4/§5-bis dans `rules_corpus.json` sous forme 
 
 | | Nombre |
 |---|---|
-| Contrôles de conformité vivants | **71** (69 + `squad_coherency_violations` 03.03 + `fight_double_pile_in` 12.02, livrés le 2026-08-10) |
+| Contrôles de conformité vivants | **75** (69 + `squad_coherency_violations` 03.03 + `fight_double_pile_in` 12.02, livrés le 2026-08-10 ; + #70 à #73 du lot melee-100, livrés le 2026-09-18) |
 | dont morts / inatteignables | **0** — V1 (`damage_exceeds_hp`) supprimé le 2026-08-17 (irréalisable par construction) ; V2 et V3 supprimés le 2026-08-10 |
 | Sommes d'erreurs dupliquées | 0 — un seul `error_totals` (`analyzer.py`) depuis V16 |
 | Clés de `stats` créées à la volée | 0 depuis V17 — toutes déclarées dans la structure |
@@ -813,7 +817,7 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | ~~L14~~ | ~~**Statut Fights First** de l'unité activée~~ — **LIVRÉ le 2026-08-18** : `[FIGHTS FIRST]` sur la ligne `FOUGHT` via `fightsFirst` dans l'action_log combat | 24.13, 12.04, 11.04, 15.12 |
 | ~~L15~~ | ~~**Nombre d'armes [HAZARDOUS] sélectionnées**~~ — **LIVRÉ le 2026-08-20** : `[HAZARDOUS:<n>] Roll:<dice>` sur SUFFERS (24.15) ; 5 verrous rouge→vert | 24.15 |
 | ~~L16~~ | ~~**Cibles de charge multiples**~~ — **LIVRÉ le 2026-08-20** : `CHARGED Unit M(…),Unit K(…)` (11.04 multi-cibles) ; 5 verrous rouge→vert | 11.04 |
-| ~~L17~~ | ~~**Cibles de pile-in / mode de consolidation**~~ — **LIVRÉ le 2026-08-20** : `PILED IN [targets: M,K]`, `CONSOLIDATED [ONGOING\|ENGAGING\|OBJECTIVE:<id>]` ; 6 verrous rouge→vert | 12.03, 12.08 |
+| ~~L17~~ | ~~**Cibles de pile-in / mode de consolidation**~~ — **LIVRÉ le 2026-08-20** : `PILED IN [targets: M,K]`, `CONSOLIDATED [ONGOING\|ENGAGING\|OBJECTIVE:<id>]` ; 6 verrous rouge→vert. **Étendu le 2026-09-18 (A3)** : `CONSOLIDATED … [ONGOING\|ENGAGING] [targets: M,K]` porte la SÉLECTION RÉELLE 12.08 (ongoing : ennemis engagés ; engaging : ennemis que le plan engage) sur le chemin gym ; absent en objective et sur le chemin PvP — consommé par #73 | 12.03, 12.08 |
 | ~~L18~~ | ~~**Objectifs : méthode `secured`/`default` + OC par joueur**~~ — **LIVRÉ le 2026-08-19** : `ZONES=` étendu avec `:Mthd=:OC1=:OC2=` dans `step_logger.py`, câblé dans `w40k_core.py`, parsé dans `analyzer_core.py` (`objective_control_method` + `objective_oc_per_zone`) | — | 14.02, 14.03 |
 | ~~L19~~ | ~~**Attached units** : lien leader/support ↔ bodyguard~~ — **LIVRÉ le 2026-08-18** : entête `Attached: <leader_id>→<bodyguard_id>` dans `log_episode_start` via `attached_info` | 19.01, 19.02, 19.04, 24.22, 24.34 |
 | L20 | **Terrain** : catégorie et hauteur par hexe | entête `Terrain: <cat>@(c,r,h)…` | 13.02–13.11, 06.01, 22.05 (lève aussi 10 NON-TESTABLE) |

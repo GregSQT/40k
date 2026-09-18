@@ -174,6 +174,47 @@ describe("TurnPhaseTracker — fight bandeaux", () => {
     expect(screen.queryByRole("button", { name: /Skip/i })).not.toBeNull();
   });
 
+  it("showFightPass + onFightPass → bouton Passer visible, absent sinon", () => {
+    const { rerender } = render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={1}
+        onFightAtk={vi.fn()}
+        showFightPass
+        onFightPass={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /Passer/ })).not.toBeNull();
+    rerender(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={1}
+        onFightAtk={vi.fn()}
+        showFightPass={false}
+        onFightPass={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /Passer/ })).toBeNull();
+  });
+
+  it("clic Passer → onFightPass appelé", () => {
+    const onPass = vi.fn();
+    render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={2}
+        onFightAtk={vi.fn()}
+        showFightPass
+        onFightPass={onPass}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Passer/ }));
+    expect(onPass).toHaveBeenCalledTimes(1);
+  });
+
   it("clic Skip → onSkipFight appelé", () => {
     const onSkip = vi.fn();
     render(

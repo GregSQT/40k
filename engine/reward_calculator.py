@@ -146,6 +146,7 @@ class RewardCalculator:
             "move", "shoot", "wait", "flee", "charge", "charge_fail", "fight", "combat",
             "squad_normal_move", "squad_advance", "squad_fall_back", "squad_wait",
             "squad_shoot", "squad_shoot_split_target", "squad_charge", "squad_fight",
+            "squad_fight_pass",
         ]
         has_position_data = any(ind in result for ind in ["fromCol", "toCol", "fromRow", "toRow"])
 
@@ -673,6 +674,13 @@ class RewardCalculator:
                 reward_breakdown['total'] = advance_reward
             game_state['last_reward_breakdown'] = reward_breakdown
             return advance_reward
+
+        elif action_type == "squad_fight_pass":
+            # A5 : la passe (PDF 25) n'est pas une activation — ni récompense ni pénalité
+            # d'attente ; seule la marge VP reste due comme pour toute action.
+            reward_breakdown['total'] = vp_margin_reward
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return vp_margin_reward
 
         elif action_type == "squad_wait":
             wait_reward = self._wait_reward(acting_unit, success, game_state)
