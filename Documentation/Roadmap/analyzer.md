@@ -180,13 +180,17 @@ Verrous : `test_analyzer_dakkablitz.py` (4 verts), `test_analyzer_overlapping_de
 ## ✅ Allocation à un CHARACTER — 05.03 / 06.02 / 24.28 (2026-09-18) {#alloc-character}
 
 Livré avec le chantier « chaîne d'attaque 100 % » (`Archives/chantiers/chaine_attaque_100.md`).
-Contrôle `alloc_character_over_bodyguard[<bucket>]` (`analyzer_core._judge_character_allocation`,
+Contrôle `alloc_character_over_bodyguard[<bucket>]` (`analyzer_core._note_character_allocation_in_lot`
++ `_flush_character_allocation` pour `SHOT`/`FOUGHT`, `_judge_character_allocation` pour `SUFFERS`,
 verdict `analyzer_rules.character_allocation_fault`) : figurine allouée (`[ALLOC_MODEL:]`) CHARACTER
-alors qu'un non-CHARACTER de l'unité est vivant — légal sous `[PRECISION]` pour une blessure normale ;
-pour une blessure MORTELLE, la clé `alloc.precision_mw_to_character` de l'entête `Run rules:`
+alors qu'un non-CHARACTER de l'unité est vivant **à la fin du lot** — verdict PAR LOT depuis le
+2026-09-18 (bis) : l'ordre des lignes d'un lot est celui des jets, pas de l'allocation (pool trié par
+sauvegarde, `_roll_batch`), le verdict ligne à ligne comptait une fausse 05.03 dès que la ligne du
+CHARACTER précédait celles des bodyguards tués avant lui. Légal sous `[PRECISION]` pour une blessure
+normale ; pour une blessure MORTELLE, la clé `alloc.precision_mw_to_character` de l'entête `Run rules:`
 (miroir de `game_rules.precision_mortal_wounds_to_character`) tranche, journal sans la clé =
 indécidable. Corpus : `PROJ.1.1/1.2/1.3/1.4.alloc_character` ; 05.03, 06.02, 24.28 passent
-d'`ABSENT_LOG_MANQUANT` à `COUVERT`. 15 verrous (`test_analyzer_alloc_character.py`). Non
+d'`ABSENT_LOG_MANQUANT` à `COUVERT`. 20 verrous (`test_analyzer_alloc_character.py`). Non
 vérifié : priorité « figurine déjà blessée », ordre des groupes W/Sv/InSv (non journalisés).
 Nouveaux jetons lus : `DID NOT ATTACK … N attack(s) not made` (métrique
 `shoot_cross_weapon_attacks_lost`), `[ENGAGED TARGET]` (17.03, seuil effectif imprimé) ; Deadly
