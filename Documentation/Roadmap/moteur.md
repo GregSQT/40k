@@ -7,6 +7,37 @@
 
 ---
 
+## Mêlée 100 % — lot melee-100 {#melee-100}
+
+✅ **Livré 2026-09-18** (`worktree-melee-100`). D+ toutes les figurines engagées frappent (04.01 /
+04.02 / 24.11) ; A1 pile-in gym « engagée si possible » en trois paliers (12.03) ; A2 charge gym
+« contact si possible » (11.04) ; A3/A4 consolidation gym : sélection engaging réelle, objective
+« closer if not » (12.08) ; A5 passe de l'étape Fight (PDF 25) ; B2 consolidation engaging =
+décision de l'agent (14e type) ; B3 pile-in d'overrun dirigé vers la cible désignée ; P8 quatre
+courbes `06_fight/` ; P9 quatre contrôles analyzer (#70–#73). **Change les parties jouées →
+`--new` de la lignée.** Banc de référence `scripts/melee_bench.py` (40 parties bot contre bot, x1) :
+
+| Mesure (deux joueurs) | Avant (`5b2422dd5`) | Après |
+|---|---|---|
+| Figurines qui frappent / engagées | 318 / 598 = 0,53 | 573 / 573 = 1,00 |
+| Attaques jetées / possibles | 1 049 / 2 042 = 0,51 | 1 917 / 1 917 = 1,00 |
+| Tuées en mêlée · VALUE | 151 · 3 275 | 242 · 5 367 |
+| Tuées au tir · VALUE | 457 · 8 208 | 435 · 7 308 |
+| Contact après charge | 118 / 516 = 23 % | 235 / 449 = 52 % |
+| Après pile-in contact / engagée / hors | 533 / 129 / 100 | 522 / 176 / 104 |
+| Consolidations ongoing / engaging / objective / vide · New Foes | 115 / 1 / 19 / 30 · 0 | 90 / 4 / 32 / 18 · 3 |
+| Victoires J1 / J2 · siège agent / adversaire | 26 / 14 · 22 / 18 | 22 / 18 · 24 / 16 |
+
+Seuils de gate / promotion relus, non modifiés (relatifs au pool ; seule la règle absolue « robuste
+≥ 0,85 » de P0 est à relire sur le premier run). Décisions, restrictions et journal :
+`Documentation/Archives/chantiers/melee_100.md`.
+
+**Reste ouvert (optionnel, P11)** : A6 — pile-in et consolidation gym verticaux (13.06) : sans
+effet sur les terrains actuels (planchers à 3", budget 3" consommé par la hauteur), courbe
+`06_fight/d_fights_multi_niveaux` = 0 en attendant.
+
+---
+
 ## Chaîne d'attaque 100 % {#chaine-attaque-100}
 
 ✅ **Livré 2026-09-18** (`worktree-chaine-attaque-100`). Ordre des lots choisi par l'attaquant lot

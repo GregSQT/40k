@@ -1025,6 +1025,20 @@ Ordre par valeur tactique :
    Consolidation* obligatoire. Le gym ne consolide donc **jamais** vers un objectif, alors que les
    objectifs décident la partie. Le flux PvP (fight_handlers) a la cascade complète. À combler
    quand cette tranche s'ouvre : c'est une règle manquante, pas une divergence d'interface.
+
+   🟢 **(a) « consolider ou non » en mode Engaging — LIVRÉ le 2026-09-18 (B2, lot melee-100).**
+   Type `consolidation_engaging` (14e de `AGENT_DECISION_TYPE_IDS`, ajouté en fin), deux
+   candidats sans `effect_ids` séparés par `declines` : `CHOICE_0` consolider, `CHOICE_1` rester.
+   Armé par `_fight_v11_gym_settle` AVANT `squad_consolidate_plan_with_targets` pour le seul mode
+   engaging (ongoing = rester au contact, objective = rejoindre la zone : sans contenu tactique,
+   automatiques) ; le propriétaire de la décision est celui de l'unité (en seconde moitié de
+   12.07 c'est le joueur non actif) ; réponse mémorisée par phase (`consolidation_engaging_answers`)
+   et jouée à la reprise du settle. (b) « quelles unités sélectionner » n'est pas exposé : la
+   sélection est celle que le plan engage réellement (A3, point fixe) — la question reste ouverte
+   comme raffinement. Bot de référence : `CHOICE_0`, l'ancien comportement du driver
+   (`bot_action_for_pending_choice`), pour ne pas bouger la baseline. `obs_size` et
+   `TOTAL_ACTION_SIZE` inchangés (slot réservé). Tests
+   `tests/unit/engine/test_consolidation_engaging_decision.py`.
 6. ✅ **Move-after-shooting LIVRÉ le 2026-09-09, reactive_move LIVRÉ le 2026-09-10.** NB : les
    deux sont des **capacités d'unité** (`config/unit_rules.json`), pas des règles de base — leur
    valeur dépend du roster, et celle de `reactive_move` est nulle sur le régime d'entraînement
