@@ -219,7 +219,7 @@ le socle déborde de son ancre) ; présence sans source, absence avec source et 
 Nouveau : `_counter_row` du rapport imprime aussi `reserves_too_early`, `da_jump_invalid` et
 `suppression_without_hit`, qui entraient dans les totaux sans ligne. 18 verrous
 (`test_analyzer_fnp.py`, `test_analyzer_save_threshold.py`) ; 0 erreur sur un journal réel du moteur
-(4 puis 14 épisodes à actions aléatoires, rosters Armageddon, 229 seuils et 159 FNP jugés, 32 instantanés Waaagh! actif ; scratch `gen_step_log.py`).
+(4 puis 14 épisodes à actions aléatoires, rosters Armageddon, 229 seuils et 159 FNP jugés, 32 instantanés Waaagh! actif ; journaux produits par un script jetable, non conserve).
 
 ---
 
