@@ -52,7 +52,7 @@ def _game_state(weapon_rules, *, dmg=1, hp=2):
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(9, 9, player=1)},
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "designated_shoot_target_id": "2"}, "2": {"id": "2", "UNIT_RULES": []}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "pending_squad_shoot_intents": {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,

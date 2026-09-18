@@ -7870,6 +7870,10 @@ class W40KEngine(gym.Env):
         _shoot_type = raw_log.get("shootType")  # get allowed : absent sur les logs de combat
         if _shoot_type is not None:
             details["shoot_type"] = str(_shoot_type)
+        # Cible DESIGNEE de l activation (grammaire 11, `[DESIGNATED:<id>]`) ; None au combat.
+        _designated = raw_log.get("designatedTargetId")  # get allowed : absent sur les logs de combat
+        if _designated is not None:
+            details["designated_target_id"] = str(_designated)
         return details
 
     def _flush_squad_action_logs_to_step_logger(

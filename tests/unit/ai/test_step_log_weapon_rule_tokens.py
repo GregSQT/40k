@@ -117,7 +117,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         # `player` sur l'attaquant : exigé par le décideur d'allocation du COMBAT
         # (`_is_ai_controlled_fight_unit`), qui lève sinon avant tout log.
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules), "deployed_on_turn": 0,
-                             "player": 0},
+                             "player": 0, "designated_shoot_target_id": "101"},
                        # `unit_keywords` de la CIBLE : c'est la donnée même de [ANTI-X Y+] 24.03
                        # (« against a target with the X keyword »). Sans elle, l'instance de la
                        # règle n'est retenue par AUCUNE cible et le profil sort sans `ANTI` —

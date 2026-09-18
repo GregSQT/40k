@@ -8604,6 +8604,59 @@ def _model_can_shoot_target(
     return True
 
 
+#: Cle d ACTIVATION portee par l unite tireuse : l escouade ennemie DESIGNEE au demarrage du
+#: tir. UNE seule cle pour les trois lecteurs — Hail of Bolts (+N A, Primitive B), Overlapping
+#: Detonations ([BLAST 1], Primitive B) et Indiscriminate Detonations (suppression, Primitive F).
+#: Posee par `designate_shoot_target`, effacee par `_clear_shoot_activation_state`.
+DESIGNATED_SHOOT_TARGET_KEY = "designated_shoot_target_id"
+
+#: Effets de Primitive B qui LISENT la cible designee (« this unit's <arme> that targeted that
+#: selected unit »). Pour leurs porteurs, la designee doit etre VISIBLE (« select one enemy unit
+#: visible to this unit ») : `designate_shoot_target` le verifie.
+_DESIGNATED_TARGET_EFFECT_IDS: Tuple[str, ...] = (
+    "weapon_attacks_bonus_vs_designated_target",
+    "grant_weapon_rule_vs_designated_target",
+)
+
+
+def designate_shoot_target(
+    game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str
+) -> None:
+    """Designe la cible de l activation de tir de `attacker_squad_id` (site UNIQUE d ecriture).
+
+    Decision de modelisation (2026-09-18, capacites.md §Primitive B) : la cible designee EST la
+    cible prioritaire de l activation — en gym `priority_target_squad_id`, au siege humain la
+    PREMIERE cible declaree. Aucune decision d agent supplementaire : la priorite est deja le
+    choix de l agent (SHOOT_SLOT). Une seconde declaration de la meme activation ne change donc
+    rien (premiere ecriture gagnante).
+
+    Pour un porteur d un effet « vs cible designee », la datasheet exige une cible VISIBLE. La
+    priorite est declarable, donc vue par au moins une figurine sous un type de tir a ligne de
+    vue ; un porteur qui designerait une cible invisible (type de tir 10.07 sur une escouade
+    sans arme [INDIRECT FIRE] : impossible par le masque) est une chaine rompue, pas un cas de
+    jeu — erreur explicite (T1).
+    """
+    attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
+    if DESIGNATED_SHOOT_TARGET_KEY in attacker_unit:
+        return
+    if any(unit_has_rule_effect(attacker_unit, eid) for eid in _DESIGNATED_TARGET_EFFECT_IDS):
+        from engine.phase_handlers.shooting_handlers import compute_unit_los
+        target_unit = require_unit_by_id(game_state, str(target_squad_id))
+        if not compute_unit_los(game_state, attacker_unit, target_unit)["can_see"]:
+            raise ValueError(
+                f"designate_shoot_target: l escouade {attacker_squad_id} designe la cible "
+                f"{target_squad_id} qu elle ne VOIT pas — « select one enemy unit visible to "
+                f"this unit » (Hail of Bolts / Overlapping Detonations)"
+            )
+    attacker_unit[DESIGNATED_SHOOT_TARGET_KEY] = str(target_squad_id)
+
+
+def designated_shoot_target_id(game_state: Dict[str, Any], attacker_unit: Dict[str, Any]) -> str:
+    """Cible designee de l activation EN COURS du tireur — absente = activation jamais declaree
+    (chaine rompue), jamais « pas de designation »."""
+    return str(require_key(attacker_unit, DESIGNATED_SHOOT_TARGET_KEY))
+
+
 def squad_declare_shoot(
     game_state: Dict[str, Any],
     attacker_squad_id: str,
@@ -8638,10 +8691,13 @@ def squad_declare_shoot(
 
     intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
 
-    # Primitive F (chantier 06, passe 6) — suppress_target_on_shooting (Indiscriminate Detonations) :
-    # stocker la cible prioritaire sur l unite attaquante pour l appliquer a la fin du tir.
+    # Cible DESIGNEE de l activation (Hail of Bolts / Overlapping Detonations, Primitive B ; et
+    # Indiscriminate Detonations, Primitive F) : en gym, c est la cible PRIORITAIRE — le choix
+    # de l agent (SHOOT_SLOT), aucune decision supplementaire (decision 2026-09-18, capacites.md
+    # §Primitive B). `designate_shoot_target` est le site UNIQUE d ecriture, jumeau des trois
+    # declarations PvP.
+    designate_shoot_target(game_state, str(attacker_squad_id), str(priority_target_squad_id))
     attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
-    attacker_unit["_last_shoot_target_id"] = str(priority_target_squad_id)
 
     def _target_size(target_sid: str) -> int:
         return sum(
@@ -9392,11 +9448,9 @@ def squad_declare_shoot_model(
 
     Wrapper fin de declare_attack_model via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    # Primitive F (chantier 06) — suppress_target_on_shooting : enregistrer la cible principale
-    # (première déclarée) pour _handle_shooting_end_activation. Miroir du gym (squad_declare_shoot).
-    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
-        "_last_shoot_target_id", str(target_squad_id)
-    )
+    # Cible DESIGNEE de l activation = la PREMIERE cible declaree (siege humain). Miroir du gym
+    # (squad_declare_shoot, cible prioritaire) — site unique `designate_shoot_target`.
+    designate_shoot_target(game_state, str(attacker_squad_id), str(target_squad_id))
     return declare_attack_model(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, attacker_model_id, target_squad_id
     )
@@ -10194,9 +10248,7 @@ def squad_declare_shoot_weapon(
 
     Wrapper fin de declare_attack_weapon via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
-        "_last_shoot_target_id", str(target_squad_id)
-    )
+    designate_shoot_target(game_state, str(attacker_squad_id), str(target_squad_id))
     return declare_attack_weapon(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
     )
@@ -10212,9 +10264,7 @@ def squad_declare_shoot_weapon_qty(
     `only_model_id` (optionnel) : attribution restreinte a CETTE figurine (menu par-fig).
     Wrapper fin de declare_attack_weapon_qty via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
-        "_last_shoot_target_id", str(target_squad_id)
-    )
+    designate_shoot_target(game_state, str(attacker_squad_id), str(target_squad_id))
     return declare_attack_weapon_qty(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, count, target_squad_id,
         only_model_id,
@@ -11320,6 +11370,17 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
             if ctx.log_type == "shoot"
             else None
         ),
+        # Cible DESIGNEE de l activation (grammaire 11) : portee par TOUTES les lignes de tir,
+        # comme [SHOOT_TYPE:] — c est elle qui borne le plafond d attaques de Hail of Bolts et
+        # d Overlapping Detonations cote analyzer (bonus seulement si cible == designee). Un tir
+        # sans declaration prealable est une chaine rompue : `designated_shoot_target_id` leve.
+        "designatedTargetId": (
+            designated_shoot_target_id(
+                game_state, require_unit_by_id(game_state, attacker_squad_id_str)
+            )
+            if ctx.log_type == "shoot"
+            else None
+        ),
         # Pré-capture du segment [MODELS:] AVANT que les effets de l'action (hazardous,
         # destroy_model) ne modifient occupied_hexes_by_model. Sans pré-capture,
         # _build_shot_details lirait le segment LIVE au flush — après que les figurines tuées
@@ -12317,17 +12378,24 @@ def _manual_roll_intent(
         )
         if weapon.get("code") == _dk_weapon_code and _dk_target_ok:  # get allowed
             n_attacks += int(require_key(_dakkablitz_args, "attacks_bonus"))
-    # weapon_attacks_bonus_vs_designated_target : +N A vs cible designee (Hail of Bolts).
-    # Dans ce moteur la cible de l intent EST la cible designee — pas de designation separee.
+    # weapon_attacks_bonus_vs_designated_target : +N A vs cible designee (Hail of Bolts) —
+    # « this unit's bolt rifles that targeted THAT selected unit ». La designee est UNE escouade
+    # par activation (`designate_shoot_target`) ; une figurine qui tire ailleurs (hors portee de
+    # la prioritaire, second slot) n a pas le bonus. Avant le 2026-09-18 le bonus jouait sur
+    # CHAQUE cible de l activation (« la cible de l intent EST la cible designee »).
     _hob_args = _pB_get_args(attacker_unit, "weapon_attacks_bonus_vs_designated_target")
-    if _hob_args is not None and weapon.get("code") == _hob_args.get("weapon_code"):  # get allowed
+    if (_hob_args is not None
+            and weapon.get("code") == _hob_args.get("weapon_code")  # get allowed
+            and str(target_sid) == designated_shoot_target_id(game_state, attacker_unit)):
         n_attacks += int(require_key(_hob_args, "attacks_bonus"))
-    # grant_weapon_rule_vs_designated_target : [BLAST 1] hors MONSTER/VEHICLE (Overlapping Detonations).
+    # grant_weapon_rule_vs_designated_target : [BLAST 1] hors MONSTER/VEHICLE (Overlapping
+    # Detonations) — meme clause « that targeted that selected unit » que ci-dessus.
     # [BLAST 1] = 1 de par tranche de 5 figurines dans la cible.
     _od_args = _pB_get_args(attacker_unit, "grant_weapon_rule_vs_designated_target")
     if (_od_args is not None
             and weapon.get("code") == _od_args.get("weapon_code")  # get allowed
-            and _target_is_non_mv):
+            and _target_is_non_mv
+            and str(target_sid) == designated_shoot_target_id(game_state, attacker_unit)):
         _od_tgt_size = int(require_key(intent, "target_squad_size_at_declaration"))
         n_attacks += _od_tgt_size // 5
     # Waaagh! Energy +D : les scalings _we_n_scalings et _waaagh_energy_args sont du Bloc A.

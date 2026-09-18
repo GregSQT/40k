@@ -116,7 +116,7 @@ def _game_state(
     unit_by_id = {
         # `player` est exige par le decideur d allocation du combat
         # (`_is_ai_controlled_fight_unit`) : sans lui, le chemin melee leve avant tout log.
-        "1": {"id": "1", "UNIT_RULES": [], "player": 0},
+        "1": {"id": "1", "UNIT_RULES": [], "player": 0, "designated_shoot_target_id": "2"},
         "2": {"id": "2", "UNIT_RULES": [], "player": 1, "unit_keywords": list(target_keywords)},
     }
     squad_cache = {"1": {"model_count_at_start": carriers}, "2": {"model_count_at_start": 1}}

@@ -79,7 +79,7 @@ def _game_state(weapon_rules, *, bs=4, dmg=1, moved_inches=0.0, shooter_hp=3, ta
                   {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY")}],
         "unit_by_id": {
             "1": {"id": "1", "player": 0, "UNIT_RULES": [], "deployed_on_turn": 0,
-                  "UNIT_KEYWORDS": _kw("INFANTRY")},
+                  "UNIT_KEYWORDS": _kw("INFANTRY"), "designated_shoot_target_id": "2"},
             "2": {"id": "2", "player": 1, "UNIT_RULES": [], "deployed_on_turn": 0,
                   "UNIT_KEYWORDS": _kw("INFANTRY")},
         },

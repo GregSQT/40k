@@ -57,7 +57,8 @@ def _game_state(*, n_attacks: int, victim_models: List[Dict[str, Any]], victim_h
     b0 = _model("B0", "2", 1, hp=1, hp_max=3, col=9, row=9, rules=[_DD_RULE_1])
     b1 = _model("B1", "2", 1, hp=3, col=10, row=9)
     models = {"A0": shooter, "B0": b0, "B1": b1, **{m["id"]: m for m in victim_models}}
-    units = [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], "hideable": False},
+    units = [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], "hideable": False,
+              "designated_shoot_target_id": "2"},
              {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], "hideable": False},
              {"id": "3", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], "hideable": False}]
     uc3 = _uc(victim_models[0]["col"], victim_models[0]["row"], player=1)

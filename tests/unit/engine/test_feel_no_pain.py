@@ -69,7 +69,7 @@ def _game_state(target_unit_rules, *, dmg=1, hp=3, sv=2):
         "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
         "col": 9, "row": 9,
     }
-    attacker_unit = {"id": "1", "player": 0, "UNIT_RULES": []}
+    attacker_unit = {"id": "1", "player": 0, "UNIT_RULES": [], "designated_shoot_target_id": "2"}
     target_unit = {"id": "2", "player": 1, "UNIT_RULES": target_unit_rules}
     gs = {
         **turn_state_invariants(),

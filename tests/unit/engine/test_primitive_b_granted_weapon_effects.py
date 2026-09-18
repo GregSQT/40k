@@ -189,8 +189,13 @@ def _shoot_state(
     target_squad_size=1,
     n_models_in_shooter_squad=1,
     n_attacks_resolved=1,
+    designated_target="2",
 ):
-    """Tireur '1' avec une arme de code weapon_code. target_keywords : liste de keywordId pour la cible."""
+    """Tireur '1' avec une arme de code weapon_code. target_keywords : liste de keywordId pour la cible.
+
+    designated_target : cible DESIGNEE de l'activation (clé posée par `designate_shoot_target`
+    en production, ici directement) — '2' par défaut, la cible de l'intent.
+    """
     from engine.phase_handlers import shooting_handlers
 
     weapon = {
@@ -221,7 +226,7 @@ def _shoot_state(
         },
         "units_cache": {"1": _uc(0, 0, player=0), "2": {**_uc(0, 1), "HP_CUR": 1}},
         "unit_by_id": {
-            "1": {"id": "1", "UNIT_RULES": unit_rules},
+            "1": {"id": "1", "UNIT_RULES": unit_rules, "designated_shoot_target_id": designated_target},
             "2": target_unit_entry,
         },
         "objectives": [],
@@ -241,7 +246,9 @@ def _shoot_state(
 
 def _neutralise_shoot(monkeypatch, shooting_handlers):
     """LoS et distance neutralisés."""
-    monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
+    monkeypatch.setattr(
+        shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False, "can_see": True}
+    )
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
     monkeypatch.setattr(
         shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean"
@@ -475,6 +482,80 @@ def test_hail_of_bolts_nul_si_mauvaise_arme(monkeypatch):
     result = roll_shoot_intent(gs, intent)
 
     assert len(result["shot_records"]) == 1
+
+
+def test_hail_of_bolts_nul_hors_cible_designee(monkeypatch):
+    """« bolt rifles that targeted THAT selected unit » : la designee est '9', l intent vise '2'
+    → aucun bonus. Rouge avant le 2026-09-18 (3 records : le bonus jouait sur toute cible)."""
+    gs, intent, sh = _shoot_state([_HAIL_OF_BOLTS], weapon_code="bolt_rifle", designated_target="9")
+    _neutralise_shoot(monkeypatch, sh)
+    _fixed(monkeypatch, 4)
+
+    result = roll_shoot_intent(gs, intent)
+
+    assert len(result["shot_records"]) == 1
+
+
+def test_overlapping_detonations_nul_hors_cible_designee(monkeypatch):
+    """JUMEAU Overlapping Detonations : cible de 6 hors designation → 6//5 dés en moins."""
+    gs, intent, sh = _shoot_state(
+        [_OVERLAPPING_DET], weapon_code="heavy_bolter", target_squad_size=6, designated_target="9",
+    )
+    _neutralise_shoot(monkeypatch, sh)
+    _fixed(monkeypatch, 4)
+
+    result = roll_shoot_intent(gs, intent)
+
+    assert len(result["shot_records"]) == 1
+
+
+def test_hail_of_bolts_sans_designation_leve(monkeypatch):
+    """T1 : un intent resolu sans designation prealable est une chaine rompue, pas « pas de
+    bonus » — `designated_shoot_target_id` leve."""
+    gs, intent, sh = _shoot_state([_HAIL_OF_BOLTS], weapon_code="bolt_rifle")
+    _neutralise_shoot(monkeypatch, sh)
+    del gs["unit_by_id"]["1"]["designated_shoot_target_id"]
+    from shared.data_validation import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="designated_shoot_target_id"):
+        roll_shoot_intent(gs, intent)
+
+
+def test_hail_of_bolts_deux_cibles_seule_la_prioritaire_est_bonifiee(monkeypatch):
+    """REPRODUCTION (prompt 2026-09-18) sur le VRAI chemin de declaration : escouade de deux
+    Intercessors ; cible A a portee de la figurine 1 seule, cible B de la figurine 2 seule ;
+    `squad_declare_shoot(priority=A, slots=[A, B])` declare fig1→A et fig2→B. A la resolution,
+    fig1 tire NB+2 sur A (designee) et fig2 tire NB seulement sur B. Avant le fix, fig2 tirait
+    aussi NB+2 sur B (4 records au lieu de 2)."""
+    from engine.weapons import get_weapons
+    from engine.phase_handlers.shared_utils import squad_declare_shoot
+    from tests.unit.engine.test_squad_shoot_declaration import _activate, _m, _make_gs, _unit
+
+    bolt_rifle = get_weapons("SpaceMarine", ["bolt_rifle"])[0]
+    assert bolt_rifle["code"] == "bolt_rifle" and bolt_rifle["NB"] == 2 and bolt_rifle["RNG"] == 24
+    # inches_to_subhex = 1 dans `_make_gs` : 24" = 24 cases. fig1 (5,5) voit A (5,20) a 15 ;
+    # fig2 (35,5) voit B (35,20) a 15 ; les paires croisees sont a ~30, hors portee.
+    atk = _unit(1, 1, [_m(5, 5, [bolt_rifle]), _m(35, 5, [bolt_rifle])], [bolt_rifle])
+    atk["UNIT_RULES"] = [_HAIL_OF_BOLTS]
+    tgt_a = _unit(2, 2, [_m(5, 20, [bolt_rifle])], [bolt_rifle])
+    tgt_b = _unit(3, 2, [_m(35, 20, [bolt_rifle])], [bolt_rifle])
+    gs = _make_gs([atk, tgt_a, tgt_b])
+    gs["moved_distance_by_model"] = {}  # bolt rifle [HEAVY] : personne n a bouge
+    _activate(gs, "1")
+
+    intents = squad_declare_shoot(gs, "1", "2", ["2", "3"])
+
+    by_model = {i["model_id"]: i["target_unit_id"] for i in intents}
+    assert by_model == {"1#0": "2", "1#1": "3"}, by_model
+    assert gs["unit_by_id"]["1"]["designated_shoot_target_id"] == "2"
+
+    from engine.phase_handlers import shooting_handlers as sh
+    _neutralise_shoot(monkeypatch, sh)
+    _fixed(monkeypatch, 4)
+    records_by_target = {
+        i["target_unit_id"]: len(roll_shoot_intent(gs, i)["shot_records"]) for i in intents
+    }
+    assert records_by_target == {"2": 4, "3": 2}, records_by_target
 
 
 # ===========================================================================

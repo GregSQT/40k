@@ -63,7 +63,8 @@ def _game_state(weapons: List[Dict[str, Any]], intents: List[Dict[str, Any]],
             mid = f"T{sid}_{i}"
             models[mid] = _target_model(mid, sid, col=base_col + i)
             squad_models[sid].append(mid)
-    units = [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []},
+    units = [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [],
+              "designated_shoot_target_id": "2"},
              {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []},
              {"id": "3", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []}]
     return {
