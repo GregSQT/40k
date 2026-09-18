@@ -407,6 +407,19 @@ def _next_engine_id() -> int:
         return _engine_id_counter
 
 
+def _fight_slot_to_target_map(
+    enemy_slot_ids: List[Optional[str]], candidates: List[str]
+) -> Dict[int, str]:
+    """Slots ennemis (0..SQUAD_ACTION_FIGHT_SLOT_COUNT-1) occupés par une cible de `candidates`."""
+    from engine.phase_handlers.shared_utils import SQUAD_ACTION_FIGHT_SLOT_COUNT
+
+    return {
+        slot_i: str(esid)
+        for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT])
+        if esid is not None and str(esid) in candidates
+    }
+
+
 def reset_debug_log_flag():
     """Reset the debug log cleared flag. Call this at the start of each training run."""
     global _debug_log_cleared
@@ -4487,7 +4500,6 @@ class W40KEngine(gym.Env):
         qui peut lui-même poser une décision d'agent et rendre la main. L'appelant l'a donc
         déjà retiré de la file et effacé la décision AVANT cet appel.
         """
-        self._validate_rule_choice_selection(prompt, selected_display_rule_id)
         unit_id = str(require_key(prompt, "unit_id"))
         if is_ability_call_prompt(prompt):
             accepted = ability_call_selection_is_accept(prompt, selected_display_rule_id)
@@ -7339,15 +7351,9 @@ class W40KEngine(gym.Env):
         pose `PENDING_FIGHT_TARGET_KEY` et retourne None : l'agent rejoue un FIGHT_SLOT.
         Retourne None sans rien poser quand `targets` est vide (combat à vide 12.04/12.06).
         """
-        from engine.phase_handlers.shared_utils import SQUAD_ACTION_FIGHT_SLOT_COUNT
-
         if not targets:
             return None
-        slot_to_target = {
-            slot_i: str(esid)
-            for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT])
-            if esid is not None and str(esid) in targets
-        }
+        slot_to_target = _fight_slot_to_target_map(enemy_slot_ids, targets)
         if not slot_to_target:
             # Cibles légales mais aucune n'occupe un slot : elles seraient INFRAPPABLES et le
             # combat à vide donnerait des attaques perdues en silence. Même refus que le masque.
@@ -7483,11 +7489,7 @@ class W40KEngine(gym.Env):
             enemy_slot_ids = get_enemy_slot_mapping(
                 gs, int(require_key(require_key(gs, "units_cache")[squad_id], "player"))
             )
-            slot_to_target = {
-                slot_i: str(esid)
-                for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT])
-                if esid is not None and str(esid) in candidates
-            }
+            slot_to_target = _fight_slot_to_target_map(enemy_slot_ids, candidates)
             if not slot_to_target:
                 raise RuntimeError(
                     f"_fight_continue_declarations: {len(leftover)} figurine(s) de {squad_id!r} "
