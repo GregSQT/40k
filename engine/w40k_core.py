@@ -7601,6 +7601,9 @@ class W40KEngine(gym.Env):
         "overrun_pile_in": "overrun_pile_in",
         "consolidation": "consolidation",
         "wait": "wait",
+        # A5 — passe de l'étape FIGHT (PDF 25). Ligne « Unit N(c,r) PASSED FIGHT » ; l'analyzer
+        # la lit pour ne pas compter d'erreur d'alternance 12.04 sur une passe.
+        "fight_pass": "fight_pass",
         # Le move REACTIF (24.xx, capacite `reactive_move`) est un vrai deplacement, soumis aux
         # memes contraintes que les autres (murs, figurines, budget) — il doit donc etre
         # journalise pour etre verifiable. Son formateur existait deja dans `step_logger` ; seul
@@ -9615,6 +9618,58 @@ class W40KEngine(gym.Env):
             return self._continue_squad_fight_after_selection(
                 squad_id, target_slot_from_semantic
             )
+
+        elif action_name == "squad_fight_pass":
+            # A5 (PDF 25) : passe de l'étape FIGHT. Décodée par `fight_v11_can_pass` (source
+            # unique, relue ici : parité masque/commit). Aucune unité n'est « selected to fight ».
+            from engine.phase_handlers.fight_handlers import (
+                fight_v11_can_pass,
+                fight_v11_fight_selection_pool,
+                fight_v11_register_pass,
+            )
+
+            squad_id = str(semantic["squad_id"])
+            if squad_id not in fight_v11_fight_selection_pool(self.game_state):
+                raise ValueError(
+                    f"squad_fight_pass: squad {squad_id} hors du pool de selection 12.04 "
+                    f"(rupture masque/commit)"
+                )
+            if not fight_v11_can_pass(self.game_state):
+                raise ValueError(
+                    f"squad_fight_pass: passe refusée pour {squad_id} — une unité éligible est à "
+                    f"≤ 5\" d'un ennemi, le combat à vide est obligatoire (rupture masque/commit)"
+                )
+            _pass_player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+            _step_ended = fight_v11_register_pass(self.game_state, _pass_player)
+            _unit_col, _unit_row = require_unit_position(
+                require_unit_by_id(self.game_state, squad_id), self.game_state
+            )
+            append_action_log(
+                self.game_state,
+                {
+                    "type": "fight_pass",
+                    "message": f"Unit {squad_id} ({_unit_col}, {_unit_row}) PASSED FIGHT",
+                    "turn": require_key(self.game_state, "turn"),
+                    "phase": "fight",
+                    "unitId": squad_id,
+                    "player": _pass_player,
+                    "col": _unit_col,
+                    "row": _unit_row,
+                    "fightStepEnded": _step_ended,
+                    "timestamp": "server_time",
+                },
+            )
+            result = {
+                "action": "squad_fight_pass",
+                "squad_id": squad_id,
+                "unitId": squad_id,
+                "player": _pass_player,
+                "fight_step_ended": _step_ended,
+                "activation_ended": True,
+                "step_incremented": True,
+            }
+            self.game_state["episode_steps"] = int(self.game_state.get("episode_steps", 0)) + 1  # get allowed : compteur d'episode
+            self._fight_v11_gym_settle()
 
         elif action_name == "squad_fight_target_sel":
             # Re-sélection de la cible CC après la mort de la cible désignée (Exhortation de

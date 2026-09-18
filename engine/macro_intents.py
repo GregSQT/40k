@@ -66,6 +66,11 @@ FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1255-1274
 # morte, overrun) resout un combat a vide. C'est un etat legal du jeu, pas un cas d'erreur :
 # il lui faut donc une action propre. Fusionner ce cas avec un slot rendrait « frapper le
 # slot i » ambigu (frapper i, ou ne frapper personne ?).
+# A5 (PDF 25, « Eligible to fight, but unable to fight ») : quand TOUTES les unites eligibles
+# du selecteur sont a plus de 5" de tout ennemi, ce meme slot est la PASSE (`squad_fight_pass`,
+# decodee par `fight_v11_can_pass`) — aucune unite n'est marquee, la main revient a
+# l'adversaire ; deux passes de suite, ou une passe face a un adversaire sans unite eligible,
+# terminent l'etape FIGHT.
 ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1275
 # 10.02 / 10.07 : le TIR INDIRECT est un second type de tir jouable dans le meme etat que le tir
 # normal — l escouade choisit. Un slot par cible, sur le MEME `get_enemy_slot_mapping` que le tir

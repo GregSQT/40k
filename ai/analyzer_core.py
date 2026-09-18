@@ -2456,6 +2456,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _ad_option = int(agent_decision_match.group(2))
                         stats['agent_decision_totals'][_ad_type][player] += 1
                         stats['agent_decision_options'][(_ad_type, _ad_option)][player] += 1
+                elif " PASSED FIGHT" in action_desc:
+                        # A5 (PDF 25) : passe de la sélection FIGHT — aucune unité n'a combattu,
+                        # l'alternance 12.04 ne se juge que sur une ligne FOUGHT. La ligne est
+                        # comptée pour elle-même, jamais rangée dans `other`.
+                        action_type = 'fight_pass'
                 elif " WAIT" in action_desc:
                         action_type = 'wait'
                         if handle_wait(state, config, line, action_desc, action_unit_id, player, turn, phase):

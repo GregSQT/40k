@@ -1755,8 +1755,16 @@ class ActionDecoder:
             }
 
         if action_int == SQUAD_ACTION_FIGHT_NO_TARGET:
-            # Combat a vide (12.04/12.06) : aucune cible eligible. `target_slot` absent — le
-            # moteur exige alors un pool 12.05 VIDE (parite masque/commit).
+            # A5 (PDF 25) : si TOUTES les unités éligibles du sélecteur sont à plus de 5" de tout
+            # ennemi, ce slot est la PASSE — la main revient à l'adversaire sans marquer l'unité,
+            # qui reste éligible (New Foes 12.08). Sinon combat a vide (12.04/12.06) : aucune
+            # cible eligible, `target_slot` absent — le moteur exige alors un pool 12.05 VIDE
+            # (parite masque/commit). Le masque ouvre ce slot dans les deux cas (aucune cible),
+            # la source unique de la distinction est `fight_v11_can_pass`.
+            from engine.phase_handlers.fight_handlers import fight_v11_can_pass
+
+            if fight_v11_can_pass(game_state):
+                return {"action": "squad_fight_pass", "squad_id": squad_id}
             return {"action": "squad_fight", "squad_id": squad_id}
 
         # P3-8 — SPLIT-FIRE : sélection du groupe d'arme j (SHOOT_WEAPON_SEL_SLOT). Arme le

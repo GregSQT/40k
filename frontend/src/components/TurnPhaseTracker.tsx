@@ -20,6 +20,8 @@ interface TurnPhaseTrackerProps {
   fightAtkPlayer?: number; // Joueur (1/2) qui doit faire attaquer une unité → libellé + couleur
   onFightAtk?: () => void; // Active la 1ère unité éligible du joueur concerné
   onSkipFight?: () => void; // Skippe toutes les attaques (2 joueurs) → consolidation directe
+  showFightPass?: boolean; // A5 (PDF 25) : le sélecteur peut passer (toutes ses unités > 5" de tout ennemi)
+  onFightPass?: () => void; // Passe la sélection FIGHT à l'adversaire sans marquer d'unité
   // Mode sandbox
   sandboxMode?: boolean;
   onSandboxToggle?: () => void;
@@ -46,6 +48,8 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   fightAtkPlayer,
   onFightAtk,
   onSkipFight,
+  showFightPass,
+  onFightPass,
   sandboxMode = false,
   onSandboxToggle,
   sandboxFreeMove = false,
@@ -456,6 +460,16 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                 onClick={() => onFightAtk()}
               >
                 P{fightAtkPlayer ?? current_player} ATK
+              </button>
+            )}
+            {showFightAtk && showFightPass && onFightPass && (
+              <button
+                type="button"
+                className={`pile-in-end-btn ${(fightAtkPlayer ?? current_player) === 2 ? "pile-in-end-btn--p2" : "pile-in-end-btn--p1"}`}
+                title="Passer (PDF 25) : toutes vos unités éligibles sont à plus de 5&quot; de tout ennemi — la main revient à l'adversaire sans sélectionner d'unité"
+                onClick={() => onFightPass()}
+              >
+                Passer
               </button>
             )}
             {showFightAtk && onSkipFight && (

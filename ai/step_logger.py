@@ -1783,6 +1783,10 @@ class StepLogger:
         elif action_type == "wait":
             return f"{unit_label} WAIT"
 
+        elif action_type == "fight_pass":
+            # A5 (PDF 25) : le joueur passe la sélection FIGHT — aucune unité sélectionnée.
+            return f"{unit_label} PASSED FIGHT"
+
         elif action_type == "skip":
             reason = (details.get("skip_reason") or "").strip()
             if reason:

@@ -1819,7 +1819,10 @@ def fight_v11_is_consolidation_eligible(game_state: Dict[str, Any], unit: Dict[s
     if not is_unit_alive(uid, game_state):
         return False
     selected = {str(x) for x in game_state.get("units_selected_to_fight", set())}
-    return uid in selected
+    # A5 : une unité éligible que son joueur a laissée en passant « was eligible to fight this
+    # phase » au sens de 12.08 ELIGIBLE IF, sans avoir été sélectionnée.
+    passed = {str(x) for x in game_state.get(UNITS_ELIGIBLE_WHEN_PASSED_KEY, set())}  # get allowed
+    return uid in selected or uid in passed
 
 
 def fight_v11_eligible_unit_ids(
@@ -1850,6 +1853,76 @@ def fight_v11_eligible_unit_ids(
     return out
 
 
+#: A5 — passe de l'étape FIGHT (PDF 25, « ELIGIBLE TO FIGHT, BUT UNABLE TO FIGHT ») : « when the
+#: sequence returns to a player to select a unit to fight, if all of that player's units that
+#: are eligible to fight are more than 5" from all enemy units, that player can instead choose
+#: to pass and return the sequence to their opponent to select a unit. If both players pass in
+#: succession, or if one player passes when their opponent has no remaining units that are
+#: eligible to fight, the Fight step ends. »
+#: Passes consécutives (remise à 0 par toute sélection effective).
+FIGHT_PASS_STREAK_KEY = "fight_pass_streak"
+#: L'étape FIGHT a été close par les passes : plus aucune sélection n'est proposée.
+FIGHT_STEP_PASSED_KEY = "fight_step_passed"
+#: Unités qui étaient éligibles au moment où leur joueur a passé — jamais « selected to fight »,
+#: mais « eligible to fight this phase » au sens de 12.08 ELIGIBLE IF (consolidation).
+UNITS_ELIGIBLE_WHEN_PASSED_KEY = "units_eligible_when_passed"
+
+
+def fight_v11_can_pass(game_state: Dict[str, Any]) -> bool:
+    """True si le SÉLECTEUR courant peut passer (A5) : l'étape FIGHT propose un pool non vide et
+    CHACUNE de ses unités est à plus de `pile_in_target_range` (5") de toute unité ennemie —
+    donc ni engagée ni capable d'engager par un pile-in overrun. Une unité à ≤ 5" sans cible
+    frappable garde le combat à vide obligatoire (12.04). Jamais en sous-phase consolidate : un
+    New Foe est engagé par construction."""
+    if game_state.get("fight_subphase") != "fight":
+        return False
+    pool = fight_v11_fight_selection_pool(game_state)
+    if not pool:
+        return False
+    for uid in pool:
+        unit = require_unit_by_id(game_state, str(uid))
+        if _fight_units_engaged_with(game_state, unit) or pile_in_targets_within_range(game_state, unit):
+            return False
+    return True
+
+
+def fight_v11_register_pass(game_state: Dict[str, Any], player: int) -> bool:
+    """Enregistre la passe du sélecteur ``player`` (A5). Rend True si l'étape FIGHT se termine
+    (deux passes consécutives, ou passe face à un adversaire sans unité éligible), False si la
+    main passe à l'adversaire. Ne marque aucune unité « selected to fight » ; les unités
+    éligibles du passeur restent éligibles (New Foes 12.08) et consolident comme « eligible to
+    fight this phase »."""
+    player = int(player)
+    if not fight_v11_can_pass(game_state):
+        raise ValueError(
+            f"fight_v11_register_pass: le joueur {player} ne peut pas passer — une de ses unités "
+            f"éligibles est à ≤ 5\" d'un ennemi (combat à vide obligatoire, 12.04)"
+        )
+    expected = fight_v11_expected_seat(game_state)
+    if expected != player:
+        raise ValueError(
+            f"fight_v11_register_pass: la main est au joueur {expected}, pas à {player}"
+        )
+    passed_units = {str(u) for u in fight_v11_fight_selection_pool(game_state)}
+    require_key(game_state, UNITS_ELIGIBLE_WHEN_PASSED_KEY).update(passed_units)
+    streak = int(require_key(game_state, FIGHT_PASS_STREAK_KEY)) + 1
+    game_state[FIGHT_PASS_STREAK_KEY] = streak
+    opponent_has_eligible = bool(
+        fight_v11_eligible_unit_ids(game_state, 3 - player, fights_first_only=False)
+    )
+    if streak >= 2 or not opponent_has_eligible:
+        game_state[FIGHT_STEP_PASSED_KEY] = True
+        _fight_v11_log(
+            game_state,
+            f"FIGHT : P{player} passe (série {streak}, adversaire éligible={opponent_has_eligible})"
+            f" → étape FIGHT terminée",
+        )
+        return True
+    game_state["fight_selector"] = 3 - player
+    _fight_v11_log(game_state, f"FIGHT : P{player} passe → sélection à P{3 - player}")
+    return False
+
+
 def _fight_v11_register_selection(game_state: Dict[str, Any], uid: str) -> None:
     """
     Enregistre une unité « selected to fight » (12.04) et passe la main à l'adversaire
@@ -1861,6 +1934,8 @@ def _fight_v11_register_selection(game_state: Dict[str, Any], uid: str) -> None:
     uid = str(uid)
     game_state["units_selected_to_fight"].add(uid)
     game_state.setdefault("units_fought", set()).add(uid)
+    # A5 : une sélection effective rompt la série de passes (« pass in succession »).
+    game_state[FIGHT_PASS_STREAK_KEY] = 0
     selector = game_state.get("fight_selector")
     if selector in (1, 2):
         game_state["fight_selector"] = 3 - selector
@@ -1884,6 +1959,9 @@ def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
         raise ValueError(f"Invalid fight_step: {step!r}")
     if selector not in (1, 2):
         raise ValueError(f"Invalid fight_selector: {selector!r}")
+    # A5 : l'étape a été close par les passes (PDF 25) — plus aucune sélection.
+    if game_state.get(FIGHT_STEP_PASSED_KEY, False):  # get allowed : clé posée à fight_v11_start
+        return None
 
     # Retour à Resolve Fights First (12.04) : si des unités FF redeviennent
     # éligibles pendant Remaining → re-sélecteur = joueur actif (inatteignable
@@ -2145,6 +2223,10 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state.pop("engaged_at_fight_step_start", None)
     game_state["fight_step"] = None
     game_state["fight_selector"] = None
+    # A5 — passe de l'étape FIGHT (PDF 25 « Eligible to fight, but unable to fight »).
+    game_state[FIGHT_PASS_STREAK_KEY] = 0
+    game_state[FIGHT_STEP_PASSED_KEY] = False
+    game_state[UNITS_ELIGIBLE_WHEN_PASSED_KEY] = set()
     game_state["fight_subphase"] = "pile_in"
 
 
@@ -2261,6 +2343,8 @@ def fight_v11_fight_selection_pool(game_state: Dict[str, Any]) -> List[str]:
     if sub == "consolidate":
         return fight_v11_new_foes_pool(game_state)
     if sub != "fight":
+        return []
+    if game_state.get(FIGHT_STEP_PASSED_KEY, False):  # get allowed : miroir de advance_selection
         return []
     active = int(require_key(game_state, "current_player"))
     step = game_state.get("fight_step") or "fights_first"
@@ -4834,6 +4918,7 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
                 fight_v11_enter_consolidate(game_state)
                 continue
             game_state["fight_eligible_units"] = list(pool)
+            game_state["fight_can_pass"] = False
             active = game_state.get("active_fight_unit")
             active = str(active) if active is not None else None
             if active is not None and active in pool:
@@ -4863,16 +4948,21 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
             # Aucune unité active → le joueur doit choisir (cercle vert sur le pool).
             game_state["active_fight_unit"] = None
             game_state["valid_fight_targets"] = []
+            # A5 (PDF 25) : la passe est offerte au sélecteur quand TOUTES ses unités éligibles
+            # sont à plus de 5" de tout ennemi — bouton « Passer » côté client.
+            can_pass = fight_v11_can_pass(game_state)
+            game_state["fight_can_pass"] = can_pass
             _fight_v11_log(
                 game_state,
                 f"état: FIGHT — choisir une unité (selector=P{game_state['fight_selector']}, "
-                f"pool={list(pool)})",
+                f"pool={list(pool)}, can_pass={can_pass})",
             )
             return True, {"phase": "fight", "fight_subphase": "fight",
                           "fight_step": game_state["fight_step"],
                           "fight_selector": game_state["fight_selector"],
                           "fight_eligible_units": list(pool),
                           "active_fight_unit": None, "valid_targets": [],
+                          "can_pass": can_pass,
                           "waiting_for_player": True, "action": "wait"}
         if sub == "consolidate":
             # New Foes to Face en cours (12.08 engaging AFTER) : tant qu'il en reste, on les
@@ -5820,6 +5910,39 @@ def _fight_v11_manual_step(
                     game_state,
                     f"FIGHT unit {active} → passée (aucune cible valide, sélectionnée sans attaque)",
                 )
+            return _fight_v11_manual_state(game_state)
+
+        if atype == "fight_pass":
+            # A5 (PDF 25) — bouton « Passer » : le sélecteur passe la main sans marquer d'unité.
+            # Refusé (état rendu tel quel) si une de ses unités éligibles est à ≤ 5" d'un ennemi
+            # (12.04 : le combat, même à vide, est obligatoire) ou si une unité est déjà active.
+            if active is not None or not fight_v11_can_pass(game_state):
+                _fight_v11_log(
+                    game_state,
+                    f"FIGHT passe REFUSÉE (active={active}, can_pass={fight_v11_can_pass(game_state)})",
+                )
+                return _fight_v11_manual_state(game_state)
+            _pass_player = int(require_key(game_state, "fight_selector"))
+            _ended = fight_v11_register_pass(game_state, _pass_player)
+            _pass_uid = str(pool[0])
+            _pass_col, _pass_row = require_unit_position(
+                require_unit_by_id(game_state, _pass_uid), game_state
+            )
+            append_action_log(
+                game_state,
+                {
+                    "type": "fight_pass",
+                    "message": f"Unit {_pass_uid} ({_pass_col}, {_pass_row}) PASSED FIGHT",
+                    "turn": require_key(game_state, "turn"),
+                    "phase": "fight",
+                    "unitId": _pass_uid,
+                    "player": _pass_player,
+                    "col": _pass_col,
+                    "row": _pass_row,
+                    "fightStepEnded": _ended,
+                    "timestamp": "server_time",
+                },
+            )
             return _fight_v11_manual_state(game_state)
 
         if atype == "skip_fight":
