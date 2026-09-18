@@ -19,7 +19,7 @@ from ai.analyzer_rules import (
 )
 from ai.analyzer_config import get_run_rule_optional
 
-from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
+from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, WEAPON_NAME_RE, position_is_on_battlefield
 from ai.analyzer_state import (
     AllocCharacterCandidate, AllocCharacterGroup, AllocCharacterKey, AnalyzerState,
 )
@@ -27,7 +27,7 @@ from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases import claim_kill_context, died_before_phase
 from ai.analyzer_phases.episode_handler import handle_episode_start
 from ai.analyzer_phases.shoot_handler import (
-    flush_cross_weapon_lost, handle_shoot, handle_wait, handle_advance,
+    flush_cross_weapon_lost, handle_shoot, handle_wait, handle_advance, shoot_group_signature,
 )
 from ai.analyzer_phases.charge_handler import handle_charge
 from ai.analyzer_phases.move_handler import handle_move_or_fled
@@ -122,8 +122,15 @@ def move_line_re(
 
 
 @lru_cache(maxsize=None)
-def attack_line_re(verbs: str = r"ATTACKED|FOUGHT", *, with_positions: bool = True) -> "re.Pattern[str]":
+def attack_line_re(
+    verbs: str = r"ATTACKED|FOUGHT", *, with_positions: bool = True, with_tags: bool = False
+) -> "re.Pattern[str]":
     """Grammaire d'une ligne d'attaque : `Unit N(c,r) VERBE [TOKEN…] Unit M(c,r)`.
+
+    `with_tags=True` capture les tokens sous le nom `tags` (signature de lot,
+    `shoot_group_signature`) ; l'attaquant et la cible s'y lisent par nom (`attacker`, `target`)
+    puisque la numérotation positionnelle change. Sans ce drapeau, les groupes positionnels
+    (1=attaquant, 2/3=ses coordonnées, 4=cible, 5/6=ses coordonnées) sont inchangés.
 
     ⚠️ UN SEUL constructeur, et il existe pour une raison mesurée. Le token `[WAAAGH!]` a été
     ajouté entre le verbe et la cible ; QUATRE lecteurs portaient cette grammaire à la main, et
@@ -136,10 +143,11 @@ def attack_line_re(verbs: str = r"ATTACKED|FOUGHT", *, with_positions: bool = Tr
     Le mode d'échec est muet dans les deux cas : la ligne n'est pas rejetée, elle est ignorée.
     Le prochain token n'aura qu'un endroit à toucher — comme pour `move_line_re`.
     """
-    head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+(?:' + verbs + r')' + ACTION_ABILITY_TOKENS
+    tokens = r'(?P<tags>' + ACTION_ABILITY_TOKENS + r')' if with_tags else ACTION_ABILITY_TOKENS
+    head = r'Unit (?P<attacker>\d+)\((\d+),\s*(\d+)\)\s+(?:' + verbs + r')' + tokens
     if not with_positions:
-        return re.compile(head + r'\s+Unit (\d+)')
-    return re.compile(head + r'\s+Unit (\d+)\((\d+),\s*(\d+)\)')
+        return re.compile(head + r'\s+Unit (?P<target>\d+)')
+    return re.compile(head + r'\s+Unit (?P<target>\d+)\((\d+),\s*(\d+)\)')
 
 
 def attack_verb_present(action_desc: str, verbs: str = r"ATTACKED|FOUGHT") -> bool:
@@ -507,17 +515,6 @@ def _model_is_character(config: AnalyzerConfig, mtype: Optional[str]) -> bool:
     return _is_character_role(_derive_model_role(require_key(unit_data, "UNIT_RULES")))
 
 
-#: Tags posés par le formateur entre le verbe d'attaque et la cible (`[PRECISION]`,
-#: `[RAPID FIRE:2]`, `[WAAAGH!]`…) : la même capture que le groupe `tags` de la grammaire SHOT
-#: de `handle_shoot`, étendue aux verbes de mêlée — ce sont ces tags qui entrent dans la
-#: signature de lot `shoot_group_signature`, et la clé doit être la même pour les deux lecteurs.
-_ATTACK_TAGS_RE = re.compile(
-    r'\b(?:SHOT|FOUGHT|ATTACKED)((?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*)\s+(?:at\s+)?Unit\s+\d+',
-    re.IGNORECASE,
-)
-_WEAPON_NAME_RE = re.compile(r'with \[([^\]]+)\]')
-
-
 def _character_allocation_occasion(
     state: AnalyzerState,
     config: AnalyzerConfig,
@@ -527,9 +524,10 @@ def _character_allocation_occasion(
     alloc_model_id: Optional[str],
     phase: str,
     player: int,
-) -> Optional[Tuple[str, bool]]:
+) -> Optional[Tuple[str, bool, Dict[str, bool]]]:
     """La ligne est-elle une OCCASION de juger 05.03 / 06.02 / 24.28 ? Si oui, note l'exercice
-    de la règle et rend (compteur de phase, la figurine allouée est un CHARACTER) ; sinon None.
+    de la règle et rend (compteur de phase, la figurine allouée est un CHARACTER, CHARACTER ou
+    non par figurine vivante de la cible) ; sinon None.
 
     Occasion = figurine allouée connue, dans une unité MIXTE (au moins un CHARACTER et un
     non-CHARACTER vivants AVANT la blessure de cette ligne). Une unité sans CHARACTER, ou sans
@@ -559,24 +557,13 @@ def _character_allocation_occasion(
         else "PROJ.1.1.alloc_character",
         player,
     )
-    return bucket, is_char[alloc_model_id]
+    return bucket, is_char[alloc_model_id], is_char
 
 
 def _precision_mw_to_character_run_rule() -> Optional[bool]:
     """Clé `alloc.precision_mw_to_character` de l'entête, ou None sur un journal antérieur."""
     precision_mw = get_run_rule_optional(RUN_RULE_PRECISION_MW_TO_CHARACTER)
     return None if precision_mw is None else precision_mw == "True"
-
-
-def _non_character_alive(
-    state: AnalyzerState, config: AnalyzerConfig, unit_id: str, *, exclude: Optional[str] = None
-) -> bool:
-    """Un non-CHARACTER de l'escouade est-il vivant dans l'état reconstruit ?"""
-    return any(
-        not _model_is_character(config, state.model_types.get(mid))  # get allowed
-        for mid in state.unit_model_hp.get(unit_id, {})  # get allowed : escouade jamais vue
-        if mid != exclude
-    )
 
 
 def _count_character_allocation_fault(
@@ -613,11 +600,11 @@ def _judge_character_allocation(
     )
     if occasion is None:
         return
-    bucket, alloc_is_character = occasion
+    bucket, alloc_is_character, is_char = occasion
     fault = character_allocation_fault(
         action_desc,
         alloc_is_character=alloc_is_character,
-        non_character_alive=_non_character_alive(state, config, target_id, exclude=alloc_model_id),
+        non_character_alive=any(not c for mid, c in is_char.items() if mid != alloc_model_id),
         is_mortal=line_inflicts_mortal_wound(action_desc),
         precision_mw_to_character=_precision_mw_to_character_run_rule(),
     )
@@ -638,6 +625,7 @@ def _note_character_allocation_in_lot(
     turn: int,
     actor_id: Optional[str],
     target_id: str,
+    tags: str,
     alloc_model_id: Optional[str],
     phase: str,
     player: int,
@@ -651,8 +639,12 @@ def _note_character_allocation_in_lot(
     bodyguards que le même lot a tués AVANT lui, et l'état d'avant la ligne dirait à tort
     « bodyguards vivants ». Cf. `AnalyzerState.alloc_character_pending`.
 
+    `tags` : les tokens entre le verbe et la cible, capturés par la grammaire du site d'appel
+    (groupe `tags`) — ils entrent dans la signature de lot, la même que `note_shoot_allocation`.
+
     Ligne à dégâts sans ` with [arme]` : lot inidentifiable → lève, même régime que
-    `note_shoot_allocation`.
+    `note_shoot_allocation`. Sans préfixe `Unit N(` : lève aussi — plus strict que `handle_shoot`,
+    qui ignore la ligne, mais une allocation sans attaquant n'a pas de lot où aller.
     """
     occasion = _character_allocation_occasion(
         state, config, stats, target_id=target_id, alloc_model_id=alloc_model_id,
@@ -660,54 +652,46 @@ def _note_character_allocation_in_lot(
     )
     if occasion is None:
         return
-    bucket, alloc_is_character = occasion
+    bucket, alloc_is_character, is_char = occasion
     if actor_id is None:
         raise ValueError(
             "ligne d'attaque allouée sans préfixe `Unit N(` : le lot d'allocation est "
             f"inidentifiable — E{state.current_episode_num} T{turn} : {line.strip()}"
         )
-    weapon = _WEAPON_NAME_RE.search(action_desc)
+    weapon = WEAPON_NAME_RE.search(action_desc)
     if weapon is None:
         raise ValueError(
             "ligne d'attaque allouée sans ` with [arme]` : le lot d'allocation est "
             f"inidentifiable — E{state.current_episode_num} T{turn} : {line.strip()}"
         )
-    tags = _ATTACK_TAGS_RE.search(action_desc)
-    if tags is None:
-        raise ValueError(
-            "ligne d'attaque allouée sans verbe SHOT/FOUGHT/ATTACKED lisible — "
-            f"E{state.current_episode_num} T{turn} : {line.strip()}"
-        )
-    from ai.analyzer_phases.shoot_handler import shoot_group_signature
-
     key: AllocCharacterKey = (
         state.current_episode_num, turn, phase, actor_id, target_id, weapon.group(1),
-        shoot_group_signature(action_desc, tags.group(1)),
+        shoot_group_signature(action_desc, tags),
     )
     pending = state.alloc_character_pending
     if pending is not None and pending.key != key:
         _flush_character_allocation(state, stats)
         pending = None
     if pending is None:
-        pending = AllocCharacterGroup(key=key, player=player, bucket=bucket)
+        pending = AllocCharacterGroup(key=key, player=player, bucket=bucket, is_char=is_char)
         state.alloc_character_pending = pending
     if alloc_is_character:
-        pending.candidates.append(AllocCharacterCandidate(
-            line=line, action_desc=action_desc,
-            precision_mw_to_character=_precision_mw_to_character_run_rule(),
-        ))
+        pending.candidates.append(AllocCharacterCandidate(line=line, action_desc=action_desc))
 
 
-def _note_character_allocation_outcome(
-    state: AnalyzerState, config: AnalyzerConfig, target_id: str
-) -> None:
+def _note_character_allocation_outcome(state: AnalyzerState, target_id: str) -> None:
     """À appeler APRÈS les dégâts d'une ligne SHOT / FOUGHT : l'état de fin de lot est celui
     d'après sa dernière ligne. Relevé ligne après ligne pour ne dépendre ni du moment de la
-    fermeture ni de ce que d'autres lignes auront fait de la cible d'ici là."""
+    fermeture ni de ce que d'autres lignes auront fait de la cible d'ici là. Le rôle par
+    figurine est celui résolu à l'ouverture du lot (`is_char`) : un lot ne voit que des morts,
+    jamais une figurine nouvelle."""
     pending = state.alloc_character_pending
     if pending is None or pending.target_id != target_id:
         return
-    pending.non_character_alive = _non_character_alive(state, config, target_id)
+    pending.non_character_alive = any(
+        not pending.is_char[mid]
+        for mid in state.unit_model_hp.get(target_id, {})  # get allowed : escouade anéantie
+    )
 
 
 def _flush_character_allocation(state: AnalyzerState, stats: Dict[str, Any]) -> None:
@@ -719,19 +703,69 @@ def _flush_character_allocation(state: AnalyzerState, stats: Dict[str, Any]) -> 
     if pending is None:
         return
     state.alloc_character_pending = None
+    if not pending.candidates:
+        return
+    # Constante de la passe : `set_run_rules` est appelé une fois par journal, avant la lecture.
+    precision_mw_to_character = _precision_mw_to_character_run_rule()
     for cand in pending.candidates:
         fault = character_allocation_fault(
             cand.action_desc,
             alloc_is_character=True,
             non_character_alive=pending.non_character_alive,
             is_mortal=line_inflicts_mortal_wound(cand.action_desc),
-            precision_mw_to_character=cand.precision_mw_to_character,
+            precision_mw_to_character=precision_mw_to_character,
         )
         if fault is not None:
             _count_character_allocation_fault(
                 stats, bucket=pending.bucket, player=pending.player, fault=fault,
                 line=cand.line, episode=pending.key[0],
             )
+
+
+def _resolve_attack_damage_line(
+    state: AnalyzerState,
+    config: AnalyzerConfig,
+    stats: Dict[str, Any],
+    *,
+    action_desc: str,
+    line: str,
+    turn: int,
+    phase: str,
+    player: int,
+    actor_id: Optional[str],
+    dmg_actor_id: Optional[str],
+    target_id: str,
+    damage: int,
+    tags: str,
+) -> None:
+    """Une ligne SHOT / FOUGHT à `Dmg:` : rangée dans son lot d'allocation CHARACTER, dégâts
+    appliqués, état de fin de lot relevé, acteur des retraits en attente posé — dans cet ordre,
+    UNE fois pour les deux grammaires (tir, mêlée).
+
+    `actor_id` (lot) vient de la grammaire d'attaque du site ; `dmg_actor_id` (attribution des
+    morts, `pending_removals_actor`) du préfixe `Unit N(` de la ligne — le même identifiant sur
+    une ligne bien formée, mais lus par deux motifs que ce helper ne confond pas.
+    """
+    # Import local : `ai.analyzer` importe ce module au chargement (cycle sinon), comme `run`.
+    from ai.analyzer import _apply_damage_and_handle_death
+
+    alloc_model_id = _alloc_model_from_line(state, action_desc, line)
+    _note_character_allocation_in_lot(
+        state, config, stats, action_desc=action_desc, line=line, turn=turn,
+        actor_id=actor_id, target_id=target_id, tags=tags, alloc_model_id=alloc_model_id,
+        phase=phase, player=player,
+    )
+    _apply_damage_and_handle_death(
+        target_id, dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
+        line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+        positions_by_model=state.positions_by_model,
+        models_invalidated=state.models_invalidated,
+        alloc_model_id=alloc_model_id,
+        pending_model_removals=state.pending_model_removals,
+        dead_model_ids_episode=state.dead_model_ids_episode,
+    )
+    _note_character_allocation_outcome(state, target_id)
+    state.pending_removals_actor = dmg_actor_id
 
 
 def _ordered_living_mids(
@@ -1595,14 +1629,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
+                # Même tête que la grammaire SHOT de `handle_shoot` (groupe `tags`) : les tags
+                # servent la signature de lot, sans second passage sur la ligne.
                 target_match = re.search(
-                    r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                    r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+(\d+)',
+                    r'\bSHOT(?P<tags>(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*)'
+                    r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+(?P<target>\d+)',
                     action_desc,
                     re.IGNORECASE
                 )
                 if target_match:
-                        target_id = target_match.group(2)
+                        target_id = target_match.group('target')
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                         if damage_match:
                             damage = int(damage_match.group(1))
@@ -1639,23 +1675,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     stats['shoot_at_dead_unit'][player] += 1
                                     if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
-                            _note_character_allocation_in_lot(
+                            _resolve_attack_damage_line(
                                 state, config, stats, action_desc=action_desc, line=line, turn=turn,
-                                actor_id=_dmg_actor_id, target_id=target_id,
-                                alloc_model_id=_alloc_model_from_line(state, action_desc, line),
-                                phase=phase, player=player,
+                                phase=phase, player=player, actor_id=_dmg_actor_id,
+                                dmg_actor_id=_dmg_actor_id, target_id=target_id, damage=damage,
+                                tags=target_match.group('tags'),
                             )
-                            _apply_damage_and_handle_death(
-                                target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
-                                positions_by_model=state.positions_by_model,
-                                models_invalidated=state.models_invalidated,
-                                alloc_model_id=_alloc_model_from_line(state, action_desc, line),
-                                pending_model_removals=state.pending_model_removals,
-                                dead_model_ids_episode=state.dead_model_ids_episode,
-                            )
-                            _note_character_allocation_outcome(state, config, target_id)
-                            state.pending_removals_actor = _dmg_actor_id
                 # Sauvegarde avant que target_match soit écrasé par la grammaire FOUGHT ci-dessous.
                 # 10.02 — marqueur d'activation SHOOT : seuls les SHOT désignent un tir réel ;
                 # les FOUGHT qui suivent (arme de mêlée, sur la même ligne d'action) ne comptent pas.
@@ -1665,32 +1690,19 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # cessait de matcher dès qu'un token de capacité s'intercalait — la cible gardait
                 # alors des PV fantômes et sa mort n'était jamais enregistrée.
                 target_match = (
-                    attack_line_re(with_positions=False).search(action_desc)
+                    attack_line_re(with_positions=False, with_tags=True).search(action_desc)
                     if ("FOUGHT" in action_desc or "ATTACKED" in action_desc) else None
                 )
                 if target_match:
-                    # Groupes de `attack_line_re` : 1=attaquant, 2/3=ses coordonnées, 4=cible.
-                    target_id = target_match.group(4)
+                    target_id = target_match.group('target')
                     damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                     if damage_match:
-                        damage = int(damage_match.group(1))
-                        _note_character_allocation_in_lot(
+                        _resolve_attack_damage_line(
                             state, config, stats, action_desc=action_desc, line=line, turn=turn,
-                            actor_id=target_match.group(1), target_id=target_id,
-                            alloc_model_id=_alloc_model_from_line(state, action_desc, line),
-                            phase=phase, player=player,
+                            phase=phase, player=player, actor_id=target_match.group('attacker'),
+                            dmg_actor_id=_dmg_actor_id, target_id=target_id,
+                            damage=int(damage_match.group(1)), tags=target_match.group('tags'),
                         )
-                        _apply_damage_and_handle_death(
-                            target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
-                            positions_by_model=state.positions_by_model,
-                            models_invalidated=state.models_invalidated,
-                            alloc_model_id=_alloc_model_from_line(state, action_desc, line),
-                            pending_model_removals=state.pending_model_removals,
-                            dead_model_ids_episode=state.dead_model_ids_episode,
-                        )
-                        _note_character_allocation_outcome(state, config, target_id)
-                        state.pending_removals_actor = _dmg_actor_id
 
                 # CHARGE IMPACT mortal wounds (11.01):
                 # "Unit CHARGER(c,r) IMPACTED [ABILITY] Unit TARGET(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"
