@@ -1729,13 +1729,6 @@ class W40KEngine(gym.Env):
         # PRECEDENT. Trouve le 2026-07-29 en verifiant §0.40 point 3, qui LIT ce cache pour
         # decrire les candidats a l'agent : la corruption y serait devenue une observation.
         self.game_state.pop(ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY, None)
-        # Zones de terrain contenant un mur DENSE (Solid 13.11), memoisees par
-        # `_squad_terrain_flags` pour le drapeau « gone to ground pret » (13.5). Elles derivent
-        # de `terrain_areas` ET de `dense_wall_hexes`, que `_reload_scenario` remplace : sans
-        # purge, un episode joue sur un autre terrain lisait les zones du precedent. Trouve le
-        # 2026-07-28 — les tests d'observation la faisaient a la main, c'est ICI qu'elle
-        # manquait (meme motif que §0.26).
-        self.game_state.pop("_obs_solid_terrain_areas", None)
         # Cartes de cellules de move (T3) : elles portent les destinations du pool de l'episode
         # precedent. Leur tampon (ancre, phase) NE protege PAS ici — au nouvel episode l'escouade
         # peut se redeployer sur la meme ancre en phase move, le tampon coincide, et une carte

@@ -169,3 +169,30 @@ def test_terrain_ref_cannot_leave_the_terrain_folder(terrain_ref: str) -> None:
         assert "terrain_ref" in response.get_json()["error"]
     finally:
         scenario_path.unlink(missing_ok=True)
+
+
+def test_terrain_zone_categories_are_derived_like_the_engine() -> None:
+    """`obscuring` / `dense` des zones servies au front sont DÉRIVÉS des murs typés du fichier
+    terrain (13.02/13.10), par la même fonction que le moteur — la clé JSON `obscuring` n'existe
+    plus. Le cône LoS du front (bloqueurs = zones `obscuring`) doit lire la vérité du moteur :
+    sur terrain-checklist, `ruin_west` contient des murs dense, `objective_center` aucun mur."""
+    from engine.game_state import GameStateManager
+
+    response = api_server.app.test_client().get(
+        f"/api/config/board?scenario_file={SCENARIO_CHECKLIST}&inches_to_subhex=5"
+    )
+    assert response.status_code == 200, response.get_json()
+    zones = {z["id"]: z for z in response.get_json()["config"]["terrain_zones"]}
+    assert zones["ruin_west"]["obscuring"] is True and zones["ruin_west"]["dense"] is True
+    assert zones["objective_center"]["obscuring"] is False
+    assert zones["objective_center"]["dense"] is False
+
+    engine_areas = {
+        a["id"]: a
+        for a in GameStateManager(config={})._load_terrain_areas_from_ref(
+            "divers/terrain-checklist.json", str(PROJECT_ROOT / SCENARIO_CHECKLIST), board_ref="44x60x5"
+        )
+    }
+    assert set(engine_areas) == set(zones)
+    for zid, area in engine_areas.items():
+        assert (zones[zid]["obscuring"], zones[zid]["dense"]) == (area["obscuring"], area["dense"]), zid

@@ -2406,15 +2406,18 @@ class GameStateManager:
         """Load wall hexes from the 'walls' section of a terrain file referenced by terrain_ref.
 
         ``only_type`` (ex: "dense") restreint aux groupes de murs de ce type (champ ``type`` du
-        groupe) — sert à construire le set Solid/dense de la règle 13.5. None = tous les murs."""
+        groupe) — sert à construire le set Solid/dense de la règle 13.5. None = tous les murs.
+        Chaque groupe DOIT porter un ``type`` ∈ {light, dense} (``wall_group_type``) : c'est la
+        feature dont les zones dérivent leur catégorie (13.02) — un groupe non typé lève."""
+        from engine.terrain_utils import wall_group_type
         terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file, board_ref)
         result: List[List[int]] = []
         for gi, g in enumerate(terrain_data.get("walls", [])):  # get allowed
             if not isinstance(g, dict):
                 continue
-            if only_type is not None and g.get("type") != only_type:
-                continue
             hint = f"Terrain file {terrain_path} walls[{gi}]"
+            if wall_group_type(g, path_hint=hint) != only_type and only_type is not None:
+                continue
             result.extend(expand_wall_group_to_hex_list(g, path_hint=hint))
         return result
 
@@ -2441,12 +2444,23 @@ class GameStateManager:
         """Load polygon terrain areas from the 'terrain' section of a terrain file referenced by terrain_ref.
 
         Only 'polygon' shapes are kept (lines like deployment markers are excluded). Each area is
-        {id, obscuring, polygon_vertices, hexes}; vertices stay in col/row sub-hex space and `hexes`
-        is the rasterized set of occupied board hexes (same odd-q projection as objectives/renderer).
+        {id, obscuring, dense, polygon_vertices, hexes}; vertices stay in col/row sub-hex space and
+        `hexes` is the rasterized set of occupied board hexes (same odd-q projection as
+        objectives/renderer).
+
+        ``obscuring`` / ``dense`` sont DÉRIVÉS des murs typés du MÊME fichier (13.02 : la catégorie
+        est portée par la feature ; 13.10 : obscuring ⇔ contient light ou dense ; 13.09 : hidden ⇔
+        contient dense) via ``terrain_utils.derive_area_categories`` — même dérivation que l'API
+        front (``api_server``). Une clé ``obscuring`` encore présente dans le JSON lève : la valeur
+        saisie à la main ne peut plus contredire les murs.
         """
         from config_loader import get_config_loader
+        from engine.terrain_utils import derive_area_categories, terrain_wall_hexes_by_type
         cols, rows = get_config_loader().get_board_size()
         terrain_data, terrain_path = self._read_terrain_file(terrain_ref, scenario_file, board_ref)
+        walls_by_type = terrain_wall_hexes_by_type(
+            terrain_data.get("walls"), path_hint=f"Terrain file {terrain_path}"  # get allowed
+        )
         areas: List[Dict[str, Any]] = []
         for ai, area in enumerate(terrain_data.get("terrain", [])):  # get allowed
             if not isinstance(area, dict):
@@ -2455,17 +2469,25 @@ class GameStateManager:
                 continue
             hint = f"Terrain file {terrain_path} terrain[{ai}]"
             area_id = require_key(area, "id")
+            if "obscuring" in area:
+                raise ValueError(
+                    f"{hint} ('{area_id}'): clé 'obscuring' obsolète — la catégorie d'une zone est "
+                    f"dérivée des murs typés (light/dense) qu'elle contient, retirer la clé"
+                )
             vertices = require_key(area, "vertices")
             if not isinstance(vertices, list) or len(vertices) < 3:
                 raise ValueError(f"{hint}: polygon 'vertices' must be a list of >= 3 points, got {vertices!r}")
             poly = [[int(v[0]), int(v[1])] for v in vertices]
+            hexes = polygon_to_hex_list(poly, cols, rows)
+            obscuring, dense = derive_area_categories(hexes, walls_by_type)
             areas.append({
                 "id": area_id,
                 "name": area.get("name", area_id),
-                "obscuring": bool(area.get("obscuring", False)),
+                "obscuring": obscuring,
+                "dense": dense,
                 "objective": bool(area.get("objective", False)),
                 "polygon_vertices": poly,
-                "hexes": polygon_to_hex_list(poly, cols, rows),
+                "hexes": hexes,
                 "floors": self._parse_terrain_floors(area, area_id, hint, cols, rows),
             })
         return areas

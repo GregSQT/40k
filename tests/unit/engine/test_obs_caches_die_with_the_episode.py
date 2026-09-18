@@ -13,7 +13,9 @@ donc sans le purger) fait rougir ce fichier.
 Trouve en ecrivant ce verrou (2026-07-28) : `_obs_solid_terrain_areas` — les zones contenant un
 mur dense (Solid 13.11), lues par le drapeau « gone to ground pret » — n'etait purgee NULLE
 PART. Les tests d'observation la retiraient a la main dans leurs fixtures, ce qui montrait que
-le besoin etait connu ; la purge manquait dans le moteur.
+le besoin etait connu ; la purge manquait dans le moteur. Ce cache n'existe plus depuis le
+2026-09-18 : la categorie dense est portee par `area["dense"]`, derivee au chargement du terrain
+(13.02), et le drapeau « gone to ground pret » vaut hidden.
 """
 
 from __future__ import annotations
@@ -41,7 +43,6 @@ OBS_CACHE_KEYS = {
     ObservationBuilder.OBJECTIVE_HEX_ARRAYS_KEY: "hexes de chaque objectif (distances/directions)",
     "_grid_static_hex_arrays": "murs / objectifs / couvert rasterises pour la grille",
     "_grid_deployment_zone_anchor": "ancre de grille des escouades pas encore posees (§0.40)",
-    "_obs_solid_terrain_areas": "zones contenant un mur dense (Solid 13.11, gone to ground)",
     "_unit_los_pair_cache": "LoS et couvert par paire (tireur, cible)",
     ActionDecoder.DEPLOYMENT_SCORING_CACHE_KEY: (
         "scoring du deploiement (expositions LoS par hexe, allies par colonne) — LU par le bloc "
@@ -94,28 +95,3 @@ def test_no_observation_cache_survives_a_reset():
         if gs.get(key) is sentinel
     ]
     assert not survivors, "cache(s) d'observation survivant au reset : " + ", ".join(survivors)
-
-
-def test_solid_terrain_areas_are_recomputed_for_the_new_terrain():
-    """Le cas concret derriere la purge de `_obs_solid_terrain_areas`.
-
-    Ce cache derive de `terrain_areas` ET `dense_wall_hexes`, tous deux remplaces par un
-    rechargement de scenario. Servi tel quel, il ferait repondre le drapeau « gone to ground
-    pret » (13.5) sur les zones Solid du terrain PRECEDENT.
-    """
-    env = _make_env()
-    env.reset()
-    gs = env.game_state
-
-    # Force le calcul du cache par le vrai chemin (drapeaux terrain de l'unite active).
-    sid = next(iter(gs["units_cache"].keys()))
-    env.obs_builder.build_squad_observation(gs, sid)
-
-    # Terrain incompatible avec le suivant : une zone unique, arbitraire.
-    gs["_obs_solid_terrain_areas"] = [{"id": "zone-de-l-episode-precedent", "hexes": [[0, 0]]}]
-
-    env.reset()
-    after = gs.get("_obs_solid_terrain_areas")
-    assert after is None or all(
-        a.get("id") != "zone-de-l-episode-precedent" for a in after
-    ), "les zones Solid de l'episode precedent sont encore servies"

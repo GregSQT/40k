@@ -1,7 +1,7 @@
 """T4 — 13.09 sur les entites ENNEMIES : `hidden` emis pour toutes, `los_can_see` = visible ET detectable.
 
 Regle lue (Documentation/40k_rules/13 Terrain.pdf) :
-- 13.09 Hidden : hideable (INFANTRY/BEASTS/SWARM) + within une zone obscurante + l unite n a fait
+- 13.09 Hidden : hideable (INFANTRY/BEASTS/SWARM) + within une zone contenant un terrain DENSE + l unite n a fait
   aucune attaque a distance ce tour ni au tour precedent. « While a model is hidden, it can only be
   visible to enemy models that are within its detection range » — 15" par defaut. 13.09 modifie donc
   la VISIBILITE elle-meme, pas seulement une eligibilite posee apres coup.
@@ -137,12 +137,14 @@ def _make_engine(
         eng = W40KEngine(config=build_engine_config(_config(shooter_col, enemy_positions)))
     eng.reset()
     gs = eng.game_state
+    # `dense` : 13.09 exige une zone contenant un terrain DENSE (derive du mur _DENSE_WALL par le
+    # loader ; pose ici a la main puisque la zone est injectee sans fichier terrain).
     gs["terrain_areas"] = [{
-        "id": "area1", "obscuring": True,
+        "id": "area1", "obscuring": True, "dense": True,
         "polygon_vertices": _AREA_POLYGON, "hexes": _AREA_HEXES,
     }]
     gs["dense_wall_hexes"] = _DENSE_WALL
-    for key in ("_dense_wall_set_cache", "_obs_solid_terrain_areas", "_obscuring_area_sets_cache"):
+    for key in ("_dense_wall_set_cache", "_obscuring_area_sets_cache"):
         gs.pop(key, None)
     return eng
 
