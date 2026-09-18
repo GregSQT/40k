@@ -5994,9 +5994,15 @@ class W40KEngine(gym.Env):
             "success": True,
         }
         # Même reprise que le chemin gym (`_ability_call_closes_command_phase`) : le siège humain
-        # n'a aucun verbe de sortie de la phase de commandement.
+        # n'a aucun verbe de sortie de la phase de commandement. Et même SERVICE de la file que la
+        # route `agent_decision` : la phase de mouvement qui s'ouvre empile l'appel Da Jump
+        # (`push_next_da_jump_call`), qui doit être servi ICI — laissé en file, il n'était servi
+        # qu'à la cascade suivante, dans la phase de tir, où `apply_da_jump` lève (finding
+        # /code-review du 2026-09-18).
         if self._ability_call_closes_command_phase(selected_prompt):
-            return True, self._resume_command_phase_after_faction_decision(result)
+            return self._serve_queued_prompts_after_decision(
+                True, self._resume_command_phase_after_faction_decision(result)
+            )
         if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
             # Même reprise que le chemin gym : l'unité reste active, le joueur déclare.
             return self._resume_fight_after_finest_hour()

@@ -189,15 +189,20 @@ def _bot_fights(enemy_cfg, monkeypatch):
     eng.pve_controller.actions[0]["target_slot"] = get_enemy_slot_mapping(gs, 2).index("1")  # type: ignore[attr-defined]
     monkeypatch.setattr(random, "randint", lambda a, b: 1)  # rien ne touche : le défenseur humain n'alloue pas
     ok, out = eng.execute_ai_turn()
-    assert ok is True and out.get("waiting_for_weapon_select") is True, out
+    assert ok is True, out
     assert "2" in gs["units_selected_to_fight"]
     assert gs["pending_rule_choice_queue"] == [] and FIGHT_SELECTION_FINEST_HOUR_KEY not in gs, (
         "l'appel a été répondu par la politique DANS la requête de sélection"
     )
-    slot = next(iter(gs[PENDING_FIGHT_WEAPON_KEY]["slot_to_code"]))
-    eng.pve_controller.actions = [{"action": "squad_fight_weapon", "weapon_slot": slot}]  # type: ignore[attr-defined]
-    ok, out = eng.execute_ai_turn()
-    assert ok is True, out
+    # Un Captain mono-arme n'a pas de question d'arme (`_fight_ask_weapon_or_continue`, ≥ 2
+    # armes ordinaires) : le combat est résolu dans la même requête. Une question posée malgré
+    # tout (harnais plus riche) se répond ici.
+    if out.get("waiting_for_weapon_select"):
+        slot = next(iter(gs[PENDING_FIGHT_WEAPON_KEY]["slot_to_code"]))
+        eng.pve_controller.actions = [{"action": "squad_fight_weapon", "weapon_slot": slot}]  # type: ignore[attr-defined]
+        ok, out = eng.execute_ai_turn()
+        assert ok is True, out
+    assert _combat_attacks(gs, "2"), "le combat du Captain a été résolu"
     return eng
 
 

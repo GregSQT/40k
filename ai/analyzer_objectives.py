@@ -129,12 +129,15 @@ def expected_oc_sums(
             return None
         if state.battle_shocked_by_unit.get(uid, False):  # get allowed : jamais testée = saine
             continue
-        bonus = 0
+        # `unit_oc_bonus` (moteur) SOMME les entrées `oc_bonus` de l'union 19.04 — une par type
+        # de porteur présent ; miroir : somme sur les types VIVANTS distincts.
+        living_types: Set[str] = set()
         for mid in living:
             mtype = state.model_types.get(mid)  # get allowed
             if mtype is None:
                 return None
-            bonus = max(bonus, int(config.oc_bonus_by_type.get(mtype, 0)))  # get allowed
+            living_types.add(mtype)
+        bonus = sum(int(config.oc_bonus_by_type.get(t, 0)) for t in living_types)  # get allowed
         if bonus and unit_effect_in_force(state, config, uid, "oc_bonus") is False:
             bonus = 0
         for mid in living:

@@ -11,7 +11,7 @@ La chaîne D3 → profil → placement et la clause bodyguard : test_returned_mo
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from engine.agent_decision import read_pending_agent_decision
 from engine.macro_intents import CHOICE_BASE
@@ -21,9 +21,9 @@ from tests.unit.engine.test_agent_decision_mechanism import _engine, _game_state
 _RULE = {"ruleId": "return_destroyed_models", "displayName": "Grot Orderly"}
 
 
-def _gs(n_dead: int = 2, **overrides: Any) -> Dict[str, Any]:
+def _gs(n_dead: int = 2, extra_units: Optional[List[Dict[str, Any]]] = None, **overrides: Any) -> Dict[str, Any]:
     """Escouade 1 (P1, Grot Orderly) à (5,10) avec `n_dead` Boyz archivés, ennemi 2 loin."""
-    gs = _game_state([_unit(1, 1, 5, 10, [dict(_RULE)]), _unit(2, 2, 20, 10, [])])
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(_RULE)]), _unit(2, 2, 20, 10, []), *(extra_units or [])])
     gs["phase"] = "command"
     # Datasheet de l'escouade : la ligne `RETURNED` du journal la lit (`model_datasheet_name`).
     gs["unit_by_id"]["1"]["unitType"] = "Boyz"
@@ -301,3 +301,26 @@ def test_real_roster_a_dead_painboy_takes_the_ability_with_him():
     assert cmd["phase_complete"] is False and decision is not None and decision["type"] == "waaagh_call", (
         "seule la décision Waaagh! (non appelée au tour 1) arrête 08.04"
     )
+
+
+def test_human_answer_that_closes_the_command_phase_serves_the_da_jump_call_in_the_move_phase():
+    """Finding /code-review du 2026-09-18 : la réponse humaine à Grot Orderly ouvre le mouvement,
+    dont le début empile l'appel Da Jump (`push_next_da_jump_call`) — il doit être SERVI dans la
+    même réponse (comme sur la route `agent_decision`), pas laissé en file jusqu'à la cascade
+    suivante, où `apply_da_jump` lèverait hors phase de mouvement."""
+    # Une seconde escouade P1 porteuse de Da Jump (le WeirdBoy), sur la table.
+    weird = _unit(3, 1, 8, 10, [{"ruleId": "da_jump", "displayName": "Da Jump"}])
+    gs = _gs(extra_units=[weird], player_types={"1": "human", "2": "ai"})
+    eng = _engine(gs, gym_training_mode=False)
+    eng._initialize_rule_choice_runtime_state()
+    engine_cmd = eng.start_command_phase()
+    assert engine_cmd["phase_complete"] is False
+    eng._emit_next_rule_choice_prompt_if_needed()
+    assert gs["active_rule_choice_prompt"]["rule_id"] == "return_destroyed_models"
+
+    ok, out = eng._process_semantic_action({
+        "action": "select_rule_choice", "unitId": "1", "player": 1, "selectedRuleId": "decline",
+    })
+    assert ok is True and gs["phase"] == "move"
+    assert out["action"] == "waiting_for_rule_choice" and out["rule_choice_prompt"]["rule_id"] == "da_jump", out
+    assert gs["active_rule_choice_prompt"]["unit_id"] == "3"
