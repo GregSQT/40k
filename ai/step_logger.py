@@ -1825,6 +1825,10 @@ class StepLogger:
                 _conso_mode = details.get("consolidation_mode")
                 if _conso_mode is not None:
                     base_msg += f" [{_conso_mode.upper()}]"
+                # A3 — sélection réelle 12.08, même token que le pile-in ; absent en objective.
+                _conso_tids = details.get("consolidation_target_ids")
+                if _conso_tids:
+                    base_msg += f" [targets: {','.join(str(t) for t in _conso_tids)}]"
             reward = details.get("reward")
             if reward is not None:
                 base_msg += f" [R:{reward:+.1f}]"

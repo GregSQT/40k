@@ -72,10 +72,10 @@ def test_probe_restores_the_engine_after_the_run(melee_scenario_file: str, monke
     import engine.phase_handlers.shared_utils as su
     from scripts.melee_bench import run_bench
 
-    before = (alu._append_entry, fh.build_manual_fight_allocation, su.squad_consolidate_plan,
+    before = (alu._append_entry, fh.build_manual_fight_allocation, su.squad_consolidate_plan_with_targets,
               fh.fight_v11_consolidation_freeze_new_foes)
     run_bench(n_episodes=1, scenario_file=melee_scenario_file, out_path=None, workers=1)
-    after = (alu._append_entry, fh.build_manual_fight_allocation, su.squad_consolidate_plan,
+    after = (alu._append_entry, fh.build_manual_fight_allocation, su.squad_consolidate_plan_with_targets,
              fh.fight_v11_consolidation_freeze_new_foes)
     assert before == after
     assert os.environ["W40K_BOARD_PATH"] == "board/44x60x1"

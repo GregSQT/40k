@@ -15254,6 +15254,15 @@ def squad_auto_declare_fight_weapons(
 def squad_consolidate_plan(
     game_state: Dict[str, Any], squad_id: str, *, mode: Optional[str] = None
 ) -> Optional[List[Tuple[str, int, int, int]]]:
+    """Plan Consolidation (12.08) — voir `squad_consolidate_plan_with_targets`, dont ceci ne
+    rend que le plan (appelants qui n'ont pas besoin de la sélection : tests, outils)."""
+    plan, _targets = squad_consolidate_plan_with_targets(game_state, squad_id, mode=mode)
+    return plan
+
+
+def squad_consolidate_plan_with_targets(
+    game_state: Dict[str, Any], squad_id: str, *, mode: Optional[str] = None
+) -> Tuple[Optional[List[Tuple[str, int, int, int]]], List[str]]:
     """Plan Consolidation (12.08, 3" max par fig) — cascade obligatoire ongoing→engaging→objective.
 
     Regle officielle (PDF 12.08) — mode impose par la situation, pas choisi :
@@ -15267,7 +15276,16 @@ def squad_consolidate_plan(
     passer evite de rejouer les trois predicats d engagement sur le chemin gym.
 
     Validations finales (coherency toujours ; ER pour (1)/(2) ; zone pour (3)).
-    Retourne plan ou None si impossible. Atomic.
+    Retourne ``(plan, cibles sélectionnées)`` — ``(None, [])`` si impossible. Atomic.
+
+    SÉLECTION RÉELLE (A3, 2026-09-18). 12.08 AFTER MOVING, Engaging : « Your unit must be
+    engaged with all of the selected enemy units ». Le gym sélectionnait TOUS les ennemis à
+    3" et validait dès qu'UNE figurine en engageait un : la sélection annoncée (log, New Foes)
+    n'était pas celle que le plan honorait. Ici la sélection est le sous-ensemble des ennemis à
+    3" que le plan engage RÉELLEMENT, obtenu par point fixe : plan vers S, E = ennemis de S
+    engagés par le plan, si E ⊊ S on replanifie vers E (« closer to the closest SELECTED enemy
+    unit ») jusqu'à stabilité ; E vide = pas de consolidation. En mode Ongoing la sélection est
+    imposée (tous les ennemis engagés) ; en mode Objective la liste rendue est vide.
     """
     from engine.phase_handlers.fight_handlers import (
         fight_v11_consolidation_mode,
@@ -15281,7 +15299,7 @@ def squad_consolidate_plan(
     squad_models = require_key(game_state, "squad_models")
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
-        return None
+        return None, []
     # Même contrat que `fight_pile_in_plan`, appelant compris (jumeau pile-in / consolidation) :
     # l'id vient de `fight_v11_grouped_next`, filtré sur `is_unit_alive`.
     our_entry = require_unit_from_cache(squad_id, game_state, "squad_consolidate_plan")
@@ -15289,7 +15307,7 @@ def squad_consolidate_plan(
     unit_ref: Dict[str, Any] = {"id": squad_id, "player": int(require_key(our_entry, "player"))}
     mode = mode if mode is not None else fight_v11_consolidation_mode(game_state, unit_ref)
     if mode is None:
-        return None
+        return None, []
 
     ish = int(require_key(game_state, "inches_to_subhex"))
     budget = 3 * ish
@@ -15298,21 +15316,30 @@ def squad_consolidate_plan(
         # Heuristique gym : premier objectif dans la liste (déjà filtré à ≤3" par la cascade).
         cands = _fight_v11_consolidation_objective_candidates(game_state, unit_ref)
         if not cands:
-            return None
+            return None, []
         obj_zone: Set[Tuple[int, int]] = _fight_v11_consolidation_objective_zone(game_state, cands[0])
         if not obj_zone:
-            return None
-        # 12.08 Objective WHILE MOVING : chaque fig doit atterrir DANS la zone (empreinte ∩ zone)
-        # si possible, sinon strictement plus proche. `_assign_cells_toward_enemies` produit des
-        # cellules B2B (ADJACENTES aux hexes de zone), pas DANS la zone — utiliser à la place une
+            return None, []
+        # 12.08 Objective WHILE MOVING : « within range of the selected objective if possible,
+        # or closer to it if not ». Chaque fig atterrit DANS la zone (empreinte ∩ zone) si une
+        # case de zone est atteignable ; sinon (A4, 2026-09-18) sur la case atteignable la plus
+        # proche de la zone — avant, elle restait sur place. `_assign_cells_toward_enemies`
+        # produit des cellules B2B (ADJACENTES aux hexes de zone), pas DANS la zone — d'où une
         # affectation gloutonne directe vers les hexes de zone.
         our_player = int(require_key(our_entry, "player"))
         occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
+        board_cols = int(require_key(game_state, "board_cols"))
+        board_rows = int(require_key(game_state, "board_rows"))
+        wall_hexes = game_state.get("wall_hexes", set())
         origins: Dict[str, Tuple[int, int]] = {
             mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
         }
         taken_obj: Set[Tuple[int, int]] = set(origins.values())
         chosen_obj: Dict[str, Tuple[int, int]] = {}
+
+        def _zone_dist(col: int, row: int) -> int:
+            return min(calculate_hex_distance(col, row, h[0], h[1]) for h in obj_zone)
+
         for mid in mids:
             oc, or_ = origins[mid]
             if (oc, or_) in obj_zone:
@@ -15329,23 +15356,47 @@ def squad_consolidate_plan(
                 if reach(zh[0], zh[1]):
                     best_zh = zh
                     break
+            if best_zh is None:
+                # « or closer to it if not » : la case atteignable STRICTEMENT plus proche de la
+                # zone, dans tout le budget (distance à la zone, puis anneau, puis coordonnées).
+                orig_zd = _zone_dist(oc, or_)
+                closer: Optional[Tuple[int, int, int, int]] = None
+                for d_col in range(-budget, budget + 1):
+                    for d_row in range(-budget, budget + 1):
+                        if d_col == 0 and d_row == 0:
+                            continue
+                        nc, nr = oc + d_col, or_ + d_row
+                        if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                            continue
+                        if (nc, nr) in taken_obj or (nc, nr) in occupied_by_others:
+                            continue
+                        if wall_hexes and (nc, nr) in wall_hexes:
+                            continue
+                        zd = _zone_dist(nc, nr)
+                        if zd >= orig_zd:
+                            continue
+                        key = (zd, max(abs(d_col), abs(d_row)), nc, nr)
+                        if (closer is None or key < closer) and reach(nc, nr):
+                            closer = key
+                if closer is not None:
+                    best_zh = (closer[2], closer[3])
             if best_zh is not None:
                 taken_obj.discard((oc, or_))
                 taken_obj.add(best_zh)
                 chosen_obj[mid] = best_zh
             else:
-                chosen_obj[mid] = (oc, or_)  # pas de zone hex atteignable → reste sur place
+                chosen_obj[mid] = (oc, or_)  # ni zone ni case plus proche atteignable → sur place
         plan: List[Tuple[str, int, int, int]] = [
             (mid, chosen_obj[mid][0], chosen_obj[mid][1], int(require_key(models_cache[mid], "level")))
             for mid in mids
         ]
         plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
         if not _validate_plan_coherency(plan_positions, game_state):
-            return None
+            return None, []
         # 12.08 Objective : au moins 1 fig dans la zone de controle de l objectif apres le move.
         if not any((c, r) in obj_zone for _, c, r, _ in plan):
-            return None
-        return plan
+            return None, []
+        return plan, []
 
     # Ongoing ou Engaging : mouvement vers les ennemis cibles.
     # SOURCE UNIQUE partagee avec le pile-in : 12.08 WHILE MOVING (Ongoing/Engaging) porte la
@@ -15355,49 +15406,63 @@ def squad_consolidate_plan(
     else:  # engaging
         target_ids = _fight_v11_consolidation_engaging_candidates(game_state, unit_ref)
     if not target_ids:
-        return None
+        return None, []
 
-    enemy_positions: List[Tuple[int, int]] = []
-    enemy_entries: List[Dict[str, Any]] = []
-    for esid in target_ids:
-        enemy_positions.extend(_squad_model_positions(game_state, esid))
-        enemy_entries.append(
-            require_unit_from_cache(esid, game_state, "squad_consolidate_plan/enemy")
-        )
-    if not enemy_positions:
-        return None
-
-    # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le plan
-    # PORTE (toute entrée de plan porte le sien).
-    chosen = _assign_cells_toward_enemies(
-        game_state, squad_id, mids, enemy_positions, budget, target_ids=target_ids
-    )
-    plan = [
-        (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
-        for mid in mids
-    ]
-
-    # Validation finale : coherency + ER (au moins 1 fig dans la zone d engagement des cibles).
-    plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
-    if not _validate_plan_coherency(plan_positions, game_state):
-        return None
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
-    in_er = any(
-        any(
-            unit_entries_within_engagement_zone(
-                _synth_model_entry(
-                    game_state, str(squad_id), models_cache[mid], c, r, level=lv
-                ),
-                ee, ez, game_state=game_state,
+
+    def _plan_toward(selection: List[str]) -> Tuple[Optional[List[Tuple[str, int, int, int]]], List[str]]:
+        """Plan vers `selection` et sous-ensemble de `selection` que le plan engage."""
+        enemy_positions: List[Tuple[int, int]] = []
+        enemy_entries: List[Tuple[str, Dict[str, Any]]] = []
+        for esid in selection:
+            enemy_positions.extend(_squad_model_positions(game_state, esid))
+            enemy_entries.append(
+                (esid, require_unit_from_cache(esid, game_state, "squad_consolidate_plan/enemy"))
             )
-            for ee in enemy_entries
+        if not enemy_positions:
+            return None, []
+        # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le
+        # plan PORTE (toute entrée de plan porte le sien).
+        chosen = _assign_cells_toward_enemies(
+            game_state, squad_id, mids, enemy_positions, budget, target_ids=selection
         )
-        for mid, c, r, lv in plan
+        plan = [
+            (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
+            for mid in mids
+        ]
+        plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
+        if not _validate_plan_coherency(plan_positions, game_state):
+            return None, []
+        synths = [
+            _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=lv)
+            for mid, c, r, lv in plan
+        ]
+        engaged = [
+            esid for esid, ee in enemy_entries
+            if any(
+                unit_entries_within_engagement_zone(synth, ee, ez, game_state=game_state)
+                for synth in synths
+            )
+        ]
+        return plan, engaged
+
+    selection = list(target_ids)
+    for _ in range(len(target_ids) + 1):
+        plan, engaged = _plan_toward(selection)
+        # Validation finale : coherency + ER (au moins 1 fig dans la zone d engagement des cibles).
+        if plan is None or not engaged:
+            return None, []
+        if mode == "ongoing" or len(engaged) == len(selection):
+            # Ongoing : la sélection est imposée (12.08 « select every enemy unit it is engaged
+            # with »), le plan n'y touche pas ; la clause AFTER (engagements de départ conservés)
+            # est portée par `_assign_cells_toward_enemies`.
+            return plan, (list(target_ids) if mode == "ongoing" else engaged)
+        selection = engaged  # 12.08 AFTER : sélection = ce que le plan engage ; on replanifie
+    raise RuntimeError(
+        f"squad_consolidate_plan: la sélection engaging de {squad_id!r} n'a pas convergé "
+        f"({target_ids})"
     )
-    if not in_er:
-        return None
-    return plan
 
 
 # ============================================================================

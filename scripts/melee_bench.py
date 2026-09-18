@@ -29,7 +29,7 @@ COMMENT C'EST MESURÉ — au moment de l'ÉVÉNEMENT, jamais après le step
     (`action_log_utils._append_entry`, corps unique des deux chemins d'émission) notifie chaque
     ligne à son émission (positions vivantes, avant tout mouvement suivant), et trois fonctions
     du chemin gym sont enveloppées
-    (`build_manual_fight_allocation`, `squad_consolidate_plan`,
+    (`build_manual_fight_allocation`, `squad_consolidate_plan_with_targets`,
     `fight_v11_consolidation_freeze_new_foes`). Aucune sonde n'altère le jeu : chaque enveloppe
     rend exactement ce que la fonction d'origine rend.
 
@@ -107,7 +107,7 @@ class MeleeProbe:
 
         self._orig_append = alu._append_entry
         self._orig_alloc = fh.build_manual_fight_allocation
-        self._orig_consolidate = su.squad_consolidate_plan
+        self._orig_consolidate = su.squad_consolidate_plan_with_targets
         self._orig_freeze = fh.fight_v11_consolidation_freeze_new_foes
 
         def _alloc(game_state: Dict[str, Any], attacker_squad_id: str) -> Dict[str, Any]:
@@ -115,11 +115,11 @@ class MeleeProbe:
             return self._orig_alloc(game_state, attacker_squad_id)
 
         def _consolidate(game_state: Dict[str, Any], squad_id: str, *, mode: Optional[str] = None):
-            plan = self._orig_consolidate(game_state, squad_id, mode=mode)
+            plan, targets = self._orig_consolidate(game_state, squad_id, mode=mode)
             if plan is None:
                 player = self._player_of(game_state, str(squad_id))
                 self.by_player[player]["consolidation_none"] += 1
-            return plan
+            return plan, targets
 
         def _freeze(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
             new_foes = self._orig_freeze(game_state, unit)
@@ -135,7 +135,7 @@ class MeleeProbe:
 
         alu._append_entry = _append
         fh.build_manual_fight_allocation = _alloc
-        su.squad_consolidate_plan = _consolidate
+        su.squad_consolidate_plan_with_targets = _consolidate
         fh.fight_v11_consolidation_freeze_new_foes = _freeze
 
     def uninstall(self) -> None:
@@ -145,7 +145,7 @@ class MeleeProbe:
 
         alu._append_entry = self._orig_append
         fh.build_manual_fight_allocation = self._orig_alloc
-        su.squad_consolidate_plan = self._orig_consolidate
+        su.squad_consolidate_plan_with_targets = self._orig_consolidate
         fh.fight_v11_consolidation_freeze_new_foes = self._orig_freeze
 
     # ── lecture des lignes ────────────────────────────────────────────────────

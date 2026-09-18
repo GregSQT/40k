@@ -409,6 +409,7 @@ def _append_fight_move_log(  # noqa: PLR0913
     models_segment: str = "",
     pile_in_target_ids: Optional[List[str]] = None,
     consolidation_mode: Optional[str] = None,
+    consolidation_target_ids: Optional[List[str]] = None,
 ) -> None:
     """Log par-figurine unique d'un déplacement de phase fight (pile-in / consolidation).
 
@@ -458,6 +459,10 @@ def _append_fight_move_log(  # noqa: PLR0913
         entry["pileInTargetIds"] = [str(t) for t in pile_in_target_ids]
     if consolidation_mode is not None:
         entry["consolidationMode"] = consolidation_mode
+    # Sélection RÉELLE 12.08 (ongoing : ennemis engagés ; engaging : ennemis que le plan engage).
+    # Absente en mode objective et sur le chemin PvP (qui ne la journalise pas encore).
+    if consolidation_target_ids:
+        entry["consolidationTargetIds"] = [str(t) for t in consolidation_target_ids]
     append_action_log(game_state, entry)
 
 

@@ -8408,6 +8408,9 @@ class W40KEngine(gym.Env):
             # L17 — cibles de pile-in (12.03) et mode de consolidation (12.08).
             ("pileInTargetIds", "pile_in_target_ids"),
             ("consolidationMode", "consolidation_mode"),
+            # A3 — sélection RÉELLE d'une consolidation (12.08 AFTER, engaging : ennemis engagés
+            # par le plan ; ongoing : tous les ennemis engagés). Vide en mode objective.
+            ("consolidationTargetIds", "consolidation_target_ids"),
             # L11 — mode de fall-back (09.07) et jets de hazard Desperate Escape (06.03).
             ("fleeMode", "flee_mode"),
             ("desperateEscapeRolls", "desperate_escape_rolls"),
@@ -8452,6 +8455,7 @@ class W40KEngine(gym.Env):
     def _gym_commit_fight_move(
         self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int, int]], kind: str,
         *, consolidation_mode: Optional[str] = None,
+        consolidation_target_ids: Optional[List[str]] = None,
     ) -> None:
         """Commit gym d'un move fight groupé (pile-in/consolidation) + log par-figurine.
 
@@ -8464,6 +8468,8 @@ class W40KEngine(gym.Env):
         ``consolidation_mode`` (obligatoire pour ``kind == "consolidation"``) est le mode 12.08
         constaté par l'appelant AVANT le move : relu après, `fight_v11_consolidation_mode` rendrait
         « ongoing » pour toute consolidation engaging réussie (elle finit engagée par construction).
+        ``consolidation_target_ids`` : la SÉLECTION RÉELLE 12.08 (ennemis que le plan engage,
+        `squad_consolidate_plan_with_targets`), journalisée `[targets: …]` pour l'analyzer.
         """
         from engine.phase_handlers.shared_utils import commit_move
         from engine.phase_handlers.fight_handlers import _append_fight_move_log
@@ -8524,6 +8530,7 @@ class W40KEngine(gym.Env):
             models_segment=captured_seg,
             pile_in_target_ids=_l17_pile_in_tids,
             consolidation_mode=consolidation_mode,
+            consolidation_target_ids=consolidation_target_ids,
         )
 
     def _fight_v11_gym_settle(self) -> None:
@@ -8593,7 +8600,7 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shared_utils import (
             fight_pile_in_plan,
             is_programmatic_owner,
-            squad_consolidate_plan,
+            squad_consolidate_plan_with_targets,
         )
 
         gs = self.game_state
@@ -8644,10 +8651,11 @@ class W40KEngine(gym.Env):
                     unit = require_unit_by_id(gs, str(uid))
                     # Mode 12.08 constate AVANT le move : apres, une engaging reussie est engagee.
                     mode = fight_v11_consolidation_mode(gs, unit)
-                    plan = squad_consolidate_plan(gs, str(uid), mode=mode)
+                    plan, targets = squad_consolidate_plan_with_targets(gs, str(uid), mode=mode)
                     if plan is not None:
                         self._gym_commit_fight_move(
-                            gs, str(uid), plan, "consolidation", consolidation_mode=mode
+                            gs, str(uid), plan, "consolidation", consolidation_mode=mode,
+                            consolidation_target_ids=targets,
                         )
                     require_key(gs, "consolidation_done").add(str(uid))
                     if (
