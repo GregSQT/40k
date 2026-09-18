@@ -173,7 +173,15 @@ def _play_and_spy(env, seed: int, max_steps: int) -> List[Dict[str, Any]]:
     return captured
 
 
-@pytest.mark.parametrize("seed", [11, 23])
+#: Graines des parties jouées. L'engagement ne dépend plus d'elles : `_play_and_spy` rapproche
+#: puis tire dès que c'est légal, et la graine 7 — qui, au pur hasard, ne voyait aucun tir de
+#: l'agent en 5 rounds après la livraison des appels de capacité (Da Jump, 2026-09-18) — y
+#: compte 3 activations offensives de l'agent (11 → 6, 23 → 5 ; mesuré le 2026-09-18). Le hasard
+#: ne porte plus que le reste (activation, choix, oath, adversaire `RandomBot`).
+ENGAGING_SEEDS = (7, 11, 23)
+
+
+@pytest.mark.parametrize("seed", ENGAGING_SEEDS)
 def test_le_moteur_porte_l_esperance_sur_de_vraies_figurines(seed: int) -> None:
     env = _make_env(reward_on_expectation=True)
     captured = _play_and_spy(env, seed=seed, max_steps=500)
@@ -202,7 +210,11 @@ def test_la_recompense_du_tir_est_l_esperance_pas_le_jet() -> None:
     controlled = int(require_key(env.engine.reward_calculator.config, "controlled_player"))
     shaping_on = require_key(require_key(env.engine.reward_calculator.rewards_config, "ArmageddonAgent_x1"), "squad_shaping")
     shaping_off = {**shaping_on, "reward_on_expectation": False}
-    captured = _play_and_spy(env, seed=7, max_steps=500)
+    # Toutes les parties engageantes, cumulées : plus d'activations confrontées à la formule, et
+    # le verrou « au moins une activation où espérance ≠ jet » porte sur l'ensemble.
+    captured: List[Dict[str, Any]] = []
+    for seed in ENGAGING_SEEDS:
+        captured += _play_and_spy(env, seed=seed, max_steps=500)
     agent_offensives = [
         c for c in captured
         if c["acting_player"] == controlled and c["summary"]["expected_damage_by_target"]

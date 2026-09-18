@@ -2600,6 +2600,57 @@ class W40KEngine(gym.Env):
                     totals[f'{key}_positive'] += max(0.0, value)
         totals['penalties'] += reserves_penalty
 
+    @staticmethod
+    def _fight_counters_from_action_logs(
+        action_logs: List[Dict[str, Any]], controlled_player: int
+    ) -> Dict[str, int]:
+        """Compteurs de fin d'episode de la phase de combat (courbes `06_fight/b_` a `e_`), lus
+        dans `action_logs` — meme source que les kills et les charges, jamais un accumulateur
+        tenu a part (cf. le commentaire des distances de charge dans `_build_terminal_info`).
+
+          - `engaging_consolidations_{agent,opponent}` : lignes `consolidation` en mode engaging ;
+          - `new_foes_suffered` : New Foes geles (`newFoesFrozen`, pose par le driver gym) par
+            les consos engaging de l'AGENT — les combats adverses qu'il a ouverts lui-meme ;
+          - `multi_level_fight_activations` : activations (tour, escouade) de l'agent dont les
+            figurines qui frappent et les survivantes de la cible ne sont pas au meme etage
+            (`attackerLevels` / `targetLevels`, exiges sur toute ligne `combat`) ; une cible
+            entierement detruite (liste vide) n'est pas jugee ;
+          - `engaged_idle_models` : figurines de l'agent engagees SANS attaque a une activation
+            (`fight_declaration`, ecrite par `build_manual_fight_allocation`).
+        """
+        engaging_agent = 0
+        engaging_opponent = 0
+        new_foes_suffered = 0
+        multi_level: Set[Tuple[int, str]] = set()
+        engaged_idle = 0
+        for log in action_logs:
+            log_type = log.get("type")
+            if log_type == "consolidation":
+                if require_key(log, "consolidationMode") == "engaging":
+                    if int(require_key(log, "player")) == controlled_player:
+                        engaging_agent += 1
+                        # Absent sur le chemin PvP humain (machine manuelle), qui ne s'entraine pas.
+                        new_foes_suffered += int(log.get("newFoesFrozen", 0))  # get allowed
+                    else:
+                        engaging_opponent += 1
+            elif log_type == "fight_declaration":
+                if int(require_key(log, "player")) == controlled_player:
+                    engaged_idle += int(require_key(log, "engagedIdleModels"))
+            elif log_type == "combat":
+                if int(require_key(log, "player")) != controlled_player:
+                    continue
+                atk_levels = require_key(log, "attackerLevels")
+                tgt_levels = require_key(log, "targetLevels")
+                if atk_levels and tgt_levels and set(atk_levels) != set(tgt_levels):
+                    multi_level.add((int(require_key(log, "turn")), str(require_key(log, "shooterId"))))
+        return {
+            "engaging_consolidations_agent": engaging_agent,
+            "engaging_consolidations_opponent": engaging_opponent,
+            "new_foes_suffered": new_foes_suffered,
+            "multi_level_fight_activations": len(multi_level),
+            "engaged_idle_models": engaged_idle,
+        }
+
     def _build_terminal_info(self) -> Dict[str, Any]:
         """Bilan de FIN D'EPISODE, construit ICI pour TOUTES les portes de terminaison.
 
@@ -3006,6 +3057,10 @@ class W40KEngine(gym.Env):
         self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
         self.episode_tactical_data['shoot_waits'] = shoot_waits
         self.episode_tactical_data['fight_activations'] = len(fight_activations)
+        # 06_fight/ b_ a e_ (lot melee-100), derives de la meme passe sur `action_logs`.
+        self.episode_tactical_data.update(
+            self._fight_counters_from_action_logs(action_logs, controlled_player)
+        )
         self.episode_tactical_data['charge_distance'] = charge_distance_local
 
         # Issues du cache de scoring du deploiement, lues sur le decodeur qui les compte.
@@ -3956,10 +4011,19 @@ class W40KEngine(gym.Env):
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": None, "reason": "fight_machine_off"}
             if self._pending_manual_alloc_ctx() is not None:
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "manual_allocation_pending"}
+            # Decision en attente (B2 `consolidation_engaging`, armee par le driver a la fin de
+            # l action precedente du bot) : elle appartient a son siege et la politique y repond
+            # par le masque (`agent_decision`), comme en gym. Relancer le driver ici rearmerait la
+            # meme decision — `set_pending_agent_decision` refuse d en empiler une seconde (500 sur
+            # `/game/ai-turn`, partie figee). Une decision du siege humain n est pas au bot.
+            pending_decision = read_pending_agent_decision(self.game_state)
+            if pending_decision is not None:
+                if self._is_player_human(int(require_key(pending_decision, "player"))):
+                    return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "human_decision_pending"}
             # Selection de la politique en cours (arme, re-selection de cible) : `squad_fight` a
             # deja enregistre l escouade et passe le selecteur — le pool 12.04 est a l humain,
             # mais c est encore au bot de finir SA selection. Ni drain ni fin de phase ici.
-            if fight_v11_pending_selection_squad(self.game_state) is None:
+            elif fight_v11_pending_selection_squad(self.game_state) is None:
                 self._fight_v11_gym_settle()
             pool_to_check = fight_v11_client_pool(self.game_state)
             drained = self._fight_v11_bot_ends_phase_if_drained()
@@ -4783,6 +4847,30 @@ class W40KEngine(gym.Env):
                 "success": True,
             }
 
+        if decision_type == "consolidation_engaging":
+            # B2 (12.07 / 12.08) : consolider en engaging, ou rester. Jumeau de `fall_back_mode`
+            # (deux candidats sans `effect_ids`, `declines` sur « Rester »). La réponse est
+            # mémorisée pour la phase, puis le driver gym reprend l'étape CONSOLIDATE là où il
+            # s'était arrêté (plan et New Foes pour « Consolider », rien pour « Rester »).
+            consolidate = bool(
+                require_key(require_key(selected_option, "payload"), "consolidate")
+            )
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            fight_handlers.apply_consolidation_engaging_decision(
+                self.game_state, decision_squad_id, consolidate
+            )
+            self._fight_v11_gym_settle()
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "consolidate": consolidate,
+                "success": True,
+            }
+
         if decision_type == "allocation_model":
             # P3-4 : le défenseur gym choisit quelle figurine encaisse la prochaine blessure (05.04).
             # Le payload porte `model_id` (la figurine choisie) et `alloc_ctx_key` (le contexte
@@ -4905,13 +4993,14 @@ class W40KEngine(gym.Env):
             consume_pending_agent_decision(
                 self.game_state, decision_type="suppress_target", player=decision_player,
             )
-            # Le résultat garde l'`action` du handler (`shoot` sans tir, ou l'attente suivante) :
-            # le tir a été payé au step qui l'a résolu, avec son `shoot_result`. Le renommer en
-            # `squad_shoot` sans ce résumé faisait lever `RewardCalculator` (`require_key`) au
-            # step `CHOICE_k` du gym — même contrat que `move_after_shooting` juste au-dessus.
             success, result = shooting_handlers.apply_suppress_target_decision(
                 self.game_state, require_unit_by_id(self.game_state, decision_squad_id), payload,
             )
+            # Le résultat GARDE l'`action` du handler (`shoot` sans tir, ou la décision suivante),
+            # comme `move_after_shooting` : le tir a été payé au step `squad_shoot` qui a posé la
+            # décision, avec son `shoot_result`. Le renommer `squad_shoot` ici en faisait un
+            # `squad_shoot` SANS `shoot_result`, contrat que `RewardCalculator` exige — mesuré :
+            # `Required key 'shoot_result' is missing` à chaque CHOICE_k de suppression en gym.
             return success, {
                 **result,
                 "decision_type": decision_type,
@@ -5251,7 +5340,9 @@ class W40KEngine(gym.Env):
         result: Dict[str, Any], settled: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Le payload de la réponse du bot recouvre celui de l'action (état FINAL), sauf
-        l'`action` : c'est le tir que ce step a joué, et son `shoot_result` reste dû."""
+        l'`action` : c'est le tir que ce step a joué, et son `shoot_result` reste dû. Sans cette
+        garde, la réponse `shoot` (sans tir) de la suppression renommait un
+        `squad_shoot_split_target` du bot PvE (mesuré le 2026-09-18)."""
         if settled is None or not isinstance(result, dict):
             return result
         merged = {**result, **settled}
@@ -7106,8 +7197,17 @@ class W40KEngine(gym.Env):
         # le premier cas : l'unité engagée par l'adversaire restait où il l'avait mise. MÊME plan
         # que le pile-in 12.02 (`fight_pile_in_plan`) : les cibles sont celles de 12.03 BEFORE
         # MOVING (engagée → ses ennemis engagés ; sinon ≤ pile_in_target_range).
+        #
+        # B3 (2026-09-18) : pour une unité NON engagée, la cible désignée par l'agent EST le choix
+        # 12.03 « select one or more enemy units within 5" » — le pile-in additionnel la vise,
+        # au lieu de viser tous les ennemis à 5" puis de redemander la cible quand elle n'est
+        # plus frappable. Repli sur toutes les cibles à 5" seulement si la désignée n'y est pas
+        # (`_overrun_pile_in_target_ids`).
         if fight_v11_can_overrun_pile_in(self.game_state, unit):
-            _ov_plan = fight_pile_in_plan(self.game_state, squad_id)
+            _ov_plan = fight_pile_in_plan(
+                self.game_state, squad_id,
+                target_ids=self._overrun_pile_in_target_ids(squad_id, unit, target_slot),
+            )
             if _ov_plan is not None:
                 self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
                 require_key(self.game_state, OVERRUN_PILE_IN_DONE_KEY).add(str(squad_id))
@@ -7176,6 +7276,30 @@ class W40KEngine(gym.Env):
             best_target_id = None
         return self._fight_resolve_with_target(squad_id, best_target_id)
 
+    def _overrun_pile_in_target_ids(
+        self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int]
+    ) -> Optional[List[str]]:
+        """Cibles du pile-in overrun 12.06 : la cible désignée par l'action si l'unité n'est pas
+        engagée et que cette cible est à ≤ 5" (`pile_in_targets_within_range`) ; sinon ``None``
+        (toutes les cibles à 5", comportement d'origine). Une unité engagée a ses cibles
+        imposées (12.03) : ``None`` aussi, `fight_pile_in_plan` les prend lui-même."""
+        from engine.phase_handlers.fight_handlers import (
+            _fight_units_engaged_with,
+            pile_in_targets_within_range,
+        )
+        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+        if target_slot is None or _fight_units_engaged_with(self.game_state, unit):
+            return None
+        cache_entry = require_key(require_key(self.game_state, "units_cache"), str(squad_id))
+        slots = get_enemy_slot_mapping(self.game_state, int(require_key(cache_entry, "player")))
+        if not (0 <= int(target_slot) < len(slots)) or slots[int(target_slot)] is None:
+            return None
+        designated = str(slots[int(target_slot)])
+        if designated not in pile_in_targets_within_range(self.game_state, unit):
+            return None
+        return [designated]
+
     def _fight_target_after_designated_death(
         self, squad_id: str, targets: List[str], enemy_slot_ids: List[Optional[str]]
     ) -> Optional[str]:
@@ -7215,45 +7339,169 @@ class W40KEngine(gym.Env):
         """Résout le combat de `squad_id` sur `best_target_id` (None = combat à vide).
 
         Extrait pour être partagé par le flux ordinaire et par la re-sélection de cible
-        (`squad_fight_target_sel`), qui reprend EXACTEMENT ici : le pile-in overrun a déjà
-        été commité et l'escouade déjà enregistrée dans la pool 12.04.
+        (`squad_fight_target_sel` après la mort de la cible désignée), qui reprend EXACTEMENT
+        ici : le pile-in overrun a déjà été commité et l'escouade déjà enregistrée dans la
+        pool 12.04.
+
+        D+ (04.01, 04.02, 24.11) : TOUTES les figurines engagées frappent. La cible désignée par
+        l'agent est celle des figurines engagées avec elle (`squad_auto_declare_fight_weapons` :
+        une arme ordinaire unique d'office + toutes les [EXTRA ATTACKS]) ; la question d'arme
+        n'est posée que pour les figurines qui portent ≥ 2 armes ordinaires ; les figurines
+        engagées SEULEMENT avec d'autres ennemis frappent l'unique autre ennemi d'office, ou
+        se voient poser une question de cible restreinte (`_fight_continue_declarations`).
         """
-        from engine.phase_handlers.fight_handlers import (
-            build_manual_fight_allocation,
-            fight_weapon_eligible_slots,
-        )
         from engine.phase_handlers.shared_utils import squad_fight_restart_activation
 
         squad_fight_restart_activation(self.game_state, squad_id)
-        if best_target_id is not None:
+        if best_target_id is None:
+            return self._fight_allocate_and_end(squad_id)
+        return self._fight_declare_toward(squad_id, best_target_id, None)
+
+    def _fight_declare_toward(
+        self, squad_id: str, target_id: str, model_ids: Optional[List[str]]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Déclare vers `target_id` les figurines engagées avec elle (`model_ids` = sous-ensemble
+        d'une reprise, None = toutes), puis pose la question d'arme s'il en reste une, sinon
+        poursuit (`_fight_continue_declarations`)."""
+        from engine.phase_handlers.shared_utils import squad_auto_declare_fight_weapons
+
+        undecided = squad_auto_declare_fight_weapons(
+            self.game_state, squad_id, target_id, only_model_ids=model_ids
+        )
+        return self._fight_ask_weapon_or_continue(squad_id, target_id, undecided)
+
+    def _fight_ask_weapon_or_continue(
+        self, squad_id: str, target_id: str, undecided: Dict[str, List[str]]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """`undecided` = figurines engagées avec `target_id` à ≥ 2 armes ordinaires : la
+        question d'arme (V11 §0.69) leur est posée, et reposée tant qu'il en reste (la réponse
+        vaut pour toutes les porteuses du profil choisi, miroir de la boucle split-fire)."""
+        from engine.phase_handlers.fight_handlers import fight_weapon_eligible_slots
+
+        if undecided:
             slot_to_code = fight_weapon_eligible_slots(
-                self.game_state, squad_id, best_target_id
+                self.game_state, squad_id, target_id, model_ids=list(undecided)
             )
             if not slot_to_code:
                 raise RuntimeError(
-                    f"_continue_squad_fight: aucune arme CC éligible pour {squad_id!r} vs "
-                    f"{best_target_id!r}"
+                    f"_fight_ask_weapon: {len(undecided)} figurine(s) de {squad_id!r} à choix "
+                    f"d'arme vs {target_id!r} mais aucun slot d'arme CC éligible "
+                    f"(codes {sorted({c for cs in undecided.values() for c in cs})})"
                 )
             self.game_state[PENDING_FIGHT_WEAPON_KEY] = {
                 "squad_id": squad_id,
-                "target_id": best_target_id,
+                "target_id": target_id,
                 "slot_to_code": slot_to_code,
+                "model_ids": sorted(undecided),
             }
             return True, {
                 "action": "squad_fight",
                 "squad_id": squad_id,
-                "target_squad_id": best_target_id,
+                "target_squad_id": target_id,
                 "waiting_for_weapon_select": True,
             }
+        return self._fight_continue_declarations(squad_id)
+
+    def _fight_continue_declarations(self, squad_id: str) -> Tuple[bool, Dict[str, Any]]:
+        """04.02 pour les figurines engagées SEULEMENT avec des ennemis non encore déclarés :
+        chacune frappe un ennemi engagé avec elle. Un seul candidat commun → déclaré d'office ;
+        plusieurs → question de cible restreinte à ces figurines (`PENDING_FIGHT_TARGET_KEY`
+        avec `model_ids`), rejouée par un FIGHT_SLOT. Termine par l'allocation."""
+        from engine.phase_handlers.fight_handlers import (
+            _fight_build_valid_target_pool,
+            _model_can_fight_target,
+        )
+        from engine.phase_handlers.shared_utils import (
+            SQUAD_ACTION_FIGHT_SLOT_COUNT,
+            get_enemy_slot_mapping,
+            get_fighting_models,
+        )
+        from engine.utils.weapon_helpers import melee_weapons
+
+        gs = self.game_state
+        models_cache = require_key(gs, "models_cache")
+        unit = require_unit_by_id(gs, squad_id)
+        for _ in range(SQUAD_ACTION_FIGHT_SLOT_COUNT + 1):
+            intents = require_key(gs, "pending_squad_fight_intents").get(squad_id, [])  # get allowed
+            declared_targets = {str(i["target_unit_id"]) for i in intents}
+            with_intent = {str(i["model_id"]) for i in intents}
+            pool = [str(t) for t in _fight_build_valid_target_pool(gs, unit)]
+            leftover: Dict[str, List[str]] = {}
+            for mid in get_fighting_models(gs, squad_id, None):
+                if mid in with_intent or not melee_weapons(models_cache[mid]):
+                    continue
+                mine = [t for t in pool if _model_can_fight_target(gs, models_cache[mid], squad_id, t)]
+                if not mine or any(t in declared_targets for t in mine):
+                    continue  # déjà servie par une cible déclarée (sans arme ordinaire : rien de plus)
+                leftover[mid] = mine
+            if not leftover:
+                return self._fight_allocate_and_end(squad_id)
+            candidates: List[str] = []
+            for mine in leftover.values():
+                for t in mine:
+                    if t not in candidates:
+                        candidates.append(t)
+            if len(candidates) == 1:
+                target_id = candidates[0]
+                undecided = self._fight_auto_declare_subset(squad_id, target_id, sorted(leftover))
+                if undecided:
+                    return self._fight_ask_weapon_or_continue(squad_id, target_id, undecided)
+                continue
+            enemy_slot_ids = get_enemy_slot_mapping(
+                gs, int(require_key(require_key(gs, "units_cache")[squad_id], "player"))
+            )
+            slot_to_target = {
+                slot_i: str(esid)
+                for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT])
+                if esid is not None and str(esid) in candidates
+            }
+            if not slot_to_target:
+                raise RuntimeError(
+                    f"_fight_continue_declarations: {len(leftover)} figurine(s) de {squad_id!r} "
+                    f"engagées avec {candidates} sans aucun slot ennemi mappé — cible(s) "
+                    f"infrappable(s)"
+                )
+            gs[PENDING_FIGHT_TARGET_KEY] = {
+                "squad_id": str(squad_id),
+                "slot_to_target": slot_to_target,
+                "model_ids": sorted(leftover),
+            }
+            return True, {
+                "action": "squad_fight",
+                "squad_id": squad_id,
+                "waiting_for_target_select": True,
+            }
+        raise RuntimeError(
+            f"_fight_continue_declarations n'a pas convergé pour {squad_id!r} "
+            f"({SQUAD_ACTION_FIGHT_SLOT_COUNT + 1} passes)"
+        )
+
+    def _fight_auto_declare_subset(
+        self, squad_id: str, target_id: str, model_ids: List[str]
+    ) -> Dict[str, List[str]]:
+        from engine.phase_handlers.shared_utils import squad_auto_declare_fight_weapons
+
+        return squad_auto_declare_fight_weapons(
+            self.game_state, squad_id, target_id, only_model_ids=model_ids
+        )
+
+    def _fight_allocate_and_end(self, squad_id: str) -> Tuple[bool, Dict[str, Any]]:
+        """Alloue les attaques déclarées (le défenseur décide, headless en gym) et clôt
+        l'activation 12.04 ; `target_squad_id` = première cible déclarée (None = combat à vide)."""
+        from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
+        from engine.phase_handlers.generic_handlers import end_activation
+
+        intents = require_key(self.game_state, "pending_squad_fight_intents").get(squad_id, [])  # get allowed
+        primary_target: Optional[str] = str(intents[0]["target_unit_id"]) if intents else None
         _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
         if _fight_alloc.get("waiting_for_player"):
             return True, _fight_alloc
         if not _fight_alloc.get("done"):
             raise RuntimeError(
-                f"_continue_squad_fight: allocation combat non terminée en auto pour {squad_id}"
+                f"_fight_allocate_and_end: allocation combat non terminée en auto pour "
+                f"{squad_id!r} (défenseur non-IA ?) — action={_fight_alloc.get('action')}"
             )
         fight_result = _fight_alloc["shoot_result"]
-        from engine.phase_handlers.generic_handlers import end_activation
         unit = require_unit_by_id(self.game_state, squad_id)
         end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
         end_result.pop("phase_complete", None)
@@ -7261,7 +7509,7 @@ class W40KEngine(gym.Env):
             **end_result,
             "action": "squad_fight",
             "squad_id": squad_id,
-            "target_squad_id": None,
+            "target_squad_id": primary_target,
             "fight_result": fight_result,
         }
         self._fight_v11_gym_settle()
@@ -7665,6 +7913,9 @@ class W40KEngine(gym.Env):
         "overrun_pile_in": "overrun_pile_in",
         "consolidation": "consolidation",
         "wait": "wait",
+        # A5 — passe de l'étape FIGHT (PDF 25). Ligne « Unit N(c,r) PASSED FIGHT » ; l'analyzer
+        # la lit pour ne pas compter d'erreur d'alternance 12.04 sur une passe.
+        "fight_pass": "fight_pass",
         # Le move REACTIF (24.xx, capacite `reactive_move`) est un vrai deplacement, soumis aux
         # memes contraintes que les autres (murs, figurines, budget) — il doit donc etre
         # journalise pour etre verifiable. Son formateur existait deja dans `step_logger` ; seul
@@ -8517,6 +8768,9 @@ class W40KEngine(gym.Env):
             # L17 — cibles de pile-in (12.03) et mode de consolidation (12.08).
             ("pileInTargetIds", "pile_in_target_ids"),
             ("consolidationMode", "consolidation_mode"),
+            # A3 — sélection RÉELLE d'une consolidation (12.08 AFTER, engaging : ennemis engagés
+            # par le plan ; ongoing : tous les ennemis engagés). Vide en mode objective.
+            ("consolidationTargetIds", "consolidation_target_ids"),
             # L11 — mode de fall-back (09.07) et jets de hazard Desperate Escape (06.03).
             ("fleeMode", "flee_mode"),
             ("desperateEscapeRolls", "desperate_escape_rolls"),
@@ -8561,8 +8815,10 @@ class W40KEngine(gym.Env):
     def _gym_commit_fight_move(
         self, gs: Dict[str, Any], uid: str, plan: List[Tuple[str, int, int, int]], kind: str,
         *, consolidation_mode: Optional[str] = None,
-    ) -> None:
+        consolidation_target_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Commit gym d'un move fight groupé (pile-in/consolidation) + log par-figurine.
+        Rend l'entrée d'action_log émise.
 
         Le driver gym résout ces déplacements via ``commit_move`` sans passer par les handlers
         interactifs : le log par-figurine (source du step.log/replay ET du game log PvP) doit donc
@@ -8573,6 +8829,8 @@ class W40KEngine(gym.Env):
         ``consolidation_mode`` (obligatoire pour ``kind == "consolidation"``) est le mode 12.08
         constaté par l'appelant AVANT le move : relu après, `fight_v11_consolidation_mode` rendrait
         « ongoing » pour toute consolidation engaging réussie (elle finit engagée par construction).
+        ``consolidation_target_ids`` : la SÉLECTION RÉELLE 12.08 (ennemis que le plan engage,
+        `squad_consolidate_plan_with_targets`), journalisée `[targets: …]` pour l'analyzer.
         """
         from engine.phase_handlers.shared_utils import commit_move
         from engine.phase_handlers.fight_handlers import _append_fight_move_log
@@ -8625,7 +8883,7 @@ class W40KEngine(gym.Env):
                 f"_gym_commit_fight_move: consolidation de {uid!r} sans `consolidation_mode` — "
                 f"le mode 12.08 se constate AVANT le move, l'appelant doit le fournir"
             )
-        _append_fight_move_log(
+        return _append_fight_move_log(
             gs, unit, kind=kind,
             from_col=from_col, from_row=from_row,
             to_col=to_col, to_row=to_row,
@@ -8633,6 +8891,7 @@ class W40KEngine(gym.Env):
             models_segment=captured_seg,
             pile_in_target_ids=_l17_pile_in_tids,
             consolidation_mode=consolidation_mode,
+            consolidation_target_ids=consolidation_target_ids,
         )
 
     def _fight_v11_gym_settle(self) -> None:
@@ -8691,6 +8950,8 @@ class W40KEngine(gym.Env):
         """
         from engine.phase_handlers.fight_handlers import (
             _fight_v11_consolidation_clear_new_foes,
+            arm_consolidation_engaging_decision,
+            consolidation_engaging_answer,
             fight_v11_advance_selection,
             fight_v11_consolidation_freeze_new_foes,
             fight_v11_consolidation_mode,
@@ -8702,7 +8963,7 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shared_utils import (
             fight_pile_in_plan,
             is_programmatic_owner,
-            squad_consolidate_plan,
+            squad_consolidate_plan_with_targets,
         )
 
         gs = self.game_state
@@ -8753,17 +9014,33 @@ class W40KEngine(gym.Env):
                     unit = require_unit_by_id(gs, str(uid))
                     # Mode 12.08 constate AVANT le move : apres, une engaging reussie est engagee.
                     mode = fight_v11_consolidation_mode(gs, unit)
-                    plan = squad_consolidate_plan(gs, str(uid), mode=mode)
+                    if mode == "engaging":
+                        # B2 : consolider vers un ennemi a 3" est un CHOIX du joueur (12.07 « they
+                        # choose to move », New Foes to Face) — pose a l'agent proprietaire de
+                        # l'unite, jouee au step suivant. « Rester » = consolidation consommee
+                        # sans mouvement.
+                        answer = consolidation_engaging_answer(gs, str(uid))
+                        if answer is None:
+                            arm_consolidation_engaging_decision(gs, str(uid))
+                            return  # la main revient au siege proprietaire (CHOICE_0 / CHOICE_1)
+                        if answer is False:
+                            require_key(gs, "consolidation_done").add(str(uid))
+                            continue
+                    plan, targets = squad_consolidate_plan_with_targets(gs, str(uid), mode=mode)
+                    _conso_entry: Optional[Dict[str, Any]] = None
                     if plan is not None:
-                        self._gym_commit_fight_move(
-                            gs, str(uid), plan, "consolidation", consolidation_mode=mode
+                        _conso_entry = self._gym_commit_fight_move(
+                            gs, str(uid), plan, "consolidation", consolidation_mode=mode,
+                            consolidation_target_ids=targets,
                         )
                     require_key(gs, "consolidation_done").add(str(uid))
-                    if (
-                        plan is not None and mode == "engaging"
-                        and fight_v11_consolidation_freeze_new_foes(gs, unit)
-                    ):
-                        break  # les New Foes combattent AVANT la conso suivante (§8.C)
+                    if plan is not None and mode == "engaging":
+                        _frozen = fight_v11_consolidation_freeze_new_foes(gs, unit)
+                        # Compteur `06_fight/c_new_foes_subies` : New Foes ouverts par CETTE conso.
+                        if _conso_entry is not None:
+                            _conso_entry["newFoesFrozen"] = len(_frozen)
+                        if _frozen:
+                            break  # les New Foes combattent AVANT la conso suivante (§8.C)
                 continue
 
             raise ValueError(f"fight_subphase inattendu dans le chemin gym: {sub!r}")
@@ -9685,6 +9962,58 @@ class W40KEngine(gym.Env):
                 squad_id, target_slot_from_semantic
             )
 
+        elif action_name == "squad_fight_pass":
+            # A5 (PDF 25) : passe de l'étape FIGHT. Décodée par `fight_v11_can_pass` (source
+            # unique, relue ici : parité masque/commit). Aucune unité n'est « selected to fight ».
+            from engine.phase_handlers.fight_handlers import (
+                fight_v11_can_pass,
+                fight_v11_fight_selection_pool,
+                fight_v11_register_pass,
+            )
+
+            squad_id = str(semantic["squad_id"])
+            if squad_id not in fight_v11_fight_selection_pool(self.game_state):
+                raise ValueError(
+                    f"squad_fight_pass: squad {squad_id} hors du pool de selection 12.04 "
+                    f"(rupture masque/commit)"
+                )
+            if not fight_v11_can_pass(self.game_state):
+                raise ValueError(
+                    f"squad_fight_pass: passe refusée pour {squad_id} — une unité éligible est à "
+                    f"≤ 5\" d'un ennemi, le combat à vide est obligatoire (rupture masque/commit)"
+                )
+            _pass_player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+            _step_ended = fight_v11_register_pass(self.game_state, _pass_player)
+            _unit_col, _unit_row = require_unit_position(
+                require_unit_by_id(self.game_state, squad_id), self.game_state
+            )
+            append_action_log(
+                self.game_state,
+                {
+                    "type": "fight_pass",
+                    "message": f"Unit {squad_id} ({_unit_col}, {_unit_row}) PASSED FIGHT",
+                    "turn": require_key(self.game_state, "turn"),
+                    "phase": "fight",
+                    "unitId": squad_id,
+                    "player": _pass_player,
+                    "col": _unit_col,
+                    "row": _unit_row,
+                    "fightStepEnded": _step_ended,
+                    "timestamp": "server_time",
+                },
+            )
+            result = {
+                "action": "squad_fight_pass",
+                "squad_id": squad_id,
+                "unitId": squad_id,
+                "player": _pass_player,
+                "fight_step_ended": _step_ended,
+                "activation_ended": True,
+                "step_incremented": True,
+            }
+            self.game_state["episode_steps"] = int(self.game_state.get("episode_steps", 0)) + 1  # get allowed : compteur d'episode
+            self._fight_v11_gym_settle()
+
         elif action_name == "squad_fight_target_sel":
             # Re-sélection de la cible CC après la mort de la cible désignée (Exhortation de
             # Rage). `pending_fight_target_select` a été posé par `squad_fight` ci-dessus ;
@@ -9703,6 +10032,13 @@ class W40KEngine(gym.Env):
                 raise ValueError(
                     f"squad_fight_target_sel: slot {ft_slot} non éligible "
                     f"(éligibles : {sorted(slot_to_target)}) — rupture masque/commit"
+                )
+            if "model_ids" in pending_ft:
+                # Question de cible RESTREINTE (04.02, figurines engagées seulement avec
+                # d'autres ennemis) : l'activation est en cours, les déclarations déjà posées
+                # restent — on ne repart pas de zéro.
+                return self._fight_declare_toward(
+                    ft_squad_id, str(slot_to_target[ft_slot]), list(pending_ft["model_ids"])
                 )
             return self._fight_resolve_with_target(
                 ft_squad_id, str(slot_to_target[ft_slot])
@@ -9729,38 +10065,31 @@ class W40KEngine(gym.Env):
             weapon_code = slot_to_code[weapon_slot]
 
             from engine.phase_handlers.fight_handlers import (
-                build_manual_fight_allocation,
                 squad_declare_fight_weapon_qty,
                 squad_fight_weapon_qty_max,
             )
-            max_qty = squad_fight_weapon_qty_max(
-                self.game_state, fw_squad_id, weapon_code, fw_target_id
-            )
-            squad_declare_fight_weapon_qty(
-                self.game_state, fw_squad_id, weapon_code, max_qty, fw_target_id
-            )
 
-            _fight_alloc = build_manual_fight_allocation(self.game_state, fw_squad_id)
-            if _fight_alloc.get("waiting_for_player"):
-                return True, _fight_alloc
-            if not _fight_alloc.get("done"):
-                raise RuntimeError(
-                    f"squad_fight_weapon: allocation combat non terminee en auto pour squad "
-                    f"{fw_squad_id!r} (defenseur non-IA ?) — action={_fight_alloc.get('action')}"
+            # La réponse vaut pour TOUTES les porteuses du profil parmi les figurines
+            # interrogées (restriction documentée : pas de choix figurine par figurine) ; les
+            # autres se voient reposer la question par `_fight_ask_weapon_or_continue`.
+            answered: List[str] = []
+            for mid in pending_fw["model_ids"]:
+                if squad_fight_weapon_qty_max(
+                    self.game_state, fw_squad_id, weapon_code, fw_target_id, only_model_id=mid
+                ) > 0:
+                    squad_declare_fight_weapon_qty(
+                        self.game_state, fw_squad_id, weapon_code, 1, fw_target_id,
+                        only_model_id=mid,
+                    )
+                    answered.append(mid)
+            if not answered:
+                raise ValueError(
+                    f"squad_fight_weapon: aucune des figurines interrogées "
+                    f"{pending_fw['model_ids']} ne porte {weapon_code!r} — rupture masque/commit"
                 )
-            fight_result = _fight_alloc["shoot_result"]
-
-            unit = require_unit_by_id(self.game_state, fw_squad_id)
-            end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
-            end_result.pop("phase_complete", None)
-            result = {
-                **end_result,
-                "action": "squad_fight",
-                "squad_id": fw_squad_id,
-                "target_squad_id": fw_target_id,
-                "fight_result": fight_result,
-            }
-            self._fight_v11_gym_settle()
+            remaining = [mid for mid in pending_fw["model_ids"] if mid not in answered]
+            undecided = self._fight_auto_declare_subset(fw_squad_id, fw_target_id, remaining)
+            return self._fight_ask_weapon_or_continue(fw_squad_id, fw_target_id, undecided)
 
         # ── split-fire (P3-8) ─────────────────────────────────────────────────
         elif action_name == "squad_shoot_weapon_sel":

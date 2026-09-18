@@ -78,8 +78,11 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
     """
     weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
               "WEAPON_RULES": list(weapon_rules), "code": weapon_name, "display_name": weapon_name}
+    # `level`, socle et hauteur : portés par toute entrée de `models_cache` de production
+    # (`_build_models_for_unit`) ; exigés depuis mêlée 100 par `_levels_of_models`
+    # (`attackerLevels`) et par `get_fighting_models` (bilan 04.02 `fight_declaration`).
     attacker = {"id": "1#0", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                "ATTACK_LEFT": n_attacks,
+                "ATTACK_LEFT": n_attacks, "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
                 "col": SHOOTER[0], "row": SHOOTER[1],
                 "RNG_WEAPONS": [] if melee else [weapon],
                 "CC_WEAPONS": [weapon] if melee else []}
@@ -91,7 +94,8 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         models_cache[mid] = {
             "id": mid, "squad_id": "101", "UNIT_RULES": [], "player": 1, "T": 4, "HP_CUR": hp_cur, "HP_MAX": hp_cur,
             "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
-            "points_per_hp": 5.0, "VALUE": 10.0, "col": pos[0], "row": pos[1],
+            "points_per_hp": 5.0, "VALUE": 10.0, "col": pos[0], "row": pos[1], "level": 0,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
             "RNG_WEAPONS": [], "CC_WEAPONS": [],
         }
         target_cache[mid] = pos

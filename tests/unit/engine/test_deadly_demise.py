@@ -147,7 +147,7 @@ def test_dd_d6_1_emet_entree_sans_allocation(monkeypatch):
     import engine.phase_handlers.shared_utils as su
     allocated_calls = []
     monkeypatch.setattr(su, "allocate_mortal_wounds",
-                        lambda gs, uid, n, auto, sink: allocated_calls.append((uid, n)))
+                        lambda gs, uid, n, auto, sink, *, is_psychic=False: allocated_calls.append((uid, n)))
     gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
     destroy_model(gs, "SRC#0", reason="combat")
     logs = _dd_logs(gs)
@@ -284,7 +284,7 @@ def test_dd_d6_1_un_seul_log_meme_avec_plusieurs_cibles(monkeypatch):
     """D6=1 avec 3 unites en portee -> exactement 1 log 'no effect', 0 jet de de par cible."""
     monkeypatch.setattr(random, "randint", lambda a, b: 1)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a, is_psychic=False: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a, **kw: None)
     gs = _gs_multi(n_targets=3)
     destroy_model(gs, "SRC#0", reason="combat")
     logs = _dd_logs(gs)

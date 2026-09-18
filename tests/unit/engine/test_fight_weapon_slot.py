@@ -3,6 +3,12 @@
 Le combat en deux temps : squad_fight arme pending_fight_weapon_select,
 puis squad_fight_weapon résout et efface le pending.
 
+Depuis D+ (2026-09-18, 04.01 « You must select ONE melee weapon that model has ») la question
+n'est posée qu'aux figurines qui ont un CHOIX : ≥ 2 armes de mêlée ordinaires. Le scénario de
+mêlée du dépôt est mono-arme, donc `_engine_in_fight_phase(two_ordinary_weapons=True)` greffe
+une seconde arme ordinaire sur chaque figurine pour que la question existe ; le test
+`test_mono_weapon_squad_resolves_without_weapon_question` verrouille l'autre face.
+
 Invariants vérifiés :
 - pending posé → masque exclusif FIGHT_WEAPON_SLOTS
 - commit valid slot → pending effacé, fight_result présent
@@ -29,7 +35,7 @@ def melee_scenario_file():
         yield str(path)
 
 
-def _engine_in_fight_phase(scenario_file: str, seed: int = 1):
+def _engine_in_fight_phase(scenario_file: str, seed: int = 1, two_ordinary_weapons: bool = True):
     from ai.unit_registry import UnitRegistry
     from engine.game_utils import get_unit_by_id
     from shared.data_validation import require_present
@@ -44,6 +50,10 @@ def _engine_in_fight_phase(scenario_file: str, seed: int = 1):
     )
     eng.reset(seed=seed)
     gs = eng.game_state
+    if two_ordinary_weapons:
+        for m in gs["models_cache"].values():
+            base = m["CC_WEAPONS"][0]
+            m["CC_WEAPONS"].append({**base, "code": f"{base['code']}_alt", "display_name": f"{base['display_name']} (alt)"})
     gs["phase"] = "fight"
     engaged = [
         sid for sid in gs["units_cache"]
@@ -109,6 +119,26 @@ def test_squad_fight_arms_pending_fight_weapon_select(melee_scenario_file):
     pending = gs[PENDING_FIGHT_WEAPON_KEY]
     assert pending["squad_id"] == action["squad_id"]
     assert pending["slot_to_code"], "aucun slot d'arme CC éligible dans le pending"
+
+
+def test_mono_weapon_squad_resolves_without_weapon_question(melee_scenario_file):
+    """04.01 : une figurine à UNE arme de mêlée ordinaire n'a pas de choix — la question d'arme
+    n'est pas posée, le combat se résout dans le step de `squad_fight`.
+
+    ROUGE avant D+ : `_fight_resolve_with_target` armait toujours `pending_fight_weapon_select`.
+    """
+    from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
+
+    eng = _engine_in_fight_phase(melee_scenario_file, two_ordinary_weapons=False)
+    gs = eng.game_state
+    action = _first_fight_action_with_target(gs)
+
+    ok, result = eng._process_squad_action(action)
+
+    assert ok is True
+    assert "fight_result" in result, f"combat non résolu : {result!r}"
+    assert result.get("waiting_for_weapon_select") is None
+    assert PENDING_FIGHT_WEAPON_KEY not in gs
 
 
 def test_pending_fight_weapon_makes_mask_exclusive(melee_scenario_file):

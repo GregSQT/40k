@@ -821,7 +821,13 @@ def self_model_bin_index(field: str) -> int:
 #: ennemies ont été touchées (une seule = aucune décision, doctrine §9.0bis). Candidats = les
 #: escouades touchées, entités ennemies désignées par `CHOICE_k` comme `mortal_wounds_target`.
 #: Déclaré le 2026-09-18 avec la refonte du bloc candidat, EN FIN de tuple.
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move", "fall_back_mode", "suppress_target")
+#: ⚠️ `consolidation_engaging` (12.07 « with all of their eligible units they CHOOSE to move » ;
+#: 12.08 Engaging + New Foes to Face, B2 2026-09-18) est le CINQUIÈME type à deux candidats sans
+#: `effect_ids`, séparés par `declines` : `CHOICE_0` consolide vers les ennemis à 3" (et subit les
+#: New Foes), `CHOICE_1` reste sur place. Posé par `arm_consolidation_engaging_decision` depuis le
+#: driver gym (`_fight_v11_gym_settle`) AVANT le plan ; les modes ongoing et objective restent
+#: automatiques (sans contenu tactique). Ajouté en FIN, après `suppress_target` (merge du lot melee-100 dans `main`, 2026-09-18).
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move", "fall_back_mode", "suppress_target", "consolidation_engaging")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

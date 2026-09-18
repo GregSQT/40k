@@ -2780,6 +2780,8 @@ export const BoardWithAPI: React.FC = () => {
                     }
               }
               onSkipFight={isGameOver ? undefined : apiProps.onSkipFight}
+              showFightPass={apiProps.gameState?.fight_can_pass === true}
+              onFightPass={isGameOver ? undefined : apiProps.onFightPass}
               maxTurns={(() => {
                 if (!gameConfig?.game_rules?.max_turns) {
                   throw new Error(

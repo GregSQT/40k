@@ -15,7 +15,10 @@ Hors couverture de ce fichier (inatteignable avec le roster d'intégration) :
   - reaction_window_active : requiert une unité portant la règle "reactive_move" ;
     aucune unité du roster d'intégration ne l'a.
   - select_rule_choice bloquant : requiert un choix de règle temporel (choice_timing_index)
-    déclenché en partie ; le roster d'intégration ne contient aucune telle règle.
+    déclenché en partie ; le roster d'intégration ne contient aucune telle règle. Les APPELS
+    de capacité (`ability_call`, ex. Da Jump du WeirdBoy de pvp_test) passent par la même
+    action : le harnais les REFUSE nominalement (`GameClient.pending_ability_call`), ils ne
+    sont pas testés ici.
 """
 
 from __future__ import annotations

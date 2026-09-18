@@ -30,7 +30,7 @@ from engine.phase_handlers import movement_handlers as mh
 from engine.phase_handlers.shared_utils import destroy_model, unit_is_in_strategic_reserves
 from tests.unit.engine._config_helpers import load_engine_from_scenario
 
-_OVERRIDES = {"controlled_agent": "ArmageddonAgent_x1", "rewards_config": "ArmageddonAgent_x1"}
+_AGENT = "ArmageddonAgent_x1"
 
 #: Plateau 44x60 à x5 = 220 × 300 cases, terrain mc1 (objectifs + zones de déploiement de la
 #: carte de mission : joueur 1 en haut, joueur 2 en bas). Boyz en (30,50) dans la zone du joueur
@@ -58,7 +58,7 @@ def _scenario() -> Dict[str, Any]:
 
 
 def _engine(gym: bool = True):
-    eng = load_engine_from_scenario(_scenario(), **_OVERRIDES)
+    eng = load_engine_from_scenario(_scenario(), controlled_agent=_AGENT, rewards_config=_AGENT)
     gs = eng.game_state
     if not gym:
         eng.gym_training_mode = False

@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
+from engine.agent_decision import PENDING_DECISION_KEY
 from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 from engine.game_utils import require_unit_by_id
 from engine.phase_handlers.charge_handlers import charge_phase_start
@@ -90,6 +91,10 @@ def _engine(units: List[Dict[str, Any]], *, current_player: int = 1,
     eng.pve_controller = _ScriptedController(actions or [])  # type: ignore[assignment]
     gs["current_player"] = current_player
     gs["phase"] = "fight"
+    # `reset()` du helper laisse une décision `fall_back_mode` de P1 en attente : artefact du
+    # montage (en partie réelle, une décision est consommée dans sa phase). `execute_ai_turn`
+    # refuse de jouer tant qu'une décision du siège humain est pendante — on la retire.
+    gs.pop(PENDING_DECISION_KEY, None)
     return eng
 
 
@@ -229,15 +234,12 @@ def test_le_bot_combat_par_la_politique_et_le_defenseur_humain_alloue(monkeypatc
     rolls = iter([6, 6, 1])
     monkeypatch.setattr(random, "randint", lambda a, b: next(rolls, 1))
 
-    ok, out = _ai_turn(eng)
-    assert ok is True and out.get("waiting_for_weapon_select") is True, out
-    assert "2" in gs["units_selected_to_fight"]
-    pending_fw = gs[PENDING_FIGHT_WEAPON_KEY]
-    weapon_slot = next(iter(pending_fw["slot_to_code"]))
-    eng.pve_controller.actions = [{"action": "squad_fight_weapon", "weapon_slot": weapon_slot}]  # type: ignore[attr-defined]
-
+    # D+ (04.01) : une figurine mono-arme n'a pas de choix d'arme, le combat est déclaré et
+    # résolu dans la même requête — jusqu'à l'allocation que l'humain doit trancher.
     ok, out = _ai_turn(eng)
     assert ok is True, out
+    assert "2" in gs["units_selected_to_fight"]
+    assert PENDING_FIGHT_WEAPON_KEY not in gs
     assert out["action"] == "squad_fight_manual_alloc" and out["waiting_for_player"] is True, out
     assert PENDING_FIGHT_ALLOCATION_KEY in gs
     assert {c["model_id"] for c in out["allocation"]["choices"]} == {"1#0", "1#1"}
@@ -336,7 +338,12 @@ def test_le_selecteur_des_new_foes_est_l_adversaire_du_consolidant_pas_du_joueur
 def test_la_consolidation_engaging_du_bot_arme_les_new_foes_de_l_humain(monkeypatch):
     # Unité 1 (humain) jamais éligible au combat (ni engagée ni chargée) ; le bot 2 a combattu
     # et consolide : 1 est à 3" → mode engaging (12.08) → 1 devient un New Foe de l'humain.
-    eng = _engine([_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 23, 20)], current_player=2)
+    # B2 : consolider en engaging est une DÉCISION du bot (12.07 « choose to move ») — la
+    # politique répond `CHOICE_0` (« Consolider »), comme le bot de référence.
+    eng = _engine(
+        [_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 23, 20)], current_player=2,
+        actions=[{"action": "agent_decision", "option_index": 0}],
+    )
     gs = _fight_step(eng)
     gs["units_selected_to_fight"] = {"2"}
     gs["units_fought"] = {"2"}
@@ -344,8 +351,10 @@ def test_la_consolidation_engaging_du_bot_arme_les_new_foes_de_l_humain(monkeypa
     assert fight_v11_current_pool(gs) == ["2"]
 
     ok, out = _ai_turn(eng)
-    assert ok is False and out["reason"] == "no_eligible_ai_units_in_pool", out
+    assert ok is True and out["decision_type"] == "consolidation_engaging", out
     assert "2" in gs["consolidation_done"]
+    ok, out = _ai_turn(eng)
+    assert ok is False and out["reason"] == "no_eligible_ai_units_in_pool", out
     assert gs["consolidation_new_foes_pending"] == ["1"]
     assert gs["consolidation_new_foes_selector"] == 1 and fight_v11_expected_seat(gs) == 1
     assert gs["fight_eligible_units"] == ["1"]
@@ -383,13 +392,10 @@ def test_les_new_foes_du_bot_sont_joues_par_la_politique(monkeypatch):
     ]
     monkeypatch.setattr(random, "randint", lambda a, b: 1)  # tout rate : pas d'allocation
 
-    ok, out = _ai_turn(eng)
-    assert ok is True and out.get("waiting_for_weapon_select") is True, out
-    assert gs["fight_subphase"] == "consolidate", "squad_fight accepté en consolidate (New Foe)"
-    weapon_slot = next(iter(gs[PENDING_FIGHT_WEAPON_KEY]["slot_to_code"]))
-    eng.pve_controller.actions = [{"action": "squad_fight_weapon", "weapon_slot": weapon_slot}]  # type: ignore[attr-defined]
+    # D+ (04.01) : mono-arme, pas de question d'arme — le New Foe combat dans la requête.
     ok, out = _ai_turn(eng)
     assert ok is True, out
+    assert PENDING_FIGHT_WEAPON_KEY not in gs
     assert "2" in gs["units_selected_to_fight"]
     assert "consolidation_new_foes_pending" not in gs, "liste épuisée → purgée par le driver"
     # 2 « was eligible to fight this phase » : le driver l'a consolidée dans la foulée (groupe
@@ -407,3 +413,68 @@ def test_squad_fight_en_consolidate_hors_new_foe_est_une_rupture():
     fight_v11_enter_consolidate(gs)
     with pytest.raises(ValueError, match="hors du pool de selection"):
         eng._process_squad_action({"action": "squad_fight", "squad_id": "2", "target_slot": 0})
+
+
+def test_la_decision_engaging_armee_par_le_dernier_combat_du_bot_est_repondue_au_ai_turn_suivant(monkeypatch):
+    """Le bot 2 (a chargé, ennemi humain 1 à 3", aucun pile-in ne l'atteint) combat à vide ; le
+    driver enchaîne la consolidation de SON groupe, constate le mode engaging et ARME la
+    décision B2 `consolidation_engaging` — fin de la requête, pool = ['2'] → le client relance
+    `/game/ai-turn`. Cette seconde requête doit laisser la POLITIQUE répondre (`agent_decision`),
+    puis le driver reprend (consolidation jouée, 1 gelé comme New Foe de l'humain).
+
+    ROUGE avant (review du 2026-09-18) : `execute_ai_turn` relançait `_fight_v11_gym_settle`
+    hors du try/except → `arm_consolidation_engaging_decision` → RuntimeError « une decision
+    'consolidation_engaging' est deja en attente » → 500, partie figée.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.phase_handlers import fight_handlers as fh
+    from engine.phase_handlers import shared_utils as su
+
+    eng = _engine(
+        [_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 23, 20)], current_player=2,
+        actions=[
+            {"action": "squad_fight", "squad_id": "2"},
+            {"action": "agent_decision", "option_index": 0},
+        ],
+    )
+    gs = eng.game_state
+    gs["units_charged"] = {"2"}
+    gs = _fight_step(eng)
+    # Ennemi « à ≤ 5" » (12.03 BEFORE MOVING) qu'aucun pile-in n'atteint : combat à vide
+    # obligatoire (pas de passe), même montage que `test_fight_pass_rule`.
+    monkeypatch.setattr(fh, "pile_in_targets_within_range", lambda _gs, _u: ["1"])
+    monkeypatch.setattr(su, "fight_pile_in_plan", lambda _gs, _sid, target_ids=None: None)
+    assert fight_v11_current_pool(gs) == ["2"]
+
+    ok, out = _ai_turn(eng)
+    assert ok is True and out["action"] == "squad_fight", out
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "consolidation_engaging", decision
+    assert gs["fight_subphase"] == "consolidate" and gs["fight_eligible_units"] == ["2"]
+
+    ok, out = _ai_turn(eng)
+
+    assert ok is True and out["action"] == "agent_decision", out
+    assert out["decision_type"] == "consolidation_engaging" and out["consolidate"] is True
+    assert read_pending_agent_decision(gs) is None
+    assert "2" in gs["consolidation_done"]
+    assert gs["consolidation_new_foes_pending"] == ["1"] and fight_v11_expected_seat(gs) == 1
+
+
+def test_une_decision_pendante_du_siege_humain_n_est_pas_jouee_par_le_bot():
+    """Une décision en attente qui appartient à l'humain : le bot ne joue ni ne draine."""
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.phase_handlers.fight_handlers import arm_consolidation_engaging_decision
+
+    eng = _engine([_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 23, 20)], current_player=1)
+    gs = _fight_step(eng)
+    gs["units_selected_to_fight"] = {"1", "2"}
+    gs["units_fought"] = {"1", "2"}
+    fight_v11_enter_consolidate(gs)
+    arm_consolidation_engaging_decision(gs, "1")
+
+    ok, out = _ai_turn(eng)
+
+    assert ok is False and out["reason"] == "human_decision_pending", out
+    assert read_pending_agent_decision(gs) is not None
+    assert "1" not in gs["consolidation_done"] and "2" not in gs["consolidation_done"]

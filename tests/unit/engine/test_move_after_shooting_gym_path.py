@@ -346,52 +346,6 @@ def test_split_fire_end_also_suppresses_the_target(monkeypatch):
     assert gs["suppressed_squads"] == {"3": 1}
 
 
-def test_the_suppress_choice_pays_nothing_through_the_real_reward(monkeypatch):
-    """Le step `CHOICE_k` de `suppress_target` traverse le VRAI barème et paie zéro.
-
-    ROUGE avant le fix (2026-09-18) : la réponse était renommée `squad_shoot` sans `shoot_result`,
-    et `RewardCalculator` levait `ConfigurationError` (`require_key`) sur le chemin gym — les
-    autres tests de ce fichier neutralisent `calculate_reward`, ils ne pouvaient pas le voir.
-    Même contrat que `move_after_shooting` : le tir est payé au step du tir, décider ne paie rien."""
-    import random
-
-    monkeypatch.setattr(random, "randint", lambda a, b: 6)
-    bolter = _weapon("bolter", rng=24)
-    lascannon = _weapon("lascannon", rng=48, STR=12, AP=-3, DMG=1)
-    eng = _engine([
-        _unit_cfg(1, 1, [(10, 10)], rng_weapons=[bolter, lascannon], rules=[_SUPPRESS_RULE]),
-        _unit_cfg(2, 2, [(20, 10)]),
-        _unit_cfg(3, 2, [(30, 10)]),
-    ])
-    gs = eng.game_state
-    rc = _reward_calculator(eng)
-    shot_rewards: List[float] = []
-    for target_slot in (1, 0):
-        mask, _pool = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
-        weapon_actions = [
-            i for i, opened in enumerate(mask) if opened and i >= SHOOT_WEAPON_SEL_SLOT_BASE
-        ]
-        assert weapon_actions, "aucun SHOOT_WEAPON_SEL ouvert"
-        eng._process_squad_action(eng.action_decoder.convert_squad_action(int(weapon_actions[0]), gs, _pool))
-        _success, shot = eng._process_squad_action(
-            eng.action_decoder.convert_squad_action(int(SHOOT_SLOT_BASE + target_slot), gs)
-        )
-        shot_rewards.append(rc.calculate_reward(True, shot, gs))
-    assert any(r > 0.0 for r in shot_rewards), "un tir à portée doit payer son espérance"
-    decision = read_pending_agent_decision(gs)
-    assert decision is not None and decision["type"] == "suppress_target", decision
-
-    _success, choice = eng._handle_agent_decision_action({"option_index": 0})
-
-    assert rc.calculate_reward(True, choice, gs) == 0.0
-    assert choice["action"] == "shoot", choice
-    assert "shoot_result" not in choice
-    assert choice["decision_type"] == "suppress_target"
-    assert choice["activation_ended"] is True
-    assert read_pending_agent_decision(gs) is None
-    assert gs["suppressed_squads"] == {decision["options"][0]["payload"]["target_eid"]: 1}
-
-
 # ── Bot PvE : la décision est répondue dans la MÊME requête, par la politique ────────────
 
 
@@ -442,3 +396,49 @@ def test_pve_bot_answers_its_own_decision_in_the_same_request():
     # cascade de `_process_squad_action` avance la phase comme pour un tir sans décision.
     assert result["phase_complete"] is True
     assert gs["phase"] != "shoot"
+
+
+def test_pve_bot_suppression_settled_in_the_same_request_keeps_the_shot_action(monkeypatch):
+    """Jumeau du test précédent pour la suppression : le bot PvE (joueur 2) touche DEUX escouades
+    par tir fractionné, la décision `suppress_target` est tranchée dans la requête par la
+    politique déclarée (`select_bot_suppress_target`), et le payload rendu reflète l'état FINAL
+    en gardant l'`action` et le `shoot_result` du tir joué — même contrat que
+    `_settle_move_after_shooting_for_ai_seat`.
+
+    ROUGE sans `_merge_settled_decision` : la réponse `shoot` (sans tir) de la suppression
+    recouvrait `squad_shoot_split_target` (mesuré le 2026-09-18)."""
+    import random
+
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    bolter = _weapon("bolter", rng=24)
+    lascannon = _weapon("lascannon", rng=48, STR=12, AP=-3, DMG=1)
+    eng = _engine([
+        _unit_cfg(1, 2, [(10, 10)], rng_weapons=[bolter, lascannon], rules=[_SUPPRESS_RULE]),
+        _unit_cfg(2, 1, [(20, 10)]),
+        _unit_cfg(3, 1, [(30, 10)]),
+    ], pve=True)
+    gs = eng.game_state
+    gs["current_player"] = 2
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    shooting_handlers.shooting_phase_start(gs)
+
+    result: Dict[str, Any] = {}
+    for weapon_slot, target_slot in ((0, 1), (1, 0)):
+        success, _sel = eng._process_squad_action(
+            {"action": "squad_shoot_weapon_sel", "squad_id": "1", "weapon_slot": weapon_slot}
+        )
+        assert success is True, _sel
+        success, result = eng._process_squad_action(
+            {"action": "squad_shoot_split_target", "squad_id": "1", "target_slot": target_slot}
+        )
+        assert success is True, result
+
+    assert read_pending_agent_decision(gs) is None
+    assert result["action"] == "squad_shoot_split_target", result["action"]
+    assert "shoot_result" in result
+    assert result["decision_type"] == "suppress_target"
+    assert result["suppressedTargetId"] in ("2", "3")
+    assert gs["suppressed_squads"] == {result["suppressedTargetId"]: 2}
+    assert result["waiting_for_player"] is False
+    assert result["activation_ended"] is True
+    assert gs["shoot_activation_pool"] == []

@@ -16,7 +16,7 @@ Aucun fallback masquant une erreur : si une donnée requise manque, on lève.
 """
 
 import re
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple, Union
 
 from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 from shared.data_validation import require_key
@@ -934,3 +934,151 @@ def parse_target_models_segment(text: str) -> Optional[Dict[str, Tuple[int, int]
     if not models:
         raise ValueError(f"Segment [TARGET_MODELS:] présent mais illisible: {m.group(1)[:120]}")
     return models
+
+
+def _base_extent_cells(base: Base) -> int:
+    """Rayon majorant (cases) d'un socle : demi-diamètre entier, +1 pour la parité hex."""
+    _shape, size = base
+    biggest = size if isinstance(size, int) else max(int(x) for x in size)
+    return biggest // 2 + 1
+
+
+def model_engaged_with_unit(
+    *,
+    state: Any,
+    unit_id: str,
+    model_id: str,
+    cell: Tuple[int, int],
+    target_id: str,
+    zone: int,
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
+) -> bool:
+    """La figurine `model_id` de `unit_id`, posée en `cell`, est-elle à ≤ `zone` (bord à bord)
+    d'une figurine de `target_id` ? Mesure PAR FIGURINE par la primitive du moteur (même
+    métrique que le jeu), cartes réduites au couple sujet ↔ cible : c'est la question 04.02
+    « engaged with the model that has that weapon », pas « l'unité est-elle engagée ? »."""
+    from ai.analyzer import _iter_engaging_enemy_ids
+
+    positions = {
+        uid: pos for uid, pos in unit_positions.items() if uid in (unit_id, target_id)
+    }
+    hps = {uid: hp for uid, hp in unit_hp.items() if uid in (unit_id, target_id)}
+    models = {uid: m for uid, m in positions_by_model.items() if uid in (unit_id, target_id)}
+    ids = _iter_engaging_enemy_ids(
+        unit_id, state.unit_player, positions, hps, int(zone),
+        None, models, state.unit_base, {model_id: cell},
+        None, None, None, None,
+    )
+    return any(str(eid) == str(target_id) for eid in ids)
+
+
+def reachable_cell_engaging(
+    *,
+    state: Any,
+    unit_id: str,
+    model_id: str,
+    start: Tuple[int, int],
+    budget: int,
+    target_ids: Sequence[str],
+    zone: int,
+    wall_hexes: Set[Tuple[int, int]],
+    occupied_positions: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: Set[Tuple[int, int]],
+    taken_cells: Set[Tuple[int, int]],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
+    forbidden_ids: Sequence[str] = (),
+    forbidden_zone: int = 0,
+) -> Optional[Tuple[int, int]]:
+    """Une case LIBRE et ATTEIGNABLE (chemin BFS ≤ `budget`, murs et figurines ennemies
+    contournés comme au move 03.01) d'où la figurine serait à ≤ `zone` (bord à bord) d'une
+    figurine d'une des unités `target_ids` — ou None s'il n'en existe aucune.
+
+    `forbidden_ids` / `forbidden_zone` : unités dont la zone d'engagement (`forbidden_zone`,
+    bord à bord) interdit la case — 11.04 AFTER MOVING « Your unit cannot be engaged with one or
+    more enemy units that are not charge targets » : une case à ≤ 1" de la cible mais dans
+    l'ER d'un ennemi NON-cible n'est pas une case où la charge « can end » (le moteur la
+    refuse, `_hex_legal_for_charge`). Vide pour le pile-in / la consolidation (12.03 / 12.08),
+    qui n'ont pas cette restriction.
+
+    C'est la question « if possible » de 12.03 / 12.08 (« engaged with it if possible ») et de
+    11.04 (« Each model that can end its move within 1" of one or more charge targets must do
+    so ») : la règle n'impose pas une case, elle impose d'en prendre une s'il en existe. Les
+    candidates sont énumérées autour des figurines cibles (rayon = zone + socles + 1) et jugées
+    par la primitive d'engagement du moteur, jamais par une distance de centres.
+
+    `taken_cells` : cases d'ARRIVÉE interdites (autres figurines, alliées comprises — 03.01
+    « cannot end a move on top of another model ») ; `occupied_positions` /
+    `enemy_adjacent_hexes` : obstacles de TRANSIT du BFS (`_build_move_bfs_blockers`).
+    """
+    from ai.analyzer import _bfs_shortest_path_length
+    from ai.analyzer_config import get_run_board_dims
+    from engine.combat_utils import calculate_hex_distance
+
+    board_cols, board_rows = get_run_board_dims()
+    radius = int(zone) + _base_extent_cells(_unit_base(state.unit_base, unit_id))
+    seen: Set[Tuple[int, int]] = set()
+    for target_id in target_ids:
+        target_models = positions_by_model.get(str(target_id)) or {}  # get allowed : ancre sinon
+        anchors = list(target_models.values()) or (
+            [unit_positions[str(target_id)]] if str(target_id) in unit_positions else []
+        )
+        t_radius = radius + _base_extent_cells(_unit_base(state.unit_base, str(target_id)))
+        for tc, tr in anchors:
+            if not position_is_on_battlefield((tc, tr)):
+                continue
+            for col in range(tc - t_radius, tc + t_radius + 1):
+                for row in range(tr - t_radius, tr + t_radius + 1):
+                    cell = (col, row)
+                    if cell in seen:
+                        continue
+                    seen.add(cell)
+                    if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
+                        continue
+                    if calculate_hex_distance(col, row, tc, tr) > t_radius:
+                        continue
+                    if cell in wall_hexes or cell in occupied_positions or cell in taken_cells:
+                        continue
+                    if not model_engaged_with_unit(
+                        state=state, unit_id=unit_id, model_id=model_id, cell=cell,
+                        target_id=str(target_id), zone=zone, unit_positions=unit_positions,
+                        unit_hp=unit_hp, positions_by_model=positions_by_model,
+                    ):
+                        continue
+                    if any(
+                        model_engaged_with_unit(
+                            state=state, unit_id=unit_id, model_id=model_id, cell=cell,
+                            target_id=str(fid), zone=forbidden_zone, unit_positions=unit_positions,
+                            unit_hp=unit_hp, positions_by_model=positions_by_model,
+                        )
+                        for fid in forbidden_ids
+                    ):
+                        continue
+                    if _bfs_shortest_path_length(
+                        start[0], start[1], col, row, int(budget),
+                        wall_hexes, occupied_positions, enemy_adjacent_hexes,
+                    ) is not None:
+                        return cell
+    return None
+
+
+def cells_taken_by_other_models(
+    state: Any, unit_id: str, own_final_models: Optional[Dict[str, Tuple[int, int]]], except_model: str
+) -> Set[Tuple[int, int]]:
+    """Cases d'arrivée interdites à `except_model` : empreintes des AUTRES escouades vivantes
+    (socles connus, ancre sinon) et cases finales de ses camarades."""
+    taken: Set[Tuple[int, int]] = set()
+    for uid, hp in state.unit_hp.items():
+        if str(uid) == str(unit_id) or hp is None or hp <= 0:
+            continue
+        taken |= footprint_or_anchor(
+            str(uid), state.positions_by_model.get(str(uid)), state.unit_base,  # get allowed
+            state.unit_positions.get(str(uid)),  # get allowed
+        )
+    for mid, pos in (own_final_models or {}).items():
+        if mid != except_model:
+            taken.add(pos)
+    return taken

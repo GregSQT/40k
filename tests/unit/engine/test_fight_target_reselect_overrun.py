@@ -48,6 +48,15 @@ class _FakeEngine:
         wcore.W40KEngine._fight_target_after_designated_death
     )
     _fight_resolve_with_target = wcore.W40KEngine._fight_resolve_with_target
+    # Flux D+ (04.01 / 04.02 / 24.11) : déclaration automatique, question d'arme seulement s'il
+    # reste un choix, figurines engagées ailleurs, allocation.
+    _fight_declare_toward = wcore.W40KEngine._fight_declare_toward
+    _fight_ask_weapon_or_continue = wcore.W40KEngine._fight_ask_weapon_or_continue
+    _fight_continue_declarations = wcore.W40KEngine._fight_continue_declarations
+    _fight_auto_declare_subset = wcore.W40KEngine._fight_auto_declare_subset
+    _fight_allocate_and_end = wcore.W40KEngine._fight_allocate_and_end
+    # B3 : cibles du pile-in overrun = la cible désignée si l'unité n'est pas engagée.
+    _overrun_pile_in_target_ids = wcore.W40KEngine._overrun_pile_in_target_ids
     _process_squad_action = wcore.W40KEngine._process_squad_action
     _pending_manual_alloc_ctx = wcore.W40KEngine._pending_manual_alloc_ctx
 
@@ -84,6 +93,7 @@ def _gs() -> Dict[str, Any]:
         # maintenant) + garde « one additional pile-in move » (alimentée par le commit gym).
         "engaged_at_fight_step_start": {_SQUAD: True},
         "overrun_pile_in_done": set(),
+        "pending_squad_fight_intents": {_SQUAD: []},
     }
 
 
@@ -96,13 +106,30 @@ def _patch_overrun(
     rapprochement (`_model_can_fight_target` → True), ce qui reproduit la branche `_did_overrun`.
     """
     monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: False)
-    monkeypatch.setattr(su, "fight_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
+    monkeypatch.setattr(fh, "_fight_units_engaged_with", lambda gs, u: [])
+    monkeypatch.setattr(
+        fh, "pile_in_targets_within_range", lambda gs, u: [str(t) for t in slots if t is not None]
+    )
+    monkeypatch.setattr(
+        su, "fight_pile_in_plan", lambda gs, sid, target_ids=None: [("atk#0", 0, 0, 0)]
+    )
     monkeypatch.setattr(su, "get_enemy_slot_mapping", lambda gs, player: list(slots))
     monkeypatch.setattr(fh, "_model_can_fight_target", lambda gs, m, uid, eid: True)
     monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
     monkeypatch.setattr(wcore, "require_unit_by_id", lambda gs, uid: {"id": uid, "player": 1})
+    _patch_weapon_choice(monkeypatch)
+
+
+def _patch_weapon_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La figurine unique porte DEUX armes ordinaires : la question d'arme reste posée après la
+    cible (D+ ne la pose plus quand il n'y a pas de choix)."""
     monkeypatch.setattr(
-        fh, "fight_weapon_eligible_slots", lambda gs, sid, tid: {0: "chainsword"}
+        su, "squad_auto_declare_fight_weapons",
+        lambda gs, sid, tid, only_model_ids=None: {"atk#0": ["chainsword", "fist"]},
+    )
+    monkeypatch.setattr(
+        fh, "fight_weapon_eligible_slots",
+        lambda gs, sid, tid, model_ids=None: {0: "chainsword", 1: "fist"},
     )
 
 
@@ -177,7 +204,11 @@ def test_designated_target_alive_non_adjacent_after_overrun_no_valueerror(monkey
     gs["units_cache"]["target_B"] = {"player": 2}
 
     monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: False)
-    monkeypatch.setattr(su, "fight_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
+    monkeypatch.setattr(fh, "_fight_units_engaged_with", lambda gs, u: [])
+    monkeypatch.setattr(fh, "pile_in_targets_within_range", lambda gs, u: ["target_A", "target_B"])
+    monkeypatch.setattr(
+        su, "fight_pile_in_plan", lambda gs, sid, target_ids=None: [("atk#0", 0, 0, 0)]
+    )
     monkeypatch.setattr(
         su, "get_enemy_slot_mapping",
         lambda gs, player: ["target_A", "target_B"],
@@ -189,9 +220,7 @@ def test_designated_target_alive_non_adjacent_after_overrun_no_valueerror(monkey
     )
     monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
     monkeypatch.setattr(wcore, "require_unit_by_id", lambda gs, uid: {"id": uid, "player": 1})
-    monkeypatch.setattr(
-        fh, "fight_weapon_eligible_slots", lambda gs, sid, tid: {0: "chainsword"}
-    )
+    _patch_weapon_choice(monkeypatch)
 
     eng = _FakeEngine(gs)
     # Ne doit pas lever ValueError même si target_A est vivante et dans units_cache.
@@ -428,3 +457,68 @@ def test_pending_target_purged_at_fight_phase_end(melee_scenario_file):
     _fight_phase_complete(gs)
 
     assert PENDING_FIGHT_TARGET_KEY not in gs
+
+
+# ---------------------------------------------------------------------------
+# B3 (2026-09-18) — le pile-in overrun 12.06 VISE la cible désignée par l'agent
+# (12.03 BEFORE MOVING, unité non engagée : « select one or more enemy units within 5" »).
+# Géométrie RÉELLE x1 (EZ 2, pile_in_target_range 5).
+# ---------------------------------------------------------------------------
+
+
+def _overrun_state():
+    """S (mono) non engagé ; A à 3 cases (le plus proche), B à 4 cases : tous deux à ≤ 5"."""
+    from engine.combat_utils import calculate_hex_distance as _d
+    from tests.unit.engine._state_builders import fight_squad_vs_enemies_state
+
+    squad, a_cell, b_cell = (10, 10), (10, 13), (14, 10)
+    assert _d(*squad, *a_cell) == 3 and _d(*squad, *b_cell) == 4
+    gs = fight_squad_vs_enemies_state([squad], [a_cell, b_cell], fight_subphase="fight")
+    return gs, a_cell, b_cell
+
+
+def test_b3_overrun_pile_in_plan_reaches_the_designated_target():
+    """`fight_pile_in_plan(target_ids=[B])` finit engagé avec B, alors que sans cible désignée
+    le plan vise le plus proche (A) et laisse B hors de portée de frappe.
+
+    ROUGE avant B3 : `fight_pile_in_plan` n'acceptait pas de cibles (TypeError)."""
+    from engine.combat_utils import calculate_hex_distance as _d
+
+    gs, a_cell, b_cell = _overrun_state()
+
+    plan_all = su.fight_pile_in_plan(gs, "1")
+    plan_b = su.fight_pile_in_plan(gs, "1", target_ids=["3"])
+
+    assert plan_all is not None and plan_b is not None
+    _m, ca, ra, _lv = plan_all[0]
+    _m, cb, rb, _lv = plan_b[0]
+    assert _d(ca, ra, *a_cell) <= 2 and _d(ca, ra, *b_cell) > 2, "sans désignation : vers A"
+    assert _d(cb, rb, *b_cell) <= 2, f"cible désignée B atteignable → engagée avec B, obtenu {(cb, rb)}"
+
+
+def test_b3_designated_target_out_of_5_inches_falls_back_to_all_targets():
+    """Cible désignée hors 5" → `None` (toutes les cibles à 5", comportement d'origine) ;
+    désignée à ≤ 5" et unité non engagée → `[désignée]` ; unité engagée → `None` (12.03 impose
+    ses cibles)."""
+    gs, _a, _b = _overrun_state()
+    unit = gs["unit_by_id"]["1"]
+    eng = _FakeEngine(gs)
+    slots = su.get_enemy_slot_mapping(gs, 1)
+    slot_b = slots.index("3")
+
+    assert eng._overrun_pile_in_target_ids("1", unit, slot_b) == ["3"]
+    assert eng._overrun_pile_in_target_ids("1", unit, None) is None
+
+    # B repoussé hors des 5" : la désignation ne peut pas être honorée → repli.
+    gs["units_cache"]["3"]["occupied_hexes"] = {(30, 30)}
+    gs["units_cache"]["3"]["col"], gs["units_cache"]["3"]["row"] = 30, 30
+    assert eng._overrun_pile_in_target_ids("1", unit, slot_b) is None
+
+    # Unité engagée : cibles imposées par 12.03.
+    monkeypatch_engaged = ["2"]
+    orig = fh._fight_units_engaged_with
+    fh._fight_units_engaged_with = lambda _gs, _u: monkeypatch_engaged
+    try:
+        assert eng._overrun_pile_in_target_ids("1", unit, slot_b) is None
+    finally:
+        fh._fight_units_engaged_with = orig

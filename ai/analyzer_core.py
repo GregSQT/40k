@@ -31,7 +31,7 @@ from ai.analyzer_phases.shoot_handler import (
 )
 from ai.analyzer_phases.charge_handler import handle_charge
 from ai.analyzer_phases.move_handler import handle_move_or_fled
-from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
+from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move, flush_engaged_idle
 
 
 PLAYER_ONE_ID = 1
@@ -2513,6 +2513,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _ad_option = int(agent_decision_match.group(2))
                         stats['agent_decision_totals'][_ad_type][player] += 1
                         stats['agent_decision_options'][(_ad_type, _ad_option)][player] += 1
+                elif " PASSED FIGHT" in action_desc:
+                        # A5 (PDF 25) : passe de la sélection FIGHT — aucune unité n'a combattu,
+                        # l'alternance 12.04 ne se juge que sur une ligne FOUGHT. La ligne est
+                        # comptée pour elle-même, jamais rangée dans `other`.
+                        action_type = 'fight_pass'
                 elif " WAIT" in action_desc:
                         action_type = 'wait'
                         if handle_wait(state, config, line, action_desc, action_unit_id, player, turn, phase):
@@ -2948,4 +2953,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     flush_cross_weapon_lost(state, stats)
     # Allocation CHARACTER : même régime, verdict par lot rendu une seule fois, journal lu.
     _flush_character_allocation(state, stats)
+    # Figurines engagées sans attaque (04.02) : même régime, verdict par activation de mêlée.
+    flush_engaged_idle(state, stats)
 

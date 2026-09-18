@@ -373,6 +373,9 @@ def _mixed_action_logs() -> list:
         {
             "type": "combat", "player": 1, "phase": "fight", "turn": 2, "shooterId": "u2",
             "damage": 4,
+            # Étages des frappeurs et des survivantes de la cible (mêlée 100, lus par
+            # `_fight_counters_from_action_logs`) : posés par `_emit_squad_shoot_log`.
+            "attackerLevels": [0], "targetLevels": [1],
             "shootDetails": [
                 {"hitResult": "HIT", "targetDied": True, "targetValue": 8.0,
                  "woundBonusAbility": "oath"},
@@ -491,11 +494,17 @@ def _attack_log(
     """
     if kind not in ("shoot", "combat"):
         raise ValueError(f"_attack_log: kind must be 'shoot' or 'combat', got {kind!r}")
-    return {
+    log = {
         "type": kind, "player": player, "turn": turn, "shooterId": shooter,
         "phase": "fight" if kind == "combat" else "shoot",
         "damage": damage, "shootDetails": details,
     }
+    if kind == "combat":
+        # Étages des frappeurs et des survivantes de la cible (mêlée 100) : exigés sur toute
+        # ligne `combat` par `_fight_counters_from_action_logs`, posés par `_emit_squad_shoot_log`.
+        log["attackerLevels"] = [0]
+        log["targetLevels"] = [0]
+    return log
 
 
 class TestBuildTerminalInfoIdempotence:

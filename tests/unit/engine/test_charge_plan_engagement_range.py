@@ -412,3 +412,82 @@ def test_a_third_squad_covering_every_engaging_cell_cancels_the_charge() -> None
     assert charge_build_valid_plan(
         _gs([CHARGER_COL], engaging), "1", ["2"], ROLL_REACHES_ENGAGEMENT
     ) is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11.04 WHILE MOVING — « within 1" … must do so » : contact si possible (A2, 2026-09-18)
+# Géométrie HEX x1 (échelle d'entraînement) : contact = case adjacente, EZ = 2 cases.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from tests.unit.engine._state_builders import synthetic_state, synthetic_unit  # noqa: E402
+
+X1_TARGET = (20, 20)
+
+
+def _x1_charge_state(charger_cells: List[Tuple[int, int]]) -> Dict[str, Any]:
+    """Escouade « 1 » aux cases données, cible « 2 » mono-figurine en X1_TARGET, plateau nu."""
+    units = [
+        synthetic_unit("1", 1, [{"col": c, "row": r} for c, r in charger_cells]),
+        synthetic_unit("2", 2, [{"col": X1_TARGET[0], "row": X1_TARGET[1]}]),
+    ]
+    return synthetic_state(
+        units, phase="charge", game_rules={}, inches_to_subhex=1, board_cols=44, board_rows=60,
+        _unit_move_version=0, charge_roll_values={}, charge_target_selections={},
+        charge_activation_pool=[], enemy_adjacent_hexes_player_1=set(), gym_training_mode=True,
+    )
+
+
+def _d_to_x1_target(cell: Tuple[int, int]) -> int:
+    return calculate_hex_distance(cell[0], cell[1], X1_TARGET[0], X1_TARGET[1])
+
+
+def test_x1_every_model_that_can_reach_contact_ends_in_contact():
+    """Cinq figurines à 4 cases, jet 11 : les six cases de contact sont libres et atteignables,
+    donc les CINQ finissent au contact (distance 1), pas à 2.
+
+    ROUGE avant A2 : la clé d'intention 0 (« Serré » = plus proche du départ) retenait la case
+    engagée la plus proche de l'origine, à 2 cases de la cible — mesuré bot contre bot :
+    118 figurines au contact sur 516 après charge.
+    """
+    chargers = [(16, 18), (16, 19), (16, 20), (16, 21), (16, 22)]
+    assert all(_d_to_x1_target(c) == 4 for c in chargers), [_d_to_x1_target(c) for c in chargers]
+    gs = _x1_charge_state(chargers)
+
+    plan = charge_build_valid_plan(gs, "1", ["2"], 11, intent=0)
+
+    assert plan is not None
+    dists = sorted(_d_to_x1_target((c, r)) for _m, c, r, _lv in plan)
+    assert dists == [1, 1, 1, 1, 1], f"11.04 : contact atteignable → contact ; obtenu {dists}"
+    cells = {(c, r) for _m, c, r, _lv in plan}
+    assert len(cells) == 5, "cinq cases distinctes"
+
+
+def test_x1_when_contact_is_full_the_next_model_ends_engaged_and_the_rest_follow():
+    """Sept figurines, six cases de contact : six au contact, la septième ENGAGÉE (distance 2) —
+    « engaged with one or more charge targets must do so » — jamais plus loin.
+
+    Verrouille aussi l'ORDRE : les figurines les plus proches sont placées en premier, si bien
+    qu'une figurine du fond ne prend pas la seule case de contact d'une figurine de front.
+    """
+    chargers = [(16, 17), (16, 18), (16, 19), (16, 20), (16, 21), (16, 22), (16, 23)]
+    gs = _x1_charge_state(chargers)
+
+    plan = charge_build_valid_plan(gs, "1", ["2"], 11, intent=0)
+
+    assert plan is not None
+    dists = sorted(_d_to_x1_target((c, r)) for _m, c, r, _lv in plan)
+    assert dists == [1, 1, 1, 1, 1, 1, 2], dists
+
+
+def test_x1_intent_only_breaks_ties_inside_the_tightest_tier():
+    """L'intention L10 « Pénétration » (3, avancer au maximum) ne peut pas faire dépasser le
+    contact : à contact atteignable, elle départage ENTRE cases de contact."""
+    chargers = [(16, 20)]
+    gs = _x1_charge_state(chargers)
+
+    plan_tight = charge_build_valid_plan(gs, "1", ["2"], 11, intent=0)
+    plan_deep = charge_build_valid_plan(gs, "1", ["2"], 11, intent=3)
+
+    assert plan_tight is not None and plan_deep is not None
+    assert _d_to_x1_target(plan_tight[0][1:3]) == 1
+    assert _d_to_x1_target(plan_deep[0][1:3]) == 1
