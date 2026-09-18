@@ -367,6 +367,9 @@ class TestPatchedTrainNumericalParity:
         model._vwu_done = 0
         # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
         model.advantage_source = "gae"
+        # S9 (température) : T = 1 et sans régulation, le régime de référence.
+        model.logits_temperature = 1.0
+        model.logits_temperature_regulation = None
         model.q_coef = None
         model.target_kl = None
         model.clip_range_vf = None
@@ -457,6 +460,9 @@ class TestPatchedTrainNumericalParity:
         model._vwu_done = 0
         # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
         model.advantage_source = "gae"
+        # S9 (température) : T = 1 et sans régulation, le régime de référence.
+        model.logits_temperature = 1.0
+        model.logits_temperature_regulation = None
         model.q_coef = None
         model.target_kl = None
         model.clip_range_vf = None
@@ -699,6 +705,9 @@ class TestPatchedVsReferenceParity:
         model._vwu_done = 0
         # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
         model.advantage_source = "gae"
+        # S9 (température) : T = 1 et sans régulation, le régime de référence.
+        model.logits_temperature = 1.0
+        model.logits_temperature_regulation = None
         model.q_coef = None
         model.target_kl = None
         model.clip_range_vf = None
@@ -850,6 +859,9 @@ class TestPatchedVsReferenceParity:
             model._vwu_done = 0
             # S14 (tête Q) : mêmes attributs, même raison ; `gae` = comportement de référence.
             model.advantage_source = "gae"
+            # S9 (température) : T = 1 et sans régulation, le régime de référence.
+            model.logits_temperature = 1.0
+            model.logits_temperature_regulation = None
             model.q_coef = None
             model.target_kl = None
             model.clip_range_vf = None

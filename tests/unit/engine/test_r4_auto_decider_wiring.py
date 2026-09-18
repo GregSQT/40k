@@ -173,7 +173,7 @@ def _alloc_ctx_state(auto: bool, monkeypatch, n_groups: int = 2) -> Dict[str, An
     )
     monkeypatch.setattr(su, "_finalize_manual_allocation", lambda gs, ctx: {"done": True})
     gs = _gs(gym=auto, owner_type="human")
-    gs["models_cache"] = {}
+    gs["models_cache"] = {"m1": {"HP_CUR": 2, "HP_MAX": 2}}
     gs[SHOOT_CTX.alloc_key] = {
         "current_batch_index": 0,
         "batches": [{
@@ -184,12 +184,22 @@ def _alloc_ctx_state(auto: bool, monkeypatch, n_groups: int = 2) -> Dict[str, An
             "alloc_groups": None,
             "declared_order": None,
             "current_group_index": 0,
-            "pool": [],
+            "current_model_id": None,
+            # UNE blessure a attribuer : un lot jete sans blessure n a pas d ordre a declarer
+            # (il n y aurait rien a allouer dans le groupe declare).
+            "pool": [{"rec": {}, "devastating": False}],
             "pool_index": 0,
             "pending_mortal_wounds": None,
         }],
     }
     return gs
+
+
+def _order_ctx():
+    """SHOOT_CTX dont la resolution de blessure consomme le pool sans toucher au plateau."""
+    return dataclasses.replace(SHOOT_CTX, resolve_wound_fn=lambda gs, alloc, batch, c: (
+        batch.__setitem__("pool_index", batch["pool_index"] + 1)
+    ))
 
 
 def test_allocation_step_auto_resolves_in_gym(monkeypatch):
@@ -198,7 +208,7 @@ def test_allocation_step_auto_resolves_in_gym(monkeypatch):
     Verrouille la consommation réelle de `ctx.auto_decider` dans `_manual_allocation_step`.
     """
     gs = _alloc_ctx_state(auto=True, monkeypatch=monkeypatch)
-    result = su._manual_allocation_step(gs, SHOOT_CTX)
+    result = su._manual_allocation_step(gs, _order_ctx())
     assert not (isinstance(result, dict) and result.get("waiting_for_player")), (
         "le moteur a rendu la main à un joueur alors qu'on est en gym — R4 débranché"
     )
@@ -212,7 +222,7 @@ def test_allocation_step_waits_for_human_in_pvp(monkeypatch):
     l'allocation manuelle du PvP.
     """
     gs = _alloc_ctx_state(auto=False, monkeypatch=monkeypatch)
-    result = su._manual_allocation_step(gs, SHOOT_CTX)
+    result = su._manual_allocation_step(gs, _order_ctx())
     assert isinstance(result, dict) and result.get("waiting_for_player") is True, (
         "le moteur n'a pas rendu la main à l'humain — le miroir PvP est cassé"
     )
