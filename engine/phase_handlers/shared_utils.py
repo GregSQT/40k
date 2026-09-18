@@ -2709,9 +2709,20 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
     la consolidation 12.08, pas de la portée 14.02) : un Ancient à un subhex hors de l aire
     jetait un FNP 4+ alors que le même état ne le comptait pas sur l objectif.
     Seul le centre est une distance (« within 6" of the centre »).
+
+    Cette distance-là se mesure du BORD du socle (01.04 : « When a rule refers to a model s
+    position in relation to anything else on the battlefield, unless otherwise stated, measure
+    to or from the closest part of that model s base »), donc avec la métrique de portée du run
+    (`_ranged_distance_metric`) : hex à x1, où la figurine tient dans une case, euclidien bord
+    à bord à x5, comme toute autre portée. Elle était mesurée en cases hex à TOUTE résolution,
+    seule distance de règle du moteur à y échapper — un Ancient au sud du centre y gagnait le
+    FNP au-delà de 6" réels, la grille hex comptant une case par rangée quand un pas vers le sud
+    en vaut √3/1,5.
     """
+    from engine.combat_utils import ranged_edge_distance_to_cell  # noqa: PLC0415
     from engine.game_state import iter_living_models_with_footprints, objective_hexes_union  # noqa: PLC0415
-    from engine.hex_utils import min_distance_between_sets  # noqa: PLC0415
+    from engine.hex_utils import Socle  # noqa: PLC0415
+    from engine.phase_handlers.shooting_handlers import _ranged_distance_metric  # noqa: PLC0415
     model = require_key(game_state, "models_cache")[model_id]
     squad_id = str(require_key(model, "squad_id"))
     footprint = next(
@@ -2727,8 +2738,16 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
         return True
     ish = int(require_key(game_state, "inches_to_subhex"))
     center_range = 6 * ish
-    center = (int(require_key(game_state, "board_cols")) // 2, int(require_key(game_state, "board_rows")) // 2)
-    return min_distance_between_sets(footprint, {center}, max_distance=center_range) <= center_range
+    center_col = int(require_key(game_state, "board_cols")) // 2
+    center_row = int(require_key(game_state, "board_rows")) // 2
+    col, row = int(require_key(model, "col")), int(require_key(model, "row"))
+    socle = Socle(
+        require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"), col, row, footprint,
+    )
+    distance = ranged_edge_distance_to_cell(
+        socle, col, row, center_col, center_row, _ranged_distance_metric(game_state),
+    )
+    return distance <= center_range
 
 
 def _collect_fnp_thresholds(
