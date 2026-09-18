@@ -200,8 +200,10 @@ du token `[COVER]` déjà garanti par la grammaire 3. Aucune règle d'arme impl�
 de la garantie. `11` (2026-09-18) : toute ligne `SHOT` porte `[DESIGNATED:<id>]` dans les tags de
 ligne, l'escouade ennemie DÉSIGNÉE au démarrage de l'activation (cible prioritaire en gym, première
 déclarée au siège humain — Hail of Bolts / Overlapping Detonations, « that targeted that selected
-unit ») ; l'historique complet des versions 6–10 est dans `ai/step_logger.py` (en-tête
-`LOG_GRAMMAR_VERSION`). Ligne absente ⇒ 1.
+unit ») ; `12` (2026-09-18) : toute suppression (Primitive F) laisse une ligne `Unit N(c,r)
+SUPPRESSES Unit M(c,r) [SUPPRESSED→M]` en fin d'activation de tir, non-incrémentante, la supprimée
+étant une escouade TOUCHÉE par ces attaques ; l'historique complet des versions 6–10 est dans
+`ai/step_logger.py` (en-tête `LOG_GRAMMAR_VERSION`). Ligne absente ⇒ 1.
 
 ⚠️ Sous la grammaire 5, un compteur d'usage à zéro dit que la règle **n'a pas joué**, et non plus
 que le journal ne sait pas le dire. C'est toute la valeur de la version : le premier état se

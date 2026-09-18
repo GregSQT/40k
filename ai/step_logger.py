@@ -87,9 +87,18 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       Sur un journal anterieur, le lecteur s abstient (plafond bonifie sur toute cible).
 #:       Verrou : test_step_log_designated_target.py et test_analyzer_hail_of_bolts.py.
 #:
+#:  12 — toute SUPPRESSION (Primitive F, Indiscriminate Detonations) laisse une ligne
+#:       « Unit N(c,r) SUPPRESSES Unit M(c,r) [SUPPRESSED→M] » a la fin de l activation de tir
+#:       qui l a causee — et depuis le 2026-09-18 la supprimee est une escouade TOUCHEE par ces
+#:       attaques, choisie par le joueur (decision `suppress_target` si plusieurs). Sur un journal
+#:       log_grammar>=12, une unite vue `[SUPPRESSED]` sans ligne SUPPRESSES ni tir qui l ait
+#:       touchee depuis la derniere phase de commandement du suppresseur est une FAUTE
+#:       (`suppression_without_hit`), jamais un vieux format. Verrou :
+#:       test_primitive_f_unit_state_effects.py (producteur), test_analyzer_suppression.py (lecteur).
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 11
+LOG_GRAMMAR_VERSION = 12
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1765,6 +1774,15 @@ class StepLogger:
             shocked = require_key(details, "battle_shocked")
             result = "SHOCKED" if shocked else "OK"
             return f"Unit {unit_with_coords} BATTLE-SHOCK Roll:2D6={roll_val} vs Ld{ld_val}+ → {result}"
+
+        elif action_type == "suppress_target":
+            # Primitive F (Indiscriminate Detonations), grammaire 12 : « Unit N(c,r) SUPPRESSES
+            # Unit M(c,r) [SUPPRESSED→M] » — l escouade TOUCHEE que le tireur a choisi de
+            # supprimer, a la fin de son activation de tir.
+            target_id = require_key(details, "target_id")
+            target_coords = details.get("target_coords")
+            target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+            return f"{unit_label} SUPPRESSES Unit {target_id}{target_coords_str} [SUPPRESSED→{target_id}]"
 
         elif action_type == "waaagh_call":
             # L25 — 08.04 : déclaration Waaagh! par le joueur Orks.

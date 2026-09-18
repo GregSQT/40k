@@ -281,8 +281,12 @@ def test_a_squad_without_the_rule_ends_its_activation_as_before():
 # ── Indiscriminate Detonations : la suppression atteint le gym ───────────────────────────
 
 
-def test_gym_squad_shoot_suppresses_the_target():
-    """ROUGE avant le fix : `suppressed_squads` restait vide sur le chemin gym."""
+def test_gym_squad_shoot_suppresses_the_target(monkeypatch):
+    """ROUGE avant le fix : `suppressed_squads` restait vide sur le chemin gym. Dés épinglés à 6 :
+    depuis le 2026-09-18 seule une escouade TOUCHÉE peut être supprimée."""
+    import random
+
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
     eng = _engine([
         _unit_cfg(1, 1, [(10, 10)], rules=[_SUPPRESS_RULE]),
         _unit_cfg(2, 2, [(20, 10)]),
@@ -296,13 +300,17 @@ def test_gym_squad_shoot_suppresses_the_target():
     assert gs["suppressed_squads"] == {"2": 1}
 
 
-def test_split_fire_end_also_suppresses_the_target():
+def test_split_fire_end_also_suppresses_the_target(monkeypatch):
     """Le tir fractionné (`squad_shoot_split_target`, deux armes → deux cibles) termine par la
-    même fin de datasheet : la PREMIÈRE cible déclarée est supprimée (choix moteur —
-    `designated_shoot_target_id` est posé par `setdefault` à chaque déclaration, donc la cible
-    principale). ROUGE avant le fix : `suppressed_squads` vide après le tir fractionné."""
+    même fin de datasheet. Dés à 6 : les DEUX cibles sont touchées, donc la fin d'activation pose
+    la décision `suppress_target` (2026-09-18 — le moteur ne choisit plus la première déclarée) ;
+    l'agent joue le candidat de l'escouade 3, qui est supprimée et l'activation se clôt.
+    D 1 sur le lascannon : une escouade DÉTRUITE par le tir n'est plus une candidate."""
+    import random
+
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
     bolter = _weapon("bolter", rng=24)
-    lascannon = _weapon("lascannon", rng=48, STR=12, AP=-3, DMG=6)
+    lascannon = _weapon("lascannon", rng=48, STR=12, AP=-3, DMG=1)
     eng = _engine([
         _unit_cfg(1, 1, [(10, 10)], rng_weapons=[bolter, lascannon], rules=[_SUPPRESS_RULE]),
         _unit_cfg(2, 2, [(20, 10)]),
@@ -325,7 +333,15 @@ def test_split_fire_end_also_suppresses_the_target():
             assert target_slot in pending["eligible_target_slots"]
             _obs, _r, _t, _tr, info, _m = eng.step_with_mask(int(SHOOT_SLOT_BASE + target_slot))
             assert info["action"] == "squad_shoot_split_target", info
-    assert gs.get("pending_shoot_weapon_split") is None
+        assert gs.get("pending_shoot_weapon_split") is None
+        decision = read_pending_agent_decision(gs)
+        assert decision is not None and decision["type"] == "suppress_target", decision
+        assert gs["suppressed_squads"] == {}, "rien n'est supprimé avant la réponse"
+        targets = [o["payload"]["target_eid"] for o in decision["options"]]
+        assert sorted(targets) == ["2", "3"]
+        from engine.macro_intents import CHOICE_BASE
+        eng.step_with_mask(int(CHOICE_BASE + targets.index("3")))
+    assert read_pending_agent_decision(gs) is None
     assert gs["phase"] != "shoot" or "1" not in gs.get("shoot_activation_pool", ["1"])
     assert gs["suppressed_squads"] == {"3": 1}
 

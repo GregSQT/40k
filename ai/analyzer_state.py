@@ -399,6 +399,14 @@ class AnalyzerState:
     # Réinitialisé à chaque début d'épisode.
     battle_shocked_by_unit: Dict[str, bool] = field(default_factory=dict)
 
+    #: Touches de TIR relevées par joueur tireur depuis sa dernière phase de commandement :
+    #: {joueur → {(tireur, cible)}} — ce contre quoi une ligne SUPPRESSES est jugée
+    #: (`ai/analyzer_suppression.py`). Repart de zéro à chaque phase de commandement du joueur.
+    shoot_hits_since_command: Dict[int, Set[Tuple[str, str]]] = field(default_factory=dict)
+    #: Suppressions EN VIGUEUR : {supprimée → (suppresseur, joueur suppresseur)}, posées par les
+    #: lignes SUPPRESSES (grammaire 12), levées à la phase de commandement du suppresseur.
+    suppressions_in_force: Dict[str, Tuple[str, int]] = field(default_factory=dict)
+
     #: Appels de capacité relevés (« ABILITY CALL <Nom> [USED|DECLINED] », `engine/ability_calls`),
     #: dans l'ordre du journal : {episode, turn, phase, player, unit_id, ability, used}. C'est la
     #: trace qui distingue « refusé » de « jamais proposé » pour Grot Orderly / Finest Hour / Da Jump.

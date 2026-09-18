@@ -41,7 +41,20 @@ de la lignée suit le chantier 8.
    (une seule source). Archives incompatibles : un seul `--new` après le chantier 8
    ([training.md#refonte-bloc-candidat](training.md#refonte-bloc-candidat)). Épisodes gym complets
    rejoués (`test_episode_combat_counters`, `test_objective_control_checkpoint_1402`).
-3. 🟡 Indiscriminate Detonations = unité TOUCHÉE, choix du joueur.
+3. ✅ **Indiscriminate Detonations = unité TOUCHÉE, choix du joueur** (2026-09-18). La fin
+   d'activation supprimait la cible DÉSIGNÉE sans contrôle de touche (reproductions : désignée
+   ratée → supprimée ; désignée ratée, seconde cible touchée → la désignée supprimée). Mesuré :
+   l'état d'allocation connaît les touches (`counts["hits"]` par lot, `_roll_batch`) — relevé
+   `alloc["hit_target_sids"]` → `unit["_shoot_hit_targets"]` (contexte tir), jamais le journal.
+   Aucune touchée → rien ; une → elle ; plusieurs → décision `suppress_target` (fin d'activation
+   différée, patron `move_after_shooting`), trois sièges : gym `CHOICE_k`, bots (PvE et adversaire
+   du gym) par `select_bot_suppress_target` déclarée, humain par panneau + refus généralisé
+   (`_ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS`). Journal `SUPPRESSES Unit M [SUPPRESSED→M]`
+   (grammaire 12) ; analyzer `ai/analyzer_suppression.py` : `suppression_without_hit`
+   (PROJ.1.2.suppression, bucket §1.2) juge suppression ⇔ touche ⇔ malus, au tir comme en mêlée,
+   abstention sur journal antérieur. `target_health_and_value` partagé avec `mortal_wounds_target`.
+   Tests rouge→vert : 6 moteur (test_primitive_f), 6 sièges/journal (test_suppress_target_decision),
+   6 analyzer (test_analyzer_suppression), 2 vitest.
 4. 🟡 Da Jump.
 5. 🟡 Grot Orderly = choix d'agent.
 6. 🟡 Finest Hour = choix à la sélection.

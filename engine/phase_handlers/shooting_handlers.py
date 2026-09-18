@@ -43,6 +43,7 @@ from .shared_utils import (
     entry_footprint,
     entry_is_on_battlefield,
     DESIGNATED_SHOOT_TARGET_KEY,
+    SHOOT_HIT_TARGETS_KEY,
 )
 
 # ============================================================================
@@ -5035,6 +5036,14 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_move_after_shooting_distance"]
     if DESIGNATED_SHOOT_TARGET_KEY in unit:
         del unit[DESIGNATED_SHOOT_TARGET_KEY]
+    if SHOOT_HIT_TARGETS_KEY in unit:
+        del unit[SHOOT_HIT_TARGETS_KEY]
+    if "_suppress_target_resolved" in unit:
+        del unit["_suppress_target_resolved"]
+    if "_suppress_target_pending" in unit:
+        del unit["_suppress_target_pending"]
+    if SUPPRESSED_TARGET_KEY in unit:
+        del unit[SUPPRESSED_TARGET_KEY]
     if "_current_shoot_nb" in unit:
         del unit["_current_shoot_nb"]
     if "advance_range" in unit:
@@ -5391,6 +5400,162 @@ def move_after_shooting_seat_is_model_driven(
     return is_gym_training or is_pve_ai
 
 
+#: Clé d'ACTIVATION : l'escouade que CETTE activation a supprimée (`suppress_squad`), lue par le
+#: journal (`[SUPPRESSED→<id>]` sur la ligne de fin d'activation). Effacée avec l'activation.
+SUPPRESSED_TARGET_KEY = "_suppressed_target_id"
+
+
+def shooting_hit_targets(unit: Dict[str, Any]) -> List[str]:
+    """Escouades ennemies TOUCHÉES par l'activation de tir qui vient d'être résolue, dans l'ordre
+    des lots. Absente = activation jamais résolue par l'allocation (chaîne rompue), jamais
+    « aucune touche » — la clé est posée vide dans ce cas (`_finalize_manual_allocation`)."""
+    hit_targets = require_key(unit, SHOOT_HIT_TARGETS_KEY)
+    if not isinstance(hit_targets, list):
+        raise TypeError(f"{SHOOT_HIT_TARGETS_KEY} must be a list, got {type(hit_targets).__name__}")
+    return [str(sid) for sid in hit_targets]
+
+
+def suppress_squad(game_state: Dict[str, Any], unit: Dict[str, Any], target_sid: str) -> None:
+    """Supprime `target_sid` au nom de `unit` (Primitive F) : -1 au jet de touche jusqu'au début
+    de la prochaine phase de commandement du suppresseur (`suppressed_squads`, purgée par
+    `command_phase_start`). Site UNIQUE d'écriture, pour les trois sièges."""
+    suppressor_player = int(require_key(unit, "player"))
+    game_state.setdefault("suppressed_squads", {})[str(target_sid)] = suppressor_player
+    unit[SUPPRESSED_TARGET_KEY] = str(target_sid)
+    # Ligne de fin d'activation (grammaire 12) : « Unit N(c,r) SUPPRESSES Unit M(c,r)
+    # [SUPPRESSED→M] » — Game Log ET step.log (via `_STEP_LOG_TYPE_MAP`). C'est ce que
+    # l'analyzer lit pour contrôler qu'une unité vue `[SUPPRESSED]` l'a été par un tir qui l'a
+    # TOUCHÉE (`suppression_without_hit`).
+    unit_id = str(require_key(unit, "id"))
+    u_col, u_row = require_unit_position(unit, game_state)
+    t_col, t_row = require_unit_position(str(target_sid), game_state)
+    append_action_log(game_state, {
+        "type": "suppress_target",
+        "message": (
+            f"Unit {unit_id}({u_col},{u_row}) SUPPRESSES Unit {target_sid}({t_col},{t_row}) "
+            f"[SUPPRESSED→{target_sid}]"
+        ),
+        "turn": game_state.get("turn", 0),  # get allowed
+        "phase": "shoot",
+        "unitId": unit_id,
+        "player": suppressor_player,
+        "col": u_col,
+        "row": u_row,
+        "targetId": str(target_sid),
+        "targetCol": t_col,
+        "targetRow": t_row,
+        "timestamp": "server_time",
+        "is_ai_action": suppressor_player == 1,
+    })
+
+
+def _squad_living_oc(game_state: Dict[str, Any], squad_id: str) -> int:
+    """OC total des figurines vivantes de l'escouade (14.02 : OC par figurine, + `oc_bonus`)."""
+    from engine.game_state import unit_oc_bonus
+
+    models_cache = require_key(game_state, "models_cache")
+    unit = require_unit_by_id(game_state, str(squad_id))
+    bonus = unit_oc_bonus(unit)
+    return sum(
+        int(require_key(models_cache[mid], "OC")) + bonus
+        for mid in require_key(game_state, "squad_models").get(str(squad_id), [])  # get allowed
+        if mid in models_cache
+    )
+
+
+def select_bot_suppress_target(
+    game_state: Dict[str, Any], unit: Dict[str, Any], hit_targets: List[str]
+) -> str:
+    """Politique DÉCLARÉE du siège bot pour « quelle escouade touchée supprimer » (Primitive F).
+
+    1. la cible DÉSIGNÉE de l'activation si elle a été touchée — c'est l'escouade que le tireur
+       voulait neutraliser, et le -1 au jet de touche prolonge ce choix ;
+    2. sinon, parmi les touchées qui tiennent un objectif (14.02), celle de plus haut OC vivant —
+       supprimer celle qui pèse le plus sur le contrôle ;
+    3. sinon la plus haute OC vivante, départage par id croissant : déterministe, jamais un tirage.
+    Même politique au bot PvE et au bot adversaire du gym (`env_wrappers`) : une baseline.
+    """
+    from engine.phase_handlers.shared_utils import is_unit_on_objective
+
+    if not hit_targets:
+        raise ValueError("select_bot_suppress_target: aucune escouade touchée à départager")
+    designated = unit.get(DESIGNATED_SHOOT_TARGET_KEY)  # get allowed : lue seulement si touchée
+    if designated is not None and str(designated) in hit_targets:
+        return str(designated)
+    on_objective = [
+        sid for sid in hit_targets
+        if is_unit_on_objective(require_unit_by_id(game_state, sid), game_state)
+    ]
+    pool = on_objective if on_objective else list(hit_targets)
+    return sorted(pool, key=lambda sid: (-_squad_living_oc(game_state, sid), str(sid)))[0]
+
+
+def arm_suppress_target_decision(
+    game_state: Dict[str, Any], unit: Dict[str, Any], hit_targets: List[str]
+) -> Dict[str, Any]:
+    """Pose la décision `suppress_target` : un candidat par escouade TOUCHÉE (entités ennemies,
+    `CHOICE_k` comme `mortal_wounds_target`). Plus de `MAX_DECISION_OPTIONS` touchées LÈVE — une
+    activation de tir ne vise pas plus d'escouades que de lots, jamais une troncature (§9.0bis)."""
+    from engine.agent_decision import set_pending_agent_decision
+    from engine.observation_entities import MAX_DECISION_OPTIONS, decision_option_cont_row
+    from engine.phase_handlers.shared_utils import target_health_and_value
+
+    if len(hit_targets) > MAX_DECISION_OPTIONS:
+        raise ValueError(
+            f"suppress_target: {len(hit_targets)} escouades touchées pour {MAX_DECISION_OPTIONS} "
+            f"candidats — tronquer exclurait un choix légal (§9.0bis réserve 2)."
+        )
+    # Mêmes grandeurs que `mortal_wounds_target` (une colonne = une grandeur) : ce que la
+    # suppression protège (santé de la cible) et ce qu'elle vaut.
+    metrics = {sid: target_health_and_value(game_state, sid) for sid in hit_targets}
+    max_value = max(v for _, v in metrics.values())
+    if max_value <= 0.0:
+        raise ValueError(
+            f"suppress_target: VALUE vivante nulle sur toutes les escouades touchées {hit_targets}"
+        )
+    unit["_suppress_target_pending"] = True
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="suppress_target",
+        player=int(require_key(unit, "player")),
+        unit_id=str(require_key(unit, "id")),
+        options=[
+            {"label": sid, "effect_ids": (), "declines": False, "payload": {"target_eid": sid}}
+            for sid in hit_targets
+        ],
+        options_cont=[
+            decision_option_cont_row({
+                "target_wounded_hp_norm": metrics[sid][0],
+                "target_value_norm": metrics[sid][1] / max_value,
+            })
+            for sid in hit_targets
+        ],
+    )
+
+
+def apply_suppress_target_decision(
+    game_state: Dict[str, Any], unit: Dict[str, Any], payload: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """Applique le candidat `suppress_target` choisi (par les trois sièges), puis reprend la fin
+    d'activation différée — même handler, même patron que `apply_move_after_shooting_decision`."""
+    if not unit.get("_suppress_target_pending", False):
+        return False, {"error": "no_pending_suppress_target", "unitId": require_key(unit, "id")}
+    target_sid = str(require_key(payload, "target_eid"))
+    if target_sid not in shooting_hit_targets(unit) or not is_unit_alive(target_sid, game_state):
+        raise ValueError(
+            f"suppress_target: {target_sid} n'a pas été touchée par l'activation de "
+            f"{require_key(unit, 'id')} — le masque n'aurait pas dû l'autoriser"
+        )
+    suppress_squad(game_state, unit, target_sid)
+    del unit["_suppress_target_pending"]
+    unit["_suppress_target_resolved"] = True
+    success, result = _handle_shooting_end_activation(
+        game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 1,
+        action_type="shoot", include_attack_results=True,
+    )
+    return success, {**result, "suppressedTargetId": target_sid}
+
+
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                                      arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1,
                                      action_type: Optional[str] = None, include_attack_results: bool = True,
@@ -5418,20 +5583,37 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     """
     from engine.phase_handlers.generic_handlers import end_activation
 
-    # Primitive F (chantier 06, passe 6) — suppress_target_on_shooting (Indiscriminate Detonations).
-    # Déclenché après une vraie activation de tir : l'unité cible est supprimée jusqu'au début de
-    # la prochaine phase de commandement du tireur. La cible est la cible DESIGNEE de
-    # l'activation (`designate_shoot_target`, shared_utils — clé unique avec Hail of Bolts).
+    # Primitive F (chantier 06) — suppress_target_on_shooting (Indiscriminate Detonations) :
+    # « when this unit has resolved its attacks, select one enemy unit HIT by one or more of those
+    # attacks. That enemy unit is suppressed until the start of your next Command phase. »
+    # Déclenché après une vraie activation de tir. Le choix appartient au JOUEUR : aucune touche →
+    # rien ; une seule escouade touchée → elle, sans décision (une seule intention possible,
+    # §9.0bis) ; plusieurs → décision `suppress_target` posée aux trois sièges, fin d'activation
+    # DIFFÉRÉE jusqu'à la réponse — même patron que `move_after_shooting`, le même handler la
+    # reprend (`apply_suppress_target_decision`). Avant le 2026-09-18, la cible DÉSIGNÉE était
+    # supprimée sans contrôle de touche.
     if (
         arg5 == 1
         and arg1 == ACTION
         and arg3 in (SHOOTING, ADVANCE)
+        and not unit.get("_suppress_target_resolved", False)
         and _unit_has_rule(unit, "suppress_target_on_shooting")
     ):
-        _suppress_target_id = unit.get(DESIGNATED_SHOOT_TARGET_KEY)
-        if _suppress_target_id is not None:
-            _suppressor_player = int(require_key(unit, "player"))
-            game_state.setdefault("suppressed_squads", {})[str(_suppress_target_id)] = _suppressor_player
+        # Une escouade DÉTRUITE par ces attaques n'est plus une unité : rien à supprimer (« that
+        # enemy unit is suppressed » suppose qu'elle existe encore), donc jamais une candidate.
+        hit_targets = [sid for sid in shooting_hit_targets(unit) if is_unit_alive(sid, game_state)]
+        if len(hit_targets) == 1:
+            suppress_squad(game_state, unit, hit_targets[0])
+        elif len(hit_targets) > 1:
+            arm_suppress_target_decision(game_state, unit, hit_targets)
+            return True, {
+                "action": "waiting_for_agent_decision",
+                "waiting_for_player": True,
+                "decision_type": "suppress_target",
+                "unitId": require_key(unit, "id"),
+                "player": int(require_key(unit, "player")),
+            }
+        unit["_suppress_target_resolved"] = True
 
     # Optional post-shoot movement rule: move_after_shooting.
     # Only relevant when a real shooting activation is ending.

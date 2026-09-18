@@ -618,7 +618,7 @@ C'est la primitive résiduelle. Elle est large mais cohérente : tout ce qui mod
 | Waaagh! Banner (clause 1) | Bannernob | `invul_save_override` (5) | override, **toute l'unité** |
 | Waaagh! Banner (clause 2) | Bannernob | `toughness_bonus_while_waaagh` (+1 T) | override conditionnel |
 | Mental Fortress | Librarian | `invul_save_override` (4) | override, **toute l'unité** |
-| Indiscriminate Detonations | Wartrakk | `suppress_target_on_shooting` | statut posé sur l'ennemi |
+| Indiscriminate Detonations | Wartrakk | `suppress_target_on_shooting` | statut posé sur UNE escouade ennemie TOUCHÉE, choisie par le joueur (§Suppression) |
 | Grot Orderly | Painboy | `return_destroyed_models` | 1×/partie, phase de commandement, D3 figurines |
 | Finest Hour (compteur) | Captain | `once_per_battle` | compteur, l'effet est en primitive B |
 | Purgation Run | Land Speeder | `move_after_shooting` **étendu** | voir ci-dessous |
@@ -668,6 +668,8 @@ La règle **existe** (`UNIT_RULE_EFFECT_IDS`, `def _build_move_after_shooting_de
 ### Suppression
 
 *« While a unit is suppressed, it has -1 to hit rolls. »* Durée : jusqu'au début de ta prochaine phase de commandement. Le statut vit dans `status_ids` (id `suppressed`, déjà déclaré dans `config/unit_statuses.json`) ; le malus est appliqué par la primitive A.
+
+**Qui est supprimé — correction du 2026-09-18.** Indiscriminate Detonations dit *« when this unit has resolved its attacks, select one enemy unit **hit** by one or more of those attacks »* ; jusqu'à cette date la cible DÉSIGNÉE était supprimée sans contrôle de touche. Désormais l'allocation relève les escouades touchées (≥ 1 touche, `_roll_batch` → `unit["_shoot_hit_targets"]` posée par `_finalize_manual_allocation`, contexte tir), et `_handle_shooting_end_activation` applique : aucune touchée → rien ; une seule → elle, sans décision (une seule intention possible, §9.0bis) ; plusieurs → décision **`suppress_target`** (type déclaré par la refonte du bloc candidat, candidats = les escouades touchées dans l'ordre des lots, traits continus santé/valeur comme `mortal_wounds_target`, plus de `MAX_DECISION_OPTIONS` touchées lève), fin d'activation DIFFÉRÉE jusqu'à la réponse — même patron que `move_after_shooting`, le même handler la reprend (`apply_suppress_target_decision`). Trois sièges : gym `CHOICE_k` ; bot PvE et bot adversaire du gym par la politique DÉCLARÉE `select_bot_suppress_target` (la désignée si touchée, sinon la touchée de plus haut OC vivant sur un objectif, sinon la plus haute OC, départage par id) ; humain par le panneau `suppress_target` (`AgentDecisionPicker`, `agent_decision` + index), toute autre action refusée (`suppress_target_pending`, garde généralisée de l'Exhortation). Le moteur ne choisit jamais à la place de l'agent. Journal : `Unit N(c,r) SUPPRESSES Unit M(c,r) [SUPPRESSED→M]` (grammaire 12) ; analyzer `suppression_without_hit` (PROJ.1.2.suppression) : suppression sans touche, malus `[SUPPRESSED]` sans suppression en vigueur, suppression en vigueur sans malus — tir et mêlée.
 
 ## Capacités traitées ailleurs
 

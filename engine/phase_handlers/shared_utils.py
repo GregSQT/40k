@@ -8604,6 +8604,40 @@ def _model_can_shoot_target(
     return True
 
 
+def target_health_and_value(game_state: Dict[str, Any], target_squad_id: str) -> Tuple[float, float]:
+    """(santé de la figurine la plus entamée, VALUE vivante) d une escouade cible d une décision.
+
+    Traits continus des candidats-escouades (`mortal_wounds_target`, `suppress_target`) : une
+    colonne = une grandeur, lue ICI pour tous. La première est celle de `wounded_hp_ratio`
+    (`UNIT_CONT_FIELDS`), lue à l identique : en 40K les pertes s allouent une figurine à la
+    fois, donc au plus une est partiellement blessée et le `min` est une lecture exacte, pas un
+    repli. Proche de 0, l effet achève quelqu un ; à 1.0, il entame seulement. La seconde reste
+    BRUTE — c est l appelant qui la rapporte à la cible la plus chère proposée, parce que la
+    borne de normalisation n existe qu à l échelle du choix.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [m for m in squad_models.get(str(target_squad_id), []) if m in models_cache]  # get allowed
+    if not alive:
+        raise KeyError(
+            f"target_health_and_value: escouade {target_squad_id!r} sans figurine vivante — "
+            f"un pool de cibles ne doit contenir que des unites vivantes."
+        )
+    wounded = min(
+        int(require_key(models_cache[m], "HP_CUR"))
+        / float(int(require_key(models_cache[m], "HP_MAX")))
+        for m in alive
+    )
+    value = float(sum(int(require_key(models_cache[m], "VALUE")) for m in alive))
+    return wounded, value
+
+
+#: Cle d ACTIVATION portee par l unite tireuse : les escouades ennemies TOUCHEES (>= 1 touche)
+#: par ses attaques de TIR, dans l ordre des lots. Posee par `_finalize_manual_allocation`
+#: (contexte tir seulement), lue par `suppress_target_on_shooting` (Indiscriminate Detonations :
+#: « select one enemy unit HIT by one or more of those attacks »).
+SHOOT_HIT_TARGETS_KEY = "_shoot_hit_targets"
+
 #: Cle d ACTIVATION portee par l unite tireuse : l escouade ennemie DESIGNEE au demarrage du
 #: tir. UNE seule cle pour les trois lecteurs — Hail of Bolts (+N A, Primitive B), Overlapping
 #: Detonations ([BLAST 1], Primitive B) et Indiscriminate Detonations (suppression, Primitive F).
@@ -12851,6 +12885,14 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
     batches = alloc["batches"]
     primary_target_sid = str(batches[0]["target_sid"]) if batches else None
     hazardous_count = int(alloc["hazardous_weapon_count"]) if "hazardous_weapon_count" in alloc else 0
+    if ctx.log_type == "shoot":
+        # Cle d ACTIVATION de l attaquant : les escouades touchees par ses attaques, lue par la
+        # fin d activation de tir (`suppress_target_on_shooting`). Posee meme vide — « aucune
+        # touche » est un fait de l activation, pas une absence de donnee. Effacee par
+        # `shooting_clear_activation_state`.
+        require_unit_by_id(game_state, attacker_squad_id)[SHOOT_HIT_TARGETS_KEY] = list(
+            alloc.get("hit_target_sids", [])  # get allowed : aucune touche = aucune entree
+        )
     # 19.04, derniere clause : « the ability it was conferring applies until the attacking unit
     # has resolved all of its attacks ». On y est. Les squads dont une source de regle est morte
     # sous cette attaque sont recalcules APRES la suppression de l allocation — c est elle qui
@@ -13260,6 +13302,13 @@ def _roll_batch(game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[s
         summary["attacks_made"] += counts["attacks"]
         summary["hits"] += counts["hits"]
         summary["wounds"] += counts["wounds"]
+        # Escouades TOUCHEES par l activation (Indiscriminate Detonations, Primitive F : « select
+        # one enemy unit HIT by one or more of those attacks ») — connu ICI, au jet, pas dans le
+        # journal ; ordre d apparition conserve (celui des lots), sans doublon.
+        if counts["hits"] > 0:
+            _hit_sids = alloc.setdefault("hit_target_sids", [])
+            if str(batch["target_sid"]) not in _hit_sids:
+                _hit_sids.append(str(batch["target_sid"]))
         g["attacks"] += counts["attacks"]
         g["shots"].extend(rolled["shot_records"])
         for pw in rolled["pending_wounds"]:

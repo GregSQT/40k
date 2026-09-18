@@ -309,28 +309,196 @@ def test_toughness_bonus_absent_retourne_base_t() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# suppress_target_on_shooting — stockage de designated_shoot_target_id
+# suppress_target_on_shooting — « select one enemy unit HIT by one or more of those attacks »
+#
+# Chaîne RÉELLE : intents → build_manual_shoot_allocation (jets, `_shoot_hit_targets` posée par
+# `_finalize_manual_allocation`) → _handle_shooting_end_activation. Avant le 2026-09-18, la cible
+# DÉSIGNÉE était supprimée sans contrôle de touche (reproductions 1 et 2 rouges).
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_suppress_target_pose_suppressed_squads() -> None:
-    """Après activation de tir, suppressed_squads contient la cible si la règle est portée."""
-    # Teste directement la logique de _handle_shooting_end_activation :
-    # si l'unité a suppress_target_on_shooting ET designated_shoot_target_id est posé,
-    # game_state["suppressed_squads"] reçoit l'id cible.
-    attacker = _unit("atk", 1, unit_rules=[_rule("suppress_target_on_shooting")])
-    target = _unit("tgt", 2)
-    gs = _base_state([attacker, target])
-    gs["phase"] = "shooting"
-    attacker["designated_shoot_target_id"] = "tgt"
+_SUPPRESS_RULE = _rule("suppress_target_on_shooting")
 
-    # Appeler la fonction de production (gating arg5==1, arg1==ACTION, arg3==SHOOTING exigés)
-    from engine.phase_handlers.shooting_handlers import (
-        ACTION, SHOOTING, _handle_shooting_end_activation,
+
+def _wartrakk_state(n_targets: int) -> Dict[str, Any]:
+    """WarTrakk '1' (1 figurine, 2 armes de test) ; cibles '101'… ; un intent par cible."""
+    from tests._state_invariants import turn_state_invariants
+    from tests.unit.ai._fabriques import units_cache_entry as _uc
+
+    # Une arme (BS 4+) par cible : un lot par arme, résolus dans l'ordre des armes.
+    weapons = [
+        {"ATK": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 120, "WEAPON_RULES": [],
+         "code": f"test_gun_{i}", "display_name": f"Test Gun {i}"}
+        for i in range(n_targets)
+    ]
+    attacker = {"id": "1#0", "squad_id": "1", "player": 1, "T": 6, "SHOOT_LEFT": 1,
+                "ATTACK_LEFT": 1, "col": 50, "row": 50, "OC": 3, "VALUE": 60,
+                "RNG_WEAPONS": weapons, "CC_WEAPONS": [], "UNIT_RULES": []}
+    models_cache: Dict[str, Any] = {"1#0": attacker}
+    squad_models: Dict[str, Any] = {"1": ["1#0"]}
+    squad_cache: Dict[str, Any] = {"1": {"model_count_at_start": 1}}
+    units_cache: Dict[str, Any] = {
+        "1": {**_uc(50, 50, player=1, models={"1#0": (50, 50)}), "orientation": 0},
+    }
+    units: List[Dict[str, Any]] = [{"id": "1", "player": 1, "unitType": "WarTrakk"}]
+    unit_by_id: Dict[str, Any] = {
+        "1": {"id": "1", "UNIT_RULES": [dict(_SUPPRESS_RULE)], "deployed_on_turn": 0, "player": 1,
+              "unit_keywords": [], "UNIT_KEYWORDS": []},
+    }
+    intents = []
+    for i in range(n_targets):
+        sid = str(101 + i)
+        mid = f"{sid}#0"
+        pos = (80, 50 + 10 * i)
+        models_cache[mid] = {
+            "id": mid, "squad_id": sid, "player": 2, "T": 4, "HP_CUR": 2, "HP_MAX": 2,
+            "ARMOR_SAVE": 7, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
+            "points_per_hp": 5.0, "VALUE": 10 + i, "OC": 2, "col": pos[0], "row": pos[1],
+            "BASE_SHAPE": "round", "BASE_SIZE": 1,
+            "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": [],
+        }
+        squad_models[sid] = [mid]
+        squad_cache[sid] = {"model_count_at_start": 1}
+        units_cache[sid] = {**_uc(*pos, player=2, models={mid: pos}, hp_cur=2), "orientation": 0}
+        units.append({"id": sid, "player": 2, "unitType": "AssaultIntercessor"})
+        unit_by_id[sid] = {"id": sid, "UNIT_RULES": [], "deployed_on_turn": 0, "player": 2,
+                           "unit_keywords": [], "UNIT_KEYWORDS": []}
+        intents.append({"model_id": "1#0", "target_unit_id": sid, "weapon_index": i,
+                        "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1})
+    return {
+        **turn_state_invariants(),
+        "gym_training_mode": True,
+        "turn": 1, "phase": "shoot", "current_player": 1,
+        "action_logs": [], "action_log_seq": 0,
+        "models_cache": models_cache, "squad_models": squad_models, "squad_cache": squad_cache,
+        "units_cache": units_cache, "units": units, "unit_by_id": unit_by_id,
+        "objectives": [], "units_moved": set(), "units_advanced": set(),
+        "inches_to_subhex": 5, "moved_distance_by_model": {"1#0": 0.0},
+        "board_cols": 200, "board_rows": 100,
+        "config": {"game_rules": {"engagement_zone": 5}, "gym_training_mode": True},
+        "no_gym_allocation_model": True,
+        "pending_squad_shoot_intents": {"1": intents},
+        "shoot_activation_pool": ["1"],
+        "suppressed_squads": {},
+        "player_types": {"1": "ai", "2": "ai"},
+    }
+
+
+def _resolve_shooting(monkeypatch, gs: Dict[str, Any], hit_rolls: List[int]) -> Dict[str, Any]:
+    """Jets forcés — un jet de touche par lot (BS 4+) ; une touche enchaîne blessure 6 puis save
+    1 (ratée), un raté ne consomme qu'un dé — puis fin d'activation."""
+    import random
+
+    from engine.phase_handlers import shared_utils as _su
+    from engine.phase_handlers import shooting_handlers
+    from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
+
+    seq: List[int] = []
+    for h in hit_rolls:
+        seq.extend([h, 6, 1] if h >= 4 else [h])
+    monkeypatch.setattr(random, "randint", lambda a, b: seq.pop(0) if seq else 1)
+    monkeypatch.setattr(shooting_handlers, "compute_unit_los",
+                        lambda gs_, s, t: {"cover": False, "can_see": True})
+    monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs_, sid: {"id": sid})
+    monkeypatch.setattr(shooting_handlers, "_is_adjacent_to_enemy_within_cc_range",
+                        lambda gs_, u: False)
+    monkeypatch.setattr(_su, "_squad_is_in_enemy_er", lambda _gs, sid: False)
+    monkeypatch.setattr(_su, "_squads_are_engaged", lambda _gs, a, b: False)
+    _su.designate_shoot_target(gs, "1", "101")
+    alloc = build_manual_shoot_allocation(gs, "1")
+    assert alloc["done"] is True
+    # Lue AVANT la fin d'activation, qui efface les clés d'activation une fois résolue.
+    gs["_test_hit_targets"] = list(gs["unit_by_id"]["1"]["_shoot_hit_targets"])
+    from engine.phase_handlers.shooting_handlers import ACTION, SHOOTING, _handle_shooting_end_activation
+
+    _ok, result = _handle_shooting_end_activation(
+        gs, gs["unit_by_id"]["1"], ACTION, 1, SHOOTING, SHOOTING, 1, action_type="shoot"
     )
-    _handle_shooting_end_activation(gs, attacker, ACTION, 1, SHOOTING, SHOOTING, 1)
+    return result
 
-    assert "tgt" in gs["suppressed_squads"]
-    assert gs["suppressed_squads"]["tgt"] == 1
+
+def test_reproduction_1_cible_designee_ratee_n_est_pas_supprimee(monkeypatch) -> None:
+    """REPRODUCTION 1 : WarTrakk tire sur A, tous les jets de touche à 1 → `suppressed_squads`
+    vide (avant le fix : A supprimée, la désignée l'était sans touche)."""
+    gs = _wartrakk_state(1)
+    _resolve_shooting(monkeypatch, gs, hit_rolls=[1])
+    assert gs["_test_hit_targets"] == []
+    assert gs["suppressed_squads"] == {}
+
+
+def test_reproduction_2_seule_l_escouade_touchee_est_supprimee(monkeypatch) -> None:
+    """REPRODUCTION 2 : A (désignée) ratée, B touchée en split-fire → B supprimée, jamais A."""
+    gs = _wartrakk_state(2)
+    _resolve_shooting(monkeypatch, gs, hit_rolls=[1, 6])
+    assert gs["_test_hit_targets"] == ["102"]
+    assert gs["suppressed_squads"] == {"102": 1}
+
+
+def test_une_seule_touchee_ne_pose_aucune_decision(monkeypatch) -> None:
+    """Une seule intention possible = aucune décision posée (§9.0bis)."""
+    from engine.agent_decision import read_pending_agent_decision
+
+    gs = _wartrakk_state(2)
+    result = _resolve_shooting(monkeypatch, gs, hit_rolls=[6, 1])
+    assert gs["suppressed_squads"] == {"101": 1}
+    assert read_pending_agent_decision(gs) is None
+    assert not result.get("waiting_for_player")
+
+
+def test_plusieurs_touchees_posent_la_decision_suppress_target(monkeypatch) -> None:
+    """Deux escouades touchées → décision `suppress_target` (candidats = les touchées, dans
+    l'ordre des lots, traits continus santé/valeur), fin d'activation DIFFÉRÉE, rien supprimé."""
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.observation_entities import decision_option_cont_index
+
+    gs = _wartrakk_state(3)
+    result = _resolve_shooting(monkeypatch, gs, hit_rolls=[6, 1, 6])
+    assert result["waiting_for_player"] is True and result["decision_type"] == "suppress_target"
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "suppress_target"
+    assert decision["unit_id"] == "1" and decision["player"] == 1
+    assert [o["payload"]["target_eid"] for o in decision["options"]] == ["101", "103"]
+    assert all(o["declines"] is False and o["effect_ids"] == () for o in decision["options"])
+    cont = decision["options_cont"]
+    assert cont[0][decision_option_cont_index("target_wounded_hp_norm")] == 0.5  # 1/2 PV après le tir
+    assert cont[1][decision_option_cont_index("target_value_norm")] == 1.0  # 12 pts = la plus chère
+    assert gs["suppressed_squads"] == {}, "rien n'est supprimé avant la réponse"
+    assert "1" in gs["shoot_activation_pool"], "l'activation n'est pas close avant la réponse"
+
+
+def test_la_reponse_applique_la_touchee_choisie_et_clot_l_activation(monkeypatch) -> None:
+    """`apply_suppress_target_decision` (les trois sièges y passent) : la touchée choisie est
+    supprimée, une non-touchée est refusée, l'activation se termine."""
+    from engine.agent_decision import clear_pending_agent_decision
+    from engine.phase_handlers.shooting_handlers import apply_suppress_target_decision
+
+    gs = _wartrakk_state(3)
+    _resolve_shooting(monkeypatch, gs, hit_rolls=[6, 1, 6])
+    unit = gs["unit_by_id"]["1"]
+    with pytest.raises(ValueError, match="n'a pas été touchée"):
+        apply_suppress_target_decision(gs, unit, {"target_eid": "102"})
+    clear_pending_agent_decision(gs)
+    ok, result = apply_suppress_target_decision(gs, unit, {"target_eid": "103"})
+    assert ok is True and result["suppressedTargetId"] == "103"
+    assert gs["suppressed_squads"] == {"103": 1}
+    assert "1" not in gs["shoot_activation_pool"]
+    assert "_suppress_target_pending" not in unit and "_shoot_hit_targets" not in unit
+
+
+def test_politique_bot_suppress_target_declaree() -> None:
+    """Bot : la désignée si touchée ; sinon, parmi les touchées sur un objectif, la plus haute OC
+    vivante ; sinon la plus haute OC, départage par id. Jamais un tirage."""
+    from engine.phase_handlers import shooting_handlers as sh
+
+    gs = _wartrakk_state(3)
+    unit = gs["unit_by_id"]["1"]
+    unit["designated_shoot_target_id"] = "102"
+    assert sh.select_bot_suppress_target(gs, unit, ["101", "102", "103"]) == "102"
+    # Désignée non touchée : OC — 103 vaut 3 (OC 2 + 1 de bonus), 101 vaut 2.
+    gs["unit_by_id"]["103"]["UNIT_RULES"] = [_rule("oc_bonus", {"oc_bonus": 1})]
+    assert sh.select_bot_suppress_target(gs, unit, ["101", "103"]) == "103"
+    # Objectif : 101 tient un objectif (socle à (80,50)), 103 non → 101 malgré son OC plus bas.
+    gs["objectives"] = [{"id": "o1", "hexes": [[80, 50]]}]
+    assert sh.select_bot_suppress_target(gs, unit, ["101", "103"]) == "101"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

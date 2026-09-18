@@ -534,6 +534,16 @@ class _StepOutcome(NamedTuple):
     actor: int
 
 
+#: Décisions posées EN COURS D'ACTIVATION à un siège humain, qui refusent toute autre action tant
+#: qu'elles attendent (`_reject_action_while_exhortation_pending`) : type -> phase du refus. Le
+#: gym n'en a pas besoin (masque exclusif) ; sans ce refus, `advance_phase` finirait la phase
+#: sous la question. `move_after_shooting` n'y est pas : le siège humain reçoit son propre prompt.
+_ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS: Dict[str, str] = {
+    "mortal_wounds_target": "fight",
+    "suppress_target": "shoot",
+}
+
+
 class W40KEngine(gym.Env):
     """
     Slim W40K game engine - delegates to specialized modules.
@@ -4891,6 +4901,30 @@ class W40KEngine(gym.Env):
                 "option_index": option_index,
             }
 
+        if decision_type == "suppress_target":
+            # Indiscriminate Detonations (Primitive F) : « select one enemy unit HIT by one or
+            # more of those attacks ». Le candidat désigne l'escouade TOUCHÉE à supprimer ; la
+            # fin d'activation différée reprend dans le même handler que le siège humain.
+            # `player` vient de l'ÉTAT ; l'unité est contrôlée par `_suppress_target_pending`.
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            decision_player = int(require_key(self.game_state, "current_player"))
+            payload = require_key(selected_option, "payload")
+            consume_pending_agent_decision(
+                self.game_state, decision_type="suppress_target", player=decision_player,
+            )
+            success, result = shooting_handlers.apply_suppress_target_decision(
+                self.game_state, require_unit_by_id(self.game_state, decision_squad_id), payload,
+            )
+            if result.get("action") not in ("move_after_shooting_select_destination",
+                                            "waiting_for_agent_decision"):
+                result["action"] = "squad_shoot"
+            return success, {
+                **result,
+                "decision_type": decision_type,
+                "player": decision_player,
+                "option_index": option_index,
+            }
+
         if decision_type == "reactive_move":
             # Mouvement réactif : la seule décision qui n'appartient PAS au joueur courant. Elle
             # se prend pendant le tour de l'adversaire, et 01.03 le dit — « each time a unit is
@@ -5160,6 +5194,43 @@ class W40KEngine(gym.Env):
             "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
 
+    def _resolve_suppress_target_decision_for_ai_seat(self) -> Optional[Dict[str, Any]]:
+        """Répond, dans la MÊME requête, au choix de suppression posé au bot PvE.
+
+        Jumeau de `_resolve_move_after_shooting_decision_for_ai_seat` : trois sièges — gym (sortie
+        immédiate, la politique répond au step suivant), humain (la décision reste posée, l'UI la
+        montre), bot PvE (tranché ICI par la politique DÉCLARÉE `select_bot_suppress_target`, la
+        même que celle du bot adversaire du gym — jamais un tirage).
+        """
+        if self.gym_training_mode:
+            return None
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None or str(require_key(decision, "type")) != "suppress_target":
+            return None
+        player = int(require_key(decision, "player"))
+        if self._is_player_human(player):
+            return None
+        unit = require_unit_by_id(self.game_state, str(require_key(decision, "unit_id")))
+        options = require_key(decision, "options")
+        hit_targets = [str(require_key(require_key(o, "payload"), "target_eid")) for o in options]
+        chosen = shooting_handlers.select_bot_suppress_target(self.game_state, unit, hit_targets)
+        option_index = hit_targets.index(chosen)
+        success, result = self._handle_agent_decision_action(
+            {"action": "agent_decision", "option_index": option_index}
+        )
+        if not success:
+            raise RuntimeError(f"suppress_target : réponse du bot PvE refusée — {result!r}")
+        return result
+
+    def _settle_shooting_decisions_for_ai_seat(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Les deux décisions de fin d'activation de tir posables au bot PvE, dans l'ordre où le
+        handler les pose : la suppression (Indiscriminate Detonations) PUIS le repositionnement
+        (Purgation Run) — la première reprend la fin d'activation, qui peut poser la seconde."""
+        settled = self._resolve_suppress_target_decision_for_ai_seat()
+        if settled is not None and isinstance(result, dict):
+            result = {**result, **settled}
+        return self._settle_move_after_shooting_for_ai_seat(result)
+
     def _settle_move_after_shooting_for_ai_seat(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """`_resolve_move_after_shooting_decision_for_ai_seat`, puis le payload rendu au client
         reflète l'état FINAL.
@@ -5373,7 +5444,9 @@ class W40KEngine(gym.Env):
     def _reject_action_while_exhortation_pending(
         self, action: Dict[str, Any]
     ) -> Optional[Tuple[bool, Dict[str, Any]]]:
-        """Refuse toute action tant que le choix de cible d'Exhortation of Rage est en attente.
+        """Refuse toute action tant qu'une décision d'ACTIVATION du siège humain est en attente
+        (`_ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS` : cible d'Exhortation of Rage, escouade
+        touchée à supprimer). Généralisée le 2026-09-18 ; le nom garde son premier cas.
 
         Posée à la sélection 12.04 dans le flux manuel (`mortal_wounds_target`, plusieurs
         ennemis engagés), la décision arrête le moteur AVANT les attaques de l'unité. Sans ce
@@ -5383,12 +5456,15 @@ class W40KEngine(gym.Env):
         masque est exclusif. Refus INERTE, même forme que `faction_decision_pending`.
         """
         decision = read_pending_agent_decision(self.game_state)
-        if decision is None or str(require_key(decision, "type")) != "mortal_wounds_target":
+        if decision is None:
+            return None
+        decision_type = str(require_key(decision, "type"))
+        if decision_type not in _ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS:
             return None
         return False, {
-            "error": "mortal_wounds_target_pending",
+            "error": f"{decision_type}_pending",
             "action": action.get("action"),
-            "phase": "fight",
+            "phase": _ACTIVATION_DECISION_TYPES_BLOCKING_ACTIONS[decision_type],
             "player": int(require_key(self.game_state, "current_player")),
         }
 
@@ -6057,6 +6133,7 @@ class W40KEngine(gym.Env):
             # La réponse peut relancer la fenêtre réactive sur l'unité SUIVANTE de la file, qui
             # peut appartenir à un siège sans canal de réponse : la résolution suit la reprise.
             decision_success, decision_result = self._handle_agent_decision_action(action)
+            self._resolve_suppress_target_decision_for_ai_seat()
             self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
             return decision_success, decision_result
@@ -6307,7 +6384,7 @@ class W40KEngine(gym.Env):
                     f"step_logger_block_s={_t_pre_cascade - _t_after_handlers:.6f}"
                 )
 
-        result = self._settle_move_after_shooting_for_ai_seat(result)
+        result = self._settle_shooting_decisions_for_ai_seat(result)
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 
@@ -7157,31 +7234,11 @@ class W40KEngine(gym.Env):
         return True, result
 
     def _mortal_wounds_target_metrics(self, target_squad_id: str) -> Tuple[float, float]:
-        """(santé de la figurine la plus entamée, VALUE vivante) d'une cible de 1-3 MW.
+        """(santé de la figurine la plus entamée, VALUE vivante) d'une cible de 1-3 MW — lecture
+        UNIQUE partagée avec `suppress_target` (`shared_utils.target_health_and_value`)."""
+        from engine.phase_handlers.shared_utils import target_health_and_value
 
-        La première grandeur est celle de `wounded_hp_ratio` (`UNIT_CONT_FIELDS`), lue à
-        l'identique : en 40K les pertes s'allouent une figurine à la fois, donc au plus une est
-        partiellement blessée et le `min` est une lecture exacte, pas un repli. Proche de 0, les
-        blessures mortelles achèvent quelqu'un ; à 1.0, elles entament seulement.
-
-        La seconde reste BRUTE — c'est l'appelant qui la rapporte à la cible la plus chère
-        proposée, parce que la borne de normalisation n'existe qu'à l'échelle du choix.
-        """
-        models_cache = require_key(self.game_state, "models_cache")
-        squad_models = require_key(self.game_state, "squad_models")
-        alive = [m for m in squad_models.get(str(target_squad_id), []) if m in models_cache]  # get allowed
-        if not alive:
-            raise KeyError(
-                f"_mortal_wounds_target_metrics: escouade {target_squad_id!r} sans figurine "
-                f"vivante — le pool de cibles engagees ne doit contenir que des unites vivantes."
-            )
-        wounded = min(
-            int(require_key(models_cache[m], "HP_CUR"))
-            / float(int(require_key(models_cache[m], "HP_MAX")))
-            for m in alive
-        )
-        value = float(sum(int(require_key(models_cache[m], "VALUE")) for m in alive))
-        return wounded, value
+        return target_health_and_value(self.game_state, target_squad_id)
 
     def _apply_exhortation_de_rage(
         self, squad_id: str, target_eid: str,
@@ -7504,6 +7561,9 @@ class W40KEngine(gym.Env):
         "skip",
         # 08.03 / 01.07 — jet de commandement : pas une action d'agent.
         "battle_shock",
+        # Primitive F — effet de fin d'activation de tir, pas une action d'agent (le step du tir
+        # est deja compte par ses lignes SHOT).
+        "suppress_target",
         # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
         # actions d'agent au sens step gym, ce sont des décisions hors-step.
         "waaagh_call", "oath_selection",
@@ -7606,6 +7666,9 @@ class W40KEngine(gym.Env):
         # n est pas une action d agent. Le formateur StepLogger produit la ligne :
         # « Unit N(c,r) BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED|OK ».
         "battle_shock": "battle_shock",
+        # Primitive F — suppression (Indiscriminate Detonations) : « Unit N(c,r) SUPPRESSES
+        # Unit M(c,r) [SUPPRESSED→M] », fin d'activation de tir (grammaire 12).
+        "suppress_target": "suppress_target",
         # L25 — 08.04 : déclaration Waaagh! (Orks) et désignation Oath of Moment (SM).
         # Non-incrementants : décisions hors-step de command phase, pas des actions gym.
         "waaagh_call": "waaagh_call",
@@ -8731,6 +8794,7 @@ class W40KEngine(gym.Env):
             # Jumeau du chemin PvP : la reprise de fenêtre peut reposer la question à un siège
             # sans canal de réponse (bot PvE).
             decision_success, decision_result = self._handle_agent_decision_action(semantic)
+            self._resolve_suppress_target_decision_for_ai_seat()
             self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
             return decision_success, decision_result
@@ -9876,7 +9940,7 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
 
-        result = self._settle_move_after_shooting_for_ai_seat(result)
+        result = self._settle_shooting_decisions_for_ai_seat(result)
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 
