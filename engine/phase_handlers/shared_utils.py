@@ -7650,10 +7650,12 @@ def charge_build_valid_plan(
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan de charge multi-figurines (transaction atomique, aucune ecriture cache).
 
-    Ordre de traitement : par index de figurine croissant.
+    Ordre de traitement : figurines les plus proches d'une cible en premier (index a egalite).
     Pour chaque fig :
-      (a) priorite : finir ENGAGEE avec une cible (11.04 WHILE MOVING « each model that can
-          end its move engaged with one or more charge targets must do so »)
+      (a) priorite : finir au CONTACT, sinon a ≤ 1", sinon ENGAGEE avec une cible (11.04 WHILE
+          MOVING : « each model that can end its move within 1" ... must do so » puis « engaged
+          with one or more charge targets must do so ») — l'intention L10 departage a
+          l'interieur du palier le plus serre atteignable
       (b) sinon : se rapprocher de la cible la plus proche, hors ER des non-cibles
     Validation finale : l'UNITE est engagee avec CHACUNE des cibles declarees (11.04 AFTER
     MOVING « your unit must be engaged with all of the charge targets » ; 03.04 : une unite
@@ -7953,12 +7955,71 @@ def charge_build_valid_plan(
             return (-gap, d_orig, nc, nr)
         return (d_orig, gap, nc, nr)  # intent == 0 (Serré, comportement actuel)
 
-    for mid in mids:
+    # 11.04 WHILE MOVING, trois puces dans l'ordre : « Each model that can end its move within
+    # 1" of one or more charge targets must do so » puis « engaged with one or more charge
+    # targets must do so ». PALIERS par cellule candidate, du plus serre au plus large — meme
+    # critere que le pool PvP (`charge_handlers._charge_pool_must_socle_a_socle_if_possible`) :
+    #   0 = contact socle a socle, 1 = ≤ 1", 2 = engagee (≤ EZ), 3 = pas engagee.
+    # La cle d'intention L10 ne DEPARTAGE qu'a l'interieur du palier le plus serre atteignable :
+    # avant (A2, 2026-09-18) elle classait tous les candidats engages, et une figurine finissait a
+    # 2" quand une case au contact etait atteignable (bench bot contre bot, 40 parties : 118
+    # figurines au contact sur 516 apres charge).
+    _contact_zone = base_contact_zone(game_state)
+    _within_1_zone = int(require_key(game_state, "inches_to_subhex"))
+
+    def _candidate_tier(mid: str, m: Dict[str, Any], nc: int, nr: int) -> int:
+        # Verdict INVARIANT PAR INTENTION : il ne dépend que de (figurine, cellule) et de
+        # `target_entries`, tous deux fixés pour ce plan — jamais de `occupied_after`, qui
+        # est la seule chose qui diverge d'une intention à l'autre. Sur un coup de mémo on
+        # économise aussi `_synth_model_entry`, qui n'existe que pour ce test.
+        _eng_k = (mid, nc, nr)
+        _tier = _eng_memo.get(_eng_k)  # get allowed : absent = pas encore calculé
+        if _tier is not None:
+            return int(_tier)
+        synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
+        # `memoise=False` : même cellule candidate de BFS que ci-dessus.
+        if not any(
+            unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state, memoise=False)
+            for te in target_entries
+        ):
+            _tier = 3
+        elif any(
+            unit_entries_within_engagement_zone(
+                synth, te, _contact_zone, game_state=game_state, memoise=False
+            )
+            for te in target_entries
+        ):
+            _tier = 0
+        elif any(
+            unit_entries_within_engagement_zone(
+                synth, te, _within_1_zone, game_state=game_state, memoise=False
+            )
+            for te in target_entries
+        ):
+            _tier = 1
+        else:
+            _tier = 2
+        _eng_memo[_eng_k] = _tier
+        return _tier
+
+    # Figurines les plus proches d'une cible EN PREMIER (a distance egale : index) : une figurine
+    # du fond ne prend plus la seule case de contact d'une figurine de front. L'ordre par index
+    # laissait `occupied_after` reserver la case au premier venu.
+    _orig_dist_by_mid = {
+        mid: min(
+            calculate_hex_distance(
+                int(models_cache[mid]["col"]), int(models_cache[mid]["row"]), tc, tr
+            )
+            for tc, tr in target_positions
+        )
+        for mid in mids
+    }
+    ordered_mids = sorted(mids, key=lambda mid: (_orig_dist_by_mid[mid], mids.index(mid)))
+
+    for mid in ordered_mids:
         m = models_cache[mid]
         orig_col, orig_row = int(m["col"]), int(m["row"])
-        orig_dist_to_tgt = min(
-            calculate_hex_distance(orig_col, orig_row, tc, tr) for tc, tr in target_positions
-        )
+        orig_dist_to_tgt = _orig_dist_by_mid[mid]
         # 11.04 EFFECT « Your unit moves as described in Moving (03) » : la borne du charge move
         # est un TRAJET legal, pas une distance a vol d'oiseau. Le niveau du trajet est celui
         # d'arrivee du plan (SOL), miroir exact du squad move rigide. Ce predicat BORNE DEJA par
@@ -7972,8 +8033,8 @@ def charge_build_valid_plan(
         # (a) Tentative d'ENGAGEMENT (03.04 : ER = 2", bord-a-bord — pas la cellule voisine
         #     du centre ennemi). 11.04 impose de finir plus pres d'une cible, donc une
         #     destination engageante mais qui eloigne n'est pas retenue.
-        # Chaque entrée : (clé de tri selon l'intention L10, nc, nr)
-        engaged_candidates: List[Tuple[tuple, int, int]] = []
+        # Chaque entrée : (palier 11.04, clé de tri selon l'intention L10, nc, nr)
+        engaged_candidates: List[Tuple[int, tuple, int, int]] = []
         for nc, nr in engage_zone_cells:
             if (nc, nr) in occupied_after:
                 continue
@@ -7986,29 +8047,16 @@ def charge_build_valid_plan(
                 nc, nr, game_state, squad_id, m, _non_target_enemies, _occupied_by_others
             ):
                 continue
-            # Verdict INVARIANT PAR INTENTION : il ne dépend que de (figurine, cellule) et de
-            # `target_entries`, tous deux fixés pour ce plan — jamais de `occupied_after`, qui
-            # est la seule chose qui diverge d'une intention à l'autre. Sur un coup de mémo on
-            # économise aussi `_synth_model_entry`, qui n'existe que pour ce test.
-            _eng_k = (mid, nc, nr)
-            _eng_v = _eng_memo.get(_eng_k)  # get allowed : absent = pas encore calculé
-            if _eng_v is None:
-                synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
-                # `memoise=False` : même cellule candidate de BFS que ci-dessus.
-                _eng_v = any(
-                    unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state, memoise=False)
-                    for te in target_entries
-                )
-                _eng_memo[_eng_k] = _eng_v
-            if not _eng_v:
+            _tier = _candidate_tier(mid, m, nc, nr)
+            if _tier >= 3:
                 continue
             engaged_candidates.append(
-                (_engaged_sort_key(nc, nr, d_orig, _formation_gap(m, nc, nr)), nc, nr)
+                (_tier, _engaged_sort_key(nc, nr, d_orig, _formation_gap(m, nc, nr)), nc, nr)
             )
         picked: Optional[Tuple[int, int]] = None
         if engaged_candidates:
             engaged_candidates.sort()
-            _, pc, pr = engaged_candidates[0]
+            _, _, pc, pr = engaged_candidates[0]
             picked = (pc, pr)
         else:
             # (b) Engagement hors d'atteinte : avancer vers la cible la plus proche
@@ -14304,6 +14352,17 @@ def squad_fight_restart_activation(game_state: Dict[str, Any], squad_id: str) ->
 # ============================================================================
 
 
+def base_contact_zone(game_state: Dict[str, Any]) -> int:
+    """Zone d'engagement qui vaut « socle a socle » dans la metrique du plateau (cf.
+    `model_in_base_contact`) : 0 en euclidien (ecart bord a bord nul), `BASE_TO_BASE_SUBHEX` en
+    hex (x1 : deux cases adjacentes). SOURCE UNIQUE du contact pour le pile-in / la consolidation
+    (`model_in_base_contact`) et pour le palier « within 1"/contact » du plan de charge gym
+    (`charge_build_valid_plan`)."""
+    from engine.spatial_relations import engagement_distance_metric
+
+    return BASE_TO_BASE_SUBHEX if engagement_distance_metric(game_state) == "hex" else 0
+
+
 def model_in_base_contact(
     game_state: Dict[str, Any], model_id: str, model_entry: Dict[str, Any]
 ) -> bool:
@@ -14338,7 +14397,7 @@ def model_in_base_contact(
     squad_id = str(require_key(model_entry, "squad_id"))
     player = int(require_key(model_entry, "player"))
     metric = engagement_distance_metric(game_state)
-    contact_zone = BASE_TO_BASE_SUBHEX if metric == "hex" else 0
+    contact_zone = base_contact_zone(game_state)
 
     subject = _synth_model_entry(
         game_state, squad_id, model_entry,
