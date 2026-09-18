@@ -130,6 +130,19 @@ def test_descent_shrinks_the_normal_advance_frontier():
     assert squad_normal_move_frontier_subhex(gs_floor, "1") == MOVE - int(FLOOR_HEIGHT_INCHES)
 
 
+def test_a_flying_squad_on_a_floor_pays_the_skies_not_the_descent():
+    """21.03 Take to the skies (`21 Flying and surging.pdf`) : « Subtract 2" from the maximum
+    distance » et « Ignore all vertical distance for the purposes of how far it has moved ».
+    Une escouade FLY à l'étage qui a déclaré le vol paie donc 2" et AUCUNE descente : frontière
+    M − 2 ; la même escouade sans vol déclaré paie la descente : M − 3 (plancher de 3")."""
+    gs_flying = _gs(level=1, fly=True)
+    gs_flying["units_took_to_skies"].add("1")
+    assert squad_normal_move_frontier_subhex(gs_flying, "1") == MOVE - 2
+
+    gs_grounded_fly = _gs(level=1, fly=True)
+    assert squad_normal_move_frontier_subhex(gs_grounded_fly, "1") == MOVE - int(FLOOR_HEIGHT_INCHES)
+
+
 def test_dead_band_cost_is_classified_advance_not_normal():
     """Un coût dans `(M - descente, M]` exige un Advance : le classer `normal` le rend
     inexécutable (budget appliqué = `M - descente`). C'est LA ligne de la divergence."""
