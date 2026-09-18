@@ -1868,21 +1868,30 @@ FIGHT_STEP_PASSED_KEY = "fight_step_passed"
 #: Unités qui étaient éligibles au moment où leur joueur a passé — jamais « selected to fight »,
 #: mais « eligible to fight this phase » au sens de 12.08 ELIGIBLE IF (consolidation).
 UNITS_ELIGIBLE_WHEN_PASSED_KEY = "units_eligible_when_passed"
+#: Joueur à qui une passe vient de « return the sequence » (PDF 25), ou None. Tant qu'il n'a pas
+#: sélectionné, le pool est le SIEN — dans l'étape courante s'il y a une unité, sinon dans
+#: Remaining — jamais celui du passeur : sans cette clé, l'alternance 12.04 rendait la main au
+#: passeur quand l'adversaire n'avait aucune unité Fights First, et deux passes forcées du même
+#: joueur fermaient l'étape avec des combats Remaining jamais joués (review du 2026-09-18).
+FIGHT_PASS_HANDOFF_KEY = "fight_pass_handoff"
 
 
 def fight_v11_can_pass(game_state: Dict[str, Any]) -> bool:
-    """True si le SÉLECTEUR courant peut passer (A5) : l'étape FIGHT propose un pool non vide et
-    CHACUNE de ses unités est à plus de `pile_in_target_range` (5") de toute unité ennemie —
-    donc ni engagée ni capable d'engager par un pile-in overrun. Une unité à ≤ 5" sans cible
-    frappable garde le combat à vide obligatoire (12.04). Jamais en sous-phase consolidate : un
-    New Foe est engagé par construction."""
+    """True si le SÉLECTEUR courant peut passer (A5) : l'étape FIGHT lui propose un pool non
+    vide et CHACUNE de ses unités éligibles (12.04) — celles du pool ET celles de l'autre étape,
+    « all of that player's units that are eligible to fight » — est à plus de
+    `pile_in_target_range` (5") de toute unité ennemie, donc ni engagée ni capable d'engager par
+    un pile-in overrun. Une unité à ≤ 5" sans cible frappable garde le combat à vide obligatoire
+    (12.04) ; une unité Remaining engagée interdit la passe pendant Fights First. Jamais en
+    sous-phase consolidate : un New Foe est engagé par construction."""
     if game_state.get("fight_subphase") != "fight":
         return False
     pool = fight_v11_fight_selection_pool(game_state)
     if not pool:
         return False
-    for uid in pool:
-        unit = require_unit_by_id(game_state, str(uid))
+    selector = _squad_owner_player(game_state, str(pool[0]))
+    for uid in fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=False):
+        unit = require_unit_by_id(game_state, uid)
         if _fight_units_engaged_with(game_state, unit) or pile_in_targets_within_range(game_state, unit):
             return False
     return True
@@ -1905,7 +1914,9 @@ def fight_v11_register_pass(game_state: Dict[str, Any], player: int) -> bool:
         raise ValueError(
             f"fight_v11_register_pass: la main est au joueur {expected}, pas à {player}"
         )
-    passed_units = {str(u) for u in fight_v11_fight_selection_pool(game_state)}
+    # TOUTES les unités éligibles du passeur (celles du pool et celles de l'autre étape) : la
+    # passe les a jugées à > 5" ; chacune « was eligible to fight this phase » (12.08).
+    passed_units = set(fight_v11_eligible_unit_ids(game_state, player, fights_first_only=False))
     require_key(game_state, UNITS_ELIGIBLE_WHEN_PASSED_KEY).update(passed_units)
     streak = int(require_key(game_state, FIGHT_PASS_STREAK_KEY)) + 1
     game_state[FIGHT_PASS_STREAK_KEY] = streak
@@ -1921,6 +1932,9 @@ def fight_v11_register_pass(game_state: Dict[str, Any], player: int) -> bool:
         )
         return True
     game_state["fight_selector"] = 3 - player
+    # « return the sequence to their opponent to select a unit » : la main est à l'adversaire
+    # jusqu'à SA sélection, même s'il n'a rien dans l'étape courante (cf. FIGHT_PASS_HANDOFF_KEY).
+    game_state[FIGHT_PASS_HANDOFF_KEY] = 3 - player
     _fight_v11_log(game_state, f"FIGHT : P{player} passe → sélection à P{3 - player}")
     return False
 
@@ -1936,8 +1950,10 @@ def _fight_v11_register_selection(game_state: Dict[str, Any], uid: str) -> None:
     uid = str(uid)
     game_state["units_selected_to_fight"].add(uid)
     game_state.setdefault("units_fought", set()).add(uid)
-    # A5 : une sélection effective rompt la série de passes (« pass in succession »).
+    # A5 : une sélection effective rompt la série de passes (« pass in succession ») et clôt le
+    # retour de séquence dû à la passe précédente.
     game_state[FIGHT_PASS_STREAK_KEY] = 0
+    game_state[FIGHT_PASS_HANDOFF_KEY] = None
     selector = game_state.get("fight_selector")
     if selector in (1, 2):
         game_state["fight_selector"] = 3 - selector
@@ -1966,8 +1982,8 @@ def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
         return None
 
     # Retour à Resolve Fights First (12.04) : si des unités FF redeviennent
-    # éligibles pendant Remaining → re-sélecteur = joueur actif (inatteignable
-    # tant que FF = charge seule, mais implémenté pour conformité).
+    # éligibles pendant Remaining → re-sélecteur = joueur actif (atteint après une passe :
+    # les FF du passeur restent éligibles pendant que l'adversaire joue Remaining).
     if step == "remaining":
         if (
             fight_v11_eligible_unit_ids(game_state, active, fights_first_only=True)
@@ -1975,6 +1991,11 @@ def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
         ):
             step = "fights_first"
             selector = active
+    # A5 : une passe vient de rendre la séquence à l'adversaire — c'est LUI qui sélectionne,
+    # dans Fights First s'il y a une unité, sinon dans Remaining.
+    handoff = game_state.get(FIGHT_PASS_HANDOFF_KEY)  # get allowed : clé posée à fight_v11_start
+    if handoff in (1, 2):
+        selector = int(handoff)
 
     # Boucle de transition (bornée : ff→remaining une fois, handoff sélecteur ≤2).
     for _ in range(8):
@@ -1984,11 +2005,13 @@ def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
                 game_state["fight_step"] = step
                 game_state["fight_selector"] = selector
                 return mine[0]
-            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=True)
-            if theirs:
-                selector = 3 - selector  # l'autre joueur sélectionne
-                continue
-            # Plus aucune FF des deux côtés → Remaining, ce même joueur sélectionne.
+            if selector != handoff:
+                theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=True)
+                if theirs:
+                    selector = 3 - selector  # l'autre joueur sélectionne
+                    continue
+            # Plus aucune FF des deux côtés (ou seulement celles du passeur) → Remaining, ce
+            # même joueur sélectionne.
             step = "remaining"
             continue
         else:  # remaining
@@ -2229,6 +2252,9 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state[FIGHT_PASS_STREAK_KEY] = 0
     game_state[FIGHT_STEP_PASSED_KEY] = False
     game_state[UNITS_ELIGIBLE_WHEN_PASSED_KEY] = set()
+    game_state[FIGHT_PASS_HANDOFF_KEY] = None
+    # Clé client de la machine manuelle (bouton « Passer ») : n'a de sens qu'en étape FIGHT.
+    game_state["fight_can_pass"] = False
     # B2 — réponses de l'agent aux consolidations engaging de la phase (12.07 « choose to move »).
     game_state[CONSOLIDATION_ENGAGING_ANSWERS_KEY] = {}
     game_state["fight_subphase"] = "pile_in"
@@ -2323,6 +2349,9 @@ def fight_v11_enter_consolidate(game_state: Dict[str, Any]) -> None:
     game_state["fight_subphase"] = "consolidate"
     game_state["fight_step"] = None
     game_state["fight_selector"] = None
+    # La passe (A5) n'existe qu'en étape FIGHT : sans cette remise à zéro, une passe qui clôt
+    # l'étape laissait `fight_can_pass` à True et le client affichait « Passer » en consolidation.
+    game_state["fight_can_pass"] = False
     _fight_v11_log(game_state, "FIGHT terminé → étape CONSOLIDATE")
 
 
@@ -2424,15 +2453,19 @@ def fight_v11_fight_selection_pool(game_state: Dict[str, Any]) -> List[str]:
         or fight_v11_eligible_unit_ids(game_state, 3 - active, fights_first_only=True)
     ):
         step, selector = "fights_first", active
+    handoff = game_state.get(FIGHT_PASS_HANDOFF_KEY)  # get allowed : miroir de advance_selection
+    if handoff in (1, 2):
+        selector = int(handoff)
     for _ in range(8):
         ff = step == "fights_first"
         mine = fight_v11_eligible_unit_ids(game_state, selector, fights_first_only=ff)
         if mine:
             return mine
-        theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
-        if theirs:
-            selector = 3 - selector
-            continue
+        if not (ff and selector == handoff):
+            theirs = fight_v11_eligible_unit_ids(game_state, 3 - selector, fights_first_only=ff)
+            if theirs:
+                selector = 3 - selector
+                continue
         if ff:
             step = "remaining"
             continue

@@ -27,7 +27,12 @@ import pytest
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_FIGHT_NO_TARGET
 
 
-def _scenario(p2_col: int = 150) -> Dict[str, Any]:
+def _unit(uid: str, player: int, col: int, row: int) -> Dict[str, Any]:
+    return {"id": uid, "player": player, "unit_type": "Boyz" if player == 1 else "Intercessor",
+            "col": col, "row": row, "models": [{"col": col, "row": row}]}
+
+
+def _scenario(p2_col: int = 150, extra_units: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     return {
         "primary_objectives": ["objectives_control"],
         "uses_codex_detachment": {"1": True, "2": True},
@@ -35,25 +40,26 @@ def _scenario(p2_col: int = 150) -> Dict[str, Any]:
         "board_ref": "44x60x5",
         "terrain_ref": "terrain-mc1.json",
         "deployment_type": "fixed",
-        "units": [
-            {"id": "1", "player": 1, "unit_type": "Boyz", "col": 100, "row": 100,
-             "models": [{"col": 100, "row": 100}]},
-            {"id": "2", "player": 2, "unit_type": "Intercessor", "col": p2_col, "row": 100,
-             "models": [{"col": p2_col, "row": 100}]},
-        ],
+        "units": [_unit("1", 1, 100, 100), _unit("2", 2, p2_col, 100)] + list(extra_units or []),
     }
+
+
+#: Second couple, ENGAGÉ (8 subhex à x5, socles compris) : 3 (P1) avec 4 (P2). Ni l'une ni
+#: l'autre n'a chargé → toutes deux Remaining ; 1 (chargeuse) est Fights First.
+ENGAGED_PAIR = [_unit("3", 1, 100, 160), _unit("4", 2, 108, 160)]
 
 
 @pytest.fixture()
 def engine_factory(tmp_path: Path):
-    def _make(p2_col: int = 150, charged: Optional[List[str]] = None):
+    def _make(p2_col: int = 150, charged: Optional[List[str]] = None,
+              extra_units: Optional[List[Dict[str, Any]]] = None):
         from ai.unit_registry import UnitRegistry
         from engine.agent_decision import PENDING_DECISION_KEY
         from engine.phase_handlers import fight_handlers
         from engine.w40k_core import W40KEngine
 
-        path = tmp_path / f"pass_{p2_col}.json"
-        path.write_text(json.dumps(_scenario(p2_col)))
+        path = tmp_path / f"pass_{p2_col}_{len(extra_units or [])}.json"
+        path.write_text(json.dumps(_scenario(p2_col, extra_units)))
         eng = W40KEngine(
             rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
             controlled_agent="ArmageddonAgent_x1", scenario_file=str(path),
@@ -178,6 +184,121 @@ def test_unit_within_5_inches_without_target_must_fight_empty(engine_factory, mo
     assert "1" in gs["units_selected_to_fight"]
 
 
+def test_remaining_unit_within_5_inches_forbids_the_pass_during_fights_first(engine_factory):
+    """PDF 25 : « if ALL of that player's units that are eligible to fight are more than 5" ».
+    P1 a l'unité 1 (chargeuse, > 5") ET l'unité 3 (Remaining, engagée avec 4) : le pool Fights
+    First ne propose que 1, mais 3 interdit la passe — 1 combat à vide, puis la séquence passe
+    à P2 (4, Remaining), et les combats 3/4 ont lieu.
+
+    ROUGE avant (review du 2026-09-18) : `fight_v11_can_pass` ne jugeait que le pool de l'étape
+    courante ; P1 passait, l'alternance lui rendait la main (P2 sans unité FF), passait encore,
+    l'étape se fermait avec 3 et 4 jamais sélectionnées.
+    """
+    from engine.phase_handlers.fight_handlers import (
+        FIGHT_STEP_PASSED_KEY,
+        fight_v11_can_pass,
+        fight_v11_eligible_unit_ids,
+        fight_v11_fight_selection_pool,
+    )
+
+    eng = engine_factory(charged=["1"], extra_units=ENGAGED_PAIR)
+    gs = eng.game_state
+    assert fight_v11_eligible_unit_ids(gs, 1, fights_first_only=False) == ["1", "3"]
+    assert fight_v11_fight_selection_pool(gs) == ["1"], "étape Fights First : la chargeuse seule"
+    assert fight_v11_can_pass(gs) is False
+
+    semantic = _decoded_no_target(eng, "1")
+    assert semantic == {"action": "squad_fight", "squad_id": "1"}, semantic
+    ok, result = eng._process_squad_action(semantic)
+
+    assert ok and result["action"] == "squad_fight", result
+    assert "1" in gs["units_selected_to_fight"]
+    assert gs[FIGHT_STEP_PASSED_KEY] is False
+    assert gs["fight_subphase"] == "fight" and fight_v11_fight_selection_pool(gs) == ["4"]
+
+
+def test_pass_returns_the_sequence_to_the_opponent_even_without_fights_first_unit(engine_factory):
+    """« return the sequence to their opponent to select a unit » : P1 (unité 1 chargeuse
+    > 5", unité 3 déjà sélectionnée) passe légalement ; P2 n'a aucune unité Fights First mais
+    l'unité 4 (Remaining, engagée avec 3) : c'est ELLE que le pool propose, jamais l'unité 1 du
+    passeur. Après le combat de 4, la séquence revient à P1, qui peut passer à nouveau ; P2 n'a
+    plus rien d'éligible → l'étape se termine.
+
+    ROUGE avant : le pool rendait ['1'] au passeur (P2 sans FF), deuxième passe forcée, étape
+    close, 4 jamais sélectionnée.
+    """
+    from engine.phase_handlers.fight_handlers import (
+        FIGHT_PASS_HANDOFF_KEY,
+        FIGHT_PASS_STREAK_KEY,
+        FIGHT_STEP_PASSED_KEY,
+        fight_v11_expected_seat,
+        fight_v11_fight_selection_pool,
+    )
+    from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+    eng = engine_factory(charged=["1"], extra_units=ENGAGED_PAIR)
+    gs = eng.game_state
+    gs["units_selected_to_fight"].add("3")
+    gs["units_fought"].add("3")
+    assert fight_v11_fight_selection_pool(gs) == ["1"]
+
+    semantic = _decoded_no_target(eng, "1")
+    assert semantic == {"action": "squad_fight_pass", "squad_id": "1"}, semantic
+    ok, result = eng._process_squad_action(semantic)
+
+    assert ok and result["fight_step_ended"] is False, result
+    assert gs[FIGHT_PASS_HANDOFF_KEY] == 2 and gs[FIGHT_PASS_STREAK_KEY] == 1
+    assert fight_v11_fight_selection_pool(gs) == ["4"], "la main est à P2, dans Remaining"
+    assert gs["fight_step"] == "remaining" and fight_v11_expected_seat(gs) == 2
+    mask, eligible = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
+    assert [str(u["id"]) for u in eligible] == ["4"]
+
+    slot_of_3 = get_enemy_slot_mapping(gs, 2).index("3")
+    ok, result = eng._process_squad_action({"action": "squad_fight", "squad_id": "4", "target_slot": slot_of_3})
+    assert ok and "4" in gs["units_selected_to_fight"], result
+    assert gs[FIGHT_PASS_HANDOFF_KEY] is None and gs[FIGHT_PASS_STREAK_KEY] == 0
+    # Retour à Fights First : la chargeuse 1 est toujours éligible, P1 peut passer à nouveau.
+    assert fight_v11_fight_selection_pool(gs) == ["1"]
+    semantic = _decoded_no_target(eng, "1")
+    assert semantic["action"] == "squad_fight_pass"
+    ok, result = eng._process_squad_action(semantic)
+    assert ok and result["fight_step_ended"] is True and gs[FIGHT_STEP_PASSED_KEY] is True
+    assert gs["units_selected_to_fight"] == {"3", "4"}
+
+
+def test_pass_marks_every_eligible_unit_of_the_passer_as_eligible_this_phase(engine_factory):
+    """12.08 ELIGIBLE IF « was eligible to fight this phase » : la passe juge TOUTES les unités
+    éligibles du passeur (> 5"), donc toutes consolident — y compris une Remaining que le pool
+    Fights First ne proposait pas (unité 3 : engagée au début de l'étape, ennemi mort depuis).
+
+    ROUGE avant (review du 2026-09-18) : seul le pool courant était inscrit dans
+    `units_eligible_when_passed` ; 3 n'était ni sélectionnée ni passée → pas de consolidation.
+    """
+    from engine.phase_handlers.fight_handlers import (
+        FIGHT_STEP_PASSED_KEY,
+        UNITS_ELIGIBLE_WHEN_PASSED_KEY,
+        fight_v11_eligible_unit_ids,
+        fight_v11_fight_selection_pool,
+        fight_v11_is_consolidation_eligible,
+    )
+
+    eng = engine_factory(charged=["1"], extra_units=[_unit("3", 1, 100, 160)])
+    gs = eng.game_state
+    gs["engaged_at_fight_step_start"]["3"] = True
+    assert fight_v11_eligible_unit_ids(gs, 1, fights_first_only=False) == ["1", "3"]
+    assert fight_v11_fight_selection_pool(gs) == ["1"]
+
+    semantic = _decoded_no_target(eng, "1")
+    assert semantic == {"action": "squad_fight_pass", "squad_id": "1"}, semantic
+    ok, result = eng._process_squad_action(semantic)
+
+    assert ok and result["fight_step_ended"] is True and gs[FIGHT_STEP_PASSED_KEY] is True
+    assert gs[UNITS_ELIGIBLE_WHEN_PASSED_KEY] == {"1", "3"}
+    for uid in ("1", "3"):
+        assert fight_v11_is_consolidation_eligible(gs, gs["unit_by_id"][uid]), uid
+        assert uid in gs["consolidation_done"], uid
+
+
 def test_pass_line_is_journaled_and_read_by_the_analyzer(tmp_path: Path):
     """step.log : « Unit 1(c,r) PASSED FIGHT » ; l'analyzer la classe `fight_pass` et ne
     produit ni ligne `other` ni erreur d'alternance."""
@@ -284,3 +405,45 @@ def test_human_seat_passes_through_the_manual_machine():
     ok, state = eng.execute_semantic_action({"action": "fight_pass"})
     assert ok and gs[FIGHT_PASS_STREAK_KEY] == 0 and fight_v11_expected_seat(gs) == 1
     assert state["fight_eligible_units"] == ["1"]
+
+
+def test_pass_that_closes_the_step_clears_fight_can_pass_for_the_client():
+    """Siège humain : P1 passe face à un adversaire sans unité éligible → l'étape FIGHT se ferme
+    et la machine présente la consolidation. `fight_can_pass` (clé lue par le client pour le
+    bouton « Passer », `BoardWithAPI` → `TurnPhaseTracker`) doit être False : la passe n'existe
+    qu'en étape FIGHT.
+
+    ROUGE avant (review du 2026-09-18) : seule la branche FIGHT écrivait la clé ; elle restait
+    True en consolidation et le bouton « Passer » y était affiché (clic sans effet).
+    """
+    from engine.phase_handlers.fight_handlers import (
+        FIGHT_STEP_PASSED_KEY,
+        fight_v11_enter_fight_step,
+        fight_v11_start,
+    )
+    from tests.unit.engine._config_helpers import (
+        _fall_back_base_config as _base_config,
+        _fall_back_make_engine as _make_engine,
+        _fall_back_unit_cfg as _unit_cfg,
+    )
+
+    eng = _make_engine(_base_config([_unit_cfg(1, 1, 20, 20), _unit_cfg(2, 2, 40, 20)]))
+    gs = eng.game_state
+    gs["gym_training_mode"] = False
+    eng.gym_training_mode = False
+    gs["player_types"] = {"1": "human", "2": "human"}
+    gs["current_player"] = 1
+    gs["phase"] = "fight"
+    gs["units_charged"] = {"1"}
+    fight_v11_start(gs)
+    assert gs["fight_can_pass"] is False
+    fight_v11_enter_fight_step(gs)
+    ok, state = eng.execute_semantic_action({"action": "activate_unit", "unitId": "2"})
+    assert ok and state["can_pass"] is True and gs["fight_can_pass"] is True, state
+
+    ok, state = eng.execute_semantic_action({"action": "fight_pass"})
+
+    assert ok, state
+    assert gs[FIGHT_STEP_PASSED_KEY] is True and gs["fight_subphase"] == "consolidate"
+    assert gs["fight_can_pass"] is False
+    assert state.get("fight_subphase") == "consolidate" and "can_pass" not in state, state

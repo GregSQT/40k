@@ -38,7 +38,8 @@ def test_stopping_at_two_inches_with_a_contact_cell_reachable_is_an_error(tmp_pa
     assert stats["charge_no_contact"][1] == 1
     first = stats["first_error_lines"]["charge_no_contact"][1]
     assert first is not None and first["model"] == "1#0"
-    assert calculate_hex_distance(*first["contact_cell"], *TARGET) == 1
+    contact_col, contact_row = first["contact_cell"]
+    assert calculate_hex_distance(contact_col, contact_row, *TARGET) == 1
     assert stats["rule_usage"]["PROJ.1.3.contact"][1] == 1
     assert stats["charge_invalid"][1]["distance_over_roll"] == 0, "le budget est respecté"
 
@@ -61,3 +62,39 @@ def test_flying_charge_is_out_of_scope(tmp_path):
     stats = parse(tmp_path, HEADERS, SETUP + _charged((10, 8), extra=" [FLY]"))
     assert stats["charge_no_contact"][1] == 0
     assert stats["rule_usage"]["PROJ.1.3.contact"][1] == 0
+
+
+NON_TARGET = (10, 11)
+
+
+def _charged_with_bystander(dest, roll: int = 11) -> str:
+    """Même charge, mais une unité ennemie NON-cible 102 est déployée en NON_TARGET."""
+    return deployed("102", 2, [NON_TARGET]) + _charged(dest, roll=roll)
+
+
+def test_geometry_premise_bystander():
+    """Toute case à 1 de la cible est à ≤ 2 (zone d'engagement x1) de la non-cible adjacente ;
+    la case d'arrivée (10,8) est à 2 de la cible (engagée) et à 3 de la non-cible (hors ER)."""
+    from engine.combat_utils import get_hex_neighbors
+
+    assert calculate_hex_distance(*NON_TARGET, *TARGET) == 1
+    for c, r in get_hex_neighbors(*TARGET):
+        assert calculate_hex_distance(c, r, *NON_TARGET) <= 2, (c, r)
+    assert calculate_hex_distance(10, 8, *NON_TARGET) == 3
+
+
+def test_contact_cells_inside_a_non_target_engagement_zone_are_not_reachable(tmp_path):
+    """11.04 AFTER MOVING « cannot be engaged with … enemy units that are not charge targets » :
+    les seules cases à ≤ 1" de la cible sont dans l'ER de la non-cible 102 — le moteur les
+    refuse (`_hex_legal_for_charge`), la charge finit légalement à 2" (engagée). ROUGE avant :
+    le contrôle comptait `charge_no_contact` sur cette charge légale."""
+    stats = parse(tmp_path, HEADERS + unit_header("102", 2), SETUP + _charged_with_bystander((10, 8)))
+    assert stats["charge_no_contact"][1] == 0, stats["first_error_lines"]["charge_no_contact"][1]
+    assert stats["rule_usage"]["PROJ.1.3.contact"][1] == 1, "occasion jugée, verdict conforme"
+
+
+def test_a_far_bystander_does_not_excuse_stopping_short(tmp_path):
+    """Non-cible hors de portée : le contrôle juge comme sans elle (contact atteignable)."""
+    far = deployed("102", 2, [(30, 40)])
+    stats = parse(tmp_path, HEADERS + unit_header("102", 2), SETUP + far + _charged((10, 8)))
+    assert stats["charge_no_contact"][1] == 1

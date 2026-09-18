@@ -75,3 +75,33 @@ membre du pool entraîné sur le même moteur) : le déplacement d'équilibre du
 faux. Le seul seuil ABSOLU est la règle de lecture de P0′ (robuste ≥ 0,85 contre les bots) :
 les bots frappent eux aussi avec toutes leurs figurines, le niveau atteint par un P0 neuf sur ce
 moteur est à relire sur le premier run, pas à préjuger.
+
+## 7. Corrections de review (2026-09-18, avant merge)
+
+Quatre findings `/code-review` reproduits puis corrigés, chacun rouge → vert :
+
+- **A5, passe qui rebondit sur le passeur** : `fight_v11_can_pass` ne jugeait que le pool de
+  l'étape courante (FF), pas « all of that player's units that are eligible to fight » — une
+  Remaining engagée n'interdisait pas la passe ; et l'alternance 12.04 rendait la main au passeur
+  quand l'adversaire n'avait aucune unité FF (deux passes forcées, étape close, combats Remaining
+  jamais joués). Correctif : la passe juge TOUTES les unités éligibles du sélecteur ;
+  `fight_pass_handoff` (posé par `fight_v11_register_pass`, levé par toute sélection) fait
+  sélectionner l'adversaire — dans FF s'il y a une unité, sinon dans Remaining ; la passe inscrit
+  TOUTES les unités éligibles du passeur dans `units_eligible_when_passed` (12.08 « was eligible
+  to fight this phase »), pas seulement le pool. `test_fight_pass_rule.py` (+3).
+- **PvE, `/game/ai-turn` réentrait le driver avec la décision B2 en attente** : la décision
+  `consolidation_engaging` armée à la fin du dernier `squad_fight` du bot était réarmée par
+  `_fight_v11_gym_settle` à la requête suivante → RuntimeError hors du try/except (500). Correctif
+  dans `execute_ai_turn` : décision pendante du bot → pas de driver, la politique répond
+  (`agent_decision`) ; décision pendante de l'humain → `not_ai_player_turn`
+  (`human_decision_pending`). `test_fight_pve_par_siege.py` (+2 ; fixture purgée de la décision
+  `fall_back_mode` que `reset()` laissait en attente).
+- **Analyzer #70 `charge_no_contact`, faux positifs** : `reachable_cell_engaging` acceptait une
+  case à ≤ 1" de la cible située dans l'ER d'un ennemi NON-cible, que le moteur refuse (11.04
+  AFTER MOVING). Correctif : `forbidden_ids` / `forbidden_zone` (ennemis vivants hors cibles de
+  la ligne, zone d'engagement) — le pile-in (#72) n'a pas cette restriction et passe une liste
+  vide. `test_analyzer_charge_contact.py` (+3).
+- **Bouton « Passer » en consolidation** : `fight_can_pass` n'était écrit que par la branche
+  FIGHT de la machine manuelle et restait True après une passe qui clôt l'étape. Correctif :
+  remis à False à `fight_v11_start` et `fight_v11_enter_consolidate` (source moteur, aucun
+  gating front ajouté). `test_fight_pass_rule.py` (+1).

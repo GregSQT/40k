@@ -4000,10 +4000,19 @@ class W40KEngine(gym.Env):
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": None, "reason": "fight_machine_off"}
             if self._pending_manual_alloc_ctx() is not None:
                 return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "manual_allocation_pending"}
+            # Decision en attente (B2 `consolidation_engaging`, armee par le driver a la fin de
+            # l action precedente du bot) : elle appartient a son siege et la politique y repond
+            # par le masque (`agent_decision`), comme en gym. Relancer le driver ici rearmerait la
+            # meme decision — `set_pending_agent_decision` refuse d en empiler une seconde (500 sur
+            # `/game/ai-turn`, partie figee). Une decision du siege humain n est pas au bot.
+            pending_decision = read_pending_agent_decision(self.game_state)
+            if pending_decision is not None:
+                if self._is_player_human(int(require_key(pending_decision, "player"))):
+                    return False, {"error": "not_ai_player_turn", "current_player": current_player, "phase": current_phase, "fight_subphase": fight_subphase, "reason": "human_decision_pending"}
             # Selection de la politique en cours (arme, re-selection de cible) : `squad_fight` a
             # deja enregistre l escouade et passe le selecteur — le pool 12.04 est a l humain,
             # mais c est encore au bot de finir SA selection. Ni drain ni fin de phase ici.
-            if fight_v11_pending_selection_squad(self.game_state) is None:
+            elif fight_v11_pending_selection_squad(self.game_state) is None:
                 self._fight_v11_gym_settle()
             pool_to_check = fight_v11_client_pool(self.game_state)
             drained = self._fight_v11_bot_ends_phase_if_drained()

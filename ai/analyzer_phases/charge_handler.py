@@ -186,11 +186,16 @@ def _judge_charge_contact(
 ) -> None:
     """PROJ.1.3.contact — 11.04 WHILE MOVING « Each model that can end its move within 1" of one
     or more charge targets must do so ». Une figurine qui finit au-delà de 1" d'une cible alors
-    qu'une case à ≤ 1" d'une cible était libre et atteignable dans le jet est une faute (une par
+    qu'une case à ≤ 1" d'une cible était libre, atteignable dans le jet ET hors de la zone
+    d'engagement de tout ennemi NON-cible (11.04 AFTER MOVING « cannot be engaged with … enemy
+    units that are not charge targets » : le moteur refuse ces cases) est une faute (une par
     ligne). Cibles = toutes les unités de la ligne CHARGED ; charge volante : mesure à vol
     d'oiseau, hors de ce contrôle (le BFS n'y a pas de sens). Sans socles d'avant/après : non
     jugeable."""
-    from ai.analyzer import _get_inches_to_subhex_for_analyzer
+    from ai.analyzer import (
+        _get_engagement_zone_for_analyzer,
+        _get_inches_to_subhex_for_analyzer,
+    )
     from ai.analyzer_perfig import (
         cells_taken_by_other_models,
         model_engaged_with_unit,
@@ -215,6 +220,11 @@ def _judge_charge_contact(
     if not target_ids:
         return
     within_1 = _get_inches_to_subhex_for_analyzer()
+    non_target_enemies = [
+        uid for uid, hp in state.unit_hp.items()
+        if hp is not None and hp > 0 and uid not in target_ids
+        and int(require_key(state.unit_player, uid)) != int(player)
+    ]
     note_rule_usage(stats, "PROJ.1.3.contact", int(player))
     for mid, dest in new_models.items():
         if mid not in prev_models:
@@ -235,6 +245,7 @@ def _judge_charge_contact(
             taken_cells=cells_taken_by_other_models(state, unit_id, new_models, mid),
             unit_positions=state.unit_positions, unit_hp=state.unit_hp,
             positions_by_model=state.positions_by_model,
+            forbidden_ids=non_target_enemies, forbidden_zone=_get_engagement_zone_for_analyzer(),
         )
         if cell is not None:
             stats["charge_no_contact"][int(player)] += 1

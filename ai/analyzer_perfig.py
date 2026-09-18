@@ -990,10 +990,19 @@ def reachable_cell_engaging(
     unit_positions: Dict[str, Tuple[int, int]],
     unit_hp: Dict[str, int],
     positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
+    forbidden_ids: Sequence[str] = (),
+    forbidden_zone: int = 0,
 ) -> Optional[Tuple[int, int]]:
     """Une case LIBRE et ATTEIGNABLE (chemin BFS ≤ `budget`, murs et figurines ennemies
     contournés comme au move 03.01) d'où la figurine serait à ≤ `zone` (bord à bord) d'une
     figurine d'une des unités `target_ids` — ou None s'il n'en existe aucune.
+
+    `forbidden_ids` / `forbidden_zone` : unités dont la zone d'engagement (`forbidden_zone`,
+    bord à bord) interdit la case — 11.04 AFTER MOVING « Your unit cannot be engaged with one or
+    more enemy units that are not charge targets » : une case à ≤ 1" de la cible mais dans
+    l'ER d'un ennemi NON-cible n'est pas une case où la charge « can end » (le moteur la
+    refuse, `_hex_legal_for_charge`). Vide pour le pile-in / la consolidation (12.03 / 12.08),
+    qui n'ont pas cette restriction.
 
     C'est la question « if possible » de 12.03 / 12.08 (« engaged with it if possible ») et de
     11.04 (« Each model that can end its move within 1" of one or more charge targets must do
@@ -1037,6 +1046,15 @@ def reachable_cell_engaging(
                         state=state, unit_id=unit_id, model_id=model_id, cell=cell,
                         target_id=str(target_id), zone=zone, unit_positions=unit_positions,
                         unit_hp=unit_hp, positions_by_model=positions_by_model,
+                    ):
+                        continue
+                    if any(
+                        model_engaged_with_unit(
+                            state=state, unit_id=unit_id, model_id=model_id, cell=cell,
+                            target_id=str(fid), zone=forbidden_zone, unit_positions=unit_positions,
+                            unit_hp=unit_hp, positions_by_model=positions_by_model,
+                        )
+                        for fid in forbidden_ids
                     ):
                         continue
                     if _bfs_shortest_path_length(
