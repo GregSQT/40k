@@ -39,13 +39,19 @@
 Marines / Orks, décision 2026-07-19), prouvé par une mesure quantitative (win-rate `x1_long`
 contre le panel) et une validation qualitative par un joueur externe.
 
-**Moteur FIGÉ pour la démo — décision utilisateur du 2026-09-16 (soir).** Le moteur de la démo
-est celui de `b2e8e241f` (sol hex du champ de montée, 20:27) ; la lignée de démo (C = P0 neuf,
-puis P2 et suivants) s'entraîne dessus. Règle : tout correctif qui change les parties jouées
-(règle, géométrie, portée, dégâts, OC, masque) est différé après la démo, ou déclenche un `--new`
-assumé de toute la lignée. Bugs sans effet sur le jeu joué (perf, log, front, API) : libres.
-Motif : P0 (moteur du 10), P1 (moteur du 16 à 09:24) et le moteur courant sont trois jeux ;
-un agent de démo doit avoir appris le jeu qu'il jouera
+**Moteur FIGÉ pour la démo — re-gel du 2026-09-18 (cycle 3), décision utilisateur du 2026-09-16 (soir).**
+Le moteur de la démo est celui de `6fe25c341` (main au lancement de P0′, fenêtre moteur du cycle 3
+livrée : fall_back, close-stage P1, action `move_after_shooting`, chaîne d'attaque — suites
+140–148 ; les trois commits après `880a5175b` ne touchent que l'analyzer et des tests, pas le jeu
+joué) ; la lignée de démo (P0′ racine, puis P1′ et suivants) s'entraîne dessus. Précédent gel :
+`b2e8e241f` (sol hex, 16/09 20:27), levé le 17/09 par l'ajout d'une action.
+**Discipline A (isolement des runs, décision du 2026-09-18 matin)** : pendant un run, aucun merge
+`engine/` ou `ai/` dans `main` et aucun JSON de `config/` touché — pas de checkout figé, c'est la
+discipline qui isole (10 commits moteur mergés pendant P1 le 17/09 ont contaminé ses évals bots).
+Règle : tout correctif qui change les parties jouées (règle, géométrie, portée, dégâts, OC, masque)
+est différé après la démo, ou déclenche un `--new` assumé de toute la lignée. Bugs sans effet sur le
+jeu joué (perf, log, front, API) : libres, hors run. Motif : P0 (moteur du 10), P1 (moteur du 16 à
+09:24) et le moteur courant sont trois jeux ; un agent de démo doit avoir appris le jeu qu'il jouera
 ([training.md#rupture-sol-hex-2026-09-16](training.md#rupture-sol-hex-2026-09-16)).
 
 Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels ; le soutien
