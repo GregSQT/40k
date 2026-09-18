@@ -233,18 +233,13 @@ def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int
     # Intercessor sur un board 44×60 : toute mesure bord-à-bord en découlait fausse.
     # Conversion résolue UNE FOIS par unit_type au chargement, empreinte mémoïsée : ce helper
     # est appelé deux fois par ligne de tir et une fois par ennemi vivant sur chaque WAIT.
-    socle = config.unit_socle_by_type.get(unit_type)  # get allowed : cache rempli à la demande
+    from ai.analyzer_perfig import scaled_socle_for_type
+    socle = scaled_socle_for_type(config, unit_type)
     if socle is None:
-        from engine.game_state import _scale_socle
-        from ai.analyzer import _get_inches_to_subhex_for_analyzer
-        data = config.unit_registry.get_unit_data(unit_type)
-        socle = _scale_socle(
-            require_key(data, "BASE_SHAPE"),
-            require_key(data, "BASE_SIZE"),
-            _get_inches_to_subhex_for_analyzer(),
-            f"analyzer_socle/{unit_type}",
+        raise ValueError(
+            f"analyzer_socle/{unit_type} : BASE_SIZE symbolique au registre, empreinte de tir "
+            "irrésoluble pour une unité réellement jouée"
         )
-        config.unit_socle_by_type[unit_type] = socle
     shape, size = socle
     return Socle(shape, size, int(col), int(row), set(_model_footprint(int(col), int(row), (shape, size))))
 
@@ -498,6 +493,13 @@ def handle_shoot(
             state, config, stats, line, action_desc, player, shooter_id, shooter_unit_type,
             weapon_display_name, target_id, _parsed_shooter_models, is_melee=False,
         )
+        # Effets défensifs 05.04 / 24.12 (`ai/analyzer_save.py`) : seuil de sauvegarde de la
+        # figurine allouée (Sv/AP/InSv conférées, Waaagh! 5++) et Feel No Pain, jugés sur les
+        # sources PRÉSENTES au Select Targets step (19.04, dernière clause comprise).
+        from ai.analyzer_save import check_fnp, check_save_threshold
+        _present_models = frozen_target.models.keys() if frozen_target.models is not None else None
+        check_save_threshold(state, config, stats, line, action_desc, target_id, player, _present_models)
+        check_fnp(state, config, stats, line, action_desc, target_id, player, weapon_display_name, _present_models)
         # 08.04 Oath of Moment : quand [OATH OF MOMENT] est dans le segment de blessure, la cible
         # DOIT être l'unité jurée. Erreur si target_id ≠ oath_target pour ce joueur.
         # oath_of_moment est une CAPACITÉ DE FACTION : elle est dans `rule_to_units`, pas dans

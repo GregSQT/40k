@@ -170,6 +170,9 @@ def _game_state(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "reactive_macro_order_current_window": [],
         "reactive_decision_mode": "auto",
         "reactive_decision_payload": {},
+        # Pool de la phase de commandement (`command_build_activation_pool`) : un appel de
+        # capacité de cette phase, une fois répondu, la REPREND (`command_phase_end`).
+        "command_activation_pool": [],
         "move_activation_pool": [],
         "shoot_activation_pool": [],
         "charge_activation_pool": [],

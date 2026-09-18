@@ -145,3 +145,15 @@ def test_les_des_du_failed_sont_controles(tmp_path, monkeypatch):
 def test_journal_anterieur_abstention(tmp_path, monkeypatch):
     stats = _stats(tmp_path, monkeypatch, _jump(2, 1, "MISCAST") + _shoot_phase(3), log_grammar=12)
     assert stats["da_jump_invalid"] == {1: 0, 2: 0}
+
+
+def test_le_wait_d_une_escouade_en_reserves_est_le_refus_de_l_ingress_pas_une_faute(tmp_path, monkeypatch):
+    """« This unit CAN then make an ingress move » : après REPOSITIONED, un WAIT hors table (ancre
+    (-1,-1)) est le refus de l'ingress, et la phase peut se clore sans ingress — 0 faute.
+    ROUGE avant le 2026-09-18 : mesuré sur un journal réel (E5 T3), 2 fautes inventées."""
+    wait = (
+        "[10:00:03] E1 T1 P1 MOVE : Unit 1(-1,-1) WAIT [MODELS: 1#0@(-1,-1,z0) 1#1@(-1,-1,z0) 1#2@(-1,-1,z0)]"
+        " [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _stats(tmp_path, monkeypatch, _jump(2, 4, "REPOSITIONED") + wait + _shoot_phase(4))
+    assert stats["da_jump_invalid"] == {1: 0, 2: 0}, stats["first_error_lines"]["da_jump_invalid"]

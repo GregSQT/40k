@@ -32,8 +32,16 @@ def _cc_cap_for_line(
     n_fighter_models: int,
     shooters: Tuple[str, ...],
     target_models_at_declaration: int,
+    fighter_id: Optional[str] = None,
+    turn: Optional[int] = None,
 ) -> Tuple[int, Optional[str]]:
     """Plafond d'attaques de MÊLÉE de cette ligne — le calcul est mutualisé avec le TIR.
+
+    `fighter_id` / `turn` : depuis la grammaire 14, `[FINEST HOUR]` ne lève le plafond que si
+    l'escouade a une ligne « ABILITY CALL Finest Hour [USED] » CE tour, en phase FIGHT
+    (`state.ability_calls`) — l'appel précède la sélection, le moteur ne pose plus le token de
+    lui-même. Sans appel USED, le plafond n'est PAS levé et la ligne est une erreur de journal
+    (rendue dans le second membre, comme [CLEAVE]) ; journal antérieur : abstention (plafond levé).
 
     Ce site ne porte plus que ce qui est PROPRE à la mêlée : le bonus d'attaques du Waaagh, LU
     dans `T{tour} EFFECTS:` et jamais redeviné (le coder ici ferait vivre une seconde définition
@@ -66,7 +74,13 @@ def _cc_cap_for_line(
     # de figurine, car une escouade hétérogène (leader attaché + troupe) peut mêler des socles
     # avec et sans la règle sur la même ligne. On itère donc sur `shooters` comme per_model_attack_cap
     # et on consulte le type RÉEL de chaque socle (model_types), jamais le type d'escouade.
-    if "[FINEST HOUR]" in action_desc:
+    finest_hour_error: Optional[str] = None
+    if "[FINEST HOUR]" in action_desc and not _finest_hour_call_used(state, fighter_id, turn):
+        finest_hour_error = (
+            f"[FINEST HOUR] sur Unit {fighter_id} sans « ABILITY CALL Finest Hour [USED] » ce tour "
+            "en phase FIGHT — le bonus n'est pas accordé, l'appel précède la sélection (grammaire 14)"
+        )
+    elif "[FINEST HOUR]" in action_desc:
         if shooters:
             for _mid in shooters:
                 _model_type = state.model_types.get(_mid, fighter_unit_type)  # get allowed
@@ -96,7 +110,25 @@ def _cc_cap_for_line(
         weapon_display_name, config.unit_attack_limits, "cleave_by_weapon",
         config.cleave_by_weapon_global, n_fighter_models, target_models_at_declaration,
     )
-    return cap + cleave_dice, cleave_error
+    return cap + cleave_dice, cleave_error if cleave_error is not None else finest_hour_error
+
+
+#: Grammaire à partir de laquelle la ligne « ABILITY CALL Finest Hour [USED] » est GARANTIE
+#: avant tout `[FINEST HOUR]` (chantier capacités-agent, prompt 6).
+FINEST_HOUR_CALL_GRAMMAR = 14
+
+
+def _finest_hour_call_used(state: "AnalyzerState", fighter_id: Optional[str], turn: Optional[int]) -> bool:
+    """`[FINEST HOUR]` est-il couvert par un appel USED de la même escouade, ce tour, en FIGHT ?
+    Journal antérieur à la grammaire 14, ou site appelé sans identité de ligne : abstention."""
+    if state.log_grammar < FINEST_HOUR_CALL_GRAMMAR or fighter_id is None or turn is None:
+        return True
+    return any(
+        call["used"] and call["ability"] == "Finest Hour"
+        and str(call["unit_id"]) == str(fighter_id) and int(call["turn"]) == int(turn)
+        and str(call["phase"]).upper() == "FIGHT" and call["episode"] == state.current_episode_num
+        for call in state.ability_calls
+    )
 
 
 def _note_melee_weapon_rule_usage(
@@ -546,6 +578,11 @@ def handle_fight(
                 state, config, stats, line, action_desc, player, fighter_id, fighter_unit_type,
                 weapon_display_name, target_id, _parsed_shooter_models, is_melee=True,
             )
+            # Effets défensifs 05.04 / 24.12 — JUMEAU du tir (`ai/analyzer_save.py`).
+            from ai.analyzer_save import check_fnp, check_save_threshold
+            _present_models = frozen_target.models.keys() if frozen_target.models is not None else None
+            check_save_threshold(state, config, stats, line, action_desc, target_id, player, _present_models)
+            check_fnp(state, config, stats, line, action_desc, target_id, player, weapon_display_name, _present_models)
             # 08.04 Oath of Moment — JUMEAU du tir : la règle joue aussi en mêlée.
             _oath_carriers = config.rule_to_units.get("oath_of_moment", set())
             if fighter_unit_type in _oath_carriers and wound_bonus_applies(action_desc):
@@ -635,7 +672,7 @@ def handle_fight(
                     cc_nb, _cleave_error = _cc_cap_for_line(
                         state, config, action_desc, attacker_player, fighter_unit_type,
                         weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
-                        frozen_target.models_alive,
+                        frozen_target.models_alive, fighter_id, turn,
                     )
                     if _cleave_error is not None:
                         stats['parse_errors'].append({

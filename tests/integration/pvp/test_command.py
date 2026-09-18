@@ -204,7 +204,9 @@ class TestGrotOrderly:
       1. Démarrage → phase MOVE tour 1 (Waaagh! résolu par drain_to).
       2. 2 Boyz de l'unité 204 détruits directement dans le game_state.
       3. Jeu avancé jusqu'à la phase command du tour 2 (p1).
-      4. La décision returned_models_placement est posée.
+      4. L'APPEL Grot Orderly (`active_rule_choice_prompt`, « you can return ») est servi au
+         siège humain ; `play_nominal` l'accepte (candidat 0), ce qui jette le D3 et pose la
+         décision returned_models_placement.
       5. Chaque option_index disponible la résout et débloque la partie.
 
     Hors couverture (couverts en tests unitaires test_returned_models_placement.py) :
@@ -221,6 +223,9 @@ class TestGrotOrderly:
 
         with app.test_client() as flask_client:
             client = GameClient(flask_client)
+            # L'appel Grot Orderly est ACCEPTÉ par le siège humain (les autres appels — Da Jump —
+            # sont passés) : c'est l'acceptation qui jette le D3 et pose le placement.
+            client.accept_ability_calls = {"return_destroyed_models"}
             # mode_code="pvp" + scenario_file explicite : même chemin d'init que "pvp",
             # toutes unités déjà placées, aucun déploiement requis.
             client.start(mode_code="pvp", scenario_file=_PVP_TEST_SCENARIO)

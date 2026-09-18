@@ -729,16 +729,16 @@ class ObservationBuilder:
         active_unit: Dict[str, Any],
         *,
         hidden_only: bool = False,
-    ) -> Tuple[float, float, float]:
-        """(hidden, gone_to_ground_ready, in_cover) de l escouade — regles 13.09, 13.5, 13.08.
+    ) -> Tuple[float, float]:
+        """(hidden, in_cover) de l escouade — regles 13.09 et 13.08.
 
-        ``hidden_only`` ne rend que **hidden**, les deux autres a 0. C est le mode des entites
+        ``hidden_only`` ne rend que **hidden**, in_cover a 0. C est le mode des entites
         NON actives, pour qui 13.09 est desormais emis (il conditionne ``los_can_see``) alors que
-        13.5 et 13.08 restent propres a l unite observee. Il n existe PAS de second calcul de
+        13.08 reste propre a l unite observee. Il n existe PAS de second calcul de
         13.09 : c est la meme fonction, les memes gardes et la meme geometrie — un chemin
         parallele aurait donne deux jeux de gardes libres de diverger.
 
-        Les trois sont calcules ICI, a l instant de l observation, et non lus sur
+        Les deux sont calcules ICI, a l instant de l observation, et non lus sur
         ``unit['hidden']`` : ce champ est rafraichi au DEBUT de la phase de tir
         (``compute_hidden_statuses``) et a chaque perte de figurine (``destroy_model``, 13.09
         etant un etat continu), mais AUCUN mouvement ne le met a jour — il reste donc perime
@@ -748,14 +748,13 @@ class ObservationBuilder:
         - **hidden (13.09)** : hideable (INFANTRY/BEASTS/SWARM) ET toutes les figurines vivantes
           dans une zone de terrain contenant un terrain **dense** (``area["dense"]``, derive des
           murs types du fichier terrain) ET l unite n a tire ni ce tour ni au tour precedent.
-        - **gone to ground « pret » (13.5)** : hidden ET toutes les figurines vivantes dans une
-          zone de terrain contenant un terrain **Solid** (dense, 13.11). Depuis que 13.09 exige
-          lui-meme une zone dense, cette condition est INCLUSE dans hidden : le drapeau vaut
-          hidden. La derniere condition de 13.5 — « pas entierement visible pour la figurine
-          ATTAQUANTE a cause d un Solid intervenant » — depend du tireur et n a donc PAS de valeur
-          au niveau escouade : elle reste dans le calcul par-paire du moteur
-          (``hidden_enemy_out_of_detection``). Ce drapeau dit « je remplis tout ce qui ne depend
-          pas de l ennemi ».
+        - **gone to ground (13.5)** n a PAS de drapeau propre. Ses conditions cote unite —
+          hidden, dans un terrain Solid (= dense, 13.11), pas de tir ce tour ni au precedent —
+          sont toutes exigees par 13.09 depuis que hidden demande une zone dense : un tel drapeau
+          valait ``hidden`` pour tout etat (information mutuelle nulle, retire le 2026-09-18). La
+          seule condition restante — « pas entierement visible pour la figurine ATTAQUANTE a cause
+          d un Solid intervenant » — depend du tireur : elle est pliee par paire dans
+          ``los_can_see`` via ``hidden_enemy_out_of_detection`` (reduction de 3" de la detection).
         - **in_cover (13.08)** : hideable ET toutes les figurines vivantes dans une zone de
           terrain — c est la premiere des deux conditions alternatives de 13.08, et elle ne
           depend PAS de l attaquant : si elle est remplie par toutes mes figurines, l escouade a
@@ -772,7 +771,7 @@ class ObservationBuilder:
         # (`compute_hidden_statuses`, shooting_handlers) — absence = non hideable. Etre plus
         # strict ici que la source de la regle ferait diverger observation et resolution.
         if not by_model or not bool(active_unit.get("hideable")):  # get allowed (cf. ci-dessus)
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0
         terrain_areas = require_key(game_state, "terrain_areas")
 
         # Volet « n a pas tire ce tour ni au precedent » de 13.09 : deux lectures d ensemble,
@@ -799,7 +798,7 @@ class ObservationBuilder:
             # UNE passe, et seulement si les gardes gratuites laissent hidden possible. La passe
             # « toute zone de terrain » ci-dessous ne sert que `in_cover` et de court-circuit :
             # ici elle serait un second scan pour un drapeau qui n est pas demande.
-            return (1.0 if (may_hide and _all_models_in_dense()) else 0.0), 0.0, 0.0
+            return (1.0 if (may_hide and _all_models_in_dense()) else 0.0), 0.0
 
         in_any_terrain = compute_models_within_terrain(
             entry, by_model, game_state, terrain_areas, None
@@ -811,13 +810,7 @@ class ObservationBuilder:
         # de cette fonction).
         hidden = all_in_terrain and may_hide and _all_models_in_dense()
 
-        # 13.5 condition 1 « within Solid terrain features » : 13.11 donne Solid aux terrains
-        # dense, et 13.09 exige deja que toutes les figurines soient dans une zone dense → la
-        # condition est incluse dans hidden. Plus aucune seconde derivation « zone Solid » a cote
-        # de `area["dense"]`.
-        gtg_ready = hidden
-
-        return (1.0 if hidden else 0.0), (1.0 if gtg_ready else 0.0), (1.0 if all_in_terrain else 0.0)
+        return (1.0 if hidden else 0.0), (1.0 if all_in_terrain else 0.0)
 
     def _squad_objective_control(
         self, game_state: Dict[str, Any], active_player: int
@@ -1732,27 +1725,27 @@ class ObservationBuilder:
             squad_id=squad_id,
         )
 
-        # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ `unit['hidden']` du
+        # État terrain (13.09 / 13.08) recalculé à chaud : le champ `unit['hidden']` du
         # moteur suit les PERTES (choke-point `destroy_model`) mais aucun MOUVEMENT, donc il
         # reste périmé pendant le move — exactement le moment où l'agent décide d'aller se
         # cacher — et après un pile-in ou une consolidation adverses.
         #
-        # `hidden` est émis pour TOUTE entité, les deux autres pour la seule unité active. C'est
+        # `hidden` est émis pour TOUTE entité, `in_cover` pour la seule unité active. C'est
         # 13.09 qui décide de la VISIBILITÉ (« while a model is hidden, it can only be visible to
         # enemy models that are within its detection range ») : sans ce drapeau, `los_can_see`
-        # ci-dessous ne pourrait pas dire ce que l'action de tir fera. 13.5 et 13.08 n'ont pas ce
-        # rôle — pour une entité ENNEMIE, `cover_vs_observer` porte déjà 13.08 EXACT par paire, et
-        # 13.5 n'agit que par la réduction de −3" déjà pliée dans `hidden_enemy_out_of_detection`.
-        # Les émettre en plus coûterait une seconde passe terrain par entité pour une information
-        # soit redondante, soit strictement plus faible.
+        # ci-dessous ne pourrait pas dire ce que l'action de tir fera. 13.08 n'a pas ce rôle —
+        # pour une entité ENNEMIE, `cover_vs_observer` porte déjà 13.08 EXACT par paire ; l'émettre
+        # en plus coûterait une seconde passe terrain par entité pour une information redondante.
+        # 13.5 (gone to ground) n'a AUCUN bit : côté unité il équivaut à `hidden`, et il n'agit
+        # que par la réduction de −3" déjà pliée dans `hidden_enemy_out_of_detection`.
         #
         # §0.40 point 5 : une entité PAS ENCORE POSÉE n'a pas d'état de terrain — ses figurines
         # sont toutes à la sentinelle (-1,-1). Le scan y répondait 0 par accident, la sentinelle
         # tombant hors des polygones ; la garde le rend contractuel et supprime un scan par entité
         # non posée à chaque step de déploiement, comme la même garde le fait pour `los_can_see`.
-        hidden_flag = gtg_flag = cover_flag = 0.0
+        hidden_flag = cover_flag = 0.0
         if entity_deployed:
-            hidden_flag, gtg_flag, cover_flag = self._squad_terrain_flags(
+            hidden_flag, cover_flag = self._squad_terrain_flags(
                 game_state, squad_id, unit, hidden_only=not is_active
             )
         binv[unit_bin_index("hidden")] = hidden_flag
@@ -1887,9 +1880,8 @@ class ObservationBuilder:
                 _b(split_assigned_field(_wslot), True)
 
         if is_active:
-            # 13.5 et 13.08 restent propres à l'unité observée (cf. le calcul plus haut, qui les
-            # a déjà produits dans la même passe que `hidden`).
-            binv[unit_bin_index("gone_to_ground")] = gtg_flag
+            # 13.08 reste propre à l'unité observée (cf. le calcul plus haut, qui l'a déjà
+            # produit dans la même passe que `hidden`).
             binv[unit_bin_index("in_cover")] = cover_flag
             _c("n_fight_eligible", ctx["n_fight_eligible"])
             _c("n_in_enemy_ez", ctx["n_in_enemy_ez"])

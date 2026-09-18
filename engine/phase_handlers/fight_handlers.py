@@ -36,6 +36,14 @@ ExhortationRegime = Literal["gym", "manual"]
 EXHORTATION_REGIME_GYM: ExhortationRegime = "gym"
 EXHORTATION_REGIME_MANUAL: ExhortationRegime = "manual"
 
+#: Finest Hour (`once_per_battle_melee_buff`) à la sélection 12.04 : APPEL DE CAPACITÉ
+#: (`engine/ability_calls`, « Once per battle … when this unit is selected to fight »). La
+#: sélection arme l'appel et suspend le combat sous cette clé — `{squad_id, target_slot, regime}`,
+#: MÊMES régimes de reprise que l'Exhortation — jusqu'à la réponse du siège ; le moteur reprend
+#: le combat par `W40KEngine._resume_fight_after_finest_hour`.
+FIGHT_SELECTION_FINEST_HOUR_KEY = "_pending_finest_hour_fight"
+FINEST_HOUR_EFFECT_ID = "once_per_battle_melee_buff"
+
 
 def exhortation_regime_of(value: Any, site: str) -> ExhortationRegime:
     """Relit un régime depuis `game_state` (`_pending_exhortation_*`, armement) — T1 : une valeur
@@ -1251,8 +1259,12 @@ def melee_attacks_characteristic_bonus(
     (`_manual_roll_fight_intent`) et pour la repartition 04.02 : le total a repartir entre
     plusieurs cibles est la caracteristique A MODIFIEE, sinon le roller ajoutait le bonus a
     chaque part (un choppa A4 reparti 2/2 sous Waaagh! jetait 6 attaques au lieu de 5).
-    Finest Hour (`once_per_battle_melee_buff`) reste au roller : une fois par bataille, posee
-    au premier intent resolu, elle n est pas une caracteristique connue a la declaration.
+    Troisieme source depuis que Finest Hour (`once_per_battle_melee_buff`) est un APPEL repondu
+    a la selection 12.04 (`apply_finest_hour_call`), donc AVANT toute declaration : « this
+    model's melee weapons have +3 A until the end of the phase » est une caracteristique connue
+    a la declaration, lue sur les regles du MODELE porteur et sur `finest_hour_active_this_phase`
+    (posee par l acceptation, purgee a l entree de la phase de combat). Elle entre ainsi dans le
+    total 04.02 comme le Waaagh!, au lieu d etre ajoutee par le roller au premier intent.
     """
     from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
 
@@ -1260,6 +1272,11 @@ def melee_attacks_characteristic_bonus(
     waaagh_atk_args = _unit_get_primitive_b_rule_args(attacker_model, "melee_attacks_bonus_while_waaagh")
     if waaagh_atk_args is not None and bonus > 0:
         bonus += int(require_key(waaagh_atk_args, "attacks_bonus"))
+    finest_hour_args = _unit_get_primitive_b_rule_args(attacker_model, FINEST_HOUR_EFFECT_ID)
+    if finest_hour_args is not None and str(require_key(attacker_unit, "id")) in game_state.get(
+        "finest_hour_active_this_phase", set()  # get allowed : jamais activee (aucune phase de combat ouverte)
+    ):
+        bonus += int(require_key(finest_hour_args, "attacks_bonus"))
     return bonus
 
 
@@ -1603,6 +1620,8 @@ def fight_ensure_v11_state(game_state: Dict[str, Any]) -> None:
         game_state["units_selected_to_fight"] = set()
     if "fight_exhortation_done" not in game_state:
         game_state["fight_exhortation_done"] = set()
+    if "fight_finest_hour_asked" not in game_state:
+        game_state["fight_finest_hour_asked"] = set()
     if "pile_in_done" not in game_state:
         game_state["pile_in_done"] = set()
     if "consolidation_done" not in game_state:
@@ -2073,21 +2092,130 @@ def _fight_v11_arm_selection_exhortation(game_state: Dict[str, Any], uid: str) -
     return True
 
 
+def fight_finest_hour_bearers(game_state: Dict[str, Any], squad_id: str) -> List[str]:
+    """Figurines VIVANTES de l'escouade portant `once_per_battle_melee_buff` (« this model's
+    melee weapons » : la règle est celle du Captain, lue sur la figurine, jamais sur l'union
+    19.04 de l'escouade)."""
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
+
+    models_cache = require_key(game_state, "models_cache")
+    return [
+        mid for mid in require_key(game_state, "squad_models").get(str(squad_id), [])  # get allowed
+        if mid in models_cache
+        and _unit_get_primitive_b_rule_args(models_cache[mid], FINEST_HOUR_EFFECT_ID) is not None
+    ]
+
+
+def fight_finest_hour_available(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Finest Hour peut-elle être APPELÉE par cette escouade ? Porteur vivant et once-per-battle
+    non dépensé (`finest_hour_used`, posé par `apply_finest_hour_call` à l'acceptation)."""
+    squad_id = str(squad_id)
+    if squad_id in game_state.get("finest_hour_used", set()):  # get allowed : jamais dépensé
+        return False
+    return bool(fight_finest_hour_bearers(game_state, squad_id))
+
+
+def fight_arm_finest_hour_call(
+    game_state: Dict[str, Any], squad_id: str, target_slot: Optional[int], regime: ExhortationRegime
+) -> bool:
+    """Sélection 12.04 : POSE l'appel Finest Hour à l'escouade sélectionnée, une fois par phase.
+
+    Datasheet (Captain with Relic Shield) : « Finest Hour (Once per battle): In the Fight phase,
+    when this unit is selected to fight, this model's melee weapons have the following until the
+    end of the phase: +3 A, [DEVASTATING WOUNDS]. » « Once per battle » : c'est un CHOIX du
+    joueur, posé ICI, avant toute déclaration d'attaque, aux trois sièges (`push_ability_call`).
+    Le combat est suspendu sous `FIGHT_SELECTION_FINEST_HOUR_KEY` (régime de reprise) ; une
+    ré-activation du même clic (flux manuel) ne repose pas la question (`fight_finest_hour_asked`).
+    Rend True si l'appel est posé.
+
+    Exhortation of Rage sur la MÊME escouade : deux leaders attachés (19.01 : « each bodyguard
+    unit can only have one leader unit ») — état impossible, donc erreur, jamais un ordre inventé.
+    """
+    from engine.ability_calls import push_ability_call
+
+    squad_id = str(squad_id)
+    if not fight_finest_hour_available(game_state, squad_id):
+        return False
+    asked = game_state.setdefault("fight_finest_hour_asked", set())
+    if squad_id in asked:
+        return False
+    if fight_exhortation_engaged_targets(game_state, require_unit_by_id(game_state, squad_id)):
+        raise ValueError(
+            f"fight_arm_finest_hour_call: l'escouade {squad_id} porte Finest Hour ET Exhortation "
+            "of Rage — deux leaders attachés (19.01), état impossible"
+        )
+    asked.add(squad_id)
+    push_ability_call(game_state, squad_id, FINEST_HOUR_EFFECT_ID, "fight")
+    game_state[FIGHT_SELECTION_FINEST_HOUR_KEY] = {
+        "squad_id": squad_id, "target_slot": target_slot, "regime": regime,
+    }
+    _fight_v11_log(game_state, f"FIGHT unit {squad_id} : appel Finest Hour posé (régime {regime})")
+    return True
+
+
+def apply_finest_hour_call(game_state: Dict[str, Any], squad_id: str, accepted: bool) -> Dict[str, Any]:
+    """Gestionnaire de l'appel (`register_ability_call`) : acceptée, Finest Hour est DÉPENSÉE
+    (`finest_hour_used`) et ACTIVE jusqu'à la fin de la phase (`finest_hour_active_this_phase`)
+    — les deux ensembles que lisent le roller (`_manual_roll_fight_intent`) et le sélecteur
+    d'armes ; refusée, rien n'est consommé. La reprise du combat appartient au moteur."""
+    squad_id = str(squad_id)
+    if accepted:
+        if not fight_finest_hour_available(game_state, squad_id):
+            raise RuntimeError(
+                f"apply_finest_hour_call: Finest Hour de {squad_id} acceptée alors qu'elle n'est "
+                "plus disponible — l'état a changé entre l'appel et sa résolution."
+            )
+        game_state.setdefault("finest_hour_used", set()).add(squad_id)
+        require_key(game_state, "finest_hour_active_this_phase").add(squad_id)
+    return {}
+
+
+def _bot_finest_hour_policy(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Politique DÉCLARÉE du siège bot : accepter si une escouade ennemie ENGAGÉE compte au
+    moins 5 figurines vivantes ou porte le mot-clé CHARACTER — trois attaques de plus à
+    [DEVASTATING WOUNDS] valent contre une masse ou un personnage, pas contre un reliquat."""
+    from engine.phase_handlers.attack_sequence import unit_keywords_upper
+
+    unit = require_unit_by_id(game_state, str(squad_id))
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
+    for target_id in _fight_build_valid_target_pool(game_state, unit):
+        alive = sum(1 for mid in squad_models.get(str(target_id), []) if mid in models_cache)  # get allowed
+        if alive >= 5:
+            return True
+        if "CHARACTER" in unit_keywords_upper(require_unit_by_id(game_state, str(target_id))):
+            return True
+    return False
+
+
+def _register_finest_hour() -> None:
+    from engine.ability_calls import ABILITY_CALL_HANDLERS, register_ability_call
+
+    if FINEST_HOUR_EFFECT_ID not in ABILITY_CALL_HANDLERS:
+        register_ability_call(
+            FINEST_HOUR_EFFECT_ID, handler=apply_finest_hour_call, bot_policy=_bot_finest_hour_policy
+        )
+
+
+_register_finest_hour()
+
+
 def _fight_v11_activation_locked(
     game_state: Dict[str, Any], active: Optional[str], uid: str
 ) -> bool:
-    """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation, OU qui a commité
-    son pile-in additionnel d'overrun (12.06, « one additional pile-in move, then fights »), EST
-    sélectionnée (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre
-    unité (`uid`) tant qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans
-    ce verrou, le dé serait joué ou le move fait, puis l'ordre des combats réarrangé, ce que la
-    règle interdit."""
+    """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation, dont l'appel Finest
+    Hour a été posé, OU qui a commité son pile-in additionnel d'overrun (12.06, « one additional
+    pile-in move, then fights »), EST sélectionnée (12.04, « selected to fight ») — le joueur ne
+    peut plus lui préférer une autre unité (`uid`) tant qu'elle n'a pas combattu (validate /
+    clic-cible / passe sans cible). Sans ce verrou, le dé serait joué, la capacité répondue ou
+    le move fait, puis l'ordre des combats réarrangé, ce que la règle interdit."""
     if active is None or uid == active:
         return False
     if active in require_key(game_state, "units_selected_to_fight"):
         return False
     return (
         active in require_key(game_state, "fight_exhortation_done")
+        or active in require_key(game_state, "fight_finest_hour_asked")
         or active in require_key(game_state, OVERRUN_PILE_IN_DONE_KEY)
     )
 
@@ -2112,6 +2240,11 @@ def _fight_v11_manual_activate(
     game_state["active_fight_unit"] = uid
     _fight_v11_log(game_state, f"{site} unit {uid} ACTIVÉE par le joueur")
     if _fight_v11_arm_selection_exhortation(game_state, uid):
+        return True, {"action": "fight_selection", "phase": "fight", "unitId": uid,
+                      "fight_subphase": "fight", "waiting_for_player": True}
+    # Finest Hour : même moment (« when this unit is selected to fight »), même stub — le moteur
+    # sert l'appel au siège (`_process_fight_phase`) et reprend le combat à la réponse.
+    if fight_arm_finest_hour_call(game_state, uid, None, EXHORTATION_REGIME_MANUAL):
         return True, {"action": "fight_selection", "phase": "fight", "unitId": uid,
                       "fight_subphase": "fight", "waiting_for_player": True}
     return _fight_v11_manual_state(game_state)
@@ -2234,6 +2367,8 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state["units_selected_to_fight"] = set()
     # Unités dont l'Exhortation of Rage a DÉJÀ été jouée cette phase (une fois par sélection).
     game_state["fight_exhortation_done"] = set()
+    # Unités à qui l'appel Finest Hour a DÉJÀ été posé cette phase (une fois par sélection).
+    game_state["fight_finest_hour_asked"] = set()
     game_state["pile_in_done"] = set()
     game_state["consolidation_done"] = set()
     game_state[OVERRUN_PILE_IN_DONE_KEY] = set()
@@ -5202,24 +5337,15 @@ def _manual_roll_fight_intent(
     if not intent.get("attacks_bonus_included", False):  # get allowed : absent = intent entier
         n_attacks += melee_attacks_characteristic_bonus(game_state, attacker, attacker_unit)
     from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
-    # once_per_battle_melee_buff : +N A + [DEVASTATING WOUNDS] jusqu a fin de phase (Finest Hour).
-    # Le flag finest_hour_used est pose ICI, lu dans build_weapon_attack_profile via finest_hour_active.
-    _finest_hour_args = _unit_get_primitive_b_rule_args(
-        attacker, "once_per_battle_melee_buff"
+    # once_per_battle_melee_buff (Finest Hour) : le +N A est DEJA dans la caracteristique
+    # (`melee_attacks_characteristic_bonus`, connu a la declaration depuis que l appel est
+    # repondu a la selection 12.04). Reste ici [DEVASTATING WOUNDS] : le roller ne DECIDE plus
+    # rien, seule `finest_hour_active_this_phase` fait foi — sur la figurine porteuse (« this
+    # model's melee weapons »), jamais sur ses soeurs.
+    _finest_hour_active = (
+        _unit_get_primitive_b_rule_args(attacker, FINEST_HOUR_EFFECT_ID) is not None
+        and str(require_key(attacker_unit, "id")) in game_state["finest_hour_active_this_phase"]
     )
-    _finest_hour_active = False
-    if _finest_hour_args is not None:
-        _squad_id_fh = str(require_key(attacker_unit, "id"))
-        _finest_hour_used = game_state.setdefault("finest_hour_used", set())
-        _finest_hour_this_phase = game_state["finest_hour_active_this_phase"]
-        if _squad_id_fh not in _finest_hour_used:
-            n_attacks += int(require_key(_finest_hour_args, "attacks_bonus"))
-            _finest_hour_used.add(_squad_id_fh)
-            _finest_hour_this_phase.add(_squad_id_fh)
-            _finest_hour_active = True
-        else:
-            # DEVASTATING WOUNDS actif seulement si l'abilité a été déclenchée dans cette phase.
-            _finest_hour_active = _squad_id_fh in _finest_hour_this_phase
     _base_wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     wth = _base_wth
     # Oath of Moment : MEME helper que le tir (modelisation par abaissement du seuil, plancher

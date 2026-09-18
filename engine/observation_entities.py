@@ -263,9 +263,9 @@ class OncePerBattleSpent(NamedTuple):
     """Où lire, dans `game_state`, qu'un effet 1×/partie n'est PLUS EN VIGUEUR.
 
     `spent_key` porte les escouades qui l'ont dépensé. `still_in_effect_key` est l'exception :
-    une capacité peut être dépensée ET continuer d'agir — Finest Hour consomme son usage à la
-    première activation, mais accorde [DEVASTATING WOUNDS] jusqu'à la fin de cette phase de
-    combat. Le prédicat du moteur (`shared_utils`, `attack_sequence`) est donc à DEUX ensembles,
+    une capacité peut être dépensée ET continuer d'agir — Finest Hour consomme son usage à
+    l'acceptation de son appel (sélection 12.04), mais accorde [DEVASTATING WOUNDS] jusqu'à la
+    fin de cette phase de combat. Le prédicat du moteur (`shared_utils`, `attack_sequence`) est donc à DEUX ensembles,
     et l'observation ne peut pas n'en lire qu'un sans mentir pendant toute une phase.
 
     `still_in_effect_phase` est obligatoire dès qu'il y a une seconde clé, et n'est pas une
@@ -361,7 +361,6 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # après un pile-in adverse ; l'observation le recalcule à chaud (`_squad_terrain_flags`,
     # mode `hidden_only`).
     "hidden",
-    "gone_to_ground",      # ⚠ unité ACTIVE uniquement (13.5)
     "in_cover",            # ⚠ unité ACTIVE uniquement (13.08)
     "deploy_not_on_board",  # one-hot mise en place (source `deployed_on_turn`)
     "deploy_pre_battle",

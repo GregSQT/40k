@@ -10,8 +10,12 @@ Grammaire 13 : la ligne « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] ».
   - la ligne est en phase MOVE ;
   - REPOSITIONED ⇔ D6 ≥ 2, MISCAST ⇔ D6 = 1 ;
   - après REPOSITIONED, l'escouade est HORS TABLE jusqu'à sa ligne d'ingress (DEPLOYED en phase
-    MOVE) du MÊME tour : toute action de l'escouade entre les deux, ou aucun ingress avant la fin
-    de la phase, est une faute ; à l'ingress, chaque socle du `[MODELS:]` est à PLUS de 8"
+    MOVE) du MÊME tour : toute action DE JEU de l'escouade entre les deux est une faute — un
+    `WAIT` n'en est pas une, c'est le refus de l'ingress (« This unit CAN then make an ingress
+    move ») ; sans ingress avant la fin de la phase, l'escouade reste en réserves et Deep Strike
+    s'éteint (« until the end of the phase »), l'attente est simplement close (mesuré le
+    2026-09-18 sur un journal réel : la politique aléatoire passe l'ingress une fois sur trois,
+    ce n'est pas une faute) ; à l'ingress, chaque socle du `[MODELS:]` est à PLUS de 8"
     (`inches_to_subhex`) de tout socle ennemi vivant — métrique hex (le run à x1 est hex ; en
     euclidien le contrôle s'abstient, la clearance moteur y est bord de socle, non reconstructible
     depuis l'ancre) ; la zone adverse est permise et le round 1 aussi (l'exemption de
@@ -94,9 +98,15 @@ def _settle_pending(state: Any, stats: Dict[str, Any], line: str, player: int, *
 
 
 def on_phase_change(state: Any, stats: Dict[str, Any], line: str, new_phase: str, player: int) -> None:
-    """Fin de la phase de mouvement : une attente encore ouverte est une faute."""
-    if state.da_jump_pending is not None and new_phase != "MOVE":
-        _settle_pending(state, stats, line, int(player), reason=f"la phase {new_phase} a commencé")
+    """Fin de la phase de mouvement : une attente MISCAST (SUFFERS) encore ouverte est une faute ;
+    une attente d'ingress est close sans faute — l'ingress est un droit, pas une obligation."""
+    pending = state.da_jump_pending
+    if pending is None or new_phase == "MOVE":
+        return
+    if pending["kind"] == "ingress":
+        state.da_jump_pending = None
+        return
+    _settle_pending(state, stats, line, int(player), reason=f"la phase {new_phase} a commencé")
 
 
 def unit_repositioned_this_turn(state: Any, unit_id: str, turn: int) -> bool:
@@ -108,12 +118,20 @@ def unit_repositioned_this_turn(state: Any, unit_id: str, turn: int) -> bool:
     )
 
 
+#: Lignes qui ne sont PAS des actions sur la table : le `WAIT` d'une escouade en réserves est
+#: son refus d'ingress, un appel de capacité ou une décision relevée n'y déplacent rien.
+_OFF_TABLE_ALLOWED_RE = re.compile(r"\bWAIT\b|ABILITY CALL|DECISION \[")
+
+
 def check_unit_action_while_off_table(
-    state: Any, stats: Dict[str, Any], line: str, unit_id: str, player: int
+    state: Any, stats: Dict[str, Any], line: str, unit_id: str, player: int, action_desc: str = ""
 ) -> None:
-    """Une escouade repositionnée n'agit pas avant son ingress (elle est hors table)."""
+    """Une escouade repositionnée n'agit pas sur la table avant son ingress (elle est hors
+    table). `WAIT` (refus de l'ingress), appels de capacité et décisions ne sont pas des actions."""
     pending = state.da_jump_pending
     if pending is None or pending["kind"] != "ingress" or pending["unit_id"] != str(unit_id):
+        return
+    if _OFF_TABLE_ALLOWED_RE.search(action_desc):
         return
     _error(state, stats, int(player), line,
            f"Unit {unit_id} agit alors qu'elle est en réserves après Da Jump (avant son ingress)")

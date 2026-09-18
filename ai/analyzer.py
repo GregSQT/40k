@@ -1689,7 +1689,18 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         ),
         # §2.3 — même motif que les buckets ci-dessus : cette somme vivait elle aussi en deux
         # exemplaires. Ils ne divergeaient pas encore ; c'est la structure qui les y menait.
-        'damage': _pair('damage_missing_unit_hp'),
+        'damage': (
+            _pair('damage_missing_unit_hp')
+            # 05.04 / 24.12 : seuil de sauvegarde et Feel No Pain de la figurine allouée
+            # (ai/analyzer_save.py), tir, mêlée et blessures mortelles — un compteur chacun.
+            + _pair('save_threshold_mismatch')
+            + _pair('fnp_threshold_mismatch')
+            # 14.02 / 14.03 / REVIVED (ai/analyzer_objectives.py) : contrôle d'objectif resommé
+            # par zone, sécurisation, restitution Grot Orderly.
+            + _pair('objective_control_mismatch')
+            + _pair('objective_secured_invalid')
+            + _pair('returned_models_invalid')
+        ),
         # ── §1.5 à §2.7 : les buckets qui manquaient au TOTAL alors que le SUMMARY les
         # affichait en ❌. Sans eux, un run pouvait imprimer « ❌ 1.6 Double-activation par
         # phase : 1 » PUIS « ✅ 0 erreur détectée » — deux verdicts contradictoires dans le même
@@ -2108,6 +2119,13 @@ def parse_step_log(filepath: str) -> Dict:
             'charge': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0}
         },
         'damage_missing_unit_hp': {1: 0, 2: 0},
+        # Effets défensifs (ai/analyzer_save.py) : seuil de sauvegarde 05.04 et Feel No Pain 24.12.
+        'save_threshold_mismatch': {1: 0, 2: 0},
+        'fnp_threshold_mismatch': {1: 0, 2: 0},
+        # Objectifs et restitution (ai/analyzer_objectives.py) : 14.02 resommé, 14.03, REVIVED.
+        'objective_control_mismatch': {1: 0, 2: 0},
+        'objective_secured_invalid': {1: 0, 2: 0},
+        'returned_models_invalid': {1: 0, 2: 0},
         'unit_revived': {1: 0, 2: 0},
         'shoot_invalid': {
             # 'no_los' RETIRE (2026-07-16) : cf. shoot_handler.py — LoS ancre-a-ancre contraire
@@ -2264,6 +2282,11 @@ def parse_step_log(filepath: str) -> Dict:
             'double_activation_reactive_move': None,
             'advance_after_shoot': {1: None, 2: None},
             'damage_missing_unit_hp': {1: None, 2: None},
+            'save_threshold_mismatch': {1: None, 2: None},
+            'fnp_threshold_mismatch': {1: None, 2: None},
+            'objective_control_mismatch': {1: None, 2: None},
+            'objective_secured_invalid': {1: None, 2: None},
+            'returned_models_invalid': {1: None, 2: None},
             'unit_revived': {1: None, 2: None},
             'fled_action': {1: None, 2: None},
             'shoot_invalid': {
@@ -2704,6 +2727,29 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 
     def _fmt_count(value: int) -> str:
         return f"{value:6d}"
+
+    def _counter_row(label: str, key: str) -> None:
+        """Une ligne de compteur `{1: n, 2: n}` + sa première occurrence par camp (avec `detail`
+        quand l'émetteur en écrit un). Sert aux compteurs des chantiers 2026-09-18 — suppression,
+        Da Jump, réserves, effets défensifs — qui entraient dans les totaux sans ligne de rapport."""
+        counts = require_key(stats, key)
+        _table_row(label, _fmt_count(counts[1]), _fmt_count(counts[2]))
+        for _p in (1, 2):
+            _first = stats['first_error_lines'][key][_p]
+            if counts[_p] > 0 and _first:
+                log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
+                if _first.get('detail'):  # get allowed : tous les émetteurs n'écrivent pas de détail
+                    log_print(f"    {_first['detail']}")
+
+    def _nested_counter_row(label: str, key: str, sub: str) -> None:
+        """`_counter_row` pour un compteur à deux niveaux `{sous-clé: {1: n, 2: n}}`
+        (`alloc_character_over_bodyguard`, un bucket par phase)."""
+        counts = require_key(require_key(stats, key), sub)
+        _table_row(label, _fmt_count(counts[1]), _fmt_count(counts[2]))
+        for _p in (1, 2):
+            _first = stats['first_error_lines'][key][sub][_p]
+            if counts[_p] > 0 and _first:
+                log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
 
     def _wound_threshold_rows(stats: Dict[str, Any], key: str, label: str) -> None:
         """Deux lignes pour le contrôle du seuil de blessure : les écarts, et les lignes non jugées.
@@ -3597,6 +3643,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _table_row("  dont figurines retirees (End of Turn):", _fmt_count(_coh_rm[1]), _fmt_count(_coh_rm[2]))
     _res_tm = require_key(stats, 'reserves_timeout_destroyed')
     _table_row("  dont escouades detruites reserves (20.04):", _fmt_count(_res_tm[1]), _fmt_count(_res_tm[2]))
+    _counter_row("Ingress avant le round 2 (20.03):", 'reserves_too_early')
+    _counter_row("Da Jump invalide (WeirdBoy):", 'da_jump_invalid')
+    _nested_counter_row("CHARACTER alloue avant bodyguard (06.02):", 'alloc_character_over_bodyguard', 'move')
     # SHOOTING ERRORS
     _switch_section("1.2")
     log_print("\n" + "-" * 80)
@@ -3793,6 +3842,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             )
             if _first_any:
                 log_print(f"  First P{_pl} occurrence (Episode {_first_any['episode']}): {_first_any['line']}")
+    _counter_row("Suppression sans touche / malus (Prim. F):", 'suppression_without_hit')
+    _nested_counter_row("CHARACTER alloue avant bodyguard (05.03):", 'alloc_character_over_bodyguard', 'shooting')
     # CHARGE ERRORS
     _switch_section("1.3")
     log_print("\n" + "-" * 80)
@@ -3845,6 +3896,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if stats['first_error_lines']['charge_invalid'][2]:
         first_err = stats['first_error_lines']['charge_invalid'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _nested_counter_row("CHARACTER alloue avant bodyguard (06.02):", 'alloc_character_over_bodyguard', 'charge')
     # FIGHT ERRORS
     _switch_section("1.4")
     log_print("\n" + "-" * 80)
@@ -3910,6 +3962,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             _fe = stats['first_error_lines'][_key][_pl]
             if _c[_pl] > 0 and _fe:
                 log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
+    _nested_counter_row("CHARACTER alloue avant bodyguard (05.03):", 'alloc_character_over_bodyguard', 'fight')
     # ACTION PHASE ACCURACY
     _switch_section("1.5")
     log_print("\n" + "-" * 80)
@@ -4293,6 +4346,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     dmg_missing_p1 = stats['damage_missing_unit_hp'][1]
     dmg_missing_p2 = stats['damage_missing_unit_hp'][2]
     log_print(f"Missing unit_hp on damage:   {dmg_missing_p1:6d}           {dmg_missing_p2:6d}")
+    _counter_row("Seuil de sauvegarde (05.04):", 'save_threshold_mismatch')
+    _counter_row("Feel No Pain (24.12):", 'fnp_threshold_mismatch')
+    _counter_row("Controle d'objectif resomme (14.02):", 'objective_control_mismatch')
+    _counter_row("Objectif securise (14.03):", 'objective_secured_invalid')
+    _counter_row("Figurines rendues (REVIVED):", 'returned_models_invalid')
     # EPISODES STATISTICS
     _switch_section("2.4")
     log_print("\n" + "-" * 80)

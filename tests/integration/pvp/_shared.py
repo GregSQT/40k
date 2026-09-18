@@ -57,6 +57,11 @@ class GameClient:
         self._check = check
         self.state: Dict[str, Any] = {}
         self.start_state: Dict[str, Any] = {}
+        # Appels de capacité (`rule_id`) que `play_nominal` ACCEPTE ; tout autre prompt de
+        # choix est passé (dernier candidat = « Passer », ordre contractuel §9.6) — l'action
+        # nominale fait avancer la partie sans rien tenter d'autre, un Da Jump accepté
+        # enverrait l'escouade en réserves au milieu d'un test qui ne le demande pas.
+        self.accept_ability_calls: set = set()
 
     # -- transport --------------------------------------------------------- #
 
@@ -172,6 +177,17 @@ class GameClient:
         decision = self.state.get("pending_agent_decision")
         if decision is not None and decision["player"] == self.current_player:
             return "agent_decision", {"option_index": 0}
+        # Appel de capacité ou choix de règle servi au siège humain (`active_rule_choice_prompt`,
+        # ce que lit le front) : candidat 0 = activer, dernier = passer (ordre contractuel
+        # §9.6). Accepté seulement si le test l'a demandé (`accept_ability_calls`).
+        prompt = self.state.get("active_rule_choice_prompt")
+        if prompt is not None and int(prompt["player"]) == self.current_player:
+            options = prompt["options"]
+            chosen = options[0] if prompt.get("rule_id") in self.accept_ability_calls else options[-1]
+            return "select_rule_choice", {
+                "unitId": prompt["unit_id"],
+                "selectedRuleId": chosen["display_rule_id"],
+            }
         return None
 
     def pending_ability_call(self) -> Optional[Tuple[str, Dict[str, Any]]]:

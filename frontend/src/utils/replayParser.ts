@@ -563,7 +563,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const zonesStr = objectiveControlMatch[6];
       if (zonesStr.length > 0) {
         for (const zone of zonesStr.split("|")) {
-          const zoneMatch = zone.match(/^(.+):Ctrl=(none|1|2)$/);
+          // Champs OPTIONNELS apres `Ctrl=` : `:Mthd=<m>:OC1=<n>:OC2=<n>` (L18, 2026-08-19) et
+          // `:Sec=<1|2|none>` (grammaire 15, 2026-09-18). Le replay ne lit que le controleur ;
+          // l'ancrage `$` juste apres `Ctrl=` rejetait TOUT journal depuis L18 (« Malformed
+          // OBJECTIVE CONTROL zone ») — mesure sur un step.log reel du 2026-09-18.
+          const zoneMatch = zone.match(/^(.+?):Ctrl=(none|1|2)(?::[A-Za-z0-9]+=[^:|]*)*$/);
           if (!zoneMatch) {
             throw new Error(`Malformed OBJECTIVE CONTROL zone in step.log: "${zone}"`);
           }

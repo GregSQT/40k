@@ -1119,6 +1119,81 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.2.3.save_threshold",
+      "section": "2.3",
+      "label": "Seuil de sauvegarde de la figurine allouée (05.04) — Sv/AP, InSv de datasheet, InSv conférée 19.04, Waaagh! 5++",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "save_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 7) : `Save R(<base>+ AP<n> → <eff>+)` recalculé par ai/analyzer_save.check_save_threshold — attendu = save_threshold du moteur (min(Sv − AP, InSv)), InSv effective = meilleure entre datasheet de la figurine allouée, invul_save_override des sources PRÉSENTES au Select Targets step (Waaagh! Banner 5+, Mental Fortress 4+) et waaagh_invul lu dans `T{tour} EFFECTS:` quand le Waaagh! est actif pour le camp défenseur. Abstention : segment sans base/AP, figurine ou datasheet inconnue, Sv symbolique, Waaagh! actif sans clé waaagh_invul (journal antérieur)."
+    },
+    {
+      "id": "PROJ.2.3.objective_control",
+      "section": "2.3",
+      "label": "Contrôle d'objectif resommé par zone (14.02) — OC de datasheet par socle dans l'aire, Relic Banner (+1 OC par figurine, 19.04), battle-shock (01.07/08.03), contrôleur (égalité, sécurisé)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "objective_control_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 8) : à chaque instantané `T{tour} OBJECTIVE CONTROL: … ZONES=`, ai/analyzer_objectives.expected_oc_sums resomme l'OC des deux camps par zone depuis les socles vivants (empreinte réelle ∩ aire), + oc_bonus par figurine si un porteur vivant le confère, 0 si l'escouade est battle-shocked ; écart avec OC1=/OC2= → faute ; contrôleur attendu = miroir de `_resolve_objective_controller` (plus haut niveau, égalité = personne sauf sécurisé, perdu seulement sur strictement plus). Abstention : escouade vivante sans socles connus, OC symbolique, instantané sans OC1=/OC2= (journal antérieur à L18)."
+    },
+    {
+      "id": "PROJ.2.3.objective_secured",
+      "section": "2.3",
+      "label": "Objectif sécurisé (14.03) — Get da Good Bitz / Objective Secured : apparition, maintien, perte",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "objective_secured_invalid"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 8), grammaire 15 : `Sec=<p>` d'un instantané ne peut apparaître qu'après une ligne « Unit N(c,r) SECURES <zone> [<capacité>] » de <p> (phase COMMAND de <p>, escouade vivante avec un socle dans l'aire, porteuse de secure_objective_on_control — 19.04 par note_special_rule_usage) et le contrôle revient à <p> ; une perte de `Sec=` sans niveau adverse strictement supérieur, ou un contrôleur ≠ <p> sur un objectif que <p> sécurise sans niveau strictement supérieur, est une faute. Journal < 15 : abstention."
+    },
+    {
+      "id": "PROJ.2.3.returned_models",
+      "section": "2.3",
+      "label": "Figurines rendues (REVIVED, Grot Orderly) — k ≤ D3, k ≤ mortes rendables, once per battle, phase COMMAND du propriétaire, types morts, aucun leader/support",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "returned_models_invalid"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 8) : ai/analyzer_objectives.check_returned_models sur chaque ligne RETURNED (grammaire 10) — les figurines réellement mortes viennent de `dead_model_ids_episode` (DEAD / [MODELS:]), leurs types de `[MODEL_TYPES:]` ; un leader/support rendu (« bodyguard models ») est une faute."
+    },
+    {
+      "id": "PROJ.2.3.fnp",
+      "section": "2.3",
+      "label": "Feel No Pain 24.12 — seuil, présence, compte (tir, mêlée, blessures mortelles)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fnp_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 7) : `[FNP:s/t+ ×n]` jugé par ai/analyzer_save.check_fnp — seuil attendu = meilleur seuil (24.02) porté par une source PRÉSENTE au Select Targets step (Dok's Toolz 5+ ; Psychic Hood 4+ si l'arme est [PSYCHIC] ou la source Da Jump ; Unbreakable Resolve 4+ si la FIGURINE allouée est l'Ancient dans une aire d'objectif 14.02 ou à 6\" du centre). Aucune source → tout [FNP:] est une faute ; source présente et Dmg>0 sans [FNP:] → faute ; Dmg ≠ n − s → faute. Miroir SUFFERS ([FNP:n] sans seuil) : présence sans source seulement. Abstention à x5 sur la clause positionnelle (le socle déborde de son ancre)."
+    },
+    {
       "id": "PROJ.2.8.fantome",
       "section": "2.8",
       "label": "État reconstruit — unité morte non vue par l'analyzer",
@@ -1227,8 +1302,8 @@
         "rule_id": "feel_no_pain"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : FNP générique (Dok's Toolz 5+), FNP vs PSYCHIC (Psychic Hood 4+), FNP near objective (Unbreakable Resolve 4+) câblés dans shared_utils._collect_fnp_thresholds / _collect_fnp_thresholds_mortal. Jets journalisés dans step.log (fnpSaves, fnpThreshold, fnp_saves_mortal)."
+      "status": "COUVERT",
+      "status_note": "Via 24.12 (fnp_threshold_mismatch, PROJ.2.3.fnp), aucun compteur propre — même forme que PROJ.1.4.hit_roll_bonus_fight. Passe 3/6 : FNP générique (Dok's Toolz 5+) câblé dans shared_utils._collect_fnp_thresholds ; seuil attendu 5+ tant qu'un PainBoy est présent (19.04)."
     },
     {
       "id": "PROJ.1.9.feel_no_pain_vs_psychic",
@@ -1239,8 +1314,8 @@
         "rule_id": "feel_no_pain_vs_psychic"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : activé seulement si l'arme ou la source porte le mot-clé PSYCHIC (weapon_has_rule). Porté par Librarian. Hookable pour les blessures mortelles de Da Jump (is_psychic=True) en passe D."
+      "status": "COUVERT",
+      "status_note": "Via 24.12 (fnp_threshold_mismatch, PROJ.2.3.fnp), aucun compteur propre. Activé seulement si l'arme porte [PSYCHIC] ou si la source de blessures mortelles est Da Jump (is_psychic=True). Porté par Librarian."
     },
     {
       "id": "PROJ.1.9.feel_no_pain_near_objective",
@@ -1251,8 +1326,8 @@
         "rule_id": "feel_no_pain_near_objective"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 3/6 : activé si le socle de la FIGURINE recouvre l'aire d'un objectif (14.02, _model_is_near_objective_or_center) OU est à ≤6\" du centre (inches_to_subhex). Porté par Ancient."
+      "status": "COUVERT",
+      "status_note": "Via 24.12 (fnp_threshold_mismatch, PROJ.2.3.fnp), aucun compteur propre. Activé si le socle de la FIGURINE allouée (Ancient) recouvre l'aire d'un objectif (14.02) OU est à ≤6\" du centre ; l'analyzer s'abstient sur cette clause à x5 (socle plus grand que son ancre)."
     },
     {
       "id": "01.01",
@@ -2854,8 +2929,11 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Jet FNP et seuil absents du journal."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.2.3.fnp"
+      ],
+      "status_note": "2026-09-18 : `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` (attaques) et `[FNP:<sauvés>]` (blessures mortelles) sont journalisés depuis la passe 3 ; le seuil, la présence et le compte sont contrôlés par fnp_threshold_mismatch (PROJ.2.3.fnp). La note « jet FNP et seuil absents du journal » était périmée."
     },
     {
       "id": "24.13",
@@ -3806,8 +3884,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "PARTIEL",
-      "status_note": "§1.7 + waaagh_melee_atk dans le plafond de mêlée + waaagh_melee_str dans le seuil de blessure. waaagh_invul (5++) journalisé sans alimenter aucun contrôle."
+      "status": "COUVERT",
+      "status_note": "§1.7 + waaagh_melee_atk dans le plafond de mêlée + waaagh_melee_str dans le seuil de blessure + waaagh_invul (5++) dans le seuil de sauvegarde (PROJ.2.3.save_threshold, lu dans `T{tour} EFFECTS:` depuis le 2026-09-18) — un 5++ sans Waaagh! actif est une faute."
     },
     {
       "id": "unit.deep_strike",
@@ -4038,7 +4116,7 @@
       },
       "controls": [],
       "status": "COUVERT",
-      "status_note": "Implémenté dans _manual_roll_fight_intent (flag finest_hour_used) et build_weapon_attack_profile (finest_hour_active). Testé dans test_primitive_b_granted_weapon_effects."
+      "status_note": "Refondu le 2026-09-18 (capacités-agent, prompt 6) : « Once per battle … when this unit is selected to fight » = APPEL DE CAPACITÉ posé à la sélection 12.04 (fight_handlers.fight_arm_finest_hour_call, deux sites : squad_fight gym/bot et _fight_v11_manual_activate humain), répondu par CHOICE_0/1, la politique bot _bot_finest_hour_policy ou select_rule_choice ; acceptation = finest_hour_used + finest_hour_active_this_phase (apply_finest_hour_call), refus = rien consommé. Le +N A entre dans melee_attacks_characteristic_bonus (connu à la déclaration, réparti 04.02), DEVASTATING WOUNDS lu sur finest_hour_active_this_phase seulement. Journal : ABILITY CALL Finest Hour [USED|DECLINED] puis [FINEST HOUR] sur chaque attaque ; grammaire 14 : l'analyzer ne lève le plafond qu'après USED (fight_handler._finest_hour_call_used). Tests : test_finest_hour_call.py, test_primitive_b_granted_weapon_effects, test_squad_fight_declaration (04.02), test_analyzer_finest_hour_call."
     },
     {
       "id": "unit.secure_objective_on_control",
@@ -4050,8 +4128,11 @@
         "rule_id": "secure_objective_on_control"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Get da Good Bitz (Boyz) / Objective Secured (Intercessor) : en fin de phase de commandement, les objectifs contrôlés par l'unité sont sécurisés (secured_objectives). Passe 5 chantier 06."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.2.3.objective_secured (objective_secured_invalid, grammaire 15) : la ligne SECURES et le champ Sec= des instantanés — Get da Good Bitz (Boyz) / Objective Secured (Intercessor), 14.03. Usage §1.7 relevé sur la ligne SECURES (19.04).",
+      "co_verified_by": [
+        "PROJ.2.3.objective_secured"
+      ]
     },
     {
       "id": "unit.oc_bonus",
@@ -4063,8 +4144,11 @@
         "rule_id": "oc_bonus"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Relic Banner (Ancient) : +1 OC par figurine de l'unité via unit_effective_oc dans objective_control_contributions. Passe 5 chantier 06."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.2.3.objective_control (objective_control_mismatch) : +oc_bonus à CHAQUE figurine de l'escouade tant qu'un porteur vit (Relic Banner, Ancient), dans l'OC resommé par zone à chaque instantané.",
+      "co_verified_by": [
+        "PROJ.2.3.objective_control"
+      ]
     },
     {
       "id": "unit.invul_save_override",
@@ -4076,8 +4160,8 @@
         "rule_id": "invul_save_override"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : confère une InSv value+ à TOUTE l'unité via 19.04 (effective_invul_save). Porté par BannerNob (5+) et LibrarianTerminator (4+)."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.2.3.save_threshold (save_threshold_mismatch) : InSv value+ conférée à TOUTE l'escouade tant que le porteur est PRÉSENT (19.04, effective_invul_save) — Waaagh! Banner (BannerNob 5+), Mental Fortress (Librarian / LibrarianTerminator 4+). Un 5++ sur des Boyz après la mort du BannerNob est une faute."
     },
     {
       "id": "unit.toughness_bonus_while_waaagh",
@@ -4089,8 +4173,8 @@
         "rule_id": "toughness_bonus_while_waaagh"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : +1 T à l'unité cible pendant que le Waaagh! est actif, via _target_highest_bodyguard_toughness (point unique tir+mêlée). Porté par BannerNob."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.1.4.blessure / PROJ.1.2.blessure (fight/shoot_wound_threshold_mismatch) : ai/analyzer_wound.target_bodyguard_toughness ajoute toughness_bonus_waaagh_by_type à l'E cible quand le Waaagh! est actif pour le camp cible (test_analyzer_waaagh_toughness.py). Passe 6 chantier 06 (Primitive F) : +1 T via _target_highest_bodyguard_toughness (point unique tir+mêlée). Porté par BannerNob."
     },
     {
       "id": "unit.suppress_target_on_shooting",
@@ -4128,8 +4212,11 @@
         "rule_id": "return_destroyed_models"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : 1×/partie, au début de la phase de commandement, D3 figurines détruites de l'unité sont restaurées (command_handlers._apply_return_destroyed_models). Porté par PainBoy (Grot Orderly)."
+      "status": "COUVERT",
+      "status_note": "Passe 6 chantier 06, refondu le 2026-09-18 (prompt 5 : appel de capacité, bodyguard models seulement) ; contrôlé depuis le prompt 8 via PROJ.2.3.returned_models (returned_models_invalid : k ≤ D3, k ≤ mortes rendables, once per battle, phase COMMAND du propriétaire, types morts, aucun leader/support). Journal : ABILITY CALL Grot Orderly [USED|DECLINED] puis RETURNED. Porté par PainBoy (Grot Orderly).",
+      "co_verified_by": [
+        "PROJ.2.3.returned_models"
+      ]
     }
   ]
 }

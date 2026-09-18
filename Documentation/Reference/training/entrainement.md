@@ -16,7 +16,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **18 241** (2026-09-18 — refonte du bloc candidat de décision : le one-hot `grants_<id>` de `decision_options_bin`, −42, remplacé par `decision_options_effect_ids`, +6, sur les 18 269 du 2026-09-09) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
+> | `obs_size` | **18 209** (2026-09-18 — retrait du bit `gone_to_ground` de `UNIT_BIN_FIELDS`, devenu identique à `hidden`, −32 sur les 18 241 de la refonte du bloc candidat du même jour) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 389** (1 024 cellules grille + 1 wait + 20 tir + 20 charge mono-cible + 190 charge multi-cibles + 20 mêlée + 1 fight sans cible + 20 tir indirect + 15 zone intents + 6 `CHOICE_i` + 20 Oath + 12 activation + 10 arme mêlée + 20 cohérence + 10 sélection arme tir + 9 slots passe 2 chantier 06) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`) |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque

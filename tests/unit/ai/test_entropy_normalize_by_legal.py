@@ -318,6 +318,19 @@ def test_curriculum_refuses_a_non_bool_key_like_the_constructor(monkeypatch: pyt
 # Config de l'expérience : config/agents/ArmageddonAgent_x1_entnorm/
 # ---------------------------------------------------------------------------
 
+def test_entnorm_x1_is_x1_of_the_base_agent() -> None:
+    """La copie n'a pas dérivé : son `x1` est identique au `x1` de ArmageddonAgent_x1.
+
+    Verrou ajouté le 2026-09-18 : le passage de la graine à 27182 (cycle 3) avait été reporté sur
+    `x1_long` seul, laissant `x1` à 12345 alors que sa note affirmait la même valeur.
+    """
+    from config_loader import get_config_loader
+
+    loader = get_config_loader()
+    base = loader.load_agent_training_config("ArmageddonAgent_x1", "x1")
+    assert loader.load_agent_training_config("ArmageddonAgent_x1_entnorm", "x1") == base
+
+
 def test_entnorm_x1_long_is_x1_long_of_the_base_agent() -> None:
     """La copie n'a pas dérivé : son `x1_long` est identique au `x1_long` de ArmageddonAgent_x1."""
     from config_loader import get_config_loader

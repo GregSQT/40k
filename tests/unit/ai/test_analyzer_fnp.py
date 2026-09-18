@@ -1,0 +1,158 @@
+"""`fnp_threshold_mismatch` (ai/analyzer_save.py, PROJ.2.3.fnp, 24.12) — journal FABRIQUÉ, roster réel.
+
+Plateau 100×100 à x1 (le socle EST son ancre : la clause positionnelle d'Unbreakable Resolve se
+juge), objectif en (50,50)-(50,52). Tireur : Unit 1 (Intercessor, P1). Cibles : Unit 101 (Boyz +
+PainBoy 101#2 : Dok's Toolz 5+), Unit 102 (Intercessor + Ancient 102#1 : Unbreakable Resolve 4+),
+Unit 103 (Boyz sans PainBoy). Journal correct → 0 ; FNP 5+ sur 103 (aucune source) → 1 ; FNP 5+
+sur 101 après la mort du PainBoy (DEAD avant l'activation) → 1 ; Unbreakable Resolve hors
+objectif (l'Ancient à (80,80)) → 1 ; à portée → 0 ; seuil 6+ à la place de 5+ → 1 ; Dmg ≠ n − s →
+1 ; Dmg>0 sans [FNP:] alors que le PainBoy vit → 1 ; blessures mortelles [FNP:n] sans source → 1.
+"""
+from __future__ import annotations
+
+import pytest
+
+from tests.unit.ai._fabriques import entete_step_log
+
+_OBJECTIVES = ";".join(f"(50,{r})" for r in range(50, 53))
+_UNITS = (
+    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (20,20), HP_MAX=2 base=round/1"
+    " [MODELS: 1#0@(20,20,z0)] [MODEL_TYPES: 1#0=Intercessor]\n"
+    "[10:00:00] Unit 101 (Boyz) P2: Starting position (30,20), HP_MAX=1 base=round/1"
+    " [MODELS: 101#0@(30,20,z0) 101#1@(31,20,z0) 101#2@(32,20,z0)]"
+    " [MODEL_TYPES: 101#0=Boyz 101#1=Boyz 101#2=PainBoy]\n"
+    "[10:00:00] Unit 102 (Intercessor) P2: Starting position (80,80), HP_MAX=2 base=round/1"
+    " [MODELS: 102#0@(80,80,z0) 102#1@(81,80,z0)] [MODEL_TYPES: 102#0=Intercessor 102#1=Ancient]\n"
+    "[10:00:00] Unit 103 (Boyz) P2: Starting position (30,40), HP_MAX=1 base=round/1"
+    " [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)] [MODEL_TYPES: 103#0=Boyz 103#1=Boyz]\n"
+)
+_SETUP = (
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(20,20) DEPLOYED from (-1,-1) to (20,20)"
+    " [R:+0.0] [MODELS: 1#0@(20,20,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(30,20) DEPLOYED from (-1,-1) to (30,20)"
+    " [R:+0.0] [MODELS: 101#0@(30,20,z0) 101#1@(31,20,z0) 101#2@(32,20,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,80) DEPLOYED from (-1,-1) to (80,80)"
+    " [R:+0.0] [MODELS: 102#0@(80,80,z0) 102#1@(81,80,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103(30,40) DEPLOYED from (-1,-1) to (30,40)"
+    " [R:+0.0] [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)] [SUCCESS]\n"
+)
+_END = ("[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
+        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "
+        "Total=0, Duration=1.000s\n")
+
+
+def _shot(target: str, pos: str, mid: str, tail: str, sec: int = 3) -> str:
+    """Un tir de 1#0 sur `target`, alloué à `mid` ; `tail` = segment Save/Dmg/FNP."""
+    return (
+        f"[10:00:{sec:02d}] E1 T1 P1 SHOOT : Unit 1(20,20) SHOT [DESIGNATED:{target}] Unit {target}{pos} with [Bolt Rifle]"
+        f" - Hit 4(3+) - Wound 5(4+) - → {mid} - {tail} [MODELS: 1#0@(20,20,z0)]"
+        f" [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: {mid}] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+    )
+
+
+def _stats(tmp_path, body: str, units: str = _UNITS, setup: str = _SETUP) -> dict:
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        setup + body + _END, units=units, objectives=_OBJECTIVES, inches_to_subhex=1,
+        board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
+        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=14,
+    ))
+    return an.parse_step_log(str(log))
+
+
+def _first(stats) -> str:
+    first = stats["first_error_lines"]["fnp_threshold_mismatch"]
+    return str((first[1] or first[2] or {}).get("detail"))
+
+
+def test_dok_s_toolz_5_plus_avec_le_painboy_vivant_est_correct(tmp_path):
+    stats = _stats(tmp_path, _shot("101", "(30,20)", "101#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/5+ ×1]"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
+    assert stats["rule_usage"]["PROJ.2.3.fnp"][1] == 1
+
+
+def test_fnp_sur_une_escouade_sans_source_est_une_faute(tmp_path):
+    stats = _stats(tmp_path, _shot("103", "(30,40)", "103#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/5+ ×1]"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans aucun Feel No Pain" in _first(stats)
+
+
+def test_fnp_apres_la_mort_du_painboy_avant_l_activation_est_une_faute(tmp_path):
+    """19.04 : la source est morte à une activation PRÉCÉDENTE (DEAD au tour 1 phase MOVE, puis
+    l'escouade bouge sans lui) — au tir suivant, Dok's Toolz ne joue plus."""
+    body = (
+        "[10:00:02] E1 T1 P2 MOVE : Unit 101 DEAD model=101#2 reason=combat"
+        " [MODELS: 101#0@(30,20,z0) 101#1@(31,20,z0)] [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P2 MOVE : Unit 101(30,21) MOVED from (30,20) to (30,21)"
+        " [MODELS: 101#0@(30,21,z0) 101#1@(31,21,z0)] [R:+0.0] [SUCCESS]\n"
+        + _shot("101", "(30,21)", "101#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/5+ ×1]", sec=4)
+    )
+    stats = _stats(tmp_path, body)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}, _first(stats)
+
+
+def test_la_source_tuee_dans_la_meme_activation_couvre_encore_l_activation(tmp_path):
+    """19.04 dernière clause : le PainBoy meurt sous CETTE activation (DEAD émis AVANT les lignes
+    d'attaque) — Dok's Toolz joue jusqu'à la fin des attaques du tireur."""
+    body = (
+        # Comme le moteur l'écrit : la ligne DEAD porte les SURVIVANTS dans `[MODELS:]`.
+        "[10:00:02] E1 T1 P1 SHOOT : Unit 101 DEAD model=101#2 reason=combat"
+        " [MODELS: 101#0@(30,20,z0) 101#1@(31,20,z0)] [R:+0.0] [SUCCESS]\n"
+        + _shot("101", "(30,20)", "101#2", "Save 2(5+ AP-1 → 6+) - Dmg:1HP [FNP:0/5+ ×1]", sec=3)
+        + _shot("101", "(30,20)", "101#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/5+ ×1]", sec=4)
+    )
+    stats = _stats(tmp_path, body)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
+
+
+def test_unbreakable_resolve_hors_objectif_est_une_faute(tmp_path):
+    stats = _stats(tmp_path, _shot("102", "(80,80)", "102#1", "Save 2(3+ AP-1 → 4+) - Dmg:0HP [FNP:1/4+ ×1]"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans aucun Feel No Pain" in _first(stats)
+
+
+def test_unbreakable_resolve_dans_l_aire_est_correct(tmp_path):
+    body = (
+        "[10:00:02] E1 T1 P2 MOVE : Unit 102(50,50) MOVED from (80,80) to (50,50)"
+        " [MODELS: 102#0@(49,50,z0) 102#1@(50,51,z0)] [R:+0.0] [SUCCESS]\n"
+        + _shot("102", "(50,50)", "102#1", "Save 2(3+ AP-1 → 4+) - Dmg:0HP [FNP:1/4+ ×1]")
+    )
+    stats = _stats(tmp_path, body)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
+
+
+def test_unbreakable_resolve_ne_couvre_pas_l_intercessor_voisin(tmp_path):
+    """« this model » : l'Intercessor 102#0 dans l'aire n'a pas le FNP de l'Ancient."""
+    body = (
+        "[10:00:02] E1 T1 P2 MOVE : Unit 102(50,50) MOVED from (80,80) to (50,50)"
+        " [MODELS: 102#0@(50,50,z0) 102#1@(50,51,z0)] [R:+0.0] [SUCCESS]\n"
+        + _shot("102", "(50,50)", "102#0", "Save 2(3+ AP-1 → 4+) - Dmg:0HP [FNP:1/4+ ×1]")
+    )
+    stats = _stats(tmp_path, body)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}, _first(stats)
+
+
+def test_seuil_fnp_faux_et_compte_faux_sont_des_fautes(tmp_path):
+    bad_threshold = _stats(tmp_path, _shot("101", "(30,20)", "101#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/6+ ×1]"))
+    assert bad_threshold["fnp_threshold_mismatch"] == {1: 0, 2: 1} and "seuil FNP 6+" in _first(bad_threshold)
+    bad_count = _stats(tmp_path, _shot("101", "(30,20)", "101#0", "Save 2(5+ AP-1 → 6+) - Dmg:1HP [FNP:1/5+ ×1]"))
+    assert bad_count["fnp_threshold_mismatch"] == {1: 0, 2: 1} and "tentatives" in _first(bad_count)
+
+
+def test_degats_sans_jet_fnp_alors_que_le_painboy_vit_est_une_faute(tmp_path):
+    stats = _stats(tmp_path, _shot("101", "(30,20)", "101#0", "Save 2(5+ AP-1 → 6+) - Dmg:1HP"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans [FNP:]" in _first(stats)
+
+
+def test_blessures_mortelles_avec_fnp_sans_source_sont_une_faute(tmp_path):
+    body = (
+        "[10:00:03] E1 T1 P2 MOVE : Unit 103(30,40) SUFFERS 1 Mortal Wounds [DA JUMP] Trigger:1 MW:2"
+        " [FROM:103] [FNP:1] [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)] [ALLOC_MODEL: 103#0]"
+        " [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _stats(tmp_path, body)
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "blessures mortelles" in _first(stats)

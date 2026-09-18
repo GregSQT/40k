@@ -14,10 +14,11 @@ from typing import Dict, List, Sequence, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
 from .shared_utils import (
-    _build_enemy_adjacent_hexes_all_players, _enemy_squad_ids, _squad_mode_level,
-    _get_source_unit_rule_display_name_for_effect, deployed_friendly_squad_ids,
-    model_datasheet_name,
+    _build_enemy_adjacent_hexes_all_players, _enemy_squad_ids, _is_character_role,
+    _squad_mode_level, _get_source_unit_rule_display_name_for_effect,
+    deployed_friendly_squad_ids, model_datasheet_name,
 )
+from engine.game_utils import require_unit_by_id
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
     WAAAGH_FACTION_KEYWORD,
@@ -250,8 +251,8 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
       3. Oath — désignation d'une unité ennemie, obligatoire, chaque tour.
 
     Le moteur ne tranche rien : il POSE la décision et `command_phase_resume` rend la main.
-    Grot Orderly (chantier 06, passe 6) : return_destroyed_models — automatique, avant toute
-    décision.
+    Grot Orderly (chantier 06, passe 6 ; appel de capacité depuis le chantier capacités-agent) :
+    `return_destroyed_models` est PROPOSÉ à l'escouade éligible avant toute décision de faction.
     """
     current_player = int(require_key(game_state, "current_player"))
 
@@ -262,10 +263,11 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     #    sur une `waaagh_call` périmée — le défaut du 2026-08-05, finding 3.
     expire_faction_abilities_for_player(game_state, current_player)
 
-    # Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
-    # phase, D3 destroyed models … are returned to that unit. »
-    # Le PLACEMENT est un choix de joueur (REVIVED) : si une décision est posée, le moteur rend
-    # la main ICI, comme il le fait pour le Waaagh!. La suite de 08.04 est jouée à la reprise.
+    # Grot Orderly — « Once per battle: In your Command phase, if this unit is below starting
+    # strength, you can return up to D3 destroyed bodyguard models to this unit. »
+    # « You can » : l'APPEL est un choix de joueur (`push_ability_call`), puis le PLACEMENT en
+    # est un autre (REVIVED). Dès qu'un appel ou une décision est posé, le moteur rend la main
+    # ICI, comme il le fait pour le Waaagh!. La suite de 08.04 est jouée à la reprise.
     if _apply_return_destroyed_models(game_state, current_player):
         return None
 
@@ -620,138 +622,240 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: int) -> bool:
-    """Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
-    phase, D3 destroyed models of that unit are returned. »
+GROT_ORDERLY_EFFECT_ID = "return_destroyed_models"
 
-    Traite chaque unité vivante du joueur actif portant la règle et n'ayant pas encore utilisé
-    l'effet. DEUX choix de joueur peuvent s'ouvrir, dans cet ordre : QUELLES figurines détruites
-    reviennent (`returned_models_profile`, seulement si plusieurs profils sont morts) puis OÙ elles
-    sont posées (`returned_models_placement`, 25 Rules appendix REVIVED). La fonction retourne
-    ``True`` quand elle a POSÉ une décision d'agent et interrompu son balayage — l'appelant doit
-    alors rendre la main, et rappeler cette fonction une fois la décision jouée pour traiter les
-    unités suivantes.
+
+def _returned_bodyguard_indices(archived: Sequence[Dict[str, Any]]) -> List[int]:
+    """Indices, dans l'archive des figurines détruites, de celles qui sont des BODYGUARD models.
+
+    Datasheet Painboy : « return up to D3 destroyed bodyguard models to this unit ». Un
+    personnage attaché (rôle `leader`/`support`, cf. `_is_character_role`) n'en est jamais un :
+    un Warboss mort ne revient pas. Le rôle est écrit sur chaque figurine par
+    `build_models_cache` ; son absence est une archive hors moteur, pas un cas de jeu.
+    """
+    return [
+        index for index, model in enumerate(archived)
+        if not _is_character_role(require_key(model, "role"))
+    ]
+
+
+def _grot_orderly_candidate(
+    game_state: Dict[str, Any], unit: Dict[str, Any], current_player: int
+) -> Optional[Tuple[str, int, List[int]]]:
+    """L'escouade est-elle éligible à l'appel Grot Orderly CETTE phase ?
+
+    Rend `(unit_id, destroyed, indices bodyguard archivés)` ou None. Conditions : escouade du
+    joueur actif, vivante, portant ENCORE l'effet (19.04 : le Painboy est vivant), usage non
+    dépensé, pas déjà refusée/sans case cette phase (`_GROT_ORDERLY_SKIPPED`), sous son
+    effectif de départ, et au moins un bodyguard model dans l'archive.
+    """
+    from engine.phase_handlers.shared_utils import unit_has_rule_effect, is_unit_alive
+
+    if int(require_key(unit, "player")) != current_player:
+        return None
+    unit_id = str(require_key(unit, "id"))
+    used: set = game_state.setdefault("return_destroyed_models_used", set())
+    skipped: set = game_state.get(_GROT_ORDERLY_SKIPPED, set())
+    if unit_id in used or unit_id in skipped:
+        return None
+    if not is_unit_alive(unit_id, game_state):
+        return None
+    if not unit_has_rule_effect(unit, GROT_ORDERLY_EFFECT_ID):
+        return None
+    cache_entry = require_key(game_state, "squad_cache").get(unit_id)
+    if cache_entry is None:
+        return None
+    count_start = int(require_key(cache_entry, "model_count_at_start"))
+    count_now = int(require_key(cache_entry, "model_count"))
+    destroyed = count_start - count_now
+    if destroyed <= 0:
+        return None
+    # Les figurines rendues sont les figurines REELLEMENT detruites (REVIVED, 25 Rules
+    # appendix) : elles se lisent dans l'archive tenue par `destroy_model`, jamais en clonant
+    # une survivante. `destroyed` reste calcule sur le cache parce que c'est LUI qui porte la
+    # borne reglementaire « cannot expand a unit beyond its starting strength » ; l'archive en
+    # est le contenu. Les deux doivent concorder — un ecart signalerait une mort passee hors
+    # de `destroy_model`, donc une archive incomplete, pas un cas de jeu.
+    archived = require_key(game_state, "destroyed_models").get(unit_id, [])  # get allowed (aucune mort = aucune entree)
+    bodyguards = _returned_bodyguard_indices(archived)
+    if not bodyguards:
+        return None
+    return unit_id, destroyed, bodyguards
+
+
+def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: int) -> bool:
+    """Grot Orderly — POSE l'appel de capacité à la première escouade éligible du joueur actif.
+
+    « You can return » : l'activation est un choix du joueur, servi comme tout appel de capacité
+    (`engine.ability_calls`) aux trois sièges — gym par le masque `CHOICE_i`, bot par la
+    politique déclarée `_bot_grot_orderly_policy`, humain par le panneau. La réponse arrive dans
+    `apply_grot_orderly_call`, qui rend les figurines (`_return_destroyed_models_for_squad`) ou
+    inscrit le refus dans `_GROT_ORDERLY_SKIPPED` (rien n'est consommé : la capacité est
+    reproposée à la phase de commandement suivante), puis reprend ce balayage pour l'escouade
+    suivante. Une escouade à la fois : la fonction rend ``True`` dès qu'un appel est posé et
+    l'appelant rend la main ; ``False`` quand plus aucune escouade n'a rien à proposer.
+    """
+    from engine.ability_calls import push_ability_call
+
+    for unit in require_key(game_state, "units"):
+        candidate = _grot_orderly_candidate(game_state, unit, current_player)
+        if candidate is None:
+            continue
+        push_ability_call(game_state, candidate[0], GROT_ORDERLY_EFFECT_ID, "command")
+        return True
+    return False
+
+
+def _return_destroyed_models_for_squad(
+    game_state: Dict[str, Any], unit_id: str, current_player: int
+) -> bool:
+    """Appel ACCEPTÉ : jet de D3, puis QUELLES figurines reviennent et OÙ.
+
+    DEUX choix de joueur peuvent s'ouvrir, dans cet ordre : le profil rendu
+    (`returned_models_profile`, seulement si plusieurs profils de bodyguard sont morts) puis le
+    placement (`returned_models_placement`, 25 Rules appendix REVIVED). Rend ``True`` quand une
+    décision d'agent a été POSÉE — l'appelant rend la main, et la résolution de la décision
+    reprend le balayage des escouades suivantes.
     """
     from engine.agent_decision import set_pending_agent_decision
     from engine.combat_utils import resolve_dice_value
     from engine.observation_entities import decision_option_cont_row
-    from engine.phase_handlers.shared_utils import unit_has_rule_effect, is_unit_alive
 
-    squad_cache = require_key(game_state, "squad_cache")
-    used: set = game_state.setdefault("return_destroyed_models_used", set())
-    skipped: set = game_state.get(_GROT_ORDERLY_SKIPPED, set())
-
-    for unit in require_key(game_state, "units"):
-        if int(require_key(unit, "player")) != current_player:
-            continue
-        unit_id = str(require_key(unit, "id"))
-        if unit_id in used or unit_id in skipped:
-            continue
-        if not is_unit_alive(unit_id, game_state):
-            continue
-        if not unit_has_rule_effect(unit, "return_destroyed_models"):
-            continue
-
-        cache_entry = squad_cache.get(unit_id)
-        if cache_entry is None:
-            continue
-        count_start = int(require_key(cache_entry, "model_count_at_start"))
-        count_now = int(require_key(cache_entry, "model_count"))
-        destroyed = count_start - count_now
-        if destroyed <= 0:
-            continue
-
-        # Les figurines rendues sont les figurines REELLEMENT detruites (REVIVED, 25 Rules
-        # appendix) : elles se lisent dans l'archive tenue par `destroy_model`, jamais en clonant
-        # une survivante. `destroyed` reste calcule sur le cache parce que c'est LUI qui porte la
-        # borne reglementaire « cannot expand a unit beyond its starting strength » ; l'archive en
-        # est le contenu. Les deux doivent concorder — un ecart signalerait une mort passee hors
-        # de `destroy_model`, donc une archive incomplete, pas un cas de jeu.
-        archived = require_key(game_state, "destroyed_models").get(unit_id, [])  # get allowed (aucune mort = aucune entree)
-        if not archived:
-            continue
-
-        d3 = resolve_dice_value("D3", "grot_orderly_return")
-        to_restore = min(d3, destroyed, len(archived))
-        if to_restore <= 0:
-            continue
-
-        # QUELLES figurines reviennent est un choix de joueur : la regle fixe le NOMBRE (D3), pas
-        # l'identite. Un Warboss a 85 pts rend un corps, trois Boyz a 8 en rendent trois — la
-        # valeur en points et le controle d'objectif (OC, 14.02) ne designent pas le meme gagnant,
-        # donc le moteur n'a pas a trancher. L'agent choisit le PROFIL prioritaire ; le choix ne se
-        # pose que s'il existe plusieurs profils distincts parmi les detruites.
-        profiles = _returned_profile_groups(archived)
-        if len(profiles) > 1:
-            game_state["_pending_returned_selection"] = {
-                "squad_id": unit_id,
-                "to_restore": int(to_restore),
-                "d3": int(d3),
-                "destroyed": int(destroyed),
-            }
-            _profile_values = {
-                profile: int(require_key(archived[indices[0]], "VALUE"))
-                for profile, indices in profiles.items()
-            }
-            # Borne de normalisation INTRINSEQUE au choix : la VALUE d'une figurine n'a pas de
-            # maximum reglementaire, et en inventer un figerait l'echelle sur le roster du jour.
-            # Rapportee au profil le plus cher PROPOSE, la colonne dit exactement ce que l'agent
-            # arbitre — « celui-ci vaut la moitie de celui-la ».
-            _max_value = max(_profile_values.values())
-            if _max_value <= 0:
-                raise ValueError(
-                    f"returned_models_profile: escouade {unit_id} — VALUE nulle ou negative sur "
-                    f"tous les profils detruits ({_profile_values}). La VALUE vient du roster ; "
-                    f"une figurine sans valeur ne peut pas etre arbitree."
-                )
-            set_pending_agent_decision(
-                game_state,
-                decision_type="returned_models_profile",
-                player=current_player,
-                unit_id=unit_id,
-                options=[
-                    {
-                        # `value` et `count` ne sont pas décoratifs : ils portent l'arbitrage
-                        # « un gros profil ou plusieurs petits » que l'agent doit trancher, et
-                        # l'UI PvP en a besoin pour que le choix soit lisible par un humain.
-                        "label": profile,
-                        "effect_ids": (),
-                        "declines": False,
-                        "payload": {
-                            "profile": profile,
-                            "value": _profile_values[profile],
-                            "count": len(indices),
-                        },
-                    }
-                    for profile, indices in profiles.items()
-                ],
-                # Les MEMES deux grandeurs, cote observation. Sans elles les candidats sortaient
-                # tous a `present=1` et rien d'autre : l'agent tirait le profil au sort.
-                options_cont=[
-                    decision_option_cont_row({
-                        "profile_value_norm": _profile_values[profile] / _max_value,
-                        # Borne au quota : au-dela de `to_restore`, un profil de plus ne change
-                        # rien a ce qui revient sur la table.
-                        "profile_count_norm": min(len(indices) / to_restore, 1.0),
-                    })
-                    for profile, indices in profiles.items()
-                ],
-            )
-            return True
-
-        _mono_result = _arm_returned_placement(
-            game_state, unit_id, current_player,
-            _select_returned_models(archived, next(iter(profiles)), to_restore),
-            d3, destroyed,
+    unit = require_unit_by_id(game_state, unit_id)
+    candidate = _grot_orderly_candidate(game_state, unit, current_player)
+    if candidate is None:
+        raise RuntimeError(
+            f"return_destroyed_models: l'escouade {unit_id} n'est plus éligible au moment de "
+            "sa réponse — l'état a changé entre l'appel et sa résolution."
         )
-        if _mono_result is PlacementResult.PENDING:
-            return True
-        if _mono_result is PlacementResult.NO_CELL:
-            # Aucune case légale, chemin mono-profil : même traitement que le chemin multi-profil
-            # dans `apply_returned_models_profile_decision` — skip temporaire, pas « used ».
-            game_state.setdefault(_GROT_ORDERLY_SKIPPED, set()).add(unit_id)
+    _, destroyed, bodyguards = candidate
+    archived = require_key(game_state, "destroyed_models")[unit_id]
 
+    d3 = resolve_dice_value("D3", "grot_orderly_return")
+    to_restore = min(d3, destroyed, len(bodyguards))
+
+    # QUELLES figurines reviennent est un choix de joueur : la regle fixe le NOMBRE (D3), pas
+    # l'identite. Un Nob a 20 pts rend un corps, trois Boyz a 8 en rendent trois — la valeur en
+    # points et le controle d'objectif (OC, 14.02) ne designent pas le meme gagnant, donc le
+    # moteur n'a pas a trancher. L'agent choisit le PROFIL prioritaire ; le choix ne se pose que
+    # s'il existe plusieurs profils distincts parmi les bodyguard models detruits.
+    profiles = _returned_profile_groups(archived, bodyguards)
+    if len(profiles) > 1:
+        game_state["_pending_returned_selection"] = {
+            "squad_id": unit_id,
+            "to_restore": int(to_restore),
+            "d3": int(d3),
+            "destroyed": int(destroyed),
+        }
+        _profile_values = {
+            profile: int(require_key(archived[indices[0]], "VALUE"))
+            for profile, indices in profiles.items()
+        }
+        # Borne de normalisation INTRINSEQUE au choix : la VALUE d'une figurine n'a pas de
+        # maximum reglementaire, et en inventer un figerait l'echelle sur le roster du jour.
+        # Rapportee au profil le plus cher PROPOSE, la colonne dit exactement ce que l'agent
+        # arbitre — « celui-ci vaut la moitie de celui-la ».
+        _max_value = max(_profile_values.values())
+        if _max_value <= 0:
+            raise ValueError(
+                f"returned_models_profile: escouade {unit_id} — VALUE nulle ou negative sur "
+                f"tous les profils detruits ({_profile_values}). La VALUE vient du roster ; "
+                f"une figurine sans valeur ne peut pas etre arbitree."
+            )
+        set_pending_agent_decision(
+            game_state,
+            decision_type="returned_models_profile",
+            player=current_player,
+            unit_id=unit_id,
+            options=[
+                {
+                    # `value` et `count` ne sont pas décoratifs : ils portent l'arbitrage
+                    # « un gros profil ou plusieurs petits » que l'agent doit trancher, et
+                    # l'UI PvP en a besoin pour que le choix soit lisible par un humain.
+                    "label": profile,
+                    "effect_ids": (),
+                    "declines": False,
+                    "payload": {
+                        "profile": profile,
+                        "value": _profile_values[profile],
+                        "count": len(indices),
+                    },
+                }
+                for profile, indices in profiles.items()
+            ],
+            # Les MEMES deux grandeurs, cote observation. Sans elles les candidats sortaient
+            # tous a `present=1` et rien d'autre : l'agent tirait le profil au sort.
+            options_cont=[
+                decision_option_cont_row({
+                    "profile_value_norm": _profile_values[profile] / _max_value,
+                    # Borne au quota : au-dela de `to_restore`, un profil de plus ne change
+                    # rien a ce qui revient sur la table.
+                    "profile_count_norm": min(len(indices) / to_restore, 1.0),
+                })
+                for profile, indices in profiles.items()
+            ],
+        )
+        return True
+
+    _mono_result = _arm_returned_placement(
+        game_state, unit_id, current_player,
+        _select_returned_models(archived, bodyguards, next(iter(profiles)), to_restore),
+        d3, destroyed,
+    )
+    if _mono_result is PlacementResult.PENDING:
+        return True
+    if _mono_result is PlacementResult.NO_CELL:
+        # Aucune case légale, chemin mono-profil : même traitement que le chemin multi-profil
+        # dans `apply_returned_models_profile_decision` — skip temporaire, pas « used ».
+        game_state.setdefault(_GROT_ORDERLY_SKIPPED, set()).add(unit_id)
     return False
+
+
+def apply_grot_orderly_call(game_state: Dict[str, Any], squad_id: str, accepted: bool) -> Dict[str, Any]:
+    """Gestionnaire de l'appel `return_destroyed_models` (`register_ability_call`).
+
+    Refus → rien n'est consommé : l'escouade entre dans `_GROT_ORDERLY_SKIPPED`, vidé à 08.01,
+    et la capacité est reproposée à la phase de commandement suivante — comme un `waaagh_call`
+    passé. Acceptation → D3 puis profil → placement, inchangés. Dans les deux cas, 08.04
+    REPREND : le balayage propose l'escouade suivante (deux Painboyz), puis Waaagh!/Oath. Le
+    payload dit `waiting_for_player` quand une décision d'agent reste posée — profil, placement
+    ou Waaagh! — pour que le siège qui a répondu rende la main dessus.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+
+    squad_id = str(squad_id)
+    player = int(require_key(require_unit_by_id(game_state, squad_id), "player"))
+    if not accepted:
+        game_state.setdefault(_GROT_ORDERLY_SKIPPED, set()).add(squad_id)
+        decision_posed = False
+    else:
+        decision_posed = _return_destroyed_models_for_squad(game_state, squad_id, player)
+    if not decision_posed and not _apply_return_destroyed_models(game_state, player):
+        _command_abilities_after_returns(game_state, player)
+    if read_pending_agent_decision(game_state) is not None:
+        return {"waiting_for_player": True}
+    return {}
+
+
+def _bot_grot_orderly_policy(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Politique DÉCLARÉE du siège bot : accepter si au moins deux bodyguard models sont morts,
+    ou dès le round 4 — plus tôt, un seul corps rendu gaspille le « once per battle »."""
+    archived = require_key(game_state, "destroyed_models").get(str(squad_id), [])  # get allowed
+    if len(_returned_bodyguard_indices(archived)) >= 2:
+        return True
+    return int(require_key(game_state, "turn")) >= 4
+
+
+def _register_grot_orderly() -> None:
+    from engine.ability_calls import ABILITY_CALL_HANDLERS, register_ability_call
+
+    if GROT_ORDERLY_EFFECT_ID not in ABILITY_CALL_HANDLERS:
+        register_ability_call(
+            GROT_ORDERLY_EFFECT_ID, handler=apply_grot_orderly_call, bot_policy=_bot_grot_orderly_policy
+        )
+
+
+_register_grot_orderly()
 
 
 def _returned_profile_key(model: Dict[str, Any]) -> str:
@@ -770,33 +874,38 @@ def _returned_profile_key(model: Dict[str, Any]) -> str:
     return str(unit_type)
 
 
-def _returned_profile_groups(archived: Sequence[Dict[str, Any]]) -> Dict[str, List[int]]:
-    """Profils distincts parmi les figurines détruites → indices dans l'archive.
+def _returned_profile_groups(
+    archived: Sequence[Dict[str, Any]], indices: Sequence[int]
+) -> Dict[str, List[int]]:
+    """Profils distincts parmi les figurines détruites `indices` → indices dans l'archive.
 
-    L'ordre des clés est celui des DESTRUCTIONS, pas un tri : il fixe l'ordre des candidats offerts
-    à l'agent, et §9.6 veut cet ordre contractuel plutôt que dépendant d'un hachage.
+    `indices` sont les bodyguard models (`_returned_bodyguard_indices`) : un personnage attaché
+    n'est ni offert ni rendu. L'ordre des clés est celui des DESTRUCTIONS, pas un tri : il fixe
+    l'ordre des candidats offerts à l'agent, et §9.6 veut cet ordre contractuel plutôt que
+    dépendant d'un hachage.
     """
     groups: Dict[str, List[int]] = {}
-    for index, model in enumerate(archived):
-        groups.setdefault(_returned_profile_key(model), []).append(index)
+    for index in indices:
+        groups.setdefault(_returned_profile_key(archived[index]), []).append(index)
     return groups
 
 
 def _select_returned_models(
-    archived: Sequence[Dict[str, Any]], profile: str, to_restore: int
+    archived: Sequence[Dict[str, Any]], indices: Sequence[int], profile: str, to_restore: int
 ) -> List[int]:
-    """Indices des figurines rendues : le profil choisi d'abord, puis l'ordre de destruction.
+    """Indices des figurines rendues : le profil choisi d'abord, puis l'ordre de destruction —
+    parmi les seuls bodyguard models `indices`.
 
     Le complément est nécessaire — la règle rend D3 figurines, et le profil choisi n'en compte pas
-    toujours assez (un seul Warboss détruit pour un D3 de 3). Il suit l'ordre de destruction et
+    toujours assez (un seul Nob détruit pour un D3 de 3). Il suit l'ordre de destruction et
     NON la valeur : compléter par les plus chères rendrait le choix de l'agent sans effet (il
     récupérerait les mêmes figurines quelle que soit son option), et par les moins chères le
     punirait silencieusement. L'ordre de destruction ne favorise ni ne pénalise aucune option.
     """
-    chosen = [i for i, model in enumerate(archived) if _returned_profile_key(model) == profile]
+    chosen = [i for i in indices if _returned_profile_key(archived[i]) == profile]
     if len(chosen) < to_restore:
         already = set(chosen)
-        chosen = chosen + [i for i in range(len(archived)) if i not in already]
+        chosen = chosen + [i for i in indices if i not in already]
     return chosen[:to_restore]
 
 
@@ -992,7 +1101,8 @@ def apply_returned_models_profile_decision(
             f"decision et sa resolution."
         )
     selected = _select_returned_models(
-        archived, str(profile), int(require_key(pending, "to_restore"))
+        archived, _returned_bodyguard_indices(archived), str(profile),
+        int(require_key(pending, "to_restore")),
     )
     result = _arm_returned_placement(
         game_state, squad_id, int(player), selected,

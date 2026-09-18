@@ -27,9 +27,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
+from engine.ability_calls import apply_ability_call, pending_ability_call_prompts
 from engine.phase_handlers.command_handlers import (
-    _apply_return_destroyed_models, apply_returned_models_placement,
-    apply_returned_models_placement_decision, apply_returned_models_profile_decision,
+    _GROT_ORDERLY_SKIPPED, _apply_return_destroyed_models, _bot_grot_orderly_policy,
+    apply_returned_models_placement, apply_returned_models_placement_decision,
+    apply_returned_models_profile_decision,
 )
 from engine.phase_handlers.deployment_handlers import (
     RETURNED_PLACEMENT_INTENTS, _model_footprint, plan_returned_models_placement,
@@ -50,8 +52,10 @@ _ENEMY = "foe"
 
 def _model(
     squad_id: str, col: int, row: int, base_size: int = 1,
-    unit_type: str = "Boyz", value: int = 10,
+    unit_type: str = "Boyz", value: int = 10, role: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """`role` : celui que `build_models_cache` écrit — None pour une figurine de base (bodyguard),
+    "leader"/"support" pour un personnage attaché (`_is_character_role`)."""
     return {
         "squad_id": squad_id,
         "unitType": unit_type,
@@ -60,7 +64,7 @@ def _model(
         "level": 0,
         "orientation": 0,
         "T": 5,
-        "role": "bodyguard",
+        "role": role,
         "HP_CUR": 3,
         "HP_MAX": 3,
         "INVUL_SAVE": 7,
@@ -83,9 +87,11 @@ def _state(
     *, n_alive: int = 3, n_destroyed: int = 2, base_size: int = 1,
     enemy_at: Optional[Tuple[int, int]] = (18, 5),
     objectives: Optional[List[Dict[str, Any]]] = None,
-    destroyed_profiles: Optional[List[Tuple[str, int]]] = None,
+    destroyed_profiles: Optional[List[Tuple[Any, ...]]] = None,
 ) -> Dict[str, Any]:
-    """Escouade alignée en colonne autour de (6,5) — positions DISTINCTES, état jouable."""
+    """Escouade alignée en colonne autour de (6,5) — positions DISTINCTES, état jouable.
+
+    `destroyed_profiles` : `(unitType, VALUE)` ou `(unitType, VALUE, role)` par figurine archivée."""
     units = [
         {
             # `unitType` et `displayName` : ce que porte toute unité de production, et ce que la
@@ -134,8 +140,9 @@ def _state(
         )
     destroyed_models = {
         _SQUAD: [
-            _model(_SQUAD, -1, -1, base_size, unit_type=unit_type, value=value)
-            for unit_type, value in profiles
+            _model(_SQUAD, -1, -1, base_size, unit_type=str(prof[0]), value=int(prof[1]),
+                   role=(str(prof[2]) if len(prof) > 2 else None))
+            for prof in profiles
         ]
     }
     game_state: Dict[str, Any] = {
@@ -207,6 +214,16 @@ def _state(
     return game_state
 
 
+def _accept_grot_orderly(gs: Dict[str, Any], player: int = 1) -> bool:
+    """08.04 : pose l'appel Grot Orderly à l'escouade éligible, puis l'ACCEPTE — ce que fait le
+    siège qui répond `CHOICE_0`. Rend True si une décision d'agent (profil, placement) est posée
+    derrière, False si les figurines sont rendues (ou qu'aucune case n'existe)."""
+    assert _apply_return_destroyed_models(gs, player) is True, "aucun appel Grot Orderly posé"
+    prompt = gs["pending_rule_choice_queue"].pop(0)
+    assert prompt["rule_id"] == "return_destroyed_models" and prompt["unit_id"] == _SQUAD
+    return bool(apply_ability_call(gs, prompt, True).get("waiting_for_player"))
+
+
 def _footprints(gs: Dict[str, Any], squad_id: str) -> List[set]:
     models_cache = gs["models_cache"]
     return [
@@ -225,7 +242,7 @@ def test_returned_models_are_not_stacked_on_the_template() -> None:
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None)
     before = list(gs["squad_models"][_SQUAD])
 
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     after = gs["squad_models"][_SQUAD]
     assert len(after) > len(before), "au moins une figurine doit être rendue"
@@ -244,7 +261,7 @@ def test_returned_models_footprints_do_not_overlap() -> None:
     """
     gs = _state(n_alive=3, n_destroyed=3, base_size=3, enemy_at=None)
 
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     seen: set = set()
     for footprint in _footprints(gs, _SQUAD):
@@ -258,7 +275,7 @@ def test_returned_models_keep_squad_coherency() -> None:
     from engine.phase_handlers.shared_utils import _positions_in_coherency
 
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None)
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     models = [gs["models_cache"][mid] for mid in gs["squad_models"][_SQUAD]]
     assert _positions_in_coherency(models, gs), "l'escouade rendue doit rester cohérente"
@@ -274,7 +291,7 @@ def test_decision_is_posted_when_intents_differ() -> None:
     from engine.agent_decision import read_pending_agent_decision
 
     gs = _state(n_alive=3, n_destroyed=3)
-    posted = _apply_return_destroyed_models(gs, 1)
+    posted = _accept_grot_orderly(gs)
 
     assert posted is True, "une décision doit être posée quand les intentions divergent"
     decision = read_pending_agent_decision(gs)
@@ -293,7 +310,7 @@ def test_no_decision_when_all_intents_agree() -> None:
     from engine.agent_decision import read_pending_agent_decision
 
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None)
-    posted = _apply_return_destroyed_models(gs, 1)
+    posted = _accept_grot_orderly(gs)
 
     assert posted is False
     assert read_pending_agent_decision(gs) is None
@@ -328,7 +345,7 @@ def test_decision_applies_the_chosen_intent() -> None:
     from engine.agent_decision import read_pending_agent_decision
 
     gs = _state(n_alive=3, n_destroyed=3)
-    assert _apply_return_destroyed_models(gs, 1) is True
+    assert _accept_grot_orderly(gs) is True
     template = gs["models_cache"][f"{_SQUAD}#0"]
     expected = plan_returned_models_placement(
         gs, _SQUAD, template, gs["_pending_returned_placement"]["to_restore"], "away_from_enemy"
@@ -371,7 +388,7 @@ def test_no_legal_cell_returns_nothing_and_keeps_the_once_per_battle() -> None:
         (c, r) for c in range(gs["board_cols"]) for r in range(gs["board_rows"])
     }
 
-    posted = _apply_return_destroyed_models(gs, 1)
+    posted = _accept_grot_orderly(gs)
 
     assert posted is False
     assert len(gs["squad_models"][_SQUAD]) == 3, "aucune figurine ne doit être rendue"
@@ -410,7 +427,7 @@ def test_legal_cells_exclude_own_models() -> None:
 def test_restored_models_are_full_health_and_distinct_ids() -> None:
     """Chaque figurine rendue a son propre identifiant et repart à pleins PV (REVIVED)."""
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None)
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     restored = [mid for mid in gs["squad_models"][_SQUAD] if "#r" in mid]
     assert restored
@@ -503,7 +520,7 @@ def test_squad_can_still_move_after_restoration() -> None:
     from engine.phase_handlers.shared_utils import explain_move_plan_rejection
 
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None)
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     plan = [
         (mid, int(gs["models_cache"][mid]["col"]) + 1, int(gs["models_cache"][mid]["row"]), 0)
@@ -676,10 +693,14 @@ def test_expired_waaagh_decision_does_not_break_the_command_phase() -> None:
 
     command_step_command_abilities(gs)  # ne doit pas lever
 
+    assert gs.get("pending_agent_decision") is None, "la décision périmée doit avoir été purgée"
+    prompts = pending_ability_call_prompts(gs, squad_id=_SQUAD, effect_id="return_destroyed_models")
+    assert len(prompts) == 1, "08.04 pose l'APPEL Grot Orderly, pas encore le placement"
+    gs["pending_rule_choice_queue"].pop(0)
+    apply_ability_call(gs, prompts[0], True)  # ne doit pas lever non plus
     pending = gs.get("pending_agent_decision")
-    assert pending is not None
-    assert str(pending["type"]) == "returned_models_placement", (
-        "la décision périmée doit avoir été purgée et remplacée par celle du placement"
+    assert pending is not None and str(pending["type"]) == "returned_models_placement", (
+        "l'appel accepté ouvre le placement sans heurter la décision périmée"
     )
 
 
@@ -701,7 +722,7 @@ def test_squad_added_to_phase_skip_when_cells_empty_at_apply_time() -> None:
     Stratégie : plateau 1×1 ; le template occupe (0,0) — aucune case libre, plan retourne [].
     """
     gs = _state(n_alive=3, n_destroyed=3)
-    assert _apply_return_destroyed_models(gs, 1) is True  # décision posée
+    assert _accept_grot_orderly(gs) is True  # décision posée
 
     # Réduire le plateau à (0,0) pour que plan_returned_models_placement ne trouve aucune case.
     gs["board_cols"] = 1
@@ -822,7 +843,7 @@ def test_no_profile_decision_when_all_destroyed_share_one_profile() -> None:
     gs = _state(n_alive=3, n_destroyed=2, enemy_at=None,
                 destroyed_profiles=[("Boyz", 8), ("Boyz", 8)])
 
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     pending = gs.get("pending_agent_decision")
     assert pending is None or pending["type"] != "returned_models_profile", (
@@ -833,13 +854,13 @@ def test_no_profile_decision_when_all_destroyed_share_one_profile() -> None:
 def test_profile_decision_is_posted_when_profiles_differ() -> None:
     """Plusieurs profils détruits → l'agent choisit lequel revient, avec valeur et effectif.
 
-    La règle fixe le NOMBRE (D3) mais pas l'identité : un Warboss à 85 points et trois Boyz à 8
+    La règle fixe le NOMBRE (D3) mais pas l'identité : un Nob à 85 points et trois Boyz à 8
     ne se valent ni en points ni en contrôle d'objectif, donc le moteur n'a pas à trancher.
     """
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None,
-                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Warboss", 85)])
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Nob", 85)])
 
-    posed = _apply_return_destroyed_models(gs, 1)
+    posed = _accept_grot_orderly(gs)
 
     assert posed is True, "le balayage doit rendre la main sur une decision posee"
     pending = gs["pending_agent_decision"]
@@ -848,7 +869,7 @@ def test_profile_decision_is_posted_when_profiles_differ() -> None:
         opt["payload"]["profile"]: (opt["payload"]["value"], opt["payload"]["count"])
         for opt in pending["options"]
     }
-    assert offered == {"Boyz": (8, 2), "Warboss": (85, 1)}, (
+    assert offered == {"Boyz": (8, 2), "Nob": (85, 1)}, (
         f"chaque profil detruit doit etre offert avec sa valeur et son effectif, obtenu {offered}"
     )
 
@@ -857,7 +878,7 @@ def test_agent_profile_choice_is_honoured(monkeypatch: pytest.MonkeyPatch) -> No
     """Le profil choisi par l'agent est celui qui revient, pas un ordre imposé par le moteur.
 
     ROUGE si le moteur retombe sur un tri interne (plus cher / moins cher d'abord) : on demande
-    ici le profil le MOINS cher alors qu'un Warboss est disponible.
+    ici le profil le MOINS cher alors qu'un Nob est disponible.
 
     D3 est FIXÉ à 2 : le scénario doit tenir dans les deux Boyz détruits, sinon le complément
     (légitime) ramènerait le Warboss et le test dépendrait du dé plutôt que du choix testé.
@@ -872,8 +893,8 @@ def test_agent_profile_choice_is_honoured(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None,
-                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Warboss", 85)])
-    _apply_return_destroyed_models(gs, 1)
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Nob", 85)])
+    _accept_grot_orderly(gs)
     assert gs["pending_agent_decision"]["type"] == "returned_models_profile"
 
     apply_returned_models_profile_decision(gs, 1, "Boyz")
@@ -970,9 +991,9 @@ def test_profile_choice_no_cells_does_not_consume_once_per_battle(
     )
 
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None,
-                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Warboss", 85)])
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Nob", 85)])
     # Poser la décision de profil.
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
     assert gs.get("pending_agent_decision", {}).get("type") == "returned_models_profile"
 
     # Murer le plateau : aucune case légale disponible pour le placement.
@@ -1004,7 +1025,7 @@ def test_mono_profile_no_cells_added_to_phase_skip_set() -> None:
         (c, r) for c in range(gs["board_cols"]) for r in range(gs["board_rows"])
     }
 
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     assert _SQUAD in gs.get("_grot_orderly_skipped_this_phase", set()), (
         "l'escouade doit être dans _grot_orderly_skipped_this_phase pour ne pas être "
@@ -1026,13 +1047,13 @@ def test_profile_candidates_carry_distinct_traits() -> None:
     ROUGE avant le câblage de `decision_options_cont` : les candidats de
     `returned_models_profile` ne portaient ni effet accordable ni `declines`, donc des lignes
     d'observation strictement identiques. `value` et `count` vivaient dans le `payload`, que
-    l'observation ne lit pas — l'agent choisissait entre un Warboss et deux Boyz à pile ou face.
+    l'observation ne lit pas — l'agent choisissait entre un Nob et deux Boyz à pile ou face.
     """
     from engine.observation_entities import decision_option_cont_index
 
     gs = _state(n_alive=3, n_destroyed=3, enemy_at=None,
-                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Warboss", 85)])
-    _apply_return_destroyed_models(gs, 1)
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Nob", 85)])
+    _accept_grot_orderly(gs)
 
     decision = gs["pending_agent_decision"]
     assert str(decision["type"]) == "returned_models_profile"
@@ -1046,7 +1067,7 @@ def test_profile_candidates_carry_distinct_traits() -> None:
         str(opt["payload"]["profile"]): row for opt, row in zip(decision["options"], cont)
     }
     # Rapportée au profil le plus cher PROPOSÉ : le Warboss vaut 1.0, un Boy 8/85.
-    assert by_profile["Warboss"][value_i] == pytest.approx(1.0)
+    assert by_profile["Nob"][value_i] == pytest.approx(1.0)
     assert by_profile["Boyz"][value_i] == pytest.approx(8.0 / 85.0)
     # Toutes les colonnes des autres familles de décision restent muettes.
     count_i = decision_option_cont_index("profile_count_norm")
@@ -1072,7 +1093,7 @@ def test_placement_candidates_carry_distinct_traits() -> None:
         n_alive=3, n_destroyed=3,
         objectives=[{"id": "obj1", "hexes": [[6, 12], [7, 12], [6, 13], [7, 13]]}],
     )
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     decision = gs["pending_agent_decision"]
     assert str(decision["type"]) == "returned_models_placement"
@@ -1112,7 +1133,7 @@ def test_placement_traits_ignore_an_enemy_in_reserves() -> None:
     objectives = [{"id": "obj1", "hexes": [[6, 12], [7, 12], [6, 13], [7, 13]]}]
 
     reference = _state(n_alive=3, n_destroyed=3, objectives=objectives)
-    _apply_return_destroyed_models(reference, 1)
+    _accept_grot_orderly(reference)
     ref_cont = reference["pending_agent_decision"]["options_cont"]
 
     with_reserve = _state(n_alive=3, n_destroyed=3, objectives=objectives)
@@ -1127,7 +1148,7 @@ def test_placement_traits_ignore_an_enemy_in_reserves() -> None:
         with_reserve["models_cache"][f"{_SQUAD}#0"], player=2, col=-1, row=-1
     )
     with_reserve["squad_models"]["RESERVE"] = ["RESERVE#0"]
-    _apply_return_destroyed_models(with_reserve, 1)
+    _accept_grot_orderly(with_reserve)
     res_cont = with_reserve["pending_agent_decision"]["options_cont"]
 
     enemy_i = decision_option_cont_index("dist_enemy_norm")
@@ -1135,3 +1156,86 @@ def test_placement_traits_ignore_an_enemy_in_reserves() -> None:
         "une unité hors table ne doit peser sur aucune distance : "
         f"{[r[enemy_i] for r in res_cont]} contre {[r[enemy_i] for r in ref_cont]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Grot Orderly en appel de capacité : « you can return up to D3 destroyed BODYGUARD models »
+# ---------------------------------------------------------------------------
+
+
+def test_a_dead_warboss_is_never_offered_nor_returned() -> None:
+    """Datasheet Painboy : seuls les BODYGUARD models reviennent. Un Warboss attaché (rôle
+    `leader`) mort reste dans l'archive : il n'est ni offert comme profil, ni rendu en
+    complément du D3.
+
+    ROUGE avant le filtre `_returned_bodyguard_indices` : le Warboss était un profil offert
+    (« Boyz » ou « Warboss »), et revenait sur la table.
+    """
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None,
+                destroyed_profiles=[("Warboss", 85, "leader"), ("Boyz", 8)])
+
+    posed = _accept_grot_orderly(gs)
+
+    assert posed is False, "un seul profil de bodyguard : aucun choix de profil à poser"
+    assert gs["pending_agent_decision"] is None
+    returned = [mid for mid in gs["squad_models"][_SQUAD] if "#r" in mid]
+    assert len(returned) == 1, f"un seul bodyguard mort → une seule figurine rendue : {returned}"
+    assert gs["models_cache"][returned[0]]["unitType"] == "Boyz"
+    remaining = [m["unitType"] for m in gs["destroyed_models"][_SQUAD]]
+    assert remaining == ["Warboss"], f"le Warboss doit rester dans l'archive : {remaining}"
+
+
+def test_only_a_dead_character_means_no_call() -> None:
+    """Sous l'effectif de départ mais sans aucun bodyguard mort : rien à rendre, aucun appel."""
+    gs = _state(n_alive=3, n_destroyed=1, enemy_at=None,
+                destroyed_profiles=[("Warboss", 85, "leader")])
+
+    assert _apply_return_destroyed_models(gs, 1) is False
+    assert gs.get("pending_rule_choice_queue", []) == []
+
+
+def test_declining_the_call_consumes_nothing_and_is_reproposed_next_phase() -> None:
+    """« You can » : le refus ne dépense pas le once-per-battle et ne touche pas l'archive ;
+    l'escouade n'est plus proposée CETTE phase, et l'est à nouveau quand 08.01 vide le set."""
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None)
+    assert _apply_return_destroyed_models(gs, 1) is True
+    prompt = gs["pending_rule_choice_queue"].pop(0)
+
+    payload = apply_ability_call(gs, prompt, False)
+
+    assert payload == {}, "refus : aucune décision posée derrière"
+    assert _SQUAD not in gs.get("return_destroyed_models_used", set())
+    assert len(gs["destroyed_models"][_SQUAD]) == 2
+    assert gs["squad_models"][_SQUAD] == ["pain#0", "pain#1", "pain#2"]
+    assert _SQUAD in gs[_GROT_ORDERLY_SKIPPED]
+    assert _apply_return_destroyed_models(gs, 1) is False, "pas reproposé dans la même phase"
+    gs.pop(_GROT_ORDERLY_SKIPPED)  # ce que fait `command_step_start_of_phase` (08.01)
+    assert _apply_return_destroyed_models(gs, 1) is True, "reproposé à la phase suivante"
+
+
+def test_accepting_the_call_spends_the_once_per_battle() -> None:
+    """Acceptation, placement forcé (tous les plans se valent, aucun ennemi) : les figurines
+    reviennent, le once-per-battle est dépensé, plus aucun appel ne se pose."""
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None)
+
+    assert _accept_grot_orderly(gs) is False
+    assert _SQUAD in gs["return_destroyed_models_used"]
+    assert len(gs["squad_models"][_SQUAD]) > 3
+    assert _apply_return_destroyed_models(gs, 1) is False
+    assert gs["pending_rule_choice_queue"] == []
+
+
+def test_bot_policy_is_declared_on_dead_bodyguards_and_round() -> None:
+    """Siège bot : accepte dès deux bodyguard morts, ou dès le round 4 ; jamais un tirage."""
+    one_dead = _state(n_alive=3, n_destroyed=1, enemy_at=None)
+    assert _bot_grot_orderly_policy(one_dead, _SQUAD) is False
+    one_dead["turn"] = 4
+    assert _bot_grot_orderly_policy(one_dead, _SQUAD) is True
+
+    two_dead = _state(n_alive=3, n_destroyed=2, enemy_at=None)
+    assert _bot_grot_orderly_policy(two_dead, _SQUAD) is True
+
+    # Un Warboss mort n'est pas un bodyguard : il ne compte pas.
+    character_and_boy = _state(n_alive=3, n_destroyed=2, enemy_at=None,
+                               destroyed_profiles=[("Warboss", 85, "leader"), ("Boyz", 8)])
+    assert _bot_grot_orderly_policy(character_and_boy, _SQUAD) is False

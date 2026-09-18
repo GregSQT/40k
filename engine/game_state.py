@@ -3929,7 +3929,9 @@ def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
     Retourne la liste des obj_id securises lors de cet appel (0 = rien de nouveau).
     Prerequis : `objective_controllers` doit etre a jour (appeler apres le checkpoint 14.02).
     """
-    from engine.phase_handlers.shared_utils import is_unit_alive, unit_has_rule_effect
+    from engine.phase_handlers.shared_utils import (
+        get_source_unit_rule_display_name_for_effect, is_unit_alive, unit_has_rule_effect,
+    )
 
     current_player = int(require_key(game_state, "current_player"))
     units = require_key(game_state, "units")
@@ -3969,7 +3971,20 @@ def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
         game_state["secured_objectives"][obj_key] = current_player
         newly_secured.append(objective_id)
 
+        # Nom de zone et capacite : ce que la ligne « SECURES <zone> [<CAPACITE>] » du journal
+        # (grammaire 15) ecrit — meme cle de zone que les instantanes (`_objective_display_name`).
+        objective = next(
+            o for o in require_key(game_state, "objectives") if str(require_key(o, "id")) == obj_key
+        )
+        objective_name = objective["name"] if "name" in objective else f"Obj{obj_key}"  # `in` allowed : nom optionnel
         for unit in securing_units:
+            ability_name = get_source_unit_rule_display_name_for_effect(unit, "secure_objective_on_control")
+            if ability_name is None:
+                raise ValueError(
+                    f"secure_objective: unit {require_key(unit, 'id')} securise sans capacite "
+                    "`secure_objective_on_control` nommee dans ses UNIT_RULES"
+                )
+            uc = require_key(require_key(game_state, "units_cache"), str(require_key(unit, "id")))
             append_action_log(game_state, {
                 "type": "secure_objective",
                 "unitId": str(require_key(unit, "id")),
@@ -3977,6 +3992,10 @@ def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
                 "phase": "command",
                 "turn": require_key(game_state, "turn"),
                 "objectiveId": objective_id,
+                "objectiveName": objective_name,
+                "abilityDisplayName": ability_name,
+                "col": int(require_key(uc, "col")),
+                "row": int(require_key(uc, "row")),
             })
 
     from engine.game_utils import add_debug_file_log

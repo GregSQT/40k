@@ -53,7 +53,6 @@ class _FakeEngine:
     _fight_declare_toward = wcore.W40KEngine._fight_declare_toward
     _fight_ask_weapon_or_continue = wcore.W40KEngine._fight_ask_weapon_or_continue
     _fight_continue_declarations = wcore.W40KEngine._fight_continue_declarations
-    _fight_auto_declare_subset = wcore.W40KEngine._fight_auto_declare_subset
     _fight_allocate_and_end = wcore.W40KEngine._fight_allocate_and_end
     # B3 : cibles du pile-in overrun = la cible désignée si l'unité n'est pas engagée.
     _overrun_pile_in_target_ids = wcore.W40KEngine._overrun_pile_in_target_ids

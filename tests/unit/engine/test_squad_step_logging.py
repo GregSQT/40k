@@ -278,7 +278,7 @@ class _FakeSnapshotLogger:
 
     def log_objective_control_snapshot(
         self, turn, objectives, controllers, victory_points, command_points,
-        control_method=None, oc_sums=None,
+        control_method=None, oc_sums=None, secured_by=None,
     ) -> None:
         # `control_method` / `oc_sums` NOMMES et non avales par `**kwargs` : ce sont les deux
         # champs de la ligne L18 (14.02/14.03), et un double qui les jette laisse leur calcul
@@ -293,6 +293,7 @@ class _FakeSnapshotLogger:
                 "command_points": dict(command_points),
                 "control_method": control_method,
                 "oc_sums": oc_sums,
+                "secured_by": secured_by,
             }
         )
 
@@ -321,6 +322,9 @@ def _snapshot_engine(
         "units_cache": {},
         "models_cache": {},
         "units": [],
+        # 14.03 : la securisation PAR OBJECTIF entre dans l'instantane (`Sec=`, grammaire 15) et
+        # dans sa cle de deduplication — cle de production (`reset`), toujours presente.
+        "secured_objectives": {},
     }
     eng.step_logger = logger
     return eng
@@ -356,6 +360,7 @@ def _snapshot_engine_with_two_models(logger: Any) -> W40KEngine:
                       "OC": 2},
         },
         "squad_models": {"1": ["1#0"], "101": ["101#0"]},
+        "secured_objectives": {},
     }
     eng.step_logger = logger
     return eng
@@ -444,6 +449,18 @@ def test_objective_snapshot_reemitted_when_command_points_change():
     eng.game_state["command_points"][1] = 3
     eng._log_objective_control_snapshot_if_changed()
     assert [s["command_points"][1] for s in logger.snapshots] == [2, 3]
+
+
+def test_objective_snapshot_reemitted_when_an_objective_gets_secured():
+    """14.03 (grammaire 15) : une securisation sans changement de controleur, de VP ni de CP
+    DOIT reemettre — c'est `Sec=` qui date l'evenement pour l'analyzer. ROUGE avant : la cle de
+    deduplication ignorait `secured_objectives`, la securisation n'apparaissait jamais."""
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine(logger, {"1": 1}, {1: 3, 2: 0}, {1: 2, 2: 2})
+    eng._log_objective_control_snapshot_if_changed()
+    eng.game_state["secured_objectives"]["1"] = 1
+    eng._log_objective_control_snapshot_if_changed()
+    assert [s["secured_by"] for s in logger.snapshots] == [{}, {"1": 1}]
 
 
 def _combat_log_with_target(**overrides: Any) -> Dict[str, Any]:

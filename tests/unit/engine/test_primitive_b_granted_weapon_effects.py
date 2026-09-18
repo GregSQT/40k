@@ -686,15 +686,52 @@ def test_da_biggest_seulement_sur_le_modele_porteur_pas_sur_lequipe(monkeypatch)
 # ===========================================================================
 
 
-def test_finest_hour_ajoute_trois_attaques_premiere_activation(monkeypatch):
-    """Première activation dans la partie : n_attacks = 1 + 3 = 4 records."""
+def _accept_finest_hour(gs, squad_id: str = "1") -> None:
+    """Ce que fait la réponse `CHOICE_0` à l'appel posé à la sélection 12.04 : Finest Hour est
+    dépensée ET active jusqu'à la fin de la phase (`apply_finest_hour_call`)."""
+    from engine.phase_handlers.fight_handlers import apply_finest_hour_call
+
+    apply_finest_hour_call(gs, squad_id, True)
+
+
+def test_finest_hour_ajoute_trois_attaques_si_l_appel_est_accepte(monkeypatch):
+    """Appel accepté à la sélection : n_attacks = 1 + 3 = 4 records."""
     _fixed(monkeypatch, 4)
     # Finest Hour est sur le MODÈLE (this model's melee weapons)
     gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
+    _accept_finest_hour(gs)
 
     result = roll_fight_intent(gs, intent)
 
     assert len(result["shot_records"]) == 4, "1 base + 3 Finest Hour"
+    assert gs["finest_hour_used"] == {"1"} and gs["finest_hour_active_this_phase"] == {"1"}
+
+
+def test_finest_hour_sans_appel_accepte_ni_bonus_ni_flag(monkeypatch):
+    """« You can » : le roller ne DÉCIDE plus rien. Sans appel accepté, ni +3A ni flag — ROUGE
+    avec l'ancien roller, qui posait `finest_hour_used` et ajoutait les attaques de lui-même."""
+    _fixed(monkeypatch, 4)
+    gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
+
+    result = roll_fight_intent(gs, intent)
+
+    assert len(result["shot_records"]) == 1, "pas d'appel accepté → pas de +3A"
+    assert "1" not in gs.get("finest_hour_used", set()), "le roller ne dépense pas la capacité"
+    assert gs["finest_hour_active_this_phase"] == set()
+
+
+def test_finest_hour_refusee_ne_consomme_rien(monkeypatch):
+    """Appel refusé : rien n'est dépensé, la capacité reste disponible à une sélection suivante."""
+    from engine.phase_handlers.fight_handlers import apply_finest_hour_call, fight_finest_hour_available
+
+    _fixed(monkeypatch, 4)
+    gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
+    assert apply_finest_hour_call(gs, "1", False) == {}
+
+    result = roll_fight_intent(gs, intent)
+
+    assert len(result["shot_records"]) == 1
+    assert fight_finest_hour_available(gs, "1") is True
 
 
 def test_finest_hour_inactif_deuxieme_activation(monkeypatch):
@@ -719,22 +756,12 @@ def test_finest_hour_accorde_devastating_wounds_premiere_activation(monkeypatch)
         unit_rules=[], model_unit_rules=[_FINEST_HOUR],
         toughness=4, save=5,  # S=4 vs T=4 : wound 4+, 6 → crit wound
     )
+    _accept_finest_hour(gs)
 
     result = roll_fight_intent(gs, intent)
 
     first_hit_record = [r for r in result["shot_records"] if r.get("hitResult") == "HIT"][0]
     assert first_hit_record.get("devastating"), "blessure critique + Finest Hour → devastating"
-
-
-def test_finest_hour_pose_le_flag_apres_premiere_activation(monkeypatch):
-    """Le flag finest_hour_used est posé dans game_state après la première activation."""
-    _fixed(monkeypatch, 4)
-    gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
-    assert "finest_hour_used" not in gs or "1" not in gs.get("finest_hour_used", set())
-
-    roll_fight_intent(gs, intent)
-
-    assert "1" in gs.get("finest_hour_used", set()), "le flag doit être posé après activation"
 
 
 def test_finest_hour_devastating_wounds_inactif_phase_suivante(monkeypatch):
@@ -757,24 +784,26 @@ def test_finest_hour_devastating_wounds_inactif_phase_suivante(monkeypatch):
 
 
 def test_finest_hour_devastating_wounds_sur_deuxieme_arme(monkeypatch):
-    """Finest Hour actif sur intent 1 → DEVASTATING WOUNDS appliqué sur intent 2 (2e CC weapon, même phase)."""
-    # Intent 1 (weapon 0, 4 attaques) : 4 × [hit=4, wound=4, save=4] = 12 dés
-    # Intent 2 (weapon 1, 1 attaque) : [hit=4, wound=6, save=4] = 3 dés SANS fix (crit sans DEVASTATING)
-    #   ou [hit=4, wound=6] = 2 dés AVEC fix (DEVASTATING WOUNDS actif → pas de save)
-    _seq(monkeypatch, [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 4])
+    """Finest Hour acceptée → « this model's melee WEAPONS have +3 A, [DEVASTATING WOUNDS] » :
+    la 2e arme de CC de la figurine (même phase) porte aussi +3 A et DEVASTATING WOUNDS."""
+    # Intent 1 (weapon 0, 1+3 attaques) : 4 × [hit=4, wound=4, save=4] = 12 dés
+    # Intent 2 (weapon 1, 1+3 attaques) : 4 × [hit=4, wound=6] = 8 dés (crit → DEVASTATING, pas
+    #   de save) ; SANS le +3 sur la 2e arme, 2 dés suffiraient et la séquence resterait pleine.
+    _seq(monkeypatch, [4, 4, 4] * 4 + [4, 6] * 4)
     gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
     weapon2 = {
         "ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
         "WEAPON_RULES": [], "code": "test_blade", "display_name": "Blade",
     }
     gs["models_cache"]["A1"]["CC_WEAPONS"].append(weapon2)
+    _accept_finest_hour(gs)
 
     roll_fight_intent(gs, {**intent, "weapon_index": 0, "n_attacks_resolved": 1})
-    assert "1" in gs.get("finest_hour_used", set()), "flag posé après intent 1"
+    assert "1" in gs.get("finest_hour_used", set()), "flag posé par l'appel accepté"
 
     result2 = roll_fight_intent(gs, {**intent, "weapon_index": 1, "n_attacks_resolved": 1})
 
-    assert len(result2["shot_records"]) == 1, "pas de +3A sur la 2e arme"
+    assert len(result2["shot_records"]) == 4, "+3 A sur la 2e arme aussi (« melee weapons »)"
     hit_records = [r for r in result2["shot_records"] if r.get("hitResult") == "HIT"]
-    assert hit_records, "l'attaque doit toucher (roll 4 vs ws 4)"
-    assert hit_records[0].get("devastating"), "Finest Hour toujours actif → devastating sur blessure critique (2e arme)"
+    assert len(hit_records) == 4, "les quatre attaques doivent toucher (roll 4 vs ws 4)"
+    assert all(r.get("devastating") for r in hit_records), "Finest Hour toujours actif → devastating (2e arme)"

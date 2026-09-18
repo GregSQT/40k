@@ -43,6 +43,8 @@ from engine.phase_handlers.fight_handlers import (
     EXHORTATION_REGIME_MANUAL,
     FIGHT_CTX,
     FIGHT_SELECTION_EXHORTATION_KEY,
+    FIGHT_SELECTION_FINEST_HOUR_KEY,
+    fight_arm_finest_hour_call,
     ExhortationRegime,
     exhortation_regime_of,
     fight_exhortation_engaged_targets,
@@ -1810,6 +1812,7 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_pending_exhortation_resume", None)
         self.game_state.pop("_pending_exhortation_fight", None)
         self.game_state.pop(FIGHT_SELECTION_EXHORTATION_KEY, None)
+        self.game_state.pop(FIGHT_SELECTION_FINEST_HOUR_KEY, None)
         # Les intents en attente (tir et combat) ne sont jamais purgés par game_state.update() ci-
         # dessous : un dict stale de l'épisode N déroute declare_attack_weapon_qty et
         # _build_manual_allocation au N+1. Remise à zéro explicite, identique à _fight_v11_phase_complete.
@@ -4449,10 +4452,8 @@ class W40KEngine(gym.Env):
         )
         if self.step_logger and self.step_logger.enabled:
             phase_raw = prompt.get("phase")
-            phase_for_log = (
-                phase_raw.strip() if isinstance(phase_raw, str) and phase_raw.strip()
-                else str(require_key(self.game_state, "phase"))
-            )
+            _stripped = phase_raw.strip() if isinstance(phase_raw, str) else ""
+            phase_for_log = _stripped or str(require_key(self.game_state, "phase"))
             self.step_logger.log_action(
                 unit_id=unit_id,
                 action_type="ability_call",
@@ -5104,7 +5105,7 @@ class W40KEngine(gym.Env):
         next_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
         if next_prompt_result is not None:
             return True, next_prompt_result
-        return True, {
+        result = {
             **applied,
             "action": "agent_decision",
             "waiting_for_player": False,
@@ -5115,6 +5116,29 @@ class W40KEngine(gym.Env):
             "selectedRuleId": selected_display_rule_id,
             "success": True,
         }
+        if self._ability_call_closes_command_phase(prompt):
+            return True, self._resume_command_phase_after_faction_decision(result)
+        if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
+            # Appel Finest Hour répondu : le combat suspendu à la sélection reprend, et c'est
+            # SON résultat (squad_fight) que le step rend.
+            return self._resume_fight_after_finest_hour()
+        return True, result
+
+    def _ability_call_closes_command_phase(self, prompt: Dict[str, Any]) -> bool:
+        """La réponse à cet appel de capacité est-elle la dernière chose qu'attendait 08.04 ?
+
+        Un appel de PHASE DE COMMANDEMENT (Grot Orderly) arrête la phase comme un Waaagh!
+        (`faction_decision_is_pending`). Sa réponse, quand elle ne pose rien derrière elle,
+        doit donc REPRENDRE la phase (`_resume_command_phase_after_faction_decision`) — sinon
+        la partie reste en phase de commandement : le gym s'en sortirait par un WAIT de plus, le
+        PvP n'a aucun verbe pour en sortir. Les appels des autres phases (Da Jump) ne ferment
+        rien : leur phase avance par ses activations.
+        """
+        return (
+            is_ability_call_prompt(prompt)
+            and str(require_key(prompt, "phase")) == "command"
+            and str(require_key(self.game_state, "phase")) == "command"
+        )
 
     # ── Capacités de faction (chantier 03) : Waaagh! et Oath of Moment ─────────────────────
     #
@@ -5234,7 +5258,10 @@ class W40KEngine(gym.Env):
             # capacité). Un prompt qui reste en attente ici serait un siège humain, déjà exclu.
             if command_handlers._command_phase_ability_call_is_pending(self.game_state, current_player):
                 waiting = self._emit_next_rule_choice_prompt_if_needed()
-                if waiting is not None:
+                # Le gestionnaire d'un appel accepté peut poser une décision d'agent (profil ou
+                # placement des figurines rendues, Waaagh! derrière) : elle est tranchée par le
+                # tour de boucle suivant. Toute autre attente serait un siège humain, déjà exclu.
+                if waiting is not None and read_pending_agent_decision(self.game_state) is None:
                     raise RuntimeError(
                         "_resolve_faction_decisions_for_ai_seats: un appel de capacité attend un "
                         f"siège qui n'est pas humain — {waiting!r}"
@@ -5965,7 +5992,7 @@ class W40KEngine(gym.Env):
         if next_prompt_result is not None:
             return True, next_prompt_result
 
-        return True, {
+        result = {
             **applied,
             "action": "select_rule_choice",
             "waiting_for_player": False,
@@ -5975,6 +6002,20 @@ class W40KEngine(gym.Env):
             "selectedRuleId": selected_display_rule_id,
             "success": True,
         }
+        # Même reprise que le chemin gym (`_ability_call_closes_command_phase`) : le siège humain
+        # n'a aucun verbe de sortie de la phase de commandement. Et même SERVICE de la file que la
+        # route `agent_decision` : la phase de mouvement qui s'ouvre empile l'appel Da Jump
+        # (`push_next_da_jump_call`), qui doit être servi ICI — laissé en file, il n'était servi
+        # qu'à la cascade suivante, dans la phase de tir, où `apply_da_jump` lève (finding
+        # /code-review du 2026-09-18).
+        if self._ability_call_closes_command_phase(selected_prompt):
+            return self._serve_queued_prompts_after_decision(
+                True, self._resume_command_phase_after_faction_decision(result)
+            )
+        if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
+            # Même reprise que le chemin gym : l'unité reste active, le joueur déclare.
+            return self._resume_fight_after_finest_hour()
+        return True, result
     
     
     def _handle_hazard_confirm(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -7415,6 +7456,7 @@ class W40KEngine(gym.Env):
             SQUAD_ACTION_FIGHT_SLOT_COUNT,
             get_enemy_slot_mapping,
             get_fighting_models,
+            squad_auto_declare_fight_weapons,
         )
         from engine.utils.weapon_helpers import melee_weapons
 
@@ -7443,7 +7485,9 @@ class W40KEngine(gym.Env):
                         candidates.append(t)
             if len(candidates) == 1:
                 target_id = candidates[0]
-                undecided = self._fight_auto_declare_subset(squad_id, target_id, sorted(leftover))
+                undecided = squad_auto_declare_fight_weapons(
+                    self.game_state, squad_id, target_id, only_model_ids=sorted(leftover)
+                )
                 if undecided:
                     return self._fight_ask_weapon_or_continue(squad_id, target_id, undecided)
                 continue
@@ -7474,15 +7518,6 @@ class W40KEngine(gym.Env):
         raise RuntimeError(
             f"_fight_continue_declarations n'a pas convergé pour {squad_id!r} "
             f"({SQUAD_ACTION_FIGHT_SLOT_COUNT + 1} passes)"
-        )
-
-    def _fight_auto_declare_subset(
-        self, squad_id: str, target_id: str, model_ids: List[str]
-    ) -> Dict[str, List[str]]:
-        from engine.phase_handlers.shared_utils import squad_auto_declare_fight_weapons
-
-        return squad_auto_declare_fight_weapons(
-            self.game_state, squad_id, target_id, only_model_ids=model_ids
         )
 
     def _fight_allocate_and_end(self, squad_id: str) -> Tuple[bool, Dict[str, Any]]:
@@ -7637,6 +7672,32 @@ class W40KEngine(gym.Env):
                 "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": [], "expected_damage_by_target": {}},
             }
         return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
+
+    def _resume_fight_after_finest_hour(self) -> Tuple[bool, Dict[str, Any]]:
+        """Reprise du combat suspendu à la sélection par l'appel Finest Hour, une fois répondu.
+
+        Jumeau de `_continue_fight_after_exhortation`, sans jet ni cascade : la réponse a posé
+        (ou non) `finest_hour_active_this_phase`, et le combat reprend par le régime enregistré
+        à l'armement — gym : `_continue_squad_fight_after_selection` (overrun → cible → arme) ;
+        manuel : l'unité reste ACTIVE, `_fight_v11_manual_state` la présente au joueur qui
+        déclare ses attaques. Appelée par les trois chemins de réponse (gym `CHOICE_i`, humain
+        `select_rule_choice`, bot dans la file) : la clé est CONSOMMÉE ici, une seule fois.
+        """
+        from engine.phase_handlers.fight_handlers import _fight_v11_manual_state
+
+        pending = self.game_state.pop(FIGHT_SELECTION_FINEST_HOUR_KEY, None)
+        if pending is None:
+            raise RuntimeError(
+                "_resume_fight_after_finest_hour: aucun combat suspendu par un appel Finest Hour"
+            )
+        regime = exhortation_regime_of(require_key(pending, "regime"), "_resume_fight_after_finest_hour")
+        squad_id = str(require_key(pending, "squad_id"))
+        if regime == EXHORTATION_REGIME_MANUAL:
+            return _fight_v11_manual_state(self.game_state)
+        target_slot = pending.get("target_slot")  # get allowed : None = cible par la politique
+        return self._continue_squad_fight_after_selection(
+            squad_id, int(target_slot) if target_slot is not None else None, skip_pool_check=True
+        )
 
     def _check_and_trigger_exhortation_de_rage(
         self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int],
@@ -7863,6 +7924,8 @@ class W40KEngine(gym.Env):
         # Figurines RENDUES (Grot Orderly, phase de commandement) : evenement moteur qui suit
         # les decisions `returned_models_*`, pas un step d'agent.
         "return_destroyed_models",
+        # 14.03 — securisation d objectif en fin de phase de commandement : effet moteur.
+        "secure_objective",
         # V11 §9.3 P2 — RELEVE d'une decision agent resolue (`_record_agent_decision_action_log`).
         # Non-incrementant, et ce n'est PAS un choix par defaut : le step gym consomme par
         # `CHOICE_i` est deja compte par la ligne d'EFFET du meme step quand le type en produit
@@ -7969,6 +8032,9 @@ class W40KEngine(gym.Env):
         # qu'au detour du `[MODELS:]` d'une ligne suivante, sans datasheet — et l'analyzer
         # s'abstenait de tout verdict 19.04 sur l'escouade.
         "return_destroyed_models": "returned_models",
+        # 14.03 — securisation d un objectif (Get da Good Bitz / Objective Secured) en fin de
+        # phase de commandement : evenement moteur, grammaire 15, pas un step d agent.
+        "secure_objective": "secure_objective",
         # Mort par-figurine explicite (toute cause). Emis par destroy_model pour rendre visible
         # chaque suppression dans step.log — sans cet event, une figurine peut disparaître de
         # [MODELS:] d'une action ultérieure sans aucun signal intermédiaire (flush LIVE post-mort).
@@ -8680,6 +8746,11 @@ class W40KEngine(gym.Env):
             details["restored_model_types"] = _restored_types
             details["ability_display_name"] = require_key(raw_log, "abilityDisplayName")
             details["d3_roll"] = require_key(raw_log, "d3Roll")
+        # Securisation d objectif (14.03) : la zone et la capacite, exigees par le formateur.
+        _secured_zone = raw_log.get("objectiveName")  # get allowed : absent hors securisation
+        if _secured_zone is not None:
+            details["objective_name"] = _secured_zone
+            details["ability_display_name"] = require_key(raw_log, "abilityDisplayName")
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:
@@ -9085,6 +9156,7 @@ class W40KEngine(gym.Env):
             build_manual_shoot_allocation,
             squad_fight_restart_activation,
             squad_declare_fight,
+            squad_auto_declare_fight_weapons,
             commit_move,
             charge_build_valid_plan,
             get_enemy_slot_mapping,
@@ -9952,6 +10024,18 @@ class W40KEngine(gym.Env):
             target_slot_from_semantic: Optional[int] = (
                 int(semantic["target_slot"]) if "target_slot" in semantic else None
             )
+            # Finest Hour (once_per_battle_melee_buff) : « Once per battle … when this unit is
+            # selected to fight » — APPEL DE CAPACITÉ posé ICI, même moment que l'Exhortation
+            # (les deux sur une même escouade lèvent, 19.01). Gym : la file émet la décision et
+            # le combat attend la réponse (`_resume_fight_after_finest_hour`) ; bot PvE : la
+            # politique déclarée répond dans la file, le combat reprend tout de suite.
+            if fight_arm_finest_hour_call(
+                self.game_state, squad_id, target_slot_from_semantic, EXHORTATION_REGIME_GYM
+            ):
+                served = self._emit_next_rule_choice_prompt_if_needed()
+                if served is not None:
+                    return True, served
+                return self._resume_fight_after_finest_hour()
             _exhort = self._check_and_trigger_exhortation_de_rage(
                 squad_id, unit, target_slot_from_semantic, regime=EXHORTATION_REGIME_GYM
             )
@@ -10088,7 +10172,9 @@ class W40KEngine(gym.Env):
                     f"{pending_fw['model_ids']} ne porte {weapon_code!r} — rupture masque/commit"
                 )
             remaining = [mid for mid in pending_fw["model_ids"] if mid not in answered]
-            undecided = self._fight_auto_declare_subset(fw_squad_id, fw_target_id, remaining)
+            undecided = squad_auto_declare_fight_weapons(
+                self.game_state, fw_squad_id, fw_target_id, only_model_ids=remaining
+            )
             return self._fight_ask_weapon_or_continue(fw_squad_id, fw_target_id, undecided)
 
         # ── split-fire (P3-8) ─────────────────────────────────────────────────
@@ -10643,6 +10729,14 @@ class W40KEngine(gym.Env):
         # pendant du site gym (`_process_squad_action`, juste après `_fight_v11_register_selection`).
         armed = self.game_state.pop(FIGHT_SELECTION_EXHORTATION_KEY, None)
         if armed is None:
+            # Finest Hour armée par le handler à la même sélection : servir l'appel au siège
+            # (humain : prompt actif, toute autre action attend ; bot : politique déclarée, le
+            # combat reprend dans la même requête). Le pendant du site gym (`squad_fight`).
+            if self.game_state.get(FIGHT_SELECTION_FINEST_HOUR_KEY) is not None:
+                served = self._emit_next_rule_choice_prompt_if_needed()
+                if served is not None:
+                    return True, served
+                return self._resume_fight_after_finest_hour()
             return success, result
         armed_squad_id = str(armed)
         # Régime MANUEL par construction : la machine manuelle est celle du siège humain (PvP
@@ -10804,12 +10898,17 @@ class W40KEngine(gym.Env):
         # gain de CP sans changement de controle ni de VP (08.02, chaque phase de commandement)
         # ne serait jamais journalise, et le replay afficherait un stock fige.
         command_points = require_key(self.game_state, "command_points")
+        # 14.03 : la securisation PAR OBJECTIF entre dans la cle — elle peut changer sans que
+        # controleur, VP ni CP ne bougent (fin de phase de commandement), et l instantane doit
+        # alors etre reecrit pour que `Sec=` (grammaire 15) date le changement.
+        secured_by = require_key(self.game_state, "secured_objectives")
         snapshot = (
             tuple(sorted((str(k), v) for k, v in controllers.items())),
             require_key(victory_points, 1),
             require_key(victory_points, 2),
             require_key(command_points, 1),
             require_key(command_points, 2),
+            tuple(sorted((str(k), int(v)) for k, v in secured_by.items())),
         )
         # get allowed : absent au tout premier passage de l'episode (cle purgee au reset)
         if snapshot == self.game_state.get(self.OBJECTIVE_CONTROL_LOGGED_KEY):
@@ -10836,6 +10935,7 @@ class W40KEngine(gym.Env):
             command_points,
             control_method=control_method,
             oc_sums=oc_sums,
+            secured_by={str(k): int(v) for k, v in secured_by.items()},
         )
 
     #: Dernier tour pour lequel l'instantané d'état a été écrit (déduplication).
@@ -10928,6 +11028,7 @@ class W40KEngine(gym.Env):
             return
         from engine.game_state import (
             OATH_WOUND_ROLL_BONUS,
+            WAAAGH_INVUL_SAVE,
             WAAAGH_MELEE_BONUS,
             oath_target_id,
             waaagh_is_active,
@@ -10944,6 +11045,10 @@ class W40KEngine(gym.Env):
                 entries.append(("waaagh", "on"))
                 entries.append(("waaagh_melee_str", f"+{WAAAGH_MELEE_BONUS}"))
                 entries.append(("waaagh_melee_atk", f"+{WAAAGH_MELEE_BONUS}"))
+                # Troisième volet de la règle (« a 5+ invulnerable save »), écrit pour la même
+                # raison que les deux autres : le contrôle du seuil de sauvegarde
+                # (`ai/analyzer_save.py`) le LIT au lieu de le redeviner.
+                entries.append(("waaagh_invul", f"{WAAAGH_INVUL_SAVE}+"))
             _oath = oath_target_id(self.game_state, player)
             if _oath is not None:
                 entries.append(("oath_target", _oath))

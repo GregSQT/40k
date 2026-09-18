@@ -167,16 +167,23 @@ def test_chaque_compteur_est_reellement_somme(bucket, path, _empty_stats):
     )
 
 
-def test_bucket_damage_ne_contient_que_damage_missing_unit_hp(_empty_stats):
-    """Le compteur `damage_exceeds_hp` est supprimé : le bucket 'damage' n'a plus qu'un seul terme."""
+def test_bucket_damage_somme_ses_six_compteurs(_empty_stats):
+    """`damage_exceeds_hp` est supprimé ; depuis le 2026-09-18 le bucket 'damage' (§2.3) somme
+    `damage_missing_unit_hp`, les deux effets défensifs (ai/analyzer_save.py) et les trois
+    contrôles d'objectif / restitution (ai/analyzer_objectives.py) — et rien d'autre."""
     stats = _fresh_stats(_empty_stats)
     assert 'damage_exceeds_hp' not in stats, (
         "damage_exceeds_hp n'aurait pas dû être initialisé — compteur supprimé"
     )
     stats['damage_missing_unit_hp'][1] = 3
     stats['damage_missing_unit_hp'][2] = 5
+    stats['save_threshold_mismatch'][1] = 2
+    stats['fnp_threshold_mismatch'][2] = 4
+    stats['objective_control_mismatch'][1] = 1
+    stats['objective_secured_invalid'][2] = 1
+    stats['returned_models_invalid'][1] = 1
     totals = an.error_totals(stats)
-    assert totals['damage'] == 8
+    assert totals['damage'] == 17
 
 
 def test_les_compteurs_a_deux_niveaux_sont_sommes_aussi(_empty_stats):
