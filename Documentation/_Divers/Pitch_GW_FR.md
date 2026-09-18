@@ -25,24 +25,24 @@ C'est là qu'une IA sachant jouer à 40K devient un **partenaire idéal**.
 
 Mise en situation : un testeur expérimenté repère une combinaison qui semble trop forte, une valeur d'unité difficile à calibrer, une "force composition" dont l'équilibrage lui paraît perfectible.
 
-Vérifier cette intuition demande de jouer des parties. Or, outre les contraintes logistiques qu'une partie demande (2 joueurs, agenda, temps de jeu), les ârties jouées ne suffiront peut-être pas à confirmer ou pas l'intuition :
+Vérifier cette intuition demande de jouer des parties. Or, outre les contraintes logistiques qu'une partie demande (2 joueurs, agenda, temps de jeu), les parties jouées ne suffiront peut-être pas à confirmer ou pas l'intuition :
 - **L'objectivation.** Même après plusieurs parties, il demeure très délicat de statuer sur des points de règle très sensibles pouvant impacter tout un pan du jeu.
 - **L'angle mort.** Une interaction non testée reste invisible jusqu'à ce des milliers de joueurs la trouvent après publication.
-- **Le niveau des joueurs.** Les statistiques issues des parties en tournoi ne tiennent pas compte d'une chose capitale : les niveaux de jeu des joueurs sont inégaux, et les statistique ne peuvent s'en afranchir.
+- **Le niveau des joueurs.** Les statistiques issues des parties en tournoi ne tiennent pas compte d'une chose capitale : les niveaux de jeu des joueurs sont inégaux, et les statistiques ne peuvent s'en affranchir.
 
 Ce que leur apporte une IA :
 Des milliers de parties et autant de statistiques fiables par heure. Des datas objectives, concrètes, sur lesquelles ils pourront s'appuyer pour statuer sur le sujet testé.
 
-A ceci il faut ajouter une nuance facilement ignorée : **une IA parfaite n'est pas un joueur humain.** Une unité difficile à manier pourrait paraître excellente jouée par une machine mais décevra des joueurs n'ayant pas le niveau de jeu necessaire pour l'exploiter au mieux. On rejoue donc les mêmes affrontements avec une IA volontairement dégradée. Si l'unité s'effondre, elle n'est pas mal évaluée — elle est **technique**. Ce n'est pas le même remède, et c'est exactement la distinction qu'un designer a besoin de faire.
+A ceci il faut ajouter une nuance facilement ignorée : **une IA parfaite n'est pas un joueur humain.** Une unité difficile à manier pourrait paraître excellente jouée par une machine mais décevra des joueurs n'ayant pas le niveau de jeu nécessaire pour l'exploiter au mieux. On rejoue donc les mêmes affrontements avec une IA volontairement dégradée. Si l'unité s'effondre, elle n'est pas mal évaluée — elle est **technique**. Ce n'est pas le même remède, et c'est exactement la distinction qu'un designer a besoin de faire.
 
 ### Le danger écarté
 
 Quand il est question d'IA, on ne peut s'empêcher de penser aux dangers potentiels. Pour Warhammer 40K, la question pourrait être : l'IA ne va-t-elle pas "terminer" le jeu en définissant la liste optimale pour chaque codex (et ainsi tuer la variété des listes) ? 
-Tout d'abord, un fait simple : L'agent que j'ai mis au point est un agent de Reinforcement Learning : il ne sait "que" joueur à Warhammer 40k. Ce qu'on fait de cette capacité ne dépend que de nous. Lui demander de mettre au point LA liste idéal pour chaque roster serait une fonctionalité à implémenter. Si on ne l'implémente pas, l'agent ne pourra jamais le faire de lui-même. C'est donc vous qui décidez si cette fonctionnalité verra le jour ou non.
+Tout d'abord, un fait simple : L'agent que j'ai mis au point est un agent de Reinforcement Learning : il ne sait "que" jouer à Warhammer 40k. Ce qu'on fait de cette capacité ne dépend que de nous. Lui demander de mettre au point LA liste idéale pour chaque roster serait une fonctionnalité à implémenter. Si on ne l'implémente pas, l'agent ne pourra jamais le faire de lui-même. C'est donc vous qui décidez si cette fonctionnalité verra le jour ou non.
 
 ---
 
-## 2. La dématélisation : Un saut dans l'inconnu ?
+## 2. La dématérialisation : Un saut dans l'inconnu ?
 
 ### Le précédent — comment Magic a répondu à la même question
 
@@ -70,7 +70,7 @@ Arena fournit à Wizards des données massives *après* publication. GW obtiendr
 
 Le cycle deviendrait :
 
-> conception → **simulation IA** → playtest humain / **simulation IA** → publication → données réelles + **pondéraion IA** → analyse → dataslate
+> conception → **simulation IA** → playtest humain / **simulation IA** → publication → données réelles + **pondération IA** → analyse → dataslate
 
 Wizards n'a accès qu'à une partie de la moitié droite de ce cycle. Games Workshop disposerait du cycle complet.
 
@@ -172,7 +172,7 @@ Le moteur utilise une grille hexagonale — un prérequis pour que l'IA puisse s
 
 En termes de jeu, les compositions d'armée (force organisations), objectifs secondaires, stratagèmes et améliorations ne sont pas encore implémentés : les ajouter ne représente pas une difficulté technique, mais cela aurait complexifié / ralenti l'entraînement, pour des aspects qui ne sont pas significatifs dans le cadre de la démonstration.
 
-L'interface s'inspire visuellement des rapports de bataille de White Dwarf. C'est un repère familier, pour un projet développé seul..
+L'interface s'inspire visuellement des rapports de bataille de White Dwarf. C'est un repère familier, pour un projet développé seul.
 
 ---
 
