@@ -361,7 +361,6 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # après un pile-in adverse ; l'observation le recalcule à chaud (`_squad_terrain_flags`,
     # mode `hidden_only`).
     "hidden",
-    "gone_to_ground",      # ⚠ unité ACTIVE uniquement (13.5)
     "in_cover",            # ⚠ unité ACTIVE uniquement (13.08)
     "deploy_not_on_board",  # one-hot mise en place (source `deployed_on_turn`)
     "deploy_pre_battle",

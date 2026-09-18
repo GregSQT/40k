@@ -302,5 +302,5 @@ def test_obs_size_et_action_space_inchanges():
     from engine.observation_entities import UNIT_RULE_EFFECT_IDS
 
     assert "da_jump" in UNIT_RULE_EFFECT_IDS
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 18241
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 18209
     assert TOTAL_ACTION_SIZE == 1389
