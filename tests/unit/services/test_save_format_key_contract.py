@@ -110,12 +110,16 @@ SCENARIO = os.path.join(
 #: `deployment_state` (`reserves_declaration_started`), donc de la table du second niveau — d'où
 #: deux formats de suite au même compte (131) et à la même empreinte, fait mesuré et non doublon.
 #: TL10 = TL09 + `vp_margin_paid` (B6, ledger de marge de VP) : premier mouvement du PREMIER
-#: niveau depuis TL05 — 132 clés.
+#: niveau depuis TL05 — 132 clés. Le 2026-09-18, `_grid_static_hex_arrays` (tableaux mémoïsés
+#: des canaux statiques de la grille) est DEVENU STATIQUE (`_GS_STATIC_KEYS`) sans bump — c'est
+#: la règle du 2026-09-09 (`game_saves._MAGIC`) : le live gagne, une row TL10 antérieure qui le
+#: porte encore est ignorée sur cette clé. Première clé réellement migrée : 131 clés au même
+#: numéro, et le registre ci-dessous porte la valeur COURANTE du littéral, sciemment.
 _TL10_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
         '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
         '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
-        '_grid_deployment_zone_anchor', '_grid_static_hex_arrays', '_ingress_arrived',
+        '_grid_deployment_zone_anchor', '_ingress_arrived',
         '_ingress_no_destination', '_ingress_offered', '_objective_control_last_boundary',
         '_objective_hex_zones_cache', '_obs_objective_hex_arrays', '_obs_weapon_profiles_cache',
         '_obscuring_area_sets_cache', '_pending_reserves_wasted', '_pending_zone_shaping',
@@ -190,7 +194,6 @@ _TL10_SUBKEYS: Dict[str, FrozenSet[str]] = {
         "reserves_declaration_closed", "reserves_declaration_started",
     }),
     "_deployment_slot_candidates": frozenset({"key", "candidates"}),
-    "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
     "choice_timing_index": frozenset({
         "phase_start", "on_deploy", "turn_start", "activation_start", "player_turn_start",
     }),
@@ -277,8 +280,11 @@ _FORMAT_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL08": (131, "bc1d5f0c7f07dc36"),
     # TL09 : échange de sous-clés, premier niveau inchangé depuis TL05 — fait mesuré.
     b"W40KTL09": (131, "bc1d5f0c7f07dc36"),
-    #: COURANTE — vérifiée contre `_TL10_KEYS` à chaque exécution : `vp_margin_paid` en plus.
-    b"W40KTL10": (132, "293d42d78788d736"),
+    #: COURANTE — vérifiée contre `_TL10_KEYS` à chaque exécution : `vp_margin_paid` en plus,
+    #: puis `_grid_static_hex_arrays` parti en statique le 2026-09-18 (132 → 131, même magic :
+    #: une clé devenue statique ne bumpe pas, cf. `game_saves._MAGIC`). Valeur (132,
+    #: "293d42d78788d736") jusqu'à cette date — fait mesuré, gardé pour lire une row TL10 d'avant.
+    b"W40KTL10": (131, "5c0046854826347c"),
 }
 
 #: Même registre pour le SECOND niveau, né sous TL06 : les magics antérieures n'y figurent pas,
@@ -292,9 +298,10 @@ _FORMAT_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     #: TL09 : `reserves_declaration_queue` y est remplacée par `reserves_declaration_declined` et
     #: `reserves_declaration_validated`.
     b"W40KTL09": (24, "9a31f524e24f7534"),
-    #: COURANTE — vérifiée contre `_TL10_SUBKEYS` à chaque exécution. Même empreinte que TL09 :
-    #: TL10 vient d'une clé de PREMIER niveau (`vp_margin_paid`), aucune sous-clé ne bouge.
-    b"W40KTL10": (24, "9a31f524e24f7534"),
+    #: COURANTE — vérifiée contre `_TL10_SUBKEYS` à chaque exécution. Même empreinte que TL09
+    #: jusqu'au 2026-09-18 (TL10 vient d'une clé de PREMIER niveau, `vp_margin_paid`) ; depuis,
+    #: `_grid_static_hex_arrays` est statique et sort de la table (24 → 23, même magic).
+    b"W40KTL10": (23, "2c5c78ec000f6601"),
 }
 
 #: Première magic relevée par chacun des deux registres. Avant elles, le fichier n'a jamais décrit

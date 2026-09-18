@@ -193,3 +193,32 @@ def test_a_lazy_static_key_absent_from_the_live_is_not_resurrected_by_the_row(en
         "un cache statique périmé a été réinjecté depuis la row alors que le live ne l'avait pas : "
         "le moteur répondrait des LoS calculées sur une autre partie"
     )
+
+
+def test_a_tl10_row_carrying_the_old_grid_arrays_key_does_not_crash_the_grid(engine):
+    """PREMIÈRE clé réellement migrée (2026-09-18) : `_grid_static_hex_arrays`.
+
+    Une row TL10 écrite avant la migration porte ce cache avec sa sous-clé d'alors
+    (`obscuring`, hexes des zones obscurantes 13.10). Depuis, le canal 9 lit `static["dense"]`
+    (zones denses 13.09) : si la row réinjectait sa valeur, le premier `build_squad_grid` lèverait
+    `KeyError: 'dense'` — ou, pire, peindrait des zones à mur light seul en « hidden possible ».
+    Le live gagne, et la grille se construit sur le cache vivant.
+    """
+    from services.game_snapshots import rebuild_game_state
+
+    gs = engine.game_state
+    live_arrays = gs["_grid_static_hex_arrays"]
+    assert "dense" in live_arrays and "obscuring" not in live_arrays, (
+        "fixture : le cache vivant doit porter la sous-clé courante, pas l'ancienne"
+    )
+    captured = _captured_with_static_key(
+        engine, "_grid_static_hex_arrays", {**{k: v for k, v in live_arrays.items() if k != "dense"},
+                                            "obscuring": live_arrays["dense"]},
+    )
+    rebuilt = rebuild_game_state(engine, captured)
+    assert rebuilt["_grid_static_hex_arrays"] is live_arrays, (
+        "la row TL10 a écrasé le cache vivant : `static['dense']` lèverait au prochain canal 9"
+    )
+    squad_id = next(iter(rebuilt["squad_cache"]))
+    grid = engine.obs_builder.build_squad_grid(rebuilt, squad_id)
+    assert grid.shape[0] > 9, "grille sans canal 9 : le test ne prouve rien"

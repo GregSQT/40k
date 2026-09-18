@@ -1172,19 +1172,21 @@ class ObservationBuilder:
         # hideable qui s y tient est « within a terrain area ». Statique comme les murs et les
         # objectifs.
         #
-        # Cases des zones OBSCURANTES (13.10) : sous-ensemble strict du precedent, `obscuring`
-        # etant un drapeau PAR ZONE pose au chargement du terrain (`game_state.py`). Le couvert
-        # 13.08 s'applique « within a terrain area », toutes zones confondues ; le hidden 13.09
-        # et l'occultation 13.10 ne regardent QUE les zones obscurantes. Les deux ensembles sont
-        # donc construits ici cote a cote, sur la meme boucle et le meme cache.
+        # Cases des zones DENSES (13.09 : « terrain area that contains one or more dense terrain
+        # features ») : sous-ensemble strict du precedent, `dense` etant un drapeau PAR ZONE derive
+        # des murs types au chargement du terrain (`game_state.py` / `derive_area_categories`). Le
+        # couvert 13.08 s'applique « within a terrain area », toutes zones confondues ; le hidden
+        # 13.09 ne regarde QUE les zones denses — pas les obscurantes 13.10 (mur light OU dense),
+        # que le moteur n'utilise que pour couper la LoS entre deux autres figurines. Les deux
+        # ensembles sont donc construits ici cote a cote, sur la meme boucle et le meme cache.
         cover_hexes: List[Tuple[int, int]] = []
-        obscuring_hexes: List[Tuple[int, int]] = []
+        dense_hexes: List[Tuple[int, int]] = []
         for area in game_state.get("terrain_areas", []):  # get allowed (scenario sans terrain)
-            # `get` MEME accessor que les deux sites de REGLE qui tranchent 13.09/13.10
-            # (`terrain_utils.hexes_in_obscuring_terrain` et `compute_models_within_terrain`) :
-            # exiger la cle ici rendrait l'observation plus stricte que la regle elle-meme, donc
-            # ferait lever sur un terrain que le moteur accepte et joue.
-            sinks = (cover_hexes, obscuring_hexes) if area.get("obscuring") else (cover_hexes,)
+            # `get` MEME accessor que le site de REGLE qui tranche 13.09
+            # (`terrain_utils.filter_terrain_areas`, via `compute_models_within_terrain`) : exiger
+            # la cle ici rendrait l'observation plus stricte que la regle elle-meme, donc ferait
+            # lever sur un terrain que le moteur accepte et joue.
+            sinks = (cover_hexes, dense_hexes) if area.get("dense") else (cover_hexes,)
             for hex_entry in require_key(area, "hexes"):
                 cell = (int(hex_entry[0]), int(hex_entry[1]))
                 for sink in sinks:
@@ -1194,7 +1196,7 @@ class ObservationBuilder:
             "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
             "objectives": _to_arrays(objective_hexes),
             "cover": _to_arrays(cover_hexes),
-            "obscuring": _to_arrays(obscuring_hexes),
+            "dense": _to_arrays(dense_hexes),
         }
         game_state["_grid_static_hex_arrays"] = static
         return static
@@ -2661,13 +2663,13 @@ class ObservationBuilder:
             GRID_CHANNELS,
             GRID_CH_ALLY,
             GRID_CH_COVER,
+            GRID_CH_DENSE,
             GRID_CH_ENEMY,
             GRID_CH_EZ,
             GRID_CH_LEVEL,
             GRID_CH_LOS_EXPOSURE,
             GRID_CH_MOVE_COST,
             GRID_CH_OBJECTIVE,
-            GRID_CH_OBSCURING,
             GRID_CH_OCCUPANT_LEVEL,
             GRID_CH_SELF,
             GRID_CH_WALL,
@@ -2775,7 +2777,7 @@ class ObservationBuilder:
         _paint_arrays(GRID_CH_COVER, *static["cover"])
         grid[GRID_CH_COVER] = dilate_channel(grid[GRID_CH_COVER], dilation_cells)
 
-        # --- Canal 9 : zones obscurantes ---------------------------------------
+        # --- Canal 9 : zones denses (hidden possible) --------------------------
         # Sous-ensemble des cases du couvert, dilate du MEME rayon et pour la MEME raison : le
         # moteur tranche 13.09 par chevauchement de socle (`compute_models_in_dense_terrain`
         # delegue a `compute_models_within_terrain`, le test disque<->polygone du couvert). Peindre
@@ -2785,9 +2787,11 @@ class ObservationBuilder:
         # CE QUE CE CANAL AJOUTE AU COUVERT : etre `hidden` (13.09) ne degrade pas un jet, il rend
         # INTIRABLE au-dela de la portee de detection — l'ennemi cache est ecarte du pool de cibles
         # (`shooting_handlers`). Sans ce canal la grille ne distinguait pas une zone ou l'on peut
-        # disparaitre d'une zone qui se contente de donner le couvert.
-        _paint_arrays(GRID_CH_OBSCURING, *static["obscuring"])
-        grid[GRID_CH_OBSCURING] = dilate_channel(grid[GRID_CH_OBSCURING], dilation_cells)
+        # disparaitre d'une zone qui se contente de donner le couvert. Il peint les zones DENSES
+        # et non les obscurantes (13.10) : meme filtre `area["dense"]` que le moteur, sinon une
+        # zone a mur light seul serait annoncee « hidden possible » sans jamais cacher personne.
+        _paint_arrays(GRID_CH_DENSE, *static["dense"])
+        grid[GRID_CH_DENSE] = dilate_channel(grid[GRID_CH_DENSE], dilation_cells)
 
         # --- Canal 5 : niveau (etages) ----------------------------------------
         # Vaut 0 partout tant qu'aucun etage n'est declare : le sol EST le niveau 0, ce n'est
