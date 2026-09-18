@@ -48,9 +48,6 @@ class _FakeEngine:
     _fight_target_after_designated_death = (
         wcore.W40KEngine._fight_target_after_designated_death
     )
-    # Mêlée 100 (B3) : cibles du pile-in overrun — la vraie méthode, lecture seule du game_state
-    # (unité engagée → None : cibles 12.03 imposées, prises par `fight_pile_in_plan`).
-    _overrun_pile_in_target_ids = wcore.W40KEngine._overrun_pile_in_target_ids
 
     def __init__(self, gs: Dict[str, Any]) -> None:
         self.game_state = gs

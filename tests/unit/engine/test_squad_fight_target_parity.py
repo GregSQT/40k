@@ -356,8 +356,8 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
     orig = su_module.fight_pile_in_plan
 
     # Miroir de `shared_utils.fight_pile_in_plan(game_state, squad_id, *, target_ids)` (mêlée 100,
-    # B3) : le commit passe `target_ids=self._overrun_pile_in_target_ids(...)`, None ici (combat
-    # à vide : `target_slot` absent → pas de cible désignée).
+    # B3) : l'oracle `overrun_pile_in_plan_for_slot` l'appelle avec les cibles de la sélection
+    # 12.03 — None ici (combat à vide : `target_slot` absent → pas de cible désignée).
     def _spy(game_state, sid, *, target_ids):
         calls.append((str(sid), target_ids))
         return None  # bloque le move effectif — le verrou porte sur l'APPEL, pas l'effet

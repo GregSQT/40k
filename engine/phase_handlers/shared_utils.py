@@ -14992,6 +14992,83 @@ def fight_pile_in_plan(
     return plan
 
 
+def overrun_pile_in_plan_for_slot(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_slot: Optional[int],
+    *,
+    unit: Dict[str, Any],
+    plan_cache: Optional[Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]]] = None,
+) -> Optional[List[Tuple[str, int, int, int]]]:
+    """Plan du pile-in additionnel de l overrun 12.06 pour ``target_slot`` — ORACLE UNIQUE.
+
+    Le masque (`build_squad_action_mask`, phase fight) et le commit
+    (`_continue_squad_fight_after_selection`) appellent CETTE fonction : un slot est ouvert ssi
+    le plan qu elle rend pour ce slot engage la cible du slot, et c est exactement le plan que
+    le commit execute ensuite. Deux calculs separes divergeaient : le masque projetait le plan
+    « toutes les cibles a 5" » pour TOUS les slots, donc n ouvrait que la cible la plus proche,
+    alors que le commit visait la cible designee et frappait n importe laquelle des cibles a 5".
+
+    Selection 12.03 BEFORE MOVING : unite engagee -> cibles imposees (les unites engagees) ;
+    unite non engagee -> la cible DESIGNEE par l action si elle est a ≤ 5"
+    (`pile_in_targets_within_range`), sinon toutes les cibles a 5".
+
+    REPLI sur toutes les cibles a 5" quand le plan mono-cible n aboutit pas : 12.03 dit
+    « select one **or more** enemy units within 5" of your unit » — selectionner tout le groupe
+    est une selection legale, et c est la seule qui garde une action jouable. Sans ce repli, un
+    etat ou seul le plan groupe aboutit fermait TOUS les slots de combat ET le combat a vide (le
+    commit y trouverait une cible), donc ne laissait aucune action a l escouade.
+
+    ``target_slot`` a ``None`` (combat a vide) : le plan groupe, celui que le commit execute.
+    Rend ``None`` quand l unite ne peut plus faire ce pile-in (`fight_v11_can_overrun_pile_in`)
+    ou qu aucune selection n aboutit — le commit ne bouge alors pas et frappe depuis le pool
+    pre-move, ce que le masque reflete en retombant sur ce meme pool.
+
+    ``unit`` : l entree d unite, que les deux appelants tiennent deja — la redemander par slot
+    ferait 20 resolutions par construction de masque pour un objet invariant.
+
+    ``plan_cache`` : memo {cle de selection -> plan} partage par les appels d une MEME
+    construction de masque. Le masque interroge un slot par cible ; sans memo il recalculerait
+    le plan groupe a chaque slot alors qu il n existe qu autant de plans distincts que de
+    selections distinctes (cibles a 5" + 1).
+    """
+    from engine.phase_handlers.fight_handlers import (
+        _fight_units_engaged_with,
+        fight_v11_can_overrun_pile_in,
+        pile_in_targets_within_range,
+    )
+
+    if not fight_v11_can_overrun_pile_in(game_state, unit):
+        return None
+
+    cache: Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]] = (
+        plan_cache if plan_cache is not None else {}
+    )
+
+    def _plan(selection: Optional[Tuple[str, ...]]) -> Optional[List[Tuple[str, int, int, int]]]:
+        if selection not in cache:
+            cache[selection] = fight_pile_in_plan(
+                game_state, str(squad_id),
+                target_ids=None if selection is None else list(selection),
+            )
+        return cache[selection]
+
+    designated: Optional[str] = None
+    # Unite engagee : 12.03 impose ses cibles, la designation de l action n y change rien.
+    if target_slot is not None and not _fight_units_engaged_with(game_state, unit):
+        slots = get_enemy_slot_mapping(game_state, int(require_key(unit, "player")))
+        if 0 <= int(target_slot) < len(slots) and slots[int(target_slot)] is not None:
+            _d = str(slots[int(target_slot)])
+            if _d in pile_in_targets_within_range(game_state, unit):
+                designated = _d
+
+    if designated is not None:
+        plan = _plan((designated,))
+        if plan is not None:
+            return plan
+    return _plan(None)
+
+
 def get_fighting_models(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -17082,7 +17159,6 @@ def build_squad_action_mask(
         # son eligibilite -> boucle infinie. Le pool est la source unique.
         from engine.phase_handlers.fight_handlers import (
             _fight_build_valid_target_pool,
-            fight_v11_can_overrun_pile_in,
             fight_v11_fight_selection_pool,
         )
         if squad_id in fight_v11_fight_selection_pool(game_state):
@@ -17094,36 +17170,62 @@ def build_squad_action_mask(
             # Overrun 12.06 : le commit (`_continue_squad_fight_after_selection`) execute le
             # pile-in additionnel AVANT de tester le pool des que `fight_v11_can_overrun_pile_in`
             # — les DEUX cas d'eligibilite (non engagee ; ou engagee depuis le snapshot 12.04),
-            # pas seulement « pool vide ». Le masque reflechit donc l'etat POST-plan (meme plan
-            # deterministe que le commit, `fight_pile_in_plan`) pour rester en parite : un plan
-            # existant REMPLACE le pool pre-move, car le commit frappe depuis les positions
-            # d'arrivee et une cible pre-move peut ne plus y etre adjacente.
-            ov_plan = (
-                fight_pile_in_plan(game_state, squad_id)
-                if fight_v11_can_overrun_pile_in(game_state, unit) else None
+            # pas seulement « pool vide ». Le masque reflechit donc l'etat POST-plan pour rester
+            # en parite : un plan existant REMPLACE le pool pre-move, car le commit frappe depuis
+            # les positions d'arrivee et une cible pre-move peut ne plus y etre adjacente.
+            #
+            # UN PLAN PAR SLOT, pas un plan pour tous : le plan depend de la cible DESIGNEE
+            # (12.03 BEFORE MOVING, `overrun_pile_in_plan_for_slot` — l'oracle que le commit
+            # appelle aussi). Le plan groupe seul n'ouvrait que la cible la plus proche alors que
+            # le commit frappait n'importe quelle cible a 5".
+            _plan_cache: Dict[Optional[Tuple[str, ...]], Optional[List[Tuple[str, int, int, int]]]] = {}
+            ov_plan = overrun_pile_in_plan_for_slot(
+                game_state, squad_id, None, unit=unit, plan_cache=_plan_cache
             )
             if ov_plan is None:
+                # Aucune selection n'aboutit (ou plus de pile-in disponible) : le commit ne bouge
+                # pas et frappe depuis le pool pre-move, quel que soit le slot joue. Le plan par
+                # slot ne peut PAS aboutir non plus — il retombe sur ce meme plan groupe.
                 fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
             else:
                 models_cache = game_state.get("models_cache", {})  # get allowed
                 ez = int(get_engagement_zone(game_state))
-                # Entrees synthetiques des figurines a leur position d'ARRIVEE, une fois pour
-                # tous les slots (elles ne dependent pas de la cible testee).
-                plan_synths = [
-                    _synth_model_entry(game_state, squad_id, models_cache[mid], c, r, level=lv)
-                    for mid, c, r, lv in ov_plan
-                    if mid in models_cache
-                ]
+                # Entrees synthetiques des figurines a leur position d'ARRIVEE, memoisees par
+                # PLAN : les slots dont la selection coincide partagent le meme plan.
+                _synths_by_plan: Dict[Tuple[Tuple[str, int, int, int], ...], List[Dict[str, Any]]] = {}
+
+                def _plan_synths(plan: List[Tuple[str, int, int, int]]) -> List[Dict[str, Any]]:
+                    key = tuple(plan)
+                    synths = _synths_by_plan.get(key)  # get allowed : absent = pas encore bati
+                    if synths is None:
+                        synths = [
+                            _synth_model_entry(game_state, squad_id, models_cache[mid], c, r, level=lv)
+                            for mid, c, r, lv in plan
+                            if mid in models_cache
+                        ]
+                        _synths_by_plan[key] = synths
+                    return synths
+
                 fight_targets = set()
-                for esid in enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]:
+                for _slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
                     if esid is None:
                         continue
                     target_entry = units_cache.get(str(esid))
                     if target_entry is None or not entry_is_on_battlefield(target_entry):
                         continue
+                    # Jamais None ici : le repli de l'oracle rend `ov_plan`, deja non-None.
+                    slot_plan = overrun_pile_in_plan_for_slot(
+                        game_state, squad_id, _slot_i, unit=unit, plan_cache=_plan_cache
+                    )
+                    if slot_plan is None:
+                        raise RuntimeError(
+                            f"build_squad_action_mask: plan overrun absent pour le slot {_slot_i} "
+                            f"de {squad_id} alors que le plan groupe existe — repli de "
+                            "`overrun_pile_in_plan_for_slot` casse."
+                        )
                     if any(
                         unit_entries_within_engagement_zone(synth, target_entry, ez)
-                        for synth in plan_synths
+                        for synth in _plan_synths(slot_plan)
                     ):
                         fight_targets.add(str(esid))
             opened = 0

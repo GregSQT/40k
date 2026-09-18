@@ -149,3 +149,67 @@ def test_reference_bot_answers_consolidate_to_keep_its_baseline(melee_scenario_f
     gs = eng.game_state
     mask, _eligible = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
     assert bot_action_for_pending_choice(gs, mask, "test") == CHOICE_BASE
+
+
+# ---------------------------------------------------------------------------
+# La question n'est posée que si consolider est POSSIBLE (12.07 « they CHOOSE to move »)
+# ---------------------------------------------------------------------------
+
+
+def test_engaging_mode_can_have_no_plan_at_all():
+    """Géométrie réelle : mode `engaging` constaté, et pourtant AUCUN plan de consolidation.
+
+    L'ennemi « 2 » est à 3" de l'escouade « 1 » (donc dans `consolidation_trigger_range`), mais
+    une unité AMIE occupe les 18 cases à distance ≤ 2 de lui : aucune figurine de « 1 » ne peut
+    finir engagée, et `squad_consolidate_plan_with_targets` rend `(None, [])`.
+    """
+    from engine.combat_utils import calculate_hex_distance
+    from engine.phase_handlers.fight_handlers import fight_v11_consolidation_mode
+    from engine.phase_handlers.shared_utils import squad_consolidate_plan_with_targets
+    from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+    enemy = (10, 13)
+    blockers = [
+        (c, r)
+        for c in range(4, 17)
+        for r in range(7, 20)
+        if calculate_hex_distance(c, r, *enemy) <= 2 and (c, r) != enemy
+    ]
+    assert len(blockers) == 18, blockers
+    gs = synthetic_state(
+        [
+            synthetic_unit("1", 1, [{"col": 10, "row": 10}]),
+            synthetic_unit("2", 2, [{"col": enemy[0], "row": enemy[1]}]),
+            synthetic_unit("3", 1, [{"col": c, "row": r} for c, r in blockers]),
+        ],
+        phase="fight", game_rules={}, inches_to_subhex=1,
+        board_cols=44, board_rows=60, fight_subphase="consolidate",
+    )
+
+    assert fight_v11_consolidation_mode(gs, {"id": "1", "player": 1}) == "engaging"
+    assert squad_consolidate_plan_with_targets(gs, "1", mode="engaging") == (None, [])
+
+
+def test_no_decision_is_armed_when_the_engaging_plan_is_impossible(melee_scenario_file):
+    """Mode engaging mais plan impossible → aucune décision armée, consolidation consommée.
+
+    ROUGE avant le fix : le settle armait `consolidation_engaging` AVANT de calculer le plan,
+    et l'agent répondait à une question dont les deux réponses produisent le même état (aucun
+    commit, aucun New Foe, `consolidation_done` posée).
+    """
+    import engine.phase_handlers.shared_utils as su_module
+    from engine.agent_decision import read_pending_agent_decision
+
+    orig = su_module.squad_consolidate_plan_with_targets
+    su_module.squad_consolidate_plan_with_targets = lambda gs, sid, *, mode=None: (None, [])
+    try:
+        eng = _engine_at_consolidation(melee_scenario_file)
+    finally:
+        su_module.squad_consolidate_plan_with_targets = orig
+    gs = eng.game_state
+
+    assert read_pending_agent_decision(gs) is None, "aucune question quand consolider est impossible"
+    assert "1" in gs["consolidation_done"], "la consolidation 12.07 est consommee"
+    assert gs["consolidation_engaging_answers"] == {}
+    assert not [e for e in gs["action_logs"] if e.get("type") == "consolidation"]
+    assert "consolidation_new_foes_pending" not in gs

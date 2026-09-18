@@ -54,8 +54,6 @@ class _FakeEngine:
     _fight_ask_weapon_or_continue = wcore.W40KEngine._fight_ask_weapon_or_continue
     _fight_continue_declarations = wcore.W40KEngine._fight_continue_declarations
     _fight_allocate_and_end = wcore.W40KEngine._fight_allocate_and_end
-    # B3 : cibles du pile-in overrun = la cible désignée si l'unité n'est pas engagée.
-    _overrun_pile_in_target_ids = wcore.W40KEngine._overrun_pile_in_target_ids
     _process_squad_action = wcore.W40KEngine._process_squad_action
     _pending_manual_alloc_ctx = wcore.W40KEngine._pending_manual_alloc_ctx
 
@@ -495,29 +493,93 @@ def test_b3_overrun_pile_in_plan_reaches_the_designated_target():
     assert _d(cb, rb, *b_cell) <= 2, f"cible désignée B atteignable → engagée avec B, obtenu {(cb, rb)}"
 
 
-def test_b3_designated_target_out_of_5_inches_falls_back_to_all_targets():
-    """Cible désignée hors 5" → `None` (toutes les cibles à 5", comportement d'origine) ;
-    désignée à ≤ 5" et unité non engagée → `[désignée]` ; unité engagée → `None` (12.03 impose
-    ses cibles)."""
-    gs, _a, _b = _overrun_state()
-    unit = gs["unit_by_id"]["1"]
-    eng = _FakeEngine(gs)
+def _overrun_state_in_fight_step():
+    """`_overrun_state()` amené à l'étape FIGHT 12.04 : l'escouade a chargé (donc éligible), n'a
+    pas encore fait son pile-in d'overrun, et n'était pas engagée au snapshot."""
+    gs, a_cell, b_cell = _overrun_state()
+    gs["current_player"] = 1
+    gs["units_charged"] = {"1"}
+    gs["units_fought"] = set()
+    gs["engaged_at_fight_step_start"] = {}
+    gs["overrun_pile_in_done"] = set()
+    return gs, a_cell, b_cell
+
+
+def test_b3_oracle_plans_toward_the_designated_target_then_falls_back():
+    """`overrun_pile_in_plan_for_slot` : slot de B → plan ENGAGÉ avec B ; slot absent (combat à
+    vide) → plan groupé (vers A, le plus proche) ; B repoussé hors des 5" → plan groupé ; unité
+    engagée → plan groupé (12.03 impose ses cibles)."""
+    from engine.combat_utils import calculate_hex_distance as _d
+
+    gs, a_cell, b_cell = _overrun_state_in_fight_step()
     slots = su.get_enemy_slot_mapping(gs, 1)
     slot_b = slots.index("3")
 
-    assert eng._overrun_pile_in_target_ids("1", unit, slot_b) == ["3"]
-    assert eng._overrun_pile_in_target_ids("1", unit, None) is None
+    plan_b = su.overrun_pile_in_plan_for_slot(gs, "1", slot_b, unit=gs["unit_by_id"]["1"])
+    plan_none = su.overrun_pile_in_plan_for_slot(gs, "1", None, unit=gs["unit_by_id"]["1"])
+    assert plan_b is not None and plan_none is not None
+    _m, cb, rb, _lv = plan_b[0]
+    _m, ca, ra, _lv = plan_none[0]
+    assert _d(cb, rb, *b_cell) <= 2, f"slot de B → engagée avec B, obtenu {(cb, rb)}"
+    assert _d(ca, ra, *a_cell) <= 2, f"sans désignation → plan groupé (vers A), obtenu {(ca, ra)}"
 
-    # B repoussé hors des 5" : la désignation ne peut pas être honorée → repli.
+    # B repoussé hors des 5" : la désignation ne peut pas être honorée → plan groupé.
     gs["units_cache"]["3"]["occupied_hexes"] = {(30, 30)}
     gs["units_cache"]["3"]["col"], gs["units_cache"]["3"]["row"] = 30, 30
-    assert eng._overrun_pile_in_target_ids("1", unit, slot_b) is None
+    assert su.overrun_pile_in_plan_for_slot(gs, "1", slot_b, unit=gs["unit_by_id"]["1"]) == plan_none
 
-    # Unité engagée : cibles imposées par 12.03.
-    monkeypatch_engaged = ["2"]
+    # Unité engagée : cibles imposées par 12.03, la désignation ne change rien.
     orig = fh._fight_units_engaged_with
-    fh._fight_units_engaged_with = lambda _gs, _u: monkeypatch_engaged
+    fh._fight_units_engaged_with = lambda _gs, _u: ["2"]
     try:
-        assert eng._overrun_pile_in_target_ids("1", unit, slot_b) is None
+        assert su.overrun_pile_in_plan_for_slot(gs, "1", slot_b, unit=gs["unit_by_id"]["1"]) == su.fight_pile_in_plan(gs, "1")
     finally:
         fh._fight_units_engaged_with = orig
+
+
+def test_b3_oracle_falls_back_when_the_single_target_plan_fails(monkeypatch):
+    """Plan mono-cible impossible mais plan groupé possible → l'oracle rend le plan GROUPÉ.
+
+    12.03 BEFORE MOVING « select one **or more** enemy units within 5" » : sélectionner tout le
+    groupe est une sélection légale. Sans ce repli, le masque fermerait tous les slots ET le
+    combat à vide (le commit y trouverait une cible) : l'escouade n'aurait plus aucune action.
+    """
+    gs, _a, _b = _overrun_state_in_fight_step()
+    slots = su.get_enemy_slot_mapping(gs, 1)
+    slot_b = slots.index("3")
+    grouped = [("1#0", 9, 12, 0)]
+
+    monkeypatch.setattr(
+        su, "fight_pile_in_plan",
+        lambda _gs, _sid, target_ids=None: None if target_ids is not None else grouped,
+    )
+
+    assert su.overrun_pile_in_plan_for_slot(gs, "1", slot_b, unit=gs["unit_by_id"]["1"]) == grouped
+
+
+def test_b3_mask_opens_the_slot_of_every_reachable_pile_in_target():
+    """Parité masque/commit de l'overrun : A ET B sont chacun atteignables par un plan 12.03,
+    donc leurs DEUX slots sont ouverts.
+
+    ROUGE avant la parité : le masque projetait le seul plan groupé (vers A) pour tous les
+    slots et n'ouvrait que le slot de A, alors que le commit sur le slot de B exécutait le
+    pile-in vers B et le frappait.
+    """
+    from engine.phase_handlers.shared_utils import (
+        SQUAD_ACTION_FIGHT_NO_TARGET,
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+        build_squad_action_mask,
+    )
+
+    gs, _a, _b = _overrun_state_in_fight_step()
+    slots = su.get_enemy_slot_mapping(gs, 1)
+
+    mask = build_squad_action_mask(gs, "1", enemy_slot_ids=slots)
+
+    opened = {
+        slots[i]
+        for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)
+        if mask[SQUAD_ACTION_FIGHT_SLOT_BASE + i]
+    }
+    assert opened == {"2", "3"}, f"les deux cibles à 5\" sont frappables, obtenu {opened}"
+    assert not mask[SQUAD_ACTION_FIGHT_NO_TARGET], "des cibles existent : pas de combat à vide"
