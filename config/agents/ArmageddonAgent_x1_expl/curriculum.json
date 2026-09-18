@@ -14,8 +14,9 @@
   ],
   "exploiter_config": {
     "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E, en episodes DE L'ETAPE — comme probe_every_episodes et le budget journalise ; le compteur cumule de la lignee reprise 'from:' ne compte pas (cf. ai/curriculum.py::stage_origin). La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur, et le profil de lignee s'y applique comme a n'importe quelle etape reprise a chaud.",
-    "probe_every_episodes": 2000,
-    "probe_cheap_n": 100,
+    "_doc_2026_09_18": "SONDES 5000 / 300 depuis le 2026-09-18 (paire option 2, plafonnement_p1.md section 10) : la regle de lecture de la paire temoin / traite se lit sur la moyenne des 3 dernieres sondes a 60 000 avec un seuil de 5 pts pose comme 2 sigma — ce qui exige sigma 2,4 pts sur la DIFFERENCE de deux moyennes, soit 300 parties par sonde (sigma 2,9 par sonde, 1,7 sur la moyenne de 3, 2,4 sur la difference). A 100 parties tous les 2000 (S25, S9), la meme difference avait sigma 4,1 : un ecart de 5 pts n'y valait que 1,2 sigma. Cout identique (12 x 300 = 3 600 parties d'evaluation par run contre 30 x 100 = 3 000). Comparaison avec S9 (0,78, sondes 2000/100) : meme fenetre de 60 000, meme argmax, cadence plus grossiere — comparable en niveau, pas sonde a sonde.",
+    "probe_every_episodes": 5000,
+    "probe_cheap_n": 300,
     "probe_confirm_n": 500,
     "win_rate_target": 0.95
   },
@@ -46,7 +47,16 @@
     "destroy_score_vs_champion": 0.5,
     "destroy_min_episodes": 20000,
     "_doc_full_pool_probe_every": "CADENCE DE COUT, pas un seuil (2026-09-07). Le champion est sonde a CHAQUE sonde, les autres membres du pool un tour sur trois. Sonder tout le pool a chaque fois fait suivre le cout de la sonde a la TAILLE du pool, qui croit d'une etape a l'autre : a P10 (13 membres, 300 000 episodes, bot_eval_freq 10 000, 300 episodes par membre) cela fait 117 000 episodes d'evaluation BLOQUANTS sur le fil d'entrainement pour 300 000 episodes entraines, la ou la sonde champion seul d'avant le 2026-09-07 en coutait 9 000. A 3, il en reste ~48 600, soit -58 %. POURQUOI CE DECOUPAGE ET PAS UNE CADENCE UNIQUE DEGRADEE : les deux verdicts n'ont pas le meme besoin de fraicheur. La DESTRUCTION ne lit que le champion et doit couper vite — chaque sonde retardee est du budget brule sur une politique deja defaite. La PROMOTION lit tout le pool mais ne s'ouvre qu'a promote_min_episodes, et arreter un run trop tard coute une fraction de ce que coute l'arreter a tort. CE QUI N'EST PAS DEGRADE : le verdict lit toujours le pool ENTIER — les membres non sondes au tour courant gardent leur derniere moyenne connue, au plus trois sondes en arriere. Les DEUX PREMIERS tours restent pleins quelle que soit cette valeur : aucun verdict n'est rendu tant qu'un membre n'a pas deux points, et sans eux la destruction attendrait 40 000 episodes au lieu des 20 000 que son seuil demande. 1 = tout le pool a chaque sonde (comportement d'avant).",
-    "full_pool_probe_every": 3
+    "full_pool_probe_every": 3,
+    "_doc_2026_09_18": "probe_every_episodes, snapshot_thresholds et plateau sont OBLIGATOIRES dans tout bloc early_stop depuis le 2026-09-17 (ai/curriculum.py _EARLY_STOP_REQUIRED_KEYS, livraison plateau / instantanes / runs de check sur l'agent x1) ; ce curriculum n'avait pas suivi et load_curriculum le refusait (constate le 2026-09-18 avant la paire option 2). Valeurs recopiees du curriculum de ArmageddonAgent_x1 : ce bloc ne pilote que PoolEarlyStoppingCallback, que l'etape E0 (exploiteur, ExploiterProbeCallback) ne monte pas — il est requis par la validation, pas lu par le run.",
+    "probe_every_episodes": 5000,
+    "snapshot_thresholds": [0.50, 0.60, 0.70],
+    "plateau": {
+      "patience_probes": 4,
+      "min_delta": 0.02,
+      "min_episodes": 40000,
+      "check_budget_cap": 100000
+    }
   },
   "stages": {
     "P0": {
