@@ -5009,8 +5009,31 @@ class W40KEngine(gym.Env):
             "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
 
-    def _resolve_move_after_shooting_decision_for_ai_seat(self) -> None:
+    def _settle_move_after_shooting_for_ai_seat(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """`_resolve_move_after_shooting_decision_for_ai_seat`, puis le payload rendu au client
+        reflète l'état FINAL.
+
+        Le résultat de l'action porte l'ARMEMENT (`waiting_for_player: True`, pas
+        d'`activation_ended`) ; une fois la décision du bot répondue dans la requête, plus rien
+        n'attend et l'activation est close. Rendre l'armement tel quel ferait lire au client une
+        attente qui n'existe plus : la boucle IA du front sort sur `waiting_for_player` sans
+        branche pour ce cas, et l'humain qui vient d'allouer les pertes du tir du bot verrait de
+        même. Les clés de la réponse (`activation_ended`, `waiting_for_player`, position
+        d'arrivée, `decision_type`…) recouvrent celles de l'armement ; l'`action` et le
+        `shoot_result` du tir restent ceux du tir — c'est lui que ce step a joué.
+        """
+        settled = self._resolve_move_after_shooting_decision_for_ai_seat()
+        if settled is None or not isinstance(result, dict):
+            return result
+        merged = {**result, **settled}
+        if "action" in result:
+            merged["action"] = result["action"]
+        return merged
+
+    def _resolve_move_after_shooting_decision_for_ai_seat(self) -> Optional[Dict[str, Any]]:
         """Répond, dans la MÊME requête, au repositionnement post-tir posé au bot PvE.
+
+        Rend le résultat de la réponse quand une décision a été tranchée, ``None`` sinon.
 
         `_handle_shooting_end_activation` pose la décision `move_after_shooting` à tout siège
         que `move_after_shooting_seat_is_model_driven` désigne — le gym, qui répond par le masque
@@ -5029,13 +5052,13 @@ class W40KEngine(gym.Env):
         modèle chargé est une rupture, pas un cas à absorber.
         """
         if self.gym_training_mode:
-            return
+            return None
         decision = read_pending_agent_decision(self.game_state)
         if decision is None or str(require_key(decision, "type")) != "move_after_shooting":
-            return
+            return None
         unit = require_unit_by_id(self.game_state, str(require_key(decision, "unit_id")))
         if not shooting_handlers.move_after_shooting_seat_is_model_driven(self.game_state, unit):
-            return
+            return None
         if not hasattr(self, "pve_controller") or not self.pve_controller.is_ready_for_decision():
             raise RuntimeError(
                 "move_after_shooting : décision posée au bot PvE sans modèle chargé — "
@@ -5052,6 +5075,7 @@ class W40KEngine(gym.Env):
             raise RuntimeError(
                 f"move_after_shooting : réponse du bot PvE refusée — {result!r}"
             )
+        return result
 
     def _resolve_reactive_move_decision_for_ai_seats(self) -> None:
         """Tranche le mouvement réactif d'un siège qui n'a AUCUN canal de réponse.
@@ -6040,7 +6064,7 @@ class W40KEngine(gym.Env):
                     f"step_logger_block_s={_t_pre_cascade - _t_after_handlers:.6f}"
                 )
 
-        self._resolve_move_after_shooting_decision_for_ai_seat()
+        result = self._settle_move_after_shooting_for_ai_seat(result)
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 
@@ -9512,7 +9536,7 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
 
-        self._resolve_move_after_shooting_decision_for_ai_seat()
+        result = self._settle_move_after_shooting_for_ai_seat(result)
         self._resolve_reactive_move_decision_for_ai_seats()
         self._defer_phase_advance_while_reacting(result)
 

@@ -369,4 +369,14 @@ def test_pve_bot_answers_its_own_decision_in_the_same_request():
     assert _position(eng, "1") != before
     assert "1" in gs["units_cannot_charge"]
     assert gs["shoot_activation_pool"] == []
-    assert "1" in gs["units_shot"]
+    # Le payload rendu au client reflète l'état FINAL : plus d'attente, activation close, tir
+    # conservé. La boucle IA du front sort sur `waiting_for_player` sans savoir répondre.
+    assert result["action"] == "squad_shoot"
+    assert "shoot_result" in result
+    assert result["waiting_for_player"] is False
+    assert result["activation_ended"] is True
+    assert (result["toCol"], result["toRow"]) == _position(eng, "1")
+    # Dernier tireur du pool : la fin d'activation de la réponse porte `phase_complete`, et la
+    # cascade de `_process_squad_action` avance la phase comme pour un tir sans décision.
+    assert result["phase_complete"] is True
+    assert gs["phase"] != "shoot"
