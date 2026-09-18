@@ -279,3 +279,56 @@ def test_un_lot_sur_une_cible_deja_detruite_ne_jette_aucun_de(monkeypatch):
     assert "T2_0" not in gs["models_cache"]
     assert result["shoot_result"]["lot_order"] == ["GUN_A", "GUN_B"]
     assert result["shoot_result"]["attacks_made"] == 2
+
+
+# ------------------------------------------------- lot jeté sans blessure : aucun ordre à déclarer
+
+def test_un_lot_sans_blessure_ne_demande_pas_l_ordre_des_groupes(monkeypatch):
+    """Cible à DEUX groupes d'allocation (deux profils de sauvegarde) : un lot dont tous les
+    dés ratent n'a rien à attribuer, donc le défenseur n'a aucun ordre à déclarer (05.03 ne
+    concerne que des blessures à attribuer) — l'activation se termine sans question."""
+    seq = _dice(monkeypatch, [2])  # touche ratée : pool vide
+    gs = _game_state([_weapon("gun_a")], [_intent(0, "2")], target_models=2)
+    gs["models_cache"]["T2_1"]["ARMOR_SAVE"] = 3  # second groupe (05.03 : triplet W/Sv/InSv)
+
+    result = build_manual_shoot_allocation(gs, "1")
+
+    assert result["done"] is True and seq == []
+    assert PENDING_SHOOT_ALLOCATION_KEY not in gs
+    assert all(m["HP_CUR"] == 3 for m in gs["models_cache"].values() if m["squad_id"] == "2")
+
+
+def test_un_lot_avec_blessure_demande_l_ordre_des_groupes(monkeypatch):
+    """Jumeau de contrôle : la même cible, une blessure à attribuer → la déclaration d'ordre
+    est bien demandée (le test précédent ne passe pas parce que la question aurait disparu)."""
+    _dice(monkeypatch, [6, 6, 1])  # touche, blessure, save ratée : une blessure à attribuer
+    gs = _game_state([_weapon("gun_a")], [_intent(0, "2")], target_models=2)
+    gs["models_cache"]["T2_1"]["ARMOR_SAVE"] = 3
+
+    result = build_manual_shoot_allocation(gs, "1")
+
+    assert result["waiting_for_player"] is True
+    assert result["action"] == "squad_shoot_declare_order"
+
+
+# -------------------------------------- choix de lot refusé pendant l'attribution du défenseur
+
+def test_choix_de_lot_refuse_tant_que_le_lot_courant_est_en_attribution(monkeypatch):
+    """Deux lots sur la cible 2 (deux groupes) : le lot A est jeté et attend l'ordre du
+    défenseur. Un `select_lot` envoyé à cet instant est refusé sans mutation : ni `lot_choice`
+    stocké, ni dé consommé, l'attente du défenseur inchangée."""
+    seq = _dice(monkeypatch, [6, 6, 1])  # lot A : touche, blessure, save ratée -> attend l ordre des groupes
+    gs = _game_state([_weapon("gun_a"), _weapon("gun_b", strength=5)],
+                     [_intent(0, "2"), _intent(1, "2")], target_models=2)
+    gs["models_cache"]["T2_1"]["ARMOR_SAVE"] = 3
+    build_manual_shoot_allocation(gs, "1")
+    waiting = select_attack_lot(gs, SHOOT_CTX, 0)
+    assert waiting["action"] == "squad_shoot_declare_order"
+
+    with pytest.raises(ValueError) as exc:
+        select_attack_lot(gs, SHOOT_CTX, 1)
+
+    assert "en cours d attribution" in str(exc.value)
+    assert gs[PENDING_SHOOT_ALLOCATION_KEY]["lot_choice"] is None
+    assert seq == []
+    assert manual_allocation_waiting_payload(gs, SHOOT_CTX)["action"] == "squad_shoot_declare_order"

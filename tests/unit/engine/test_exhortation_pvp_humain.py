@@ -198,12 +198,11 @@ def test_pvp_un_seul_ennemi_jet_immediat_a_l_activation(monkeypatch):
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["hazardousMortalWounds"] == 3, lines
     assert lines[0]["unitId"] == "2" and lines[0]["abilityTriggerRoll"] == 6
-    # Défenseur humain : premier clic sur l'unique figurine, les deux autres blessures vont
-    # d'office à la figurine entamée (06.02).
-    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
-    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "2", "modelId": "2#0"})
-    assert ok is True, out
+    # Défenseur humain, figurine UNIQUE : aucun choix 06.02 à poser (décision du 2026-09-18,
+    # chantier « chaîne d'attaque 100 % » : attribution d'office à candidate unique) — les trois
+    # blessures tombent dans la même requête et le Chaplain reste actif.
     assert gs["models_cache"]["2#0"]["HP_CUR"] == 2
+    assert "pending_hazard_allocation" not in gs
     assert out["action"] == "wait" and out["active_fight_unit"] == "1", out
     assert out["valid_targets"] == ["2"]
     assert "1" not in gs["units_selected_to_fight"]
@@ -319,10 +318,10 @@ def test_pve_siege_ia_la_decision_est_tranchee_sur_le_champ(monkeypatch):
     assert gs.get("_pending_exhortation_fight") is None
     lines = _mw_lines(gs)
     assert len(lines) == 1 and lines[0]["unitId"] == "3" and lines[0]["hazardousMortalWounds"] == 3
-    # Défenseur HUMAIN : l'attribution lui revient (HAZARD_CTX), puis la reprise GYM du bot.
-    assert out["action"] == "squad_hazard_manual_alloc" and out["waiting_for_player"] is True, out
-    ok, out = eng.execute_semantic_action({"action": "squad_hazard_allocate_model", "unitId": "3", "modelId": "3#0"})
-    assert ok is True, out
+    # Défenseur HUMAIN à figurine UNIQUE : aucun choix 06.02 (attribution d'office à candidate
+    # unique, décision du 2026-09-18), donc la reprise GYM du bot suit dans la même requête.
+    assert out == {"action": "squad_fight", "squad_id": "5"}, out
+    assert gs["models_cache"]["3#0"]["HP_CUR"] == 2
     assert resumed == [("5", 1, "gym")]
     # Une action humaine n'est plus refusée : la décision n'existe plus.
     assert eng._reject_action_while_exhortation_pending({"action": "activate_unit"}) is None
