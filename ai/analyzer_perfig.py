@@ -1003,11 +1003,9 @@ def model_engaged_with_unit(
     « engaged with the model that has that weapon », pas « l'unité est-elle engagée ? »."""
     from ai.analyzer import _iter_engaging_enemy_ids
 
-    positions = {
-        uid: pos for uid, pos in unit_positions.items() if uid in (unit_id, target_id)
-    }
-    hps = {uid: hp for uid, hp in unit_hp.items() if uid in (unit_id, target_id)}
-    models = {uid: m for uid, m in positions_by_model.items() if uid in (unit_id, target_id)}
+    positions = {k: unit_positions[k] for k in (unit_id, target_id) if k in unit_positions}
+    hps = {k: unit_hp[k] for k in (unit_id, target_id) if k in unit_hp}
+    models = {k: positions_by_model[k] for k in (unit_id, target_id) if k in positions_by_model}
     ids = _iter_engaging_enemy_ids(
         unit_id, state.unit_player, positions, hps, int(zone),
         None, models, state.unit_base, {model_id: cell},
@@ -1058,7 +1056,7 @@ def reachable_cell_engaging(
     """
     from ai.analyzer import _bfs_shortest_path_length
     from ai.analyzer_config import get_run_board_dims
-    from engine.combat_utils import calculate_hex_distance
+    from engine.phase_handlers.shared_utils import _hex_cells_within_radius
 
     board_cols, board_rows = get_run_board_dims()
     radius = int(zone) + _base_extent_cells(_unit_base(state.unit_base, unit_id))
@@ -1072,38 +1070,35 @@ def reachable_cell_engaging(
         for tc, tr in anchors:
             if not position_is_on_battlefield((tc, tr)):
                 continue
-            for col in range(tc - t_radius, tc + t_radius + 1):
-                for row in range(tr - t_radius, tr + t_radius + 1):
-                    cell = (col, row)
-                    if cell in seen:
-                        continue
-                    seen.add(cell)
-                    if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
-                        continue
-                    if calculate_hex_distance(col, row, tc, tr) > t_radius:
-                        continue
-                    if cell in wall_hexes or cell in occupied_positions or cell in taken_cells:
-                        continue
-                    if not model_engaged_with_unit(
+            for cell in _hex_cells_within_radius(tc, tr, t_radius):
+                col, row = cell
+                if cell in seen:
+                    continue
+                seen.add(cell)
+                if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
+                    continue
+                if cell in wall_hexes or cell in occupied_positions or cell in taken_cells:
+                    continue
+                if not model_engaged_with_unit(
+                    state=state, unit_id=unit_id, model_id=model_id, cell=cell,
+                    target_id=str(target_id), zone=zone, unit_positions=unit_positions,
+                    unit_hp=unit_hp, positions_by_model=positions_by_model,
+                ):
+                    continue
+                if any(
+                    model_engaged_with_unit(
                         state=state, unit_id=unit_id, model_id=model_id, cell=cell,
-                        target_id=str(target_id), zone=zone, unit_positions=unit_positions,
+                        target_id=str(fid), zone=forbidden_zone, unit_positions=unit_positions,
                         unit_hp=unit_hp, positions_by_model=positions_by_model,
-                    ):
-                        continue
-                    if any(
-                        model_engaged_with_unit(
-                            state=state, unit_id=unit_id, model_id=model_id, cell=cell,
-                            target_id=str(fid), zone=forbidden_zone, unit_positions=unit_positions,
-                            unit_hp=unit_hp, positions_by_model=positions_by_model,
-                        )
-                        for fid in forbidden_ids
-                    ):
-                        continue
-                    if _bfs_shortest_path_length(
-                        start[0], start[1], col, row, int(budget),
-                        wall_hexes, occupied_positions, enemy_adjacent_hexes,
-                    ) is not None:
-                        return cell
+                    )
+                    for fid in forbidden_ids
+                ):
+                    continue
+                if _bfs_shortest_path_length(
+                    start[0], start[1], col, row, int(budget),
+                    wall_hexes, occupied_positions, enemy_adjacent_hexes,
+                ) is not None:
+                    return cell
     return None
 
 
