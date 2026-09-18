@@ -642,12 +642,35 @@ def squad_floor_level_map(
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
     if not terrain_areas:
         return {}
-    return floor_level_by_cell(
-        terrain_areas,
+    return floor_level_by_cell(terrain_areas, *_model_floor_geometry(model))
+
+
+def _model_floor_geometry(model: Dict[str, Any]) -> Tuple[str, Any, int]:
+    """`(forme, taille, orientation)` du socle de CETTE figurine, telles que le plancher les lit."""
+    return (
         require_key(model, "BASE_SHAPE"),
         require_key(model, "BASE_SIZE"),
         int(model.get("orientation", 0)),  # get allowed (socle rond non orienté)
     )
+
+
+def model_floor_cells_at_level(
+    game_state: Dict[str, Any], model: Dict[str, Any], level: int
+) -> FrozenSet[Tuple[int, int]]:
+    """Cellules où le socle de CETTE figurine tient à l'étage `level` (13.06), ou vide sans étage.
+
+    Jumelle de `squad_floor_level_map` sans l'écrasement par le niveau supérieur
+    (`floor_cells_by_level`) : c'est la carte d'une figurine qui GARDE son étage, qu'un plancher
+    plus haut le recouvre ou non.
+    """
+    from engine.terrain_utils import floor_cells_by_level
+
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
+    if not terrain_areas:
+        return frozenset()
+    return floor_cells_by_level(terrain_areas, *_model_floor_geometry(model)).get(
+        int(level), frozenset()
+    )  # get allowed : aucun plancher à cet étage = aucune cellule
 
 
 def model_rigid_level_map(
@@ -661,10 +684,13 @@ def model_rigid_level_map(
 
       - montée déclarée (`ascent`) : la carte complète de son socle (`squad_floor_level_map`) —
         elle peut monter, rester à son étage ou descendre selon la case d'arrivée ;
-      - sans déclaration, figurine EN HAUTEUR : les seules cellules qui portent SON étage — elle
-        y reste (13.06 MOVING VERTICALLY : bouger le long d'un plancher est un mouvement
-        horizontal, aucune règle ne force la descente) et descend au sol partout ailleurs. Elle ne
-        monte jamais : la montée est la décision `ascent_declaration`, pas un effet de bord ;
+      - sans déclaration, figurine EN HAUTEUR : les seules cellules où SON étage la porte
+        (`model_floor_cells_at_level`, un plancher plus haut au-dessus ou non) — elle y reste
+        (13.06 MOVING VERTICALLY : bouger le long d'un plancher est un mouvement horizontal,
+        aucune règle ne force la descente) et descend au sol partout ailleurs. Elle ne monte
+        jamais : la montée est la décision `ascent_declaration`, pas un effet de bord. Lire ici
+        la carte « niveau le plus haut » (`squad_floor_level_map`) l'enverrait au sol partout
+        où un étage 2 recouvre son étage 1, translation nulle comprise ;
       - sans déclaration, figurine AU SOL : carte vide, elle reste au sol.
 
     POURQUOI par figurine et non « tout au sol ». Deux figurines d'une même escouade peuvent
@@ -677,13 +703,12 @@ def model_rigid_level_map(
     Le niveau rendu reste un HINT au sens de `place_model_at_effective_level` : le commit
     revérifie l'empreinte avant d'écrire.
     """
-    level_map = squad_floor_level_map(game_state, model)
     if ascent:
-        return level_map
+        return squad_floor_level_map(game_state, model)
     origin = int(require_key(model, "level"))
-    if origin < 1 or not level_map:
+    if origin < 1:
         return {}
-    return {cell: lv for cell, lv in level_map.items() if lv == origin}
+    return {cell: origin for cell in model_floor_cells_at_level(game_state, model, origin)}
 
 
 def model_move_destination_level(
