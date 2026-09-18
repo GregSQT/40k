@@ -62,6 +62,20 @@ def _stats(tmp_path, body: str, units: str = _UNITS, setup: str = _SETUP) -> dic
     return an.parse_step_log(str(log))
 
 
+def _stats_x5(tmp_path, body: str) -> dict:
+    """Même journal, à la résolution où tourne le jeu : le socle y déborde de son ancre et la
+    métrique de portée du run est euclidienne (bord-à-bord, 01.04)."""
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        _SETUP + body + _END, units=_UNITS, objectives=_OBJECTIVES, inches_to_subhex=5,
+        board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=14,
+    ))
+    return an.parse_step_log(str(log))
+
+
 def _first(stats) -> str:
     first = stats["first_error_lines"]["fnp_threshold_mismatch"]
     return str((first[1] or first[2] or {}).get("detail"))
@@ -132,6 +146,39 @@ def test_unbreakable_resolve_ne_couvre_pas_l_intercessor_voisin(tmp_path):
     )
     stats = _stats(tmp_path, body)
     assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}, _first(stats)
+
+
+def _ancient_a(col: int, row: int) -> str:
+    """L'Ancient 102#1 seul en (col,row), hors de l'aire d'objectif, touché sans dégât."""
+    return (
+        f"[10:00:02] E1 T1 P2 MOVE : Unit 102({col},{row}) MOVED from (80,80) to ({col},{row})"
+        f" [MODELS: 102#0@(1,1,z0) 102#1@({col},{row},z0)] [R:+0.0] [SUCCESS]\n"
+        + _shot("102", f"({col},{row})", "102#1", "Save 2(3+ AP-1 → 4+) - Dmg:0HP [FNP:1/4+ ×1]")
+    )
+
+
+def test_unbreakable_resolve_juge_le_centre_a_x5_au_lieu_de_s_abstenir(tmp_path):
+    """La clause « within 6" of the centre » se juge à la résolution où tourne le jeu.
+
+    Le journal x5 porte `metric.ranged=euclidean` : l'analyzer mesure du BORD du socle (01.04)
+    avec la primitive du moteur, au lieu de mesurer depuis l'ancre puis de s'abstenir. Board
+    100×100 → centre (50,50) ; l'Ancient a un socle round/8 à x5 (rayon 4 subhex), et 6" = 30
+    subhex. MIROIR VÉRIFIÉ : `_model_is_near_objective_or_center` bascule aux mêmes positions.
+
+    VERROU : rétablir l'abstention x5 (`return False if ish <= 1 else None`) fait accepter le
+    FNP à (50,80) — l'ambiguïté couvrait les deux réponses → rouge."""
+    assert _stats_x5(tmp_path, _ancient_a(50, 79))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, "29 rangées au sud"
+    trop_loin = _stats_x5(tmp_path, _ancient_a(50, 80))
+    assert trop_loin["fnp_threshold_mismatch"] == {1: 0, 2: 1}, "30 rangées au sud = 34,6 subhex"
+    assert "sans aucun Feel No Pain" in _first(trop_loin)
+
+
+def test_unbreakable_resolve_a_x5_est_anisotrope_comme_la_grille(tmp_path):
+    """Même distance en cases, verdicts opposés : 34 colonnes à l'est sont dans les 6", 30
+    rangées au sud n'y sont pas (√3/1,5 par rangée contre 1 par colonne). Une mesure en cases
+    hex — celle que le moteur appliquait à toute résolution — les confondrait."""
+    assert _stats_x5(tmp_path, _ancient_a(84, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, "34 colonnes à l'est"
+    assert _stats_x5(tmp_path, _ancient_a(85, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 1}, "35 colonnes à l'est"
 
 
 def test_seuil_fnp_faux_et_compte_faux_sont_des_fautes(tmp_path):

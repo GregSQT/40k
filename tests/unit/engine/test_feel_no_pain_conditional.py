@@ -318,8 +318,42 @@ def test_near_objective_le_centre_reste_une_distance_de_6_pouces():
     """« within 6" of the centre of the battlefield » est une DISTANCE : 30 subhex à ish=5.
     Plateau 100x100 → centre (50,50)."""
     assert su._model_is_near_objective_or_center(_ancient_gs(50, 50), "T1") is True, "sur le centre"
-    assert su._model_is_near_objective_or_center(_ancient_gs(50, 80), "T1") is True, "à 30 subhex = 6\""
-    assert su._model_is_near_objective_or_center(_ancient_gs(50, 81), "T1") is False, "à 31 subhex > 6\""
+    assert su._model_is_near_objective_or_center(_ancient_gs(80, 50), "T1") is True, "à 30 subhex = 6\""
+    assert su._model_is_near_objective_or_center(_ancient_gs(81, 50), "T1") is False, "à 31 subhex > 6\""
+
+
+def test_near_objective_le_centre_se_mesure_bord_a_bord_avec_la_metrique_du_run():
+    """01.04 : « measure to or from the closest part of that model's base ». Le 6" du centre est
+    donc mesuré comme toute autre portée — métrique `ranged` du run, bord de socle → centre.
+
+    Conséquence VÉRIFIÉE à x5 (euclidien) : la frontière est ANISOTROPE, la grille hex n'ayant
+    pas le même pas vers le sud (√3/1,5 par rangée) que vers l'est (1 par colonne). 30 colonnes
+    à l'est sont dans les 6", 30 rangées au sud ne le sont pas — elles valent 34,6 subhex.
+
+    VERROU : remettre `min_distance_between_sets(footprint, {center})` (mesure en CASES hex à
+    toute résolution) rend le cas « 30 rangées au sud » vrai → rouge."""
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 76), "T1") is True, "26 rangées au sud"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 77), "T1") is False, "27 rangées au sud"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 80), "T1") is False, \
+        "30 rangées au sud = 34,6 subhex > 6\" — la mesure en cases hex les comptait à portée"
+
+
+def test_near_objective_le_centre_reste_isotrope_a_x1():
+    """À x1 la géométrie est hex (`geometry_is_hex`) : la figurine tient dans une case, aucune
+    mesure continue n'y a de sens, et la frontière reste à 6 cases dans toutes les directions.
+
+    VERROU : forcer la branche euclidienne à toute résolution rend « 6 rangées au sud » faux
+    (6 × √3/1,5 = 6,93 > 6) → rouge."""
+    def _gs_x1(col, row):
+        gs = _ancient_gs(col, row)
+        gs["inches_to_subhex"] = 1
+        gs["board_cols"], gs["board_rows"] = 20, 20   # centre (10,10)
+        return gs
+
+    assert su._model_is_near_objective_or_center(_gs_x1(10, 16), "T1") is True, "6 cases au sud"
+    assert su._model_is_near_objective_or_center(_gs_x1(10, 17), "T1") is False, "7 cases au sud"
+    assert su._model_is_near_objective_or_center(_gs_x1(16, 10), "T1") is True, "6 cases à l'est"
+    assert su._model_is_near_objective_or_center(_gs_x1(17, 10), "T1") is False, "7 cases à l'est"
 
 
 # ---------------------------------------------------------------------------

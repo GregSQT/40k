@@ -24,7 +24,8 @@ Deux compteurs, un par entrée du corpus (bucket §2.3 « dégâts ») :
    `[PSYCHIC]` (ou la source de la blessure mortelle : Da Jump) ; Unbreakable Resolve seulement
    si la FIGURINE ALLOUÉE porte `feel_no_pain_near_objective` ET est à portée d'un objectif
    (14.02 : « within range of a terrain objective while it is within that terrain area » — son
-   socle recouvre l'aire) ou à 6" du centre. Aucun FNP attendu → tout `[FNP:]` est une faute ;
+   socle recouvre l'aire) ou à 6" du centre, mesurés du BORD de son socle (01.04) avec la
+   métrique de portée du run. Aucun FNP attendu → tout `[FNP:]` est une faute ;
    FNP attendu, dégâts appliqués (`Dmg:X>0`) sans `[FNP:]` → faute ; seuil ≠ attendu → faute ;
    `X ≠ tentatives − sauvés` → faute.
 
@@ -37,13 +38,12 @@ d'attaque de l'activation, donc les socles VIVANTS à la ligne sous-estimeraient
 CE QUI EST DÉLIBÉRÉMENT ÉCARTÉ (abstention, jamais une faute inventée) : segment `Save` sans
 base/AP (journal antérieur, `[DEVASTATING WOUNDS]`, `[NOT ALLOCATED]`) ; figurine allouée ou
 datasheet inconnue ; caractéristique symbolique au registre ; Waaagh! actif sans clé
-`waaagh_invul` dans EFFECTS (journal antérieur) ; clause positionnelle d'Unbreakable Resolve à
-une résolution où le socle déborde de son ancre (x5 : l'ancre hors de l'aire ne dit pas que le
-socle l'est) — la présence comme l'absence du 4+ y sont acceptées.
+`waaagh_invul` dans EFFECTS (journal antérieur) ; figurine dont le journal ne donne pas la
+position (la clause positionnelle d'Unbreakable Resolve est alors indécidable — la présence
+comme l'absence du 4+ y sont acceptées).
 """
 from __future__ import annotations
 
-import math
 import re
 from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
@@ -179,31 +179,37 @@ def check_save_threshold(
 
 def model_near_objective_or_center(state: Any, config: Any, mid: str, target_id: str) -> Optional[bool]:
     """Unbreakable Resolve : le socle recouvre l'aire d'un objectif (14.02) ou est à 6" du
-    centre. None = indéterminable (socle inconnu, ou résolution où il déborde de son ancre)."""
-    from ai.analyzer import _get_inches_to_subhex_for_analyzer, calculate_hex_distance, _analyzer_engagement_metric
+    centre. None = indéterminable (position de la figurine absente du journal).
+
+    Les deux clauses sont mesurées sur l'EMPREINTE du socle, donc exactes à toute résolution.
+    Le 6" du centre passe par la primitive du MOTEUR (`ranged_edge_distance_to_cell`) avec la
+    métrique de portée du RUN (`metric.ranged` de l'entête) : 01.04 mesure « from the closest
+    part of that model's base », et c'est le même bord-à-bord que le moteur applique. L'ancre
+    seule ne le donnait pas, d'où une abstention à x5 — le socle y déborde de son ancre — qui
+    laissait la clause positionnelle injugée à la résolution où tourne le jeu."""
+    from ai.analyzer import _get_inches_to_subhex_for_analyzer
     from ai.analyzer_config import get_run_board_dims
     from ai.analyzer_perfig import _model_footprint, model_base
+    from ai.analyzer_phases.shoot_handler import _analyzer_ranged_metric
+    from engine.combat_utils import ranged_edge_distance_to_cell
+    from engine.hex_utils import Socle
 
     pos = state.positions_by_model.get(target_id, {}).get(mid)  # get allowed
     if pos is None:
         return None
-    ish = int(_get_inches_to_subhex_for_analyzer())
+    col, row = int(pos[0]), int(pos[1])
     # « within that terrain area » : l'EMPREINTE du socle (datasheet de la figurine, à la
     # résolution du run) recouvre l'aire — exact à toute résolution.
-    footprint = _model_footprint(int(pos[0]), int(pos[1]), model_base(state, config, target_id, mid))
+    shape, size = model_base(state, config, target_id, mid)
+    footprint = _model_footprint(col, row, (shape, size))
     if not footprint.isdisjoint(state.objective_cells):
         return True
     cols, rows = get_run_board_dims()
-    center = (cols // 2, rows // 2)
-    if _analyzer_engagement_metric() == "hex":
-        dist = calculate_hex_distance(pos[0], pos[1], center[0], center[1])
-    else:
-        dist = math.hypot(pos[0] - center[0], pos[1] - center[1])
-    if dist <= 6 * ish:
-        return True
-    # À x1 le socle EST son ancre : loin du centre, la clause ne joue pas. À x5 la distance au
-    # centre se mesure bord de socle (moteur) et l'ancre ne la donne pas → indéterminable.
-    return False if ish <= 1 else None
+    distance = ranged_edge_distance_to_cell(
+        Socle(shape, size, col, row, set(footprint)),
+        col, row, cols // 2, rows // 2, _analyzer_ranged_metric(config),
+    )
+    return distance <= 6 * int(_get_inches_to_subhex_for_analyzer())
 
 
 def expected_fnp_thresholds(

@@ -94,6 +94,33 @@ def test_un_objectif_securise_reste_controle_sur_egalite_et_se_perd_sur_strictem
     assert taken["objective_control_mismatch"] == {1: 0, 2: 0}, taken["first_error_lines"]["objective_control_mismatch"]
 
 
+def test_une_securisation_reprise_sans_passer_par_none_exige_un_niveau_strictement_superieur(tmp_path):
+    """14.03 : « that objective remains under their control … until their opponent's level of
+    control over that objective is greater than theirs at the end of a phase ».
+
+    `Sec=` peut passer de 1 à 2 SANS instantané `Sec=none` intermédiaire : à la fin de la phase
+    de commandement de P2, `calculate_objective_control` efface la sécurisation de P1 puis
+    `apply_secure_objective_on_control` pose celle de P2 dans le MÊME appel, et l'instantané
+    n'est écrit qu'au changement. La reprise doit donc être jugée là où elle apparaît — la
+    branche PERTE, seule à tester le « strictement supérieur », n'est atteinte que par `Sec=none`.
+
+    VERROU : retirer le test d'OC de la branche APPARITION rend le cas « égalité » conforme →
+    rouge."""
+    secured_p1 = (
+        _move("1", "1#0@(50,50,z0) 1#1@(60,60,z0)") + _secures(sec=3)
+        + _snapshot("rect b NW:Ctrl=1:Mthd=default:OC1=2:OC2=0:Sec=1", sec=4)
+        + _move("101", "101#0@(50,51,z0) 101#1@(50,52,z0)", sec=5, player=2)
+        + _secures(unit="101", pos="(50,51)", player=2, sec=6)
+    )
+    # P2 a 4 d'OC contre 2 : strictement plus, la reprise est conforme.
+    taken = _stats(tmp_path, secured_p1 + _snapshot("rect b NW:Ctrl=2:Mthd=default:OC1=2:OC2=4:Sec=2", sec=7))
+    assert taken["objective_secured_invalid"] == {1: 0, 2: 0}, _first(taken)
+    # Même reprise sur une ÉGALITÉ d'OC : P1 gardait l'objectif, P2 ne peut pas le sécuriser.
+    on_tie = _stats(tmp_path, secured_p1 + _snapshot("rect b NW:Ctrl=2:Mthd=default:OC1=2:OC2=2:Sec=2", sec=7))
+    assert on_tie["objective_secured_invalid"] == {1: 0, 2: 1}, _first(on_tie)
+    assert "sans niveau strictement supérieur" in _first(on_tie)
+
+
 def test_journal_anterieur_a_la_grammaire_15_est_une_abstention(tmp_path):
     body = _BOYZ_IN + _snapshot("rect b NW:Ctrl=1:Mthd=default:OC1=4:OC2=0", sec=3)
     stats = _stats(tmp_path, body, grammar=14)
