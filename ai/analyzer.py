@@ -448,8 +448,9 @@ def _apply_damage_and_handle_death(
     # suivent sont des « excess wounds lost » ; les appliquer déclencherait _sync_front_hp_mirror
     # et restaurerait unit_hp à une valeur positive — faussant les snapshots des tours suivants.
     # Quand la ligne porte un [ALLOC_MODEL:] nommé, on retire ce socle de unit_model_hp pour que
-    # _non_character_alive lise un état cohérent à la fermeture du lot : sans ça, les bodyguards
-    # déjà abattus par leurs DEAD comptent encore et déclenchent un faux positif 05.03.
+    # le relevé de fin de lot (`AllocCharacterGroup.non_character_alive`) lise un état cohérent
+    # après cette ligne : sans ça, les bodyguards déjà abattus par leurs DEAD comptent encore
+    # et déclenchent un faux positif 05.03.
     # La comptabilité de mort (unit_deaths, unit_kill_context, current_episode_deaths) n'est pas
     # refaite ici — le handler DEAD l'a déjà écrite.
     if target_id in unit_hp and unit_hp[target_id] <= 0:
