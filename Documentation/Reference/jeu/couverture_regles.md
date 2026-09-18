@@ -152,7 +152,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Excess damage on destroyed unit lost | 05.04 | ✅ |
 | Mortal wounds always follow the 06.02 cascade (Deadly Demise, hazard, Hold Still, DEVASTATING WOUNDS); PRECISION + mortal wounds ruled by `game_rules.precision_mortal_wounds_to_character` (default false, GW confirmation pending) — read by engine AND analyzer (`Run rules: alloc.precision_mw_to_character`) | 06.02 / 24.28 | ✅ 2026-09-18 |
 | Feel No Pain X+ (one roll per model at the best threshold, 24.02 duplicated abilities) | 24.12 / 24.02 | ✅ 2026-09-18 (was cumulative) |
-| Deadly Demise X — resolved AFTER the attacking unit has resolved all its attacks (PDF 25 DESTROYED), 6" measured to the closest model of each unit, human defender allocates | 24.08 | ✅ 2026-09-18 (was immediate) |
+| Deadly Demise X — resolved AFTER the attacking unit has resolved all its attacks (PDF 25 DESTROYED), 6" measured edge-to-edge (01.04) from the destroyed model's base to the closest model of each unit, with the run's `ranged` metric, human defender allocates | 24.08 | ✅ 2026-09-18 (was immediate, then raw-grid distance) |
 | Human hazard allocation then end of the activation (`_resume_after_hazard`) | 24.15 | ✅ 2026-09-18 (activation stayed open before) |
 | Revived models (full wounds, back to starting strength) | PDF 25 | ❌ |
 

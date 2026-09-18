@@ -18,6 +18,8 @@ Discrimination verrouillee :
 import random
 import pytest
 
+from engine.constants import MORTAL_WOUND_QUEUE_KEY
+from engine.hex_utils import compute_occupied_hexes
 from engine.phase_handlers.shared_utils import destroy_model as _destroy_model_raw, drain_mortal_wound_queue
 
 
@@ -39,21 +41,33 @@ _DD_RULE_1 = {"ruleId": "deadly_demise", "displayName": "Deadly Demise 1", "rule
 
 # ── game_state minimal pour destroy_model ────────────────────────────────────
 
-def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int = 2):
+def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int = 2,
+        base_size: int = 1, src_shape: str = "round", src_base_size=None,
+        src_orientation: int = 0):
     """Une figurine (mid='SRC#0') dans escouade 'SRC' à (0,0) + une escouade cible 'TGT' à
     (target_col, target_row).  inches_to_subhex=5 => 6" = 30 subhex.
+
+    `base_size` (diamètre en subhex, socles ronds) : les deux escouades le partagent. 24.08 se
+    mesure du BORD des socles (01.04), donc la taille change le verdict à écart de grille égal ;
+    `occupied_hexes` en découle par `compute_occupied_hexes`, comme en production.
+
+    `src_shape` / `src_base_size` / `src_orientation` décrivent le socle de la SEULE figurine qui
+    explose — le profil véhicule/monstre que 24.08 vise, dont le contour n'est pas invariant par
+    rotation.
     """
     ish = 5
+    src_size = base_size if src_base_size is None else src_base_size
     # La règle est portée par LA FIGURINE (règles propres de sa datasheet), pas par l'escouade.
     src_model = {
         "col": 0, "row": 0, "level": 0, "player": 1, "squad_id": "SRC",
-        "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "HP_CUR": 1, "BASE_SHAPE": src_shape, "BASE_SIZE": src_size,
+        "orientation": src_orientation,
         "UNIT_RULES": [_DD_RULE_1] if with_deadly_demise else [],
     }
     src_uc: dict = {
         "col": 0, "row": 0, "player": 1, "HP_CUR": 1,
-        "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
-        "occupied_hexes": {(0, 0)},
+        "BASE_SHAPE": src_shape, "BASE_SIZE": src_size, "orientation": src_orientation,
+        "occupied_hexes": compute_occupied_hexes(0, 0, src_shape, src_size, src_orientation),
         "occupied_hexes_by_model": {"SRC#0": (0, 0)},
         "floor_height_by_model": {"SRC#0": 0.0},
         "level_by_model": {"SRC#0": 0},
@@ -62,8 +76,8 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
 
     tgt_uc = {
         "col": target_col, "row": target_row, "player": 2, "HP_CUR": 2,
-        "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
-        "occupied_hexes": {(target_col, target_row)},
+        "BASE_SHAPE": "round", "BASE_SIZE": base_size, "orientation": 0,
+        "occupied_hexes": compute_occupied_hexes(target_col, target_row, "round", base_size),
         "occupied_hexes_by_model": {"TGT#0": (target_col, target_row)},
         "floor_height_by_model": {"TGT#0": 0.0},
         "level_by_model": {"TGT#0": 0},
@@ -82,7 +96,7 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
     # ont encore une (`select_eligible_models`), une escouade vide n'est plus une unité.
     tgt_model = {
         "col": target_col, "row": target_row, "level": 0, "player": 2, "squad_id": "TGT",
-        "HP_CUR": 2, "HP_MAX": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "HP_CUR": 2, "HP_MAX": 2, "BASE_SHAPE": "round", "BASE_SIZE": base_size, "orientation": 0,
         "UNIT_RULES": [],
     }
     return {
@@ -101,7 +115,7 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
         "config": {
             "game_rules": {
                 "engagement_zone": 2,
-                "max_base_size_hex": 12,
+                "max_base_size_hex": 35,
                 "unit_model_cohesion_range": 2,
                 "unit_global_cohesion_range": 9,
                 "squad_min_neighbors": 1,
@@ -315,6 +329,102 @@ def test_dd_cible_hors_portee_pas_d_entree(monkeypatch):
     destroy_model(gs, "SRC#0", reason="combat")
     tgt_logs = [e for e in _dd_logs(gs) if e.get("unitId") == "TGT"]
     assert not tgt_logs, "la cible hors portee ne doit pas recevoir de MW"
+
+
+def test_dd_le_6_pouces_n_est_pas_isotrope_sur_la_grille(monkeypatch):
+    """Même écart de grille (30 cases), verdicts OPPOSÉS — la grille offset n'est pas isotrope.
+
+    24.08 mesure « within 6" », donc une distance RÉELLE (01.04). Dans le repère `_hex_center`
+    un pas de colonne vaut 1 subhex et un pas de RANGÉE √3/1,5 ≈ 1,155. À x5 (6" = 30 subhex) :
+    30 rangées plein sud = 33,6 subhex, HORS des 6" ; 30 colonnes plein est = 29,0 subhex,
+    DEDANS. La mesure sur les écarts de grille BRUTS (`sqrt(dc**2 + dr**2)`) rendait 30 dans les
+    deux cas et faisait exploser la cible du sud, à 15 % au-delà de la portée réelle.
+    """
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
+
+    gs_sud = _gs(with_deadly_demise=True, target_col=0, target_row=30)
+    destroy_model(gs_sud, "SRC#0", reason="combat")
+    assert not [e for e in _dd_logs(gs_sud) if e["unitId"] == "TGT"], \
+        "30 rangées plein sud = 33,6 subhex : hors des 6 pouces"
+
+    gs_est = _gs(with_deadly_demise=True, target_col=30, target_row=0)
+    destroy_model(gs_est, "SRC#0", reason="combat")
+    assert [e for e in _dd_logs(gs_est) if e["unitId"] == "TGT"], \
+        "30 colonnes plein est = 29,0 subhex : dans les 6 pouces"
+
+
+def test_dd_le_6_pouces_se_mesure_du_bord_des_socles(monkeypatch):
+    """01.04 : « measure to or from the closest part of that model's base » — pas centre à centre.
+
+    Socles ronds de 5 subhex (le cas d'un véhicule à x5, celui qui porte Deadly Demise). Cible à
+    34 colonnes : 34 subhex de centre à centre, donc HORS des 6" pour une mesure centre à centre,
+    mais 29,0 subhex de bord à bord — l'unité explose. Contrôle à 36 colonnes : 31,0 subhex bord
+    à bord, hors de portée, donc la borne existe toujours.
+    """
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
+
+    gs_dedans = _gs(with_deadly_demise=True, target_col=34, target_row=0, base_size=5)
+    destroy_model(gs_dedans, "SRC#0", reason="combat")
+    assert [e for e in _dd_logs(gs_dedans) if e["unitId"] == "TGT"], \
+        "centres à 34 subhex mais bords à 29,0 : dans les 6 pouces"
+
+    gs_dehors = _gs(with_deadly_demise=True, target_col=36, target_row=0, base_size=5)
+    destroy_model(gs_dehors, "SRC#0", reason="combat")
+    assert not [e for e in _dd_logs(gs_dehors) if e["unitId"] == "TGT"], \
+        "bords à 31,0 subhex : hors des 6 pouces"
+
+
+def test_dd_l_orientation_du_socle_detruit_decide_du_verdict(monkeypatch):
+    """Socle OVAL : le contour tourne avec la figurine, donc le verdict des 6" aussi.
+
+    La figurine qui explose porte un socle oval 21x9 subhex (profil véhicule à x5). Cible plein
+    est à 40 colonnes : grand axe vers l'est (orientation 0) elle est à 29,0 subhex, DANS les
+    6" ; pivotée d'un quart de tour (orientation 3), le petit axe la regarde et elle passe à
+    35,0 subhex, HORS des 6". La figurine détruite ayant quitté `models_cache`, son orientation
+    doit voyager dans la file avec sa forme : sans elle, le socle se remonte à l'orientation 0
+    et l'unité de l'est explose dans les deux cas.
+    """
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
+
+    gs_grand_axe = _gs(with_deadly_demise=True, target_col=40, target_row=0,
+                       src_shape="oval", src_base_size=[21, 9], src_orientation=0)
+    destroy_model(gs_grand_axe, "SRC#0", reason="combat")
+    assert [e for e in _dd_logs(gs_grand_axe) if e["unitId"] == "TGT"], \
+        "grand axe vers la cible : 29,0 subhex, dans les 6 pouces"
+
+    gs_petit_axe = _gs(with_deadly_demise=True, target_col=40, target_row=0,
+                       src_shape="oval", src_base_size=[21, 9], src_orientation=3)
+    destroy_model(gs_petit_axe, "SRC#0", reason="combat")
+    assert not [e for e in _dd_logs(gs_petit_axe) if e["unitId"] == "TGT"], \
+        "socle pivoté d'un quart de tour : 35,0 subhex, hors des 6 pouces"
+
+
+def test_dd_la_file_en_attente_reste_copiable_et_picklable():
+    """La file 24.08 traverse les frontières de requête : elle ne porte que des données plates.
+
+    Une allocation humaine 06.02 suspend `drain_mortal_wound_queue` en laissant les explosions
+    suivantes dans `game_state`, que `services/game_snapshots` `deepcopy` à chaque capture et que
+    `services/game_saves` pickle puis relit sous liste blanche de classes. Une entrée portant un
+    objet `Socle` (fabrique par `__new__`) casserait les deux — la capture lèverait
+    `TypeError: Socle.__new__() missing 4 required positional arguments`.
+    """
+    import copy
+    import pickle
+
+    gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
+    _destroy_model_raw(gs, "SRC#0", reason="combat")
+    queue = gs[MORTAL_WOUND_QUEUE_KEY]
+    assert [e["kind"] for e in queue] == ["deadly_demise"], queue
+
+    copie = copy.deepcopy(queue)
+    assert copie[0]["base"]["fp"] == queue[0]["base"]["fp"]
+    assert pickle.loads(pickle.dumps(queue))[0]["base"]["shape"] == "round"
 
 
 def test_dd_mutation_verrou(monkeypatch):

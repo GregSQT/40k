@@ -87,6 +87,8 @@ from engine.combat_utils import (
     get_unit_by_id,
     require_unit_by_id,
     set_unit_coordinates,
+    ranged_edge_distance,
+    socle_from_cache_entry,
 )
 # Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Import de MODULE :
 # `_compute_unit_occupied_hexes` la consulte dans des boucles chaudes (empreintes, masques), et un
@@ -4527,12 +4529,21 @@ def _roll_deadly_demise(game_state: Dict[str, Any], entry: Dict[str, Any]) -> Li
     "details_key"}` — sans infliger : c est `drain_mortal_wound_queue` qui attribue, en AUTO
     (proprietaire programmatique) ou par l allocation manuelle 06.02 (proprietaire humain).
 
-    Distance : « each unit within 6" of that model » — mesuree de la figurine detruite a la
-    figurine LA PLUS PROCHE de chaque unite (01.04, 17.02), pas a l ancre de l unite. La ligne
-    de journal est emise ici, au jet, et ses details sont completes a l attribution.
+    Distance : « each unit within 6" of that model » — mesuree du BORD du socle detruit au bord
+    du socle le PLUS PROCHE de chaque unite (01.04 : « measure to or from the closest part of
+    that model s base » ; 17.02 pour un FRAME), pas d ancre a ancre. Elle passe donc par la
+    primitive de portee du moteur et la metrique du run (`_ranged_distance_metric`) : hex a x1,
+    euclidien bord a bord a x5, comme toute autre distance de regle. Elle etait la derniere
+    distance de regle calculee sur les ECARTS DE GRILLE BRUTS (`sqrt(dc**2 + dr**2)`), deux
+    fautes cumulees : la grille offset n est pas isotrope (un pas de rangee vaut √3/1,5 ≈ 1,155
+    pas de colonne, donc une unite plein sud entrait dans les 6" jusqu a 15 % trop loin — 30
+    rangees valent 33,6 subhex, comptees a 30), et la mesure ignorait les socles alors que 01.04
+    les impose. La ligne de journal est emise ici, au jet, et ses details sont completes a
+    l attribution.
     """
     import random
-    import math
+    from engine.hex_utils import Socle  # noqa: PLC0415
+    from engine.phase_handlers.shooting_handlers import _ranged_distance_metric  # noqa: PLC0415
     squad_id = str(entry["squad_id"])
     dead_col = int(entry["col"])
     dead_row = int(entry["row"])
@@ -4563,29 +4574,28 @@ def _roll_deadly_demise(game_state: Dict[str, Any], entry: Dict[str, Any]) -> Li
 
     ish = int(require_key(game_state, "inches_to_subhex"))
     radius = 6 * ish
-    _is_hex = geometry_is_hex(game_state)
-
-    def _dist(u_col: int, u_row: int) -> float:
-        if _is_hex:
-            return float(calculate_hex_distance(dead_col, dead_row, u_col, u_row))
-        return math.sqrt((dead_col - u_col) ** 2 + (dead_row - u_row) ** 2)
-
-    def _unit_distance(uentry: Dict[str, Any]) -> Optional[float]:
-        by_model = uentry.get("occupied_hexes_by_model")  # get allowed : unite hors table = absent
-        positions = list(by_model.values()) if by_model else []
-        if not positions:
-            u_col = int(uentry.get("col", -1))  # get allowed
-            u_row = int(uentry.get("row", -1))  # get allowed
-            if u_col < 0 or u_row < 0:
-                return None
-            positions = [(u_col, u_row)]
-        return min(_dist(int(pos[0]), int(pos[1])) for pos in positions)
+    metric = _ranged_distance_metric(game_state)
+    # Socle de la figurine detruite, reconstruit depuis les donnees relevees a la mort : elle
+    # n est plus dans `models_cache`. L ORIENTATION en fait partie — `_socle_edge_primitives`
+    # batit le contour d un socle non rond a partir d elle, et la laisser a 0 mesurerait un ovale
+    # grand axe et petit axe permutes.
+    _base = entry["base"]
+    dead_socle = Socle(
+        _base["shape"], _base["base_size"], dead_col, dead_row, _base["fp"],
+        None, int(_base["orientation"]),
+    )
 
     victims: List[Dict[str, Any]] = []
     # Toutes les unites (y compris l unite source si elle a encore des figs) dans les 6".
     for uid, uentry in list(units_cache.items()):
-        distance = _unit_distance(uentry)
-        if distance is None or distance > radius:
+        # HORS TABLE (20.01) : une unite sans position n est « within 6" » de rien, et la
+        # mesurer inventerait une distance depuis la sentinelle (-1,-1).
+        if not entry_is_on_battlefield(uentry):
+            continue
+        distance = ranged_edge_distance(
+            dead_socle, socle_from_cache_entry(uentry), metric, max_distance=radius
+        )
+        if distance > radius:
             continue
         # « each unit within 6" » : une escouade sans figurine vivante n est plus une unite sur
         # le plateau.
@@ -4713,6 +4723,22 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     # Ability CORE, propre a la figurine : un Boy mene par un WeirdBoy n explose pas, le WeirdBoy
     # explose (attache ou non). None = la figurine ne porte pas la regle, aucun jet.
     _deadly_demise_val = _get_deadly_demise_value(game_state, model_id)
+    # SOCLE de la figurine detruite, releve ICI pour la meme raison que la regle : le 6" de 24.08
+    # se mesure du BORD de son socle (01.04), et l explosion est jouee APRES son retrait des
+    # caches (25 DESTROYED) — plus rien n en donnerait alors ni la forme, ni la taille, ni
+    # l orientation, ni l empreinte. DONNEES PLATES, pas un objet `Socle` : la file survit entre
+    # deux requetes des qu une allocation humaine 06.02 la suspend, `game_snapshots` en fait un
+    # `deepcopy` a chaque capture et `game_saves._safe_loads` filtre les classes depicklables —
+    # un `Socle`, fabrique par `__new__`, casse les deux.
+    _dd_base = (
+        None if _deadly_demise_val is None or reason not in ("combat", "hazard")
+        else {
+            "shape": require_key(model, "BASE_SHAPE"),
+            "base_size": require_key(model, "BASE_SIZE"),
+            "orientation": socle_orientation(model),
+            "fp": _compute_unit_occupied_hexes(old_col, old_row, model, game_state),
+        }
+    )
 
     # 1. Retire du models_cache.
     del game_state["models_cache"][model_id]
@@ -4818,7 +4844,7 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
         game_state.setdefault(MORTAL_WOUND_QUEUE_KEY, []).append({
             "kind": "deadly_demise",
             "squad_id": str(squad_id), "model_id": str(model_id),
-            "col": old_col, "row": old_row, "value": _deadly_demise_val,
+            "col": old_col, "row": old_row, "base": _dd_base, "value": _deadly_demise_val,
             # Proprietaire de la SOURCE, lu MAINTENANT : l explosion est jouee plus tard, quand
             # l escouade peut avoir quitte units_cache (derniere figurine).
             "player": int(require_key(model, "player")),

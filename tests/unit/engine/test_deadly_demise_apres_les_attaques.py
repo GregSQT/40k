@@ -61,10 +61,16 @@ def _game_state(*, n_attacks: int, victim_models: List[Dict[str, Any]], victim_h
               "designated_shoot_target_id": "2"},
              {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], "hideable": False},
              {"id": "3", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], "hideable": False}]
+    # `occupied_hexes` = UNION des empreintes par figurine, invariant que
+    # `_recompute_squad_occupied_hexes` tient en production : l'escouade 3 a une figurine loin de
+    # son ancre, et une entrée qui ne la déclare qu'à l'ancre ferait mesurer les distances de
+    # règle (24.08) sur une escouade amputée.
     uc3 = _uc(victim_models[0]["col"], victim_models[0]["row"], player=1)
     uc3["occupied_hexes_by_model"] = {m["id"]: (m["col"], m["row"]) for m in victim_models}
+    uc3["occupied_hexes"] = {(m["col"], m["row"]) for m in victim_models}
     uc2 = _uc(9, 9, player=1)
     uc2["occupied_hexes_by_model"] = {"B0": (9, 9), "B1": (10, 9)}
+    uc2["occupied_hexes"] = {(9, 9), (10, 9)}
     uc1 = _uc(5, 9, player=0)
     uc1["occupied_hexes_by_model"] = {"A0": (5, 9)}
     return {
