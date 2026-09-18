@@ -72,3 +72,17 @@ Doc : `Reference/jeu/couverture_regles.md` (lignes fausses corrigées), `Chantie
   `NON_ABILITY_ROLL_TOKENS` (+ [POINT-BLANK], [PLUNGING FIRE], même motif). Vitest : 19 neufs.
 - 2026-09-18 : clôture — merge dans main pendant le run P1 (décision utilisateur : `--new` de toute façon).
   Reste ouvert : confirmation GW sur [PRECISION] + blessures mortelles (clé à basculer si besoin).
+- 2026-09-18 : findings `/code-review` (6/6 confirmés, corrigés) — 04.02 : la somme répartie vaut la
+  caractéristique A MODIFIÉE (`melee_attacks_characteristic_bonus`, Waaagh! + Da Biggest and da Best),
+  intents `attacks_bonus_included` non re-bonifiés par le roller ; `select_attack_lot` refusé pendant
+  l'attribution du défenseur ; lot jeté sans blessure = aucune déclaration d'ordre ; Deadly Demise mise
+  en file seulement pour `combat`/`hazard` (03.03 : le retrait de cohérence ne déclenche rien ; réserves
+  20.04 hors table) ; fall back gym/bot : file servie AVANT le mouvement, unité vivante comprise, avec
+  reprise du mouvement du bot après attribution humaine (`PENDING_GYM_FALL_BACK_RESUME_KEY`) ; actions
+  hazard ET `select_coherency_removal` routées dans la chaîne des handlers pour traverser la cascade
+  (`_CASCADED_OUT_OF_PHASE_ACTIONS`, gym compris) — même motif, bug préexistant mesuré : le tour de
+  l'adversaire était sauté après un retrait de cohérence du joueur courant. Tests rouge→vert :
+  `test_lot_selection_04_03` (+3), `test_squad_fight_declaration` (+2), `test_deadly_demise_apres_les_attaques`
+  (+1), `test_gym_fall_back_desperate_escape` (+2), `test_charge_impact_hazard_cascade` (1),
+  `test_coherency_removal_progression_cascade` (3) ; `test_exhortation_pvp_humain` (2 tests périmés par
+  l'allocation à candidate unique, remis d'aplomb).

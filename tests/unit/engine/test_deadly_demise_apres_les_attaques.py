@@ -167,3 +167,27 @@ def test_le_defenseur_humain_choisit_la_figurine_qui_encaisse_l_explosion(monkey
     outcome = post_attack_effects(gs, SHOOT_CTX, gs.pop(PENDING_HAZARD_RESUME_RESULT_KEY))
     assert outcome["done"] is True and outcome["shoot_result"]["models_killed"] == 1
     assert "hazard_origin" not in gs
+
+
+def test_un_retrait_de_coherence_ne_declenche_pas_l_explosion(monkeypatch):
+    """03.03 REGAINING COHERENCY : « Models removed in this way are destroyed, but they do not
+    trigger rules that apply when a model is destroyed. » Le retrait de B0 (Deadly Demise 1)
+    ne met RIEN en file : aucun dé n'est jeté, personne n'encaisse — ni maintenant, ni au
+    prochain drain. Jumeau 20.04 (`strategic_reserves_timeout`) : une unité jamais arrivée n'est
+    pas sur le champ de bataille, aucune unité n'est « within 6" » d'elle."""
+    from engine.phase_handlers.shared_utils import destroy_model
+    seq = _dice(monkeypatch, [])
+    gs = _game_state(n_attacks=1, victim_models=[_model("V0", "3", 1, hp=3, col=12, row=9)], victim_human=False)
+
+    destroy_model(gs, "B0", reason="coherency_removal")
+
+    assert "B0" not in gs["models_cache"]
+    assert MORTAL_WOUND_QUEUE_KEY not in gs
+    assert drain_mortal_wound_queue(gs) is None and seq == []
+    assert gs["models_cache"]["B1"]["HP_CUR"] == 3 and gs["models_cache"]["V0"]["HP_CUR"] == 3
+    assert "deadly_demise" not in _types(gs)
+
+    # Contrôle : la même mort par blessure mortelle hors attaque (`hazard`) est bien mise en file.
+    gs2 = _game_state(n_attacks=1, victim_models=[_model("V0", "3", 1, hp=3, col=12, row=9)], victim_human=False)
+    destroy_model(gs2, "B0", reason="hazard")
+    assert [e["kind"] for e in gs2[MORTAL_WOUND_QUEUE_KEY]] == ["deadly_demise"]

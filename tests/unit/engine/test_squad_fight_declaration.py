@@ -481,3 +481,43 @@ class TestExtraAttacks2411:
         squad_declare_fight_weapon_qty(gs, "1", "urty_syringe", 1, "2")
         added = squad_fight_complete_extra_attacks(gs, "1")
         assert [(i["weapon_index"], i["target_unit_id"]) for i in added] == [(0, "2")]
+
+
+class TestSplittingMeleeAttacksSousWaaagh:
+    """04.02 sous Waaagh! : la caracteristique A repartie est la caracteristique MODIFIEE
+    (« add 1 to the Strength and Attacks characteristics of melee weapons »), et le roller ne
+    rajoute pas le bonus a chaque part."""
+
+    def _gs(self):
+        units = [_atk_squad(), _target2(),
+                 _unit(4, 2, [_m(7, 5, [CCW]), _m(7, 6, [CCW])], [CCW])]
+        gs = _make_gs(units)
+        _activate(gs, "1")
+        gs["waaagh_active"] = {1: True, 2: False}
+        gs["config"]["army_faction"] = {"1": "ORKS", "2": "ADEPTUS ASTARTES"}
+        gs["unit_by_id"]["1"]["FACTION_KEYWORDS"] = [{"keywordId": "ORKS"}]
+        return gs
+
+    def test_la_somme_repartie_vaut_a_plus_un(self):
+        gs = self._gs()
+        assert int(PF["NB"]) == 3
+        with pytest.raises(ValueError, match=r"caracteristique A de l arme \(4\)"):
+            squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 2, "4": 1})
+        created = squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 2, "4": 2})
+        assert [(i["target_unit_id"], i["n_attacks_resolved"]) for i in created] == [("2", 2), ("4", 2)]
+        assert all(i["attacks_bonus_included"] is True for i in created)
+
+    def test_le_roller_ne_rajoute_pas_le_bonus_aux_parts_reparties(self):
+        """Total jete = 4 (A3 + 1), reparti 2/2 — pas 3/3."""
+        from engine.phase_handlers.fight_handlers import _manual_roll_fight_intent
+        gs = self._gs()
+        created = squad_fight_split_weapon_attacks(gs, "1", "1#2", PF_CODE, {"2": 2, "4": 2})
+        gs["objectives"] = []
+        meta: Dict[str, Any] = {}
+        prepared = [_manual_roll_fight_intent(gs, i, meta) for i in created]
+        assert all(p is not None for p in prepared)
+        assert [int(p["roll_spec"]["n_attacks"]) for p in prepared if p is not None] == [2, 2]
+        # Jumeau de controle : un intent ENTIER (declaration ordinaire) recoit bien le +1.
+        whole = squad_declare_fight_weapon_qty(gs, "1", PF_CODE, 1, "2")
+        entire = _manual_roll_fight_intent(gs, whole[0], meta)
+        assert entire is not None and int(entire["roll_spec"]["n_attacks"]) == 4
