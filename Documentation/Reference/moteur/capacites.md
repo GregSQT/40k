@@ -621,9 +621,16 @@ C'est la primitive résiduelle. Elle est large mais cohérente : tout ce qui mod
 | Waaagh! Banner (clause 2) | Bannernob | `toughness_bonus_while_waaagh` (+1 T) | override conditionnel |
 | Mental Fortress | Librarian | `invul_save_override` (4) | override, **toute l'unité** |
 | Indiscriminate Detonations | Wartrakk | `suppress_target_on_shooting` | statut posé sur UNE escouade ennemie TOUCHÉE, choisie par le joueur (§Suppression) |
-| Grot Orderly | Painboy | `return_destroyed_models` | 1×/partie, phase de commandement, D3 figurines |
+| Grot Orderly | Painboy | `return_destroyed_models` | 1×/partie, phase de commandement, **appel de capacité** puis D3 bodyguard models (§Grot Orderly) |
 | Finest Hour (compteur) | Captain | `once_per_battle` | compteur, l'effet est en primitive B |
 | Purgation Run | Land Speeder | `move_after_shooting` **étendu** | voir ci-dessous |
+
+### Grot Orderly : d'abord un CHOIX d'appeler — et seuls les bodyguard models reviennent
+
+Datasheet Painboy : *« Grot Orderly (Once per battle): In your Command phase, if this unit is below starting strength, **you can** return up to D3 destroyed **bodyguard** models to this unit. »* Deux clauses que la passe 6 du chantier 06 ne respectait pas, corrigées le 2026-09-18 (chantier capacités-agent, prompt 5) :
+
+- **« You can »** : la restitution était automatique (le D3 jeté dès 08.04). Elle est désormais un **appel de capacité** (`engine/ability_calls.py`, §1) : `_apply_return_destroyed_models` pose `push_ability_call(escouade, "return_destroyed_models", "command")` à la première escouade éligible (`_grot_orderly_candidate` : vivante, Painboy vivant donc effet en vigueur 19.04, non dépensée, sous l'effectif de départ, ≥ 1 bodyguard model archivé) **AVANT tout jet**, et 08.04 s'arrête dessus comme sur un Waaagh! (`faction_decision_is_pending`). Réponse dans `apply_grot_orderly_call` : refus → rien n'est consommé, l'escouade entre dans `_GROT_ORDERLY_SKIPPED` (vidé à 08.01) et l'appel est **reproposé à la phase de commandement suivante** ; acceptation → D3 puis profil → placement, inchangés. Dans les deux cas le balayage reprend (second Painboy), puis Waaagh!/Oath. Trois sièges : gym `CHOICE_0/1` ; bot PvE et bot adversaire du gym par la politique déclarée `_bot_grot_orderly_policy` (accepter si ≥ 2 bodyguard morts ou dès le round 4) ; humain par le panneau d'appel et `select_rule_choice`. La réponse à un appel de phase de commandement **reprend la phase** (`W40KEngine._ability_call_closes_command_phase` → `_resume_command_phase_after_faction_decision`) : sans cela le PvP n'avait aucun verbe pour sortir de la phase. Journal : `Unit N(c,r) ABILITY CALL Grot Orderly [USED|DECLINED]`, puis la ligne `RETURNED` si accepté.
+- **« bodyguard models »** : l'archive `destroyed_models` contient TOUTES les figurines mortes, personnages attachés compris, et `_returned_profile_groups` les offrait toutes — un Warboss mort pouvait revenir. Le filtre est `_returned_bodyguard_indices` (rôle ni `leader` ni `support`, cf. `_is_character_role`) : un personnage n'est ni offert comme profil, ni rendu en complément du D3, ni compté par l'éligibilité — une escouade dont seul le Warboss est mort ne reçoit aucun appel. Verrou : `test_a_dead_warboss_is_never_offered_nor_returned` (`tests/unit/engine/test_returned_models_placement.py`) ; trois sièges par le moteur : `tests/unit/engine/test_grot_orderly_call.py`.
 
 ### Grot Orderly : QUELLES figurines reviennent, avant même où les poser
 

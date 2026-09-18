@@ -4073,7 +4073,7 @@
       },
       "controls": [],
       "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F) : 1×/partie, au début de la phase de commandement, D3 figurines détruites de l'unité sont restaurées (command_handlers._apply_return_destroyed_models). Porté par PainBoy (Grot Orderly)."
+      "status_note": "Passe 6 chantier 06 (Primitive F), refondu le 2026-09-18 (capacités-agent, prompt 5) : « you can return up to D3 destroyed BODYGUARD models » — 1×/partie, appel de capacité posé au début de 08.04 (command_handlers._apply_return_destroyed_models → push_ability_call), refus = rien consommé et reproposé au tour suivant ; acceptation = D3 puis profil → placement ; seuls les bodyguard models (rôle ni leader ni support) reviennent, un Warboss mort jamais. Journal : ABILITY CALL Grot Orderly [USED|DECLINED] puis RETURNED. Porté par PainBoy (Grot Orderly)."
     }
   ]
 }

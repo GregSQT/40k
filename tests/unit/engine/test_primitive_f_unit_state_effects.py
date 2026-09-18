@@ -549,6 +549,9 @@ def test_resolve_move_after_shooting_distance_absente_leve() -> None:
 def _state_with_painboy_and_destroyed(n_alive: int = 3, n_destroyed: int = 2) -> Dict[str, Any]:
     """Game state : PainBoy attaché à un squad avec des figurines détruites."""
     unit = _unit("pain", 1, unit_rules=[_rule("return_destroyed_models")])
+    # L'appel accepté REPREND 08.04 (Waaagh!/Oath) : la faction déclarée par `_base_state`
+    # doit être portée par l'escouade, comme pour toute unité de production.
+    unit["FACTION_KEYWORDS"] = ["SPACE MARINES"]
     gs = _base_state([unit])
     gs.update({
         "board_cols": 24,
@@ -585,14 +588,21 @@ def _state_with_painboy_and_destroyed(n_alive: int = 3, n_destroyed: int = 2) ->
     return gs
 
 
-def test_return_destroyed_models_restaure_au_moins_un() -> None:
-    """Des figurines détruites existent → D3 sont restaurées (≥ 1)."""
+def _accept_grot_orderly(gs: Dict[str, Any]) -> None:
+    """08.04 pose l'APPEL Grot Orderly (« you can return ») ; ici le siège l'accepte."""
+    from engine.ability_calls import apply_ability_call
     from engine.phase_handlers.command_handlers import _apply_return_destroyed_models
 
+    assert _apply_return_destroyed_models(gs, 1) is True, "aucun appel Grot Orderly posé"
+    apply_ability_call(gs, gs["pending_rule_choice_queue"].pop(0), True)
+
+
+def test_return_destroyed_models_restaure_au_moins_un() -> None:
+    """Des figurines détruites existent → l'appel est posé, accepté, D3 sont restaurées (≥ 1)."""
     gs = _state_with_painboy_and_destroyed(n_alive=3, n_destroyed=3)
     mids_before = len(gs["squad_models"]["pain"])
 
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     mids_after = len(gs["squad_models"]["pain"])
     assert mids_after > mids_before, "Aucune figurine restaurée"
@@ -601,15 +611,15 @@ def test_return_destroyed_models_restaure_au_moins_un() -> None:
 
 
 def test_return_destroyed_models_une_seule_fois() -> None:
-    """Deux appels successifs : seul le premier restaure."""
+    """Once per battle : après une acceptation, plus aucun appel n'est posé."""
     from engine.phase_handlers.command_handlers import _apply_return_destroyed_models
 
     gs = _state_with_painboy_and_destroyed(n_alive=2, n_destroyed=4)
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
     count_apres_premier = len(gs["squad_models"]["pain"])
 
-    _apply_return_destroyed_models(gs, 1)
-    assert len(gs["squad_models"]["pain"]) == count_apres_premier, "Second appel ne doit pas restaurer"
+    assert _apply_return_destroyed_models(gs, 1) is False, "Second appel ne doit pas être posé"
+    assert len(gs["squad_models"]["pain"]) == count_apres_premier
 
 
 def test_return_destroyed_models_sans_pertes_rien_ne_se_passe() -> None:
@@ -619,19 +629,17 @@ def test_return_destroyed_models_sans_pertes_rien_ne_se_passe() -> None:
     gs = _state_with_painboy_and_destroyed(n_alive=5, n_destroyed=0)
     mids_before = list(gs["squad_models"]["pain"])
 
-    _apply_return_destroyed_models(gs, 1)
+    assert _apply_return_destroyed_models(gs, 1) is False, "à effectif complet, aucun appel"
 
     assert gs["squad_models"]["pain"] == mids_before
 
 
 def test_return_destroyed_models_met_a_jour_hp_cur() -> None:
     """Après restauration, HP_CUR de l'escouade en units_cache augmente."""
-    from engine.phase_handlers.command_handlers import _apply_return_destroyed_models
-
     gs = _state_with_painboy_and_destroyed(n_alive=2, n_destroyed=3)
     hp_avant = gs["units_cache"]["pain"]["HP_CUR"]
 
-    _apply_return_destroyed_models(gs, 1)
+    _accept_grot_orderly(gs)
 
     assert gs["units_cache"]["pain"]["HP_CUR"] > hp_avant
 

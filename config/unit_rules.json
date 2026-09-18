@@ -346,7 +346,8 @@
   "return_destroyed_models": {
     "id": "return_destroyed_models",
     "obs_id": 38,
-    "description": "Primitive F (chantier 06) : 1x/partie, en phase de commandement, retourne D3 figurines detruites de l unite. Porte par Grot Orderly (PainBoy)."
+    "name": "Grot Orderly",
+    "description": "Grot Orderly (Once per battle) : In your Command phase, if this unit is below starting strength, you can return up to D3 destroyed BODYGUARD models to this unit (jamais un personnage attache). Appel de capacite (engine/ability_calls) pose au debut de 08.04 a l escouade eligible ; refus = rien consomme, repropose au tour suivant. Porte par Grot Orderly (Painboy, Datasheets - Orks)."
   },
   "da_jump": {
     "id": "da_jump",

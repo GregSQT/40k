@@ -5014,7 +5014,7 @@ class W40KEngine(gym.Env):
         next_prompt_result = self._emit_next_rule_choice_prompt_if_needed()
         if next_prompt_result is not None:
             return True, next_prompt_result
-        return True, {
+        result = {
             **applied,
             "action": "agent_decision",
             "waiting_for_player": False,
@@ -5025,6 +5025,25 @@ class W40KEngine(gym.Env):
             "selectedRuleId": selected_display_rule_id,
             "success": True,
         }
+        if self._ability_call_closes_command_phase(prompt):
+            return True, self._resume_command_phase_after_faction_decision(result)
+        return True, result
+
+    def _ability_call_closes_command_phase(self, prompt: Dict[str, Any]) -> bool:
+        """La réponse à cet appel de capacité est-elle la dernière chose qu'attendait 08.04 ?
+
+        Un appel de PHASE DE COMMANDEMENT (Grot Orderly) arrête la phase comme un Waaagh!
+        (`faction_decision_is_pending`). Sa réponse, quand elle ne pose rien derrière elle,
+        doit donc REPRENDRE la phase (`_resume_command_phase_after_faction_decision`) — sinon
+        la partie reste en phase de commandement : le gym s'en sortirait par un WAIT de plus, le
+        PvP n'a aucun verbe pour en sortir. Les appels des autres phases (Da Jump) ne ferment
+        rien : leur phase avance par ses activations.
+        """
+        return (
+            is_ability_call_prompt(prompt)
+            and str(require_key(prompt, "phase")) == "command"
+            and str(require_key(self.game_state, "phase")) == "command"
+        )
 
     # ── Capacités de faction (chantier 03) : Waaagh! et Oath of Moment ─────────────────────
     #
@@ -5144,7 +5163,10 @@ class W40KEngine(gym.Env):
             # capacité). Un prompt qui reste en attente ici serait un siège humain, déjà exclu.
             if command_handlers._command_phase_ability_call_is_pending(self.game_state, current_player):
                 waiting = self._emit_next_rule_choice_prompt_if_needed()
-                if waiting is not None:
+                # Le gestionnaire d'un appel accepté peut poser une décision d'agent (profil ou
+                # placement des figurines rendues, Waaagh! derrière) : elle est tranchée par le
+                # tour de boucle suivant. Toute autre attente serait un siège humain, déjà exclu.
+                if waiting is not None and read_pending_agent_decision(self.game_state) is None:
                     raise RuntimeError(
                         "_resolve_faction_decisions_for_ai_seats: un appel de capacité attend un "
                         f"siège qui n'est pas humain — {waiting!r}"
@@ -5864,7 +5886,7 @@ class W40KEngine(gym.Env):
         if next_prompt_result is not None:
             return True, next_prompt_result
 
-        return True, {
+        result = {
             **applied,
             "action": "select_rule_choice",
             "waiting_for_player": False,
@@ -5874,6 +5896,11 @@ class W40KEngine(gym.Env):
             "selectedRuleId": selected_display_rule_id,
             "success": True,
         }
+        # Même reprise que le chemin gym (`_ability_call_closes_command_phase`) : le siège humain
+        # n'a aucun verbe de sortie de la phase de commandement.
+        if self._ability_call_closes_command_phase(selected_prompt):
+            return True, self._resume_command_phase_after_faction_decision(result)
+        return True, result
     
     
     def _handle_hazard_confirm(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
