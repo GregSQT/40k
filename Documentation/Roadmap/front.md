@@ -70,6 +70,10 @@ Détail et commandes : `Documentation/Reference/outils/tests.md`.
 
 ---
 
+## ✅ T1 socle — livré 2026-09-18 {#t1-socle}
+
+`assertValidBaseSize` (`frontend/src/utils/hexFootprint.ts`) : un `BASE_SIZE` non fini ou non positif lève à la frontière API (`convertUnits`) et dans les utilitaires d'affichage au lieu d'un rendu rond silencieux ; l'absence reste le cas métier du replay (socle d'une case), prouvée finie ou absente côté parseur. Détail `ROADMAP_INDEX.md` suite 143.
+
 ## Validations navigateur en attente {#validations-nav}
 
 Plusieurs chantiers récents ont été livrés sans passage navigateur. À valider en PvP/replay :

@@ -295,6 +295,12 @@ Suite 138 (2026-09-17) : deux verrous ajoutés à la checklist sans écart moteu
 
 Suite 139 (2026-09-18) : sans déclaration de montée, une figurine en hauteur garde son étage même sous un plancher plus haut (`FloorLevelMaps.by_level` rendu par `def floor_level_maps`, `engine/terrain_utils.py`, lu par `def model_rigid_level_map`) — la carte « niveau le plus haut » l'envoyait au sol ; détail dans `ROADMAP_INDEX.md`, suite 139. Seul `terrain-floors-test.json` superpose deux étages aujourd'hui.
 
+Suite 140 (2026-09-18) : plan rigide à NIVEAU PAR FIGURINE (`def model_rigid_level_map`, option B tranchée par l'utilisateur) — une figurine en hauteur garde son étage là où la case le porte, descend ailleurs ; l'érosion refuse toute candidate où deux figurines atterrissent sur la même (niveau, case). Ferme le crash « collision intra-plan … (dont 1#r0) » du gate de P1 (socle rendu REVIVED sous une survivante à l'étage, pile-in inter-étage). Détail `ROADMAP_INDEX.md` suite 140.
+
+Suite 141 (2026-09-18) : fin de tir d'escouade par la fin d'activation de DATASHEET pour les trois sièges — décision `move_after_shooting` (Purgation Run) offerte au gym et au bot PvE (réponse en requête par la politique), suppression de la cible (Indiscriminate Detonations) atteinte ; aucune colonne d'obs ni slot. Écart connu non traité : cible supprimée = première déclarée, sans contrôle « hit by one or more of those attacks » (`shooting_handlers.py` ~5350). Détail suite 141.
+
+Suite 142 (2026-09-18) : descente 13.06 facturée au sol en métrique HEX sur le chemin par-figurine PvP (branche `_floor_start` hex : BFS amputé de la hauteur du plancher, étage vu par `ascent_field_for_model`, cases d'étage = celles que le commit résout) ; verrou FLY 21.03 (M − 2, sans descente). Détail suite 142.
+
 ---
 
 ## Replis `unit_by_id` {#unit-by-id}

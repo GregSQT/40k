@@ -4,7 +4,7 @@
  */
 
 import type { Unit } from "../types/game";
-import { resolveBaseSizeForUnitDisplay } from "./hexFootprint";
+import { assertValidBaseSize, resolveBaseSizeForUnitDisplay } from "./hexFootprint";
 
 /** Réduction légère pour laisser respirer le trait de bordure socle / portrait. */
 const ICON_INSET = 0.92;
@@ -47,12 +47,11 @@ export function getNonRoundBasePixelLayout(
   HEX_RADIUS: number
 ): NonRoundBasePixelLayout | null {
   if (isOvalUnit(unit)) {
-    const bs = unit.BASE_SIZE as [number, number];
-    const M = Number(bs[0]);
-    const N = Number(bs[1]);
-    if (!Number.isFinite(M) || !Number.isFinite(N)) {
-      return null;
-    }
+    // Dimensions VALIDÉES (T1) : une dimension non numérique est une donnée corrompue, levée
+    // nommant l'unité — pas un rendu rond silencieux.
+    const bs = assertValidBaseSize(unit.BASE_SIZE, `unité ${String(unit.id)}`) as [number, number];
+    const M = bs[0];
+    const N = bs[1];
     const outerRx = (M / 2) * 1.5 * HEX_RADIUS;
     const outerRy = (N / 2) * 1.5 * HEX_RADIUS;
     const iconRadius = Math.min(outerRx, outerRy) * ICON_INSET;

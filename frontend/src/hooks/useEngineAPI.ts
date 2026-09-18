@@ -37,6 +37,7 @@ import {
 } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
+import { assertValidBaseSize } from "../utils/hexFootprint";
 import { toPlanArray, toPlanArrayWithOrientation } from "../utils/modelPlan";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
@@ -3604,6 +3605,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         unit.orientation === undefined
           ? undefined
           : validateOrientationStepValue(unit.orientation, `API unit ${unit.id}`);
+      // Socle validé à la frontière (T1) : un BASE_SIZE non fini ou non positif lève ici, en
+      // nommant l'unité, au lieu d'un rendu rond par défaut dans les utilitaires d'affichage.
+      const baseSize = assertValidBaseSize(unit.BASE_SIZE, `API unit ${unit.id}`);
 
       return {
         id: typeof unit.id === "number" ? unit.id : parseInt(unit.id, 10),
@@ -3632,7 +3636,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         ICON: unit.ICON,
         ICON_SCALE: unit.ICON_SCALE,
         ILLUSTRATION_RATIO: unit.ILLUSTRATION_RATIO,
-        BASE_SIZE: unit.BASE_SIZE,
+        BASE_SIZE: baseSize,
         BASE_SHAPE: unit.BASE_SHAPE,
         orientation,
         SHOOT_LEFT: unit.SHOOT_LEFT,

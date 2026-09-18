@@ -106,25 +106,54 @@ export function computeOccupiedHexes(
 }
 
 /**
- * Diamètre hex effectif pour le rendu et les approximations front :
- * nombre ``BASE_SIZE``, ou ``max(major, minor)`` pour une base ovale (aligné moteur).
+ * Valide un ``BASE_SIZE`` à la frontière où la donnée entre (payload API, roster) : ``undefined``
+ * quand il est ABSENT (cas métier : un replay d'ancien step.log sans ``base=``, l'unité est alors
+ * rendue en socle d'une case), un nombre fini > 0, ou un couple ``[grand axe, petit axe]`` de
+ * nombres finis > 0. Toute autre valeur est une donnée corrompue : levée explicite (T1), jamais un
+ * rendu rond par défaut qui masquerait le défaut. Miroir de ``engine.hex_utils.require_base_size``.
  */
-export function resolveBaseSizeForUnitDisplay(unit: {
-  BASE_SIZE?: number | [number, number];
-}): number {
-  if (!unit?.BASE_SIZE) return 1;
-  const bs = unit.BASE_SIZE;
-  if (typeof bs === "number" && Number.isFinite(bs)) {
-    return Math.max(1, bs);
+export function assertValidBaseSize(
+  value: unknown,
+  context: string
+): number | [number, number] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`${context}: BASE_SIZE invalide (${String(value)}), nombre fini > 0 attendu`);
+    }
+    return value;
   }
-  if (Array.isArray(bs) && bs.length >= 2) {
-    const a = Number(bs[0]);
-    const b = Number(bs[1]);
-    if (Number.isFinite(a) && Number.isFinite(b)) {
-      return Math.max(1, Math.max(a, b));
+  if (Array.isArray(value) && value.length === 2) {
+    const [a, b] = value as unknown[];
+    if (
+      typeof a === "number" &&
+      typeof b === "number" &&
+      Number.isFinite(a) &&
+      Number.isFinite(b) &&
+      a > 0 &&
+      b > 0
+    ) {
+      return [a, b];
     }
   }
-  return 1;
+  throw new Error(
+    `${context}: BASE_SIZE invalide (${JSON.stringify(value)}), nombre fini > 0 ou [grand axe, petit axe] attendu`
+  );
+}
+
+/**
+ * Diamètre hex effectif pour le rendu et les approximations front :
+ * nombre ``BASE_SIZE``, ou ``max(major, minor)`` pour une base ovale (aligné moteur).
+ * ``BASE_SIZE`` absent = socle d'une case (cas métier, cf. ``assertValidBaseSize``).
+ */
+export function resolveBaseSizeForUnitDisplay(unit: {
+  id?: unknown;
+  BASE_SIZE?: number | [number, number];
+}): number {
+  const bs = assertValidBaseSize(unit?.BASE_SIZE, `unité ${String(unit?.id ?? "?")}`);
+  if (bs === undefined) return 1;
+  if (typeof bs === "number") return Math.max(1, bs);
+  return Math.max(1, Math.max(bs[0], bs[1]));
 }
 
 function resolveBaseSizeForFootprint(unit: { BASE_SIZE?: number | [number, number] }): number {

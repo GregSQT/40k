@@ -26,6 +26,41 @@ describe("replayParser", () => {
     expect(parsed.episodes[0].states.length).toBeGreaterThan(0);
   });
 
+  // T1 socle : le parseur ne produit JAMAIS de BASE_SIZE non fini. Le motif `base=(\\w+)\\/(\\d+)`
+  // ne capture que des chiffres (parseInt fini), et un socle ovale (`base=oval/[41, 27]`) ou une
+  // valeur corrompue ne matchent pas le groupe optionnel : BASE_SIZE reste ABSENT, le cas métier
+  // que `assertValidBaseSize` laisse passer (rendu d'une case, puis enrichi depuis le roster).
+  it("ne produit qu'un BASE_SIZE fini, ou aucun, depuis la ligne de position de départ", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5 base=round/3",
+      "Unit 2 (WarTrakk) P2: Starting position (2, 0), HP_MAX=7 base=oval/[41, 27]",
+      "Unit 3 (Termagant) P2: Starting position (4, 0), HP_MAX=4 base=round/abc",
+      "Unit 4 (Termagant) P2: Starting position (6, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    const units = parsed.episodes[0].initial_state.units as { id: number; BASE_SIZE?: unknown }[];
+    const byId = new Map(units.map((u) => [u.id, u]));
+    expect(byId.get(1)?.BASE_SIZE).toBe(3);
+    expect(byId.get(2)?.BASE_SIZE).toBeUndefined();
+    expect(byId.get(3)?.BASE_SIZE).toBeUndefined();
+    expect(byId.get(4)?.BASE_SIZE).toBeUndefined();
+    expect(units).toHaveLength(4);
+    for (const unit of units) {
+      const bs = unit.BASE_SIZE;
+      expect(bs === undefined || (typeof bs === "number" && Number.isFinite(bs) && bs > 0)).toBe(
+        true
+      );
+    }
+  });
+
   // VERROU : la ligne de charge porte jusqu'a DEUX marqueurs — la capacite qui l'a autorisee
   // (`[ASSAULT]`, `[WAAAGH!]`) puis `[FLY]` (21.03). Le motif n'en acceptait qu'UN : la charge
   // disparaissait du replay, sans erreur, l'unite restant a sa position de depart.
