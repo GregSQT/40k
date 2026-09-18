@@ -1,5 +1,5 @@
-"""T4 — drapeaux d'escouade liés au terrain : hidden (13.09), gone to ground (13.5),
-à couvert (13.08), dans la zone d'engagement ennemie.
+"""T4 — drapeaux d'escouade liés au terrain : hidden (13.09), à couvert (13.08), dans la zone
+d'engagement ennemie.
 
 Règles lues (Documentation/40k_rules/13 Terrain.pdf, 13-5 gone to ground.jpg) :
 - 13.08 Benefit of Cover : l'unité a le couvert si CHAQUE figurine remplit l'une des deux
@@ -8,9 +8,10 @@ Règles lues (Documentation/40k_rules/13 Terrain.pdf, 13-5 gone to ground.jpg) :
   à distance : c'est ce que porte le drapeau (condition suffisante exacte, pas une heuristique).
 - 13.09 Hidden : hideable + within une zone obscurante + l'unité n'a pas tiré ce tour ni au
   précédent.
-- 13.5 Gone to Ground : hidden + within un terrain Solid + « pas entièrement visible pour la
-  figurine attaquante ». Le dernier volet dépend du tireur et n'existe pas au niveau escouade ;
-  le drapeau porte les deux premiers (« prêt à »).
+- 13.5 Gone to Ground n'a PAS de drapeau : ses conditions côté unité (hidden, terrain Solid =
+  dense, pas de tir ce tour ni au précédent) sont toutes exigées par 13.09, donc un tel bit valait
+  hidden pour tout état (retiré le 2026-09-18) ; le volet « pas entièrement visible pour la
+  figurine attaquante » dépend du tireur et vit dans `los_can_see`.
 
 Contre-épreuves intégrées :
 - `test_flags_are_fresh_during_move` : les drapeaux sont recalculés à chaud. Lire
@@ -34,7 +35,6 @@ from engine.observation_entities import unit_bin_index
 from tests.unit.engine._config_helpers import build_engine_config
 
 BIN_HIDDEN = unit_bin_index("hidden")
-BIN_GTG = unit_bin_index("gone_to_ground")
 BIN_COVER = unit_bin_index("in_cover")
 BIN_IN_EZ = unit_bin_index("engaged")
 
@@ -137,14 +137,13 @@ def _flags(engine) -> Dict[str, float]:
     binv = engine.obs_builder.build_squad_observation(engine.game_state, "1")["allies_bin"][0]
     return {
         "hidden": float(binv[BIN_HIDDEN]),
-        "gtg": float(binv[BIN_GTG]),
         "cover": float(binv[BIN_COVER]),
         "in_ez": float(binv[BIN_IN_EZ]),
     }
 
 
 def test_flags_are_fresh_during_move():
-    """Escouade INFANTRY entierement dans une zone obscurante Solid : hidden + GtG + couvert.
+    """Escouade INFANTRY entierement dans une zone obscurante Solid : hidden + couvert.
 
     Contre-epreuve de fraicheur : on est en phase move, `unit['hidden']` n'a jamais ete calcule
     (le moteur ne l'ecrit qu'au debut de la phase de tir et a chaque perte de figurine, jamais
@@ -154,7 +153,6 @@ def test_flags_are_fresh_during_move():
     assert not eng.game_state["units"][0].get("hidden"), "fixture : le champ moteur n'est pas encore pose"
     f = _flags(eng)
     assert f["hidden"] == 1.0
-    assert f["gtg"] == 1.0
     assert f["cover"] == 1.0
     assert f["in_ez"] == 0.0
 
@@ -183,28 +181,25 @@ def test_cover_without_obscuring_is_not_hidden():
     f = _flags(eng)
     assert f["cover"] == 1.0
     assert f["hidden"] == 0.0
-    assert f["gtg"] == 0.0
 
 
-def test_gone_to_ground_needs_solid_terrain():
-    """13.09 + 13.5 : zone obscurante a murs LIGHT seuls (sans dense) → couvert oui, mais ni
-    hidden (13.09 exige « contains one or more dense terrain features ») ni GtG. Avant le
-    2026-09-18 le moteur accordait hidden sur le seul flag obscuring."""
+def test_obscuring_light_only_gives_cover_not_hidden():
+    """13.09 : zone obscurante a murs LIGHT seuls (sans dense) → couvert oui (13.08), hidden non
+    (13.09 exige « contains one or more dense terrain features »). Avant le 2026-09-18 le moteur
+    accordait hidden sur le seul flag obscuring."""
     eng = _make_engine(_config([(30, 20), (32, 20)], [(80, 20)], ["INFANTRY"]), dense=False)
     f = _flags(eng)
     assert f["cover"] == 1.0
     assert f["hidden"] == 0.0
-    assert f["gtg"] == 0.0
 
 
 def test_hidden_lost_after_shooting():
-    """13.09 : l'unite qui a tire ce tour (ou au precedent) n'est plus hidden — ni GtG."""
+    """13.09 : l'unite qui a tire ce tour (ou au precedent) n'est plus hidden."""
     eng = _make_engine(_config([(30, 20), (32, 20)], [(80, 20)], ["INFANTRY"]))
     gs = eng.game_state
     gs.setdefault("units_shot", set()).add("1")
     f = _flags(eng)
     assert f["hidden"] == 0.0
-    assert f["gtg"] == 0.0
     assert f["cover"] == 1.0, "le couvert 13.08 ne depend pas du tir"
 
     gs["units_shot"].discard("1")
