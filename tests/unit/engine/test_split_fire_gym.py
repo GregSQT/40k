@@ -615,13 +615,20 @@ def test_remaining_eligible_slots_skips_off_battlefield():
 # helpers ci-dessus mais dans le choix de l'escouade que l'observation DÉCRIT, qui n'existe
 # qu'au niveau de `W40KEngine._build_observation_and_mask`.
 
-def _obs_engine_two_allied_squads():
+def _obs_engine_two_allied_squads(
+    shooter_weapons_per_model: "List[List[Dict[str, Any]]] | None" = None,
+    gym_training_mode: bool = False,
+):
     """Moteur en phase de tir : DEUX escouades alliées, la tireuse portant l'identifiant le PLUS
     HAUT, et deux ennemis à portée.
 
     L'identifiant compte : l'observateur de repli est `_first_squad_on_board`, qui rend
     l'escouade d'identifiant le plus BAS. Une tireuse d'identifiant 1 ferait tomber ce repli
     juste par hasard et rendrait ces tests verts SANS rien verrouiller.
+
+    `shooter_weapons_per_model` : armes de la tireuse, une liste par figurine (les tests 24.07
+    ci-dessous arment un pistolet ET un fusil sur la même figurine). Défaut : une figurine au
+    bolter, une au lascannon.
     """
     from unittest.mock import patch
 
@@ -661,6 +668,9 @@ def _obs_engine_two_allied_squads():
 
     bolter = _rng("obs_bolter", 24, 4, 0, 1)
     lascannon = _rng("obs_lascannon", 48, 12, 3, 6)
+    if shooter_weapons_per_model is None:
+        shooter_weapons_per_model = [[bolter], [lascannon]]
+    shooter_positions = [(10 + i, 20) for i in range(len(shooter_weapons_per_model))]
     obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
     cfg = {
         "board": {"default": {"cols": 80, "rows": 40, "hex_radius": 1.0, "margin": 0.0,
@@ -673,19 +683,19 @@ def _obs_engine_two_allied_squads():
         "move": {"can_move_through_enemy_engagement_zone": True,
                  "can_move_through_enemy_model": False,
                  "can_move_through_friendly_model": True},
-        "pve_mode": False, "scenario_objectives": [],
+        "pve_mode": False, "scenario_objectives": [], "controlled_player": 1,
         "observation_params": obs_params,
         "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
         "units": [
             _cfg_unit(1, 1, [(5, 5)], [[bolter]]),                            # alliée, NE tire pas
-            _cfg_unit(2, 1, [(10, 20), (11, 20)], [[bolter], [lascannon]]),   # la TIREUSE
+            _cfg_unit(2, 1, shooter_positions, shooter_weapons_per_model),    # la TIREUSE
             _cfg_unit(3, 2, [(20, 20)], [[bolter]]),
             _cfg_unit(4, 2, [(30, 20)], [[bolter]]),
         ],
     }
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        engine = W40KEngine(config=build_engine_config(cfg))
+        engine = W40KEngine(config=build_engine_config(cfg), gym_training_mode=gym_training_mode)
     engine.reset()
     engine.game_state["phase"] = "shoot"
     engine.game_state["current_player"] = 1
@@ -790,5 +800,100 @@ def test_split_fire_next_weapon_observes_the_shooting_squad():
         assert not _same_obs(observation, _obs_of(engine, "1")), (
             "l'observation décrit l'escouade 1, qui ne tire pas"
         )
+    finally:
+        patcher.stop()
+
+
+# ─── 24.07 [CLOSE-QUARTERS] : déclaration lot par lot, masque ⊆ exécutable ─────────────────
+
+def _cq_rng(code: str, close_quarters: bool) -> Dict[str, Any]:
+    return {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
+            "WEAPON_RULES": ["CLOSE_QUARTERS"] if close_quarters else [],
+            "code": code, "display_name": code}
+
+
+def _weapon_sel_action(engine, code: str) -> int:
+    """Action SHOOT_WEAPON_SEL du profil `code` de la tireuse (identifiant 2)."""
+    from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+    from engine.observation_weapon_profiles import collect_weapon_profiles
+
+    mc = engine.game_state["models_cache"]
+    alive = [mc[mid] for mid in engine.game_state["squad_models"]["2"] if mid in mc]
+    profiles = collect_weapon_profiles(alive, "RNG_WEAPONS")
+    slots = [j for j, (w, _) in enumerate(profiles) if w["code"] == code]
+    assert len(slots) == 1, f"profil {code!r} attendu une fois, slots={slots}"
+    return int(SHOOT_WEAPON_SEL_SLOT_BASE + slots[0])
+
+
+def _open_actions(engine) -> List[int]:
+    mask, _pool = engine.action_decoder.get_squad_action_mask_and_eligible_units(engine.game_state)
+    return [index for index, opened in enumerate(mask) if opened]
+
+
+def _activate_shooter(engine) -> None:
+    from engine.macro_intents import ACTIVATE_SLOT_BASE
+    from engine.phase_handlers.shared_utils import get_ally_slot_mapping
+
+    ally_slots = get_ally_slot_mapping(engine.game_state, 1, "1")
+    engine.step_with_mask(int(ACTIVATE_SLOT_BASE + ally_slots.index("2")))
+
+
+def _play_target(engine) -> None:
+    from engine.macro_intents import SHOOT_SLOT_BASE
+
+    pending = engine.game_state["pending_shoot_weapon_split"]
+    engine.step_with_mask(int(SHOOT_SLOT_BASE + pending["eligible_target_slots"][0]))
+
+
+@pytest.mark.parametrize("first,locked", [("cq_rifle", "cq_pistol"), ("cq_pistol", "cq_rifle")])
+def test_split_fire_24_07_first_family_closes_the_other_slot(first: str, locked: str):
+    """Deux figurines portant chacune fusil + pistolet [CLOSE-QUARTERS]. Après la déclaration
+    de la première famille sur les DEUX figurines, l'autre famille n'a plus aucune figurine
+    éligible (24.07, par figurine) : son slot se ferme et l'activation se résout sans erreur.
+
+    Défaut mesuré le 2026-09-18 (main 5f304a2d4) : `remaining_weapon_slots` était figé au
+    premier choix et la déclaration finale commettait un compte pris sur l'état INITIAL —
+    « count=2 > figurines eligibles (0) ».
+    """
+    rifle, pistol = _cq_rng("cq_rifle", False), _cq_rng("cq_pistol", True)
+    engine, patcher = _obs_engine_two_allied_squads([[rifle, pistol], [rifle, pistol]], gym_training_mode=True)
+    try:
+        _activate_shooter(engine)
+        first_action = _weapon_sel_action(engine, first)
+        locked_action = _weapon_sel_action(engine, locked)
+        opened = _open_actions(engine)
+        assert first_action in opened and locked_action in opened, (
+            "au premier choix, les deux familles sont ouvertes"
+        )
+        engine.step_with_mask(first_action)
+        _play_target(engine)
+        assert "pending_shoot_weapon_split" not in engine.game_state, (
+            f"le slot {locked!r} doit être fermé : plus aucune figurine ne peut le déclarer"
+        )
+        assert "2" in {str(x) for x in engine.game_state["units_shot"]}, "activation non résolue"
+    finally:
+        patcher.stop()
+
+
+def test_split_fire_24_07_keeps_the_slot_of_a_model_that_only_carries_the_other_family():
+    """Figurine A : fusil + pistolet ; figurine B : pistolet seul. Fusil déclaré (A) → le slot
+    pistolet reste ouvert pour B seule, et sa déclaration (count = 1, compte du moteur à cet
+    instant) résout l'activation sans erreur."""
+    rifle, pistol = _cq_rng("cq_rifle", False), _cq_rng("cq_pistol", True)
+    engine, patcher = _obs_engine_two_allied_squads([[rifle, pistol], [pistol]], gym_training_mode=True)
+    try:
+        _activate_shooter(engine)
+        engine.step_with_mask(_weapon_sel_action(engine, "cq_rifle"))
+        _play_target(engine)
+        pending = engine.game_state["pending_shoot_weapon_split"]
+        assert list(pending["remaining_weapon_slots"].values()) == ["cq_pistol"], pending
+        intents = engine.game_state["pending_squad_shoot_intents"]["2"]
+        assert len(intents) == 1, f"le fusil est déclaré sur A seule, intents={intents}"
+        pistol_action = _weapon_sel_action(engine, "cq_pistol")
+        assert _open_actions(engine) == [pistol_action]
+        engine.step_with_mask(pistol_action)
+        _play_target(engine)
+        assert "pending_shoot_weapon_split" not in engine.game_state
+        assert "2" in {str(x) for x in engine.game_state["units_shot"]}, "activation non résolue"
     finally:
         patcher.stop()

@@ -10264,6 +10264,37 @@ def shoot_weapon_remaining_eligible_slots(
     return result
 
 
+def filter_remaining_weapon_slots(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    enemy_slot_ids: List[Optional[str]],
+    remaining: Dict[int, str],
+) -> Dict[int, str]:
+    """Relit `remaining` sur l'état courant : ne garde que les slots encore déclarables.
+
+    Appelé après CHAQUE déclaration du split-fire (`squad_shoot_split_target`) : une
+    déclaration consomme des figurines — arme physique déjà tirée, famille 24.07
+    [CLOSE-QUARTERS] / autre choisie par la figurine — et le masque du prochain choix d'arme
+    doit rester ⊆ exécutable. Même critère que `shoot_weapon_remaining_eligible_slots`
+    (≥ 1 ennemi sur le plateau avec `weapon_qty_max` > 0), appliqué en FILTRE et non en
+    reconstruction : la purge des profils COMBI frères (restriction d'encodage, un profil par
+    arme physique et par escouade) reste acquise.
+    """
+    _uc = require_key(game_state, "units_cache")
+    on_table = [
+        tsid for tsid in enemy_slot_ids
+        if tsid is not None and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
+    ]
+    return {
+        slot_j: code
+        for slot_j, code in remaining.items()
+        if any(
+            squad_shoot_weapon_qty_max(game_state, squad_id, code, tsid) > 0
+            for tsid in on_table
+        )
+    }
+
+
 def purge_combi_siblings_from_remaining(
     game_state: Dict[str, Any],
     squad_id: str,
