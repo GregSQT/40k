@@ -272,6 +272,8 @@ canal de grille `occupant_level`. Ce qui restait de la Phase B — la LoS 3D cô
 
 Le tir est légitime côté backend : le tireur élevé ignore correctement les murs de sa propre ruine (`_walls_around_occupied_floor`). Mais le cône WASM ne le sait pas — il trace la LoS comme si le tireur était au sol, bloque sur le mur de la ruine, alors que la cible clignote (backend valide). Le joueur voit le cône bloqué, clique quand même, ça tire. Bug d'affichage, pas de règle.
 
+**Côté cible (2026-09-18, fait au backend)** : la LoS étage↔sol était à sens unique — les murs de la ruine n'étaient retirés que pour la figurine tireuse, une cible à l'étage restait masquée pour un tireur au sol. Corrigé : wall_set de paire = murs − étage du tireur − étage de la cible (`_resolve_target_models_for_los`, jumeaux GtG et `_attacker_model_can_reach_squad`). Le cône WASM ne connaît toujours ni l'étage du tireur ni celui des cibles ; le backend peint les cases visibles des cibles valides (`build_visible_cells_by_target`), source autoritative, par-dessus le cône.
+
 → Traiter en même temps que la Phase B (`combat_utils`/WASM).
 
 ---

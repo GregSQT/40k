@@ -217,8 +217,18 @@ Conséquences : une charge vers un étage doit couvrir la montée avec le 2D6 et
 - Découpe cible en empreintes par-figurine ; visible si ≥1 modèle a ≥1 cellule à ligne dégagée.
 - Primitive de tracé `_los_line_segment_clear` : trace `hex_line` ([hex_utils.py](../../../engine/hex_utils.py),
   cube-lerp) et inspecte chaque cellule intermédiaire.
-- **Bloque** : un **mur** (`wall_set`, toujours) ; une **area obscuring**
-  (sauf si elle appartient au tireur ou à la cible, règle 13.10).
+- **Bloque** : un **mur** (`wall_set`) ; une **area obscuring** (sauf si la **figurine** tireuse ou
+  la **figurine** cible de la paire l'occupe, règle 13.10 — exclusion par paire de figurines, jamais
+  par escouade).
+- **Murs ignorés (§13.11, étage)** : le wall_set effectif d'une **paire** = murs du plateau − murs de
+  l'étage occupé par la figurine tireuse − murs de l'étage occupé par la figurine cible
+  (`_walls_around_occupied_floor`, granularité floor, cache par figurine « m:<mid> », côté tireur
+  dans `_resolve_shooter_models_with_walls`, côté cible dans `_resolve_target_models_for_los`).
+  La LoS est une ligne entre deux points, donc **symétrique** : le mur d'une ruine franchissable
+  pour la figurine à l'étage l'est dans les deux sens (illustration 13.11 « Units A and C are
+  visible to each other »). Même wall_set de paire pour Gone to Ground
+  (`_model_footprint_not_fully_visible_due_to_solid`) et le chemin par figurine de
+  `declare_attack_model` (`_attacker_model_can_reach_squad`, shared_utils).
 - "Peek de coin" déjà géré : vantages latéraux du socle (`_shooter_lateral_vantage_hexes`).
 - Miroir WASM frontend `has_los_fast` que la primitive Python doit refléter (docstring de
   `_los_line_segment_clear`). Le miroir est en **Rust** ([lib.rs](../../../frontend/wasm-los/src/lib.rs)) : toute
