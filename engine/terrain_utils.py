@@ -12,7 +12,7 @@ Membership is answered by testing hex appartenance against the precomputed
 so a unit "within a terrain area" matches exactly what the player sees on board.
 """
 import threading
-from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
+from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
@@ -367,6 +367,26 @@ def footprint_within_floor(
     return fp <= floor_hexes
 
 
+def _footprint_holds_at_level(
+    index: _FloorIndex,
+    col: int,
+    row: int,
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int,
+    level: int,
+) -> bool:
+    """L'empreinte de ce socle posé en ``(col, row)`` tient-elle ENTIÈREMENT sur un plancher
+    de ce niveau (13.06) ? RÈGLE UNIQUE, lue par ``resolve_model_floor_level`` (une cellule) et
+    par ``floor_level_maps`` (toutes les cellules d'étage, index déjà en main)."""
+    fh = index.hexes_by_level.get(level, frozenset())  # get allowed (niveau sans plancher)
+    if not fh:
+        return False
+    # Base ronde : confinement euclidien (aucun débordement du bord) ; oval/carré : hex.
+    fpoly = index.polys(level) if base_shape == "round" else None
+    return footprint_within_floor(col, row, base_shape, base_size, orientation, fh, fpoly)
+
+
 def resolve_model_floor_level(
     col: int,
     row: int,
@@ -390,23 +410,89 @@ def resolve_model_floor_level(
     # UN seul passage par le mémo : cette fonction est appelée par cellule candidate (boucles de
     # pool charge / pile-in / consolidation), et chaque passage revalide la signature du terrain.
     index = _floor_index(terrain_areas)
-    fh = index.hexes_by_level.get(requested_level, frozenset())  # get allowed (niveau sans plancher)
-    # Base ronde : confinement euclidien (aucun débordement du bord) ; oval/carré : hex.
-    fpoly = index.polys(requested_level) if base_shape == "round" else None
-    if fh and footprint_within_floor(col, row, base_shape, base_size, orientation, fh, fpoly):
+    if _footprint_holds_at_level(index, col, row, base_shape, base_size, orientation, requested_level):
         return requested_level
     return 0
 
 
-#: La valeur porte la LISTE `terrain_areas` en plus de la carte, comme `_FLOOR_INDEX_CACHE` :
+class FloorLevelMaps(NamedTuple):
+    """Les deux cartes d'étage d'UN socle sur UN terrain, issues d'un seul parcours d'empreinte.
+
+    ``highest`` : niveau EFFECTIF le plus haut où le socle tient, par cellule d'étage — une
+    cellule absente vaut 0 (sol). C'est ce que lit une figurine qui MONTE : sur deux étages
+    superposés elle arrive au plus haut (13.06 ne connaît pas de position intermédiaire).
+
+    ``by_level`` : pour chaque niveau, les cellules où le socle tient À CE NIVEAU, sans
+    l'écrasement par le niveau supérieur — une cellule portée par un plancher 1 ET un plancher 2
+    figure dans les deux ensembles. C'est ce que lit une figurine EN HAUTEUR sans déclaration de
+    montée (``model_rigid_level_map``) : 13.06 ne force jamais la descente, et une figurine à
+    l'étage 1 reste à l'étage 1 partout où celui-ci continue, un plancher 2 au-dessus ou non — le
+    même verdict que ``resolve_model_floor_level`` rend au commit avec cet étage pour hint.
+    """
+
+    highest: Mapping[Tuple[int, int], int]
+    by_level: Mapping[int, FrozenSet[Tuple[int, int]]]
+
+
+#: La valeur porte la LISTE `terrain_areas` en plus des cartes, comme `_FLOOR_INDEX_CACHE` :
 #: c'est cette référence forte qui rend `id()` sûr comme clé. Sans elle, une liste libérée peut
 #: rendre son adresse à une autre, et la signature de forme (`_floor_signature`, qui ne compte que
 #: niveau / hauteur / nombre d'hexes) ne suffit pas à les distinguer — la carte de niveaux d'un
 #: terrain serait alors servie pour un autre, en silence.
-_FLOOR_LEVEL_BY_CELL_CACHE: (
-    "Dict[Tuple[int, Any, str, Any, int], Tuple[List[Dict[str, Any]], Mapping[Tuple[int, int], int]]]"
-) = {}
+_FLOOR_LEVEL_BY_CELL_CACHE: Dict[Tuple[int, Any, str, Any, int], Tuple[List[Dict[str, Any]], FloorLevelMaps]] = {}
 _FLOOR_LEVEL_BY_CELL_CACHE_MAX = 16
+
+
+def floor_level_maps(
+    terrain_areas: List[Dict[str, Any]],
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int,
+) -> FloorLevelMaps:
+    """Cartes d'étage (``FloorLevelMaps``) de ce socle sur ce terrain, mémoïsées — SOURCE UNIQUE.
+
+    Pendant PRÉCALCULÉ de ``resolve_model_floor_level``, qui répond à la même question une
+    cellule à la fois : les deux passent par ``_footprint_holds_at_level`` pour que la règle ne
+    vive qu'à un endroit. Le parcours ne visite que les hexes d'étage, jamais le plateau, et chaque
+    cellule de chaque niveau passe le test d'empreinte à CE niveau, indépendamment des niveaux
+    au-dessus — c'est ce qui permet à une figurine de rester à l'étage 1 sous un plancher 2.
+
+    Existe parce que l'érosion du masque de move interroge ce niveau pour CHAQUE figurine et
+    CHAQUE candidate du pool (~2800 × 20), et le plan rigide pour chaque figurine de chaque
+    candidate : résoudre à la volée y refait le test d'empreinte des dizaines de milliers de fois
+    par activation, alors que la réponse ne dépend que du terrain et de la géométrie du socle.
+
+    Sur un HIT, une seule signature et un seul verrou : l'index (qui relit la signature lui-même)
+    n'est interrogé que sur un MISS.
+    """
+    from engine.hex_utils import base_size_cache_key
+
+    orientation = int(orientation)
+    key = (
+        id(terrain_areas), _floor_signature(terrain_areas), str(base_shape),
+        base_size_cache_key(base_size), orientation,
+    )
+    with _FLOOR_INDEX_LOCK:
+        cached = _FLOOR_LEVEL_BY_CELL_CACHE.get(key)  # get allowed (géométrie pas encore vue)
+        if cached is not None:
+            return cached[1]
+    index = _floor_index(terrain_areas)
+    by_level: Dict[int, FrozenSet[Tuple[int, int]]] = {}
+    highest: Dict[Tuple[int, int], int] = {}
+    for level in reversed(index.levels):
+        cells = frozenset(
+            cell for cell in index.hexes_by_level[level]
+            if _footprint_holds_at_level(index, cell[0], cell[1], base_shape, base_size, orientation, level)
+        )
+        by_level[level] = cells
+        for cell in cells:
+            highest.setdefault(cell, level)
+    maps = FloorLevelMaps(highest, by_level)
+    with _FLOOR_INDEX_LOCK:
+        _FLOOR_LEVEL_BY_CELL_CACHE[key] = (terrain_areas, maps)
+        if len(_FLOOR_LEVEL_BY_CELL_CACHE) > _FLOOR_LEVEL_BY_CELL_CACHE_MAX:
+            del _FLOOR_LEVEL_BY_CELL_CACHE[next(iter(_FLOOR_LEVEL_BY_CELL_CACHE))]
+    return maps
 
 
 def floor_level_by_cell(
@@ -415,44 +501,8 @@ def floor_level_by_cell(
     base_size: "int | list[int]",
     orientation: int,
 ) -> Mapping[Tuple[int, int], int]:
-    """Niveau EFFECTIF le plus haut où ce socle tient, pour chaque cellule d'étage — SOURCE UNIQUE.
-
-    Rend ``{(col, row): niveau}`` restreint aux cellules dont le niveau résolu est >= 1 : une
-    cellule absente vaut 0 (sol), qui est le cas de l'immense majorité du plateau. C'est le
-    pendant PRÉCALCULÉ de ``resolve_model_floor_level``, qui répond à la même question une
-    cellule à la fois : les deux doivent rendre le même niveau, et c'est cette fonction qui
-    appelle l'autre pour que la règle ne vive qu'à un endroit.
-
-    Existe parce que l'érosion du masque de move interroge ce niveau pour CHAQUE figurine et
-    CHAQUE candidate du pool (~2800 × 20) : résoudre à la volée y refait le test d'empreinte des
-    dizaines de milliers de fois par activation, alors que la réponse ne dépend que du terrain et
-    de la géométrie du socle. Le parcours ne visite que les hexes d'étage, jamais le plateau.
-
-    Niveaux parcourus du plus haut au plus bas : une figurine qui tient sur deux étages
-    superposés appartient au plus haut (13.06 ne connaît pas de position intermédiaire).
-    """
-    index = _floor_index(terrain_areas)
-    size_key = tuple(base_size) if isinstance(base_size, list) else base_size
-    key = (id(terrain_areas), _floor_signature(terrain_areas), str(base_shape), size_key, int(orientation))
-    with _FLOOR_INDEX_LOCK:
-        cached = _FLOOR_LEVEL_BY_CELL_CACHE.get(key)  # get allowed (géométrie pas encore vue)
-        if cached is not None:
-            return cached[1]
-    resolved: Dict[Tuple[int, int], int] = {}
-    for level in reversed(index.levels):
-        for cell in index.hexes_by_level.get(level, frozenset()):  # get allowed (niveau sans plancher)
-            if cell in resolved:
-                continue
-            if resolve_model_floor_level(
-                int(cell[0]), int(cell[1]), base_shape, base_size, int(orientation),
-                int(level), terrain_areas,
-            ) == level:
-                resolved[cell] = int(level)
-    with _FLOOR_INDEX_LOCK:
-        _FLOOR_LEVEL_BY_CELL_CACHE[key] = (terrain_areas, resolved)
-        if len(_FLOOR_LEVEL_BY_CELL_CACHE) > _FLOOR_LEVEL_BY_CELL_CACHE_MAX:
-            del _FLOOR_LEVEL_BY_CELL_CACHE[next(iter(_FLOOR_LEVEL_BY_CELL_CACHE))]
-    return resolved
+    """Vue ``highest`` de ``floor_level_maps`` : niveau effectif le plus haut par cellule d'étage."""
+    return floor_level_maps(terrain_areas, base_shape, base_size, orientation).highest
 
 
 def resolved_floor_height_at(

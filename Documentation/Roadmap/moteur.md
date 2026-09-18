@@ -293,6 +293,8 @@ Les sept écarts mesurés par la checklist mouvement PvP (x5 et x1) sont corrig�
 
 Suite 138 (2026-09-17) : deux verrous ajoutés à la checklist sans écart moteur — traversée de la bande d'engagement sans y finir (`TestNormalMove0905::test_traverse_la_zone_d_engagement_sans_y_finir`, la doc disait « non traversable » contre config/code/PDF 03.01) et Advance déclaré puis stationnaire qui reste un Advance (`TestAdvance0906::test_advance_puis_stationnaire_reste_un_advance`). Restent non couverts par la checklist : le coût de descente 13.06 sur le pool par-figurine PvP et le jumeau FLY 21.03 depuis un étage (aucune unité FLY à portée de la ruine dans le scénario figé).
 
+Suite 139 (2026-09-18) : sans déclaration de montée, une figurine en hauteur garde son étage même sous un plancher plus haut (`FloorLevelMaps.by_level` rendu par `def floor_level_maps`, `engine/terrain_utils.py`, lu par `def model_rigid_level_map`) — la carte « niveau le plus haut » l'envoyait au sol ; détail dans `ROADMAP_INDEX.md`, suite 139. Seul `terrain-floors-test.json` superpose deux étages aujourd'hui.
+
 ---
 
 ## Replis `unit_by_id` {#unit-by-id}

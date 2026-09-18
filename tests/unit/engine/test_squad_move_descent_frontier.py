@@ -28,8 +28,11 @@ import pytest
 
 from engine.phase_handlers.movement_handlers import (
     get_eligible_units,
+    model_rigid_level_map,
     movement_build_valid_destinations_pool,
+    squad_floor_level_map,
 )
+from engine.terrain_utils import floor_hexes_at_level
 from engine.phase_handlers.shared_utils import (
     SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
     build_rigid_plan,
@@ -299,8 +302,6 @@ def test_masked_cells_of_a_floor_squad_carry_the_level_of_their_cell():
     """La légalité des cellules est évaluée au niveau d'ARRIVÉE : le plan et la validation
     lisent la même carte, étage conservé sur le plancher, sol ailleurs — et le masque offre
     les deux sortes de cellules (sans quoi l'une des deux branches n'est pas éprouvée)."""
-    from engine.phase_handlers.movement_handlers import model_rigid_level_map
-
     gs = _gs(level=1)
     cell_map = build_squad_move_cell_map(gs, "1", None)
     assert cell_map
@@ -312,6 +313,34 @@ def test_masked_cells_of_a_floor_squad_carry_the_level_of_their_cell():
             assert entry[3] == expected, (cell, entry, expected)
             seen_levels.add(entry[3])
     assert seen_levels == {SQUAD_RIGID_MOVE_DESTINATION_LEVEL, 1}
+
+
+def _gs_under_a_higher_floor() -> Dict[str, Any]:
+    """`1#0` à l'étage 1, et un plancher de niveau 2 qui RECOUVRE tout l'étage 1.
+
+    La carte « niveau le plus haut » (`floor_level_by_cell`) résout alors chaque cellule à 2 :
+    une figurine qui garde SON étage doit lire la carte par niveau, pas celle-là.
+    """
+    gs = _gs(level=1)
+    floor_1 = gs["terrain_areas"][0]["floors"][0]
+    gs["terrain_areas"][0]["floors"].append({
+        "level": 2, "height_inches": 2 * FLOOR_HEIGHT_INCHES,
+        "hexes": [list(h) for h in floor_1["hexes"]],
+        "polygon_vertices": [list(v) for v in floor_1["polygon_vertices"]],
+    })
+    return gs
+
+
+def test_rigid_plan_keeps_its_own_floor_under_a_higher_one():
+    """13.06 ne force jamais la descente : sans déclaration de montée, une figurine à l'étage 1
+    y RESTE là où l'étage 1 continue, même sous un plancher 2 — translation nulle comprise.
+    La carte « niveau le plus haut » y voit 2 ≠ 1 et l'enverrait au sol."""
+    gs = _gs_under_a_higher_floor()
+    model = gs["models_cache"]["1#0"]
+    assert squad_floor_level_map(gs, model).get(START) == 2, "la fixture ne superpose pas 2 sur 1"
+    assert model_rigid_level_map(gs, model, False).get(START) == 1
+    for entry in _plan((START[0] + 1, START[1]), gs):
+        assert len(entry) >= 4 and entry[3] == 1, entry
 
 
 # ── 2bis. Paire SUPERPOSÉE sur deux étages (socle rendu REVIVED, pile-in) ───────────────────
@@ -333,18 +362,16 @@ def _gs_stacked() -> Dict[str, Any]:
     return gs
 
 
-def test_stacked_pair_mask_is_executable_and_stays_on_two_floors():
+def test_stacked_pair_masked_cells_are_executable_on_two_floors():
     """Masque ⊆ exécutable sur la paire superposée, ET la paire reste sur deux étages.
 
     Chaque cellule offerte passe la validation ; la figurine de l'étage y RESTE (niveau 1) et sa
-    sœur reste au sol — donc pas de collision. Les ancres où l'étage ne continue pas (les deux
-    retomberaient au sol sur la même case) sont dans le pool d'ancre brut et ABSENTES du masque :
-    c'est l'érosion par `(niveau, case)` qui les retire, miroir du contrôle de la validation.
+    sœur reste au sol — donc pas de collision.
     """
     gs = _gs_stacked()
     cell_map = build_squad_move_cell_map(gs, "1", None)
     assert cell_map, "masque vide : la paire superposée est clouée au sol"
-    floor_cells = {(int(c), int(r)) for c, r in gs["terrain_areas"][0]["floors"][0]["hexes"]}
+    floor_cells = floor_hexes_at_level(gs["terrain_areas"], 1)
     for (cell, cost) in cell_map.values():
         plan = _plan(cell, gs)
         by_mid = {entry[0]: entry for entry in plan}
@@ -354,13 +381,21 @@ def test_stacked_pair_mask_is_executable_and_stays_on_two_floors():
         constraints = resolve_squad_move_constraints("1", gs, move_type, None)
         reason = explain_move_plan_rejection(plan, gs, constraints)
         assert reason is None, (cell, reason)
+
+
+def test_stacked_pair_off_floor_anchors_are_eroded():
+    """Les ancres où l'étage ne continue pas (les deux figurines retomberaient au sol sur la
+    même case) sont dans le pool d'ancre brut et ABSENTES du masque : c'est l'érosion par
+    `(niveau, case)` qui les retire, miroir du contrôle de la validation."""
+    gs = _gs_stacked()
+    floor_cells = floor_hexes_at_level(gs["terrain_areas"], 1)
     raw_pool = {
         (int(d[0]), int(d[1]))
         for d in movement_build_valid_destinations_pool(gs, "1", read_only=True)
     }
     off_floor = raw_pool - floor_cells
     assert off_floor, "le pool d'ancre brut n'offre aucune ancre hors plancher : rien à éroder"
-    masked = {cell for (cell, _c) in cell_map.values()}
+    masked = {cell for (cell, _c) in build_squad_move_cell_map(gs, "1", None).values()}
     assert not (off_floor & masked), (
         f"ancres hors plancher offertes au masque (les deux figurines y retombent au sol sur la "
         f"même case) : {sorted(off_floor & masked)}"
