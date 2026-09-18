@@ -131,7 +131,7 @@ def test_dd_d6_6_emet_entree_dans_action_log(monkeypatch):
     """D6=6 et cible a <=6" -> une entree deadly_demise dans action_log, wounds > 0."""
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
     gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)   # TGT a 5 subhex < 30
     destroy_model(gs, "SRC#0", reason="combat")
     logs = _dd_logs(gs)
@@ -147,7 +147,7 @@ def test_dd_d6_1_emet_entree_sans_allocation(monkeypatch):
     import engine.phase_handlers.shared_utils as su
     allocated_calls = []
     monkeypatch.setattr(su, "allocate_mortal_wounds",
-                        lambda gs, uid, n, auto, sink: allocated_calls.append((uid, n)))
+                        lambda gs, uid, n, auto, sink, *, is_psychic=False: allocated_calls.append((uid, n)))
     gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
     destroy_model(gs, "SRC#0", reason="combat")
     logs = _dd_logs(gs)
@@ -163,7 +163,7 @@ def test_dd_player_est_le_proprietaire_de_la_source_sur_les_deux_formes(monkeypa
     de la grammaire `P(\\d+)` de toutes les lignes — erreur de parse a chaque explosion ratee.
     Le jet reussi portait le player de la VICTIME : c'est la source qui exerce 24.08."""
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
 
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
@@ -186,7 +186,7 @@ def test_dd_source_videe_n_est_pas_une_unite_dans_le_rayon(monkeypatch):
     (mesuré, éval du 2026-09-13, E4 T3). Avec une figurine survivante, la source est bien visée."""
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
 
     gs = _gs(with_deadly_demise=True, target_col=5, target_row=0)
     destroy_model(gs, "SRC#0", reason="combat")
@@ -284,7 +284,7 @@ def test_dd_d6_1_un_seul_log_meme_avec_plusieurs_cibles(monkeypatch):
     """D6=1 avec 3 unites en portee -> exactement 1 log 'no effect', 0 jet de de par cible."""
     monkeypatch.setattr(random, "randint", lambda a, b: 1)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a, **kw: None)
     gs = _gs_multi(n_targets=3)
     destroy_model(gs, "SRC#0", reason="combat")
     logs = _dd_logs(gs)
@@ -299,7 +299,7 @@ def test_dd_absent_aucune_entree(monkeypatch):
     """Sans la cle deadly_demise en units_cache, aucune entree deadly_demise emise."""
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
     gs = _gs(with_deadly_demise=False, target_col=5, target_row=0)
     destroy_model(gs, "SRC#0", reason="combat")
     assert not _dd_logs(gs), "aucune entree deadly_demise sans la cle"
@@ -309,7 +309,7 @@ def test_dd_cible_hors_portee_pas_d_entree(monkeypatch):
     """Cible a > 6" (> 30 subhex) -> aucune entree deadly_demise pour cette cible."""
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
     # TGT a (40, 0) = 40 subhex, donc 40/5 = 8" > 6"
     gs = _gs(with_deadly_demise=True, target_col=40, target_row=0)
     destroy_model(gs, "SRC#0", reason="combat")
@@ -325,7 +325,7 @@ def test_dd_mutation_verrou(monkeypatch):
     """
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
 
     # Cas controle : sans deadly_demise -> 0 log (baseline de la mutation)
     gs_no = _gs(with_deadly_demise=False, target_col=5, target_row=0)
@@ -402,7 +402,7 @@ def test_dd_weirdboy_attache_detruit_explose(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     gs, wb, _boyz = _load_boyz_weirdboy()
     import engine.phase_handlers.shared_utils as su
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink: None)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda gs, uid, n, auto, sink, *, is_psychic=False: None)
     destroy_model(gs, wb, reason="combat")
     logs = _dd_logs(gs)
     assert logs and all(e["sourceUnitId"] == "101" and e["d6Roll"] == 6 for e in logs)

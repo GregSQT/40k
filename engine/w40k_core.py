@@ -4908,9 +4908,11 @@ class W40KEngine(gym.Env):
             success, result = shooting_handlers.apply_suppress_target_decision(
                 self.game_state, require_unit_by_id(self.game_state, decision_squad_id), payload,
             )
-            if result.get("action") not in ("move_after_shooting_select_destination",
-                                            "waiting_for_agent_decision"):
-                result["action"] = "squad_shoot"
+            # Le résultat GARDE l'`action` du handler (`shoot` sans tir, ou la décision suivante),
+            # comme `move_after_shooting` : le tir a été payé au step `squad_shoot` qui a posé la
+            # décision, avec son `shoot_result`. Le renommer `squad_shoot` ici en faisait un
+            # `squad_shoot` SANS `shoot_result`, contrat que `RewardCalculator` exige — mesuré :
+            # `Required key 'shoot_result' is missing` à chaque CHOICE_k de suppression en gym.
             return success, {
                 **result,
                 "decision_type": decision_type,
