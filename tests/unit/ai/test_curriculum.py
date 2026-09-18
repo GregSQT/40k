@@ -74,8 +74,9 @@ from ai.curriculum import (
 #: test_shipped_stage_matches_the_specification[P2] ROUGE.
 EXPECTED_STAGES = {
     "P0":  (0, 0.00, None, {}),
-    # Nouveau cycle du 2026-09-17 : P0 neuf champion, trois archives de l'ancien cycle.
-    "P1":  (0, 0.70, "P0", {"P0": 0.40, "P1a": 0.15, "P0a": 0.075, "P0b": 0.075}),
+    # Cycle 3 du 2026-09-18 : P0' champion a 0,50, deux archives-juges (P1b = P1 du cycle 2, P0b)
+    # a 0,10 chacune — archives a 20 % au plus (decision utilisateur du 18), bots 30 % inchanges.
+    "P1":  (0, 0.70, "P0", {"P0": 0.50, "P1b": 0.10, "P0b": 0.10}),
     "P2":  (0, 0.80, "P1", {"P1": 0.50, "P0": 0.30}),
     "P3":  (0, 0.85, "P2", {"P2": 0.50, "P0": 0.175, "P1": 0.175}),
     "E1":  (0, 1.00, "P3", {"P3": 1.00}),

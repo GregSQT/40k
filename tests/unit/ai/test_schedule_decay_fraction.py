@@ -273,6 +273,11 @@ def _resolved_cb(callback_params: dict, key: str):
 # ou il la remplit exactement une fois — une seule position de fenêtre, donc le « meilleur »
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
+#: Rétention des checkpoints d'un profil de mesure : 64 sur x1_long depuis le 2026-09-18 (un
+#: départ à froid de 50 000 parties en écrit ~26, tous gardés comme instantanés datés de la
+#: lignée) ; x5_long reste à 3 (aucun run de lignée x5).
+LONG_PROFILE_MAX_CHECKPOINTS = {"x1_long": 64, "x5_long": 3}
+
 PROMISES_BEST_MODEL = {
     "x1": False, "x1_long": True, "x1_lineage": True, "x1_debug": False,
     "x5_new": False, "x5_long": True, "x5_debug": False,
@@ -579,8 +584,16 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
         # training_probe_every_n_evals : instrument de mesure réservé aux runs de mesure,
         # vérifié nommément juste en dessous (cf. PROFILE_TRAINING_PROBE).
         "training_probe_every_n_evals",
+        # max_checkpoints : un COMPTE de rétention, qui suit la longueur du run (le commentaire
+        # sur checkpoint_save_freq ci-dessus le nomme comme LE levier). x1_long garde 64 depuis
+        # le 2026-09-18 — les ~26 checkpoints d'un départ à froid de 50 000 parties sont les
+        # instantanés datés de la lignée — là où x1 (10 000 épisodes, banc) garde 3. Vérifié
+        # nommément juste en dessous (LONG_PROFILE_MAX_CHECKPOINTS).
+        "max_checkpoints",
     }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
+    assert long_cb["max_checkpoints"] == LONG_PROFILE_MAX_CHECKPOINTS[long_name]
+    assert ref_cb["max_checkpoints"] == 3
     # Lu comme `train.py:4255` le lit — clé absente = 0 = sonde éteinte —, pas via
     # `_resolved_cb` : la clé n'est pas dans `_training_common.json`, il n'y a aucun héritage.
     assert long_cb.get("training_probe_every_n_evals", 0) == PROFILE_TRAINING_PROBE[long_name]

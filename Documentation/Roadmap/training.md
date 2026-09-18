@@ -165,6 +165,57 @@ Plan : mesures statiques par siège (S27) → exploiteur de P0 meilleur cas sur 
 lr 0,0005, P0 déterministe, siège 0,5, 100 % P0) → leviers de mécanisme dans ce dispositif, deux
 graines sous 10 points d'effet ; B6 après, sur deux graines.
 
+**2026-09-18, 06:00 — cycle 3 lancé : moteur re-gelé `6fe25c341`, P0′ à froid en cours, règle de lecture écrite avant ([dossier §10 option 2](../Chantiers/backlog/plafonnement_p1.md#exploration-2026-09-16), [§5.15 fin](../Chantiers/backlog/plafonnement_p1.md#b-2026-09-16)).**
+Session autonome (utilisateur absent) ; chaque choix est consigné ici avec ses alternatives.
+- **Gel** : `main` = `6fe25c341` au lancement (et non `880a5175b` : trois commits de plus, analyzer
+  et tests seulement — rien du jeu joué), écrit dans `ROADMAP_INDEX.md` Direction avec la
+  discipline A. Pendant chaque run : aucun merge `engine/` ou `ai/` dans `main`, aucun JSON de
+  `config/` touché.
+- **Préparation (commit `b9fe8479e`, AVANT le run)** : `x1_long` de l'agent x1 : `seed` 12345 →
+  **27182** (P0 du 17 : 54321 ; P0a / P0b : 12345 — trois graines, trois mesures), `max_checkpoints`
+  3 → **64** (les ~26 checkpoints d'un P0 de 50 000 sont les instantanés datés de la lignée). Le
+  verrou `test_long_profile_is_its_reference_recalibrated` compare x1 et x1_long en bloc : la graine
+  est posée sur les DEUX profils (la doctrine « seule la longueur diffère » reste entière, x1 est un
+  banc), `max_checkpoints` est écarté nommément comme compte de rétention (le test le nommait déjà
+  « le levier »), mutation rouge / vert faite. Alternatives écartées : `--param seed` en ligne de
+  commande (la graine d'un P0 doit être lisible dans la config, comme 54321 l'était pour p0ctrl) ;
+  exclure `seed` du verrou (affaiblit un verrou sans doctrine).
+- **Curriculum expl** : `load_curriculum('ArmageddonAgent_x1_expl')` REFUSAIT (clés
+  `probe_every_episodes` / `snapshot_thresholds` / `plateau` obligatoires depuis le 17, jamais
+  reportées) — complété par copie du bloc x1 (bloc requis par la validation, non lu par un
+  exploiteur). `exploiter_config` : sondes **5 000 / 300** au lieu de 2 000 / 100 (S9) : la règle
+  ±5 pts = 2σ de la paire exige σ 2,4 sur la différence de deux moyennes de 3, soit 300 parties par
+  sonde ; à 100 parties, 5 pts ne valaient que 1,2σ. Coût égal (3 600 contre 3 000 parties d'éval).
+- **Curriculum x1, étape P1 (P1′)** : pool **P0′ 0,50 · P1b 0,10 · P0b 0,10**, bots 0,30 ; le prompt
+  disait « P0′ 40 %, bots 30 %, archives 20 % au plus » (somme 0,90) : les 10 pts vont au champion
+  (c'est lui que le gate exige, la montée d'une étape suit son exposition à lui — P1 du 17 : même
+  0,667 que B pour ~22 000 parties contre P0), les bots gardent la part documentée de
+  `_doc_part_bots`, les archives restent ≤ 20 %. Archives = les deux plus fortes au gate de P1 du
+  18 : **P1b** (= P1 du cycle 2, renommée parce que `P1` est le nom de l'étape rejouée et que la
+  promotion écrase le fichier homonyme — `promote_stage_model` copie sans refus) et **P0b** (0,791).
+  `early_stop` d'étape = bloc racine avec **patience 6** (les autres étapes gardent 4). Table du
+  test `EXPECTED_STAGES` mise à jour.
+- **Artefacts renommés dans `ai/models/ArmageddonAgent_x1/` (pas de suppression)** : ancien
+  `P0` (ex-p0ctrl, 17/09) → **`P0c`** (`--new` n'écarte que le canonique, pas les archives d'étape :
+  la clôture de P0′ aurait écrasé `model_ArmageddonAgent_x1_P0.zip`), `P1` (18/09) → **`P1b`**.
+  Le canonique (= P1 vive) part sous son nom horodaté par `--new`.
+- **Commande** (l'étape pose `--new` elle-même, `--etape` + `--new` est refusé par `main()`) :
+  `bash scripts/train.sh --agent ArmageddonAgent_x1 --training-config x1_long --scenario bot
+  --resolution 1 --etape P0 --total-episodes 50000`, log `training_x1_08-p00-prime.log`.
+- **Règle de lecture de P0′ (écrite avant)** : jugée sur le holdout bots (référence P0 du 17 :
+  robuste 0,903, holdout 92,3 %) et sur trois sondes de référence à 300 parties argmax, sièges
+  50/50 (`scripts/seat_matrix_probe.py` via l'agent expl / `x1_lineage`, comme toutes les matrices
+  depuis le 16 — le profil x1 tirerait 0,75 en second et ne serait pas comparable) : P0′ contre
+  P0c, P0a, entnorm, plus le miroir P0′/P0′ (référence d'écart de siège). Robuste **< 0,85** contre
+  les bots = relance avec une autre graine, UNE seule fois. Réserve : la réponse des juges à
+  `move_after_shooting` est arbitraire mais déterministe = biais fixe, pas du bruit.
+- **Suite prévue** : paire option 2 sur `ArmageddonAgent_x1_expl` (P0′ copié en P0 de l'exploiteur ;
+  témoin `logits_temperature_regulation: null`, traité `{entropy_target 1.0, gain 0.1, t_min 1.0,
+  t_max 4.0}`, même graine, 60 000 parties, sondes 5 000 / 300 ; règle : écart traité − témoin sur
+  la moyenne des 3 dernières sondes ≥ +5 = tient, ±5 = nul, < −5 = nuit ; sous 10 pts, seconde
+  graine des deux runs) ; puis P1′ en run de check (patience 6) sous option 2 si la paire a tenu,
+  sinon T = 2 fixe.
+
 **2026-09-18 — cycle 3 : décisions consignées, fenêtre moteur livrée, P1 PROMUE au close-stage rejoué ([dossier §10](../Chantiers/backlog/plafonnement_p1.md)).**
 Décisions utilisateur du matin : isolement des runs par DISCIPLINE (option A : aucun merge `engine/` ou `ai/` dans `main` pendant un run, pas de checkout figé) ; l'action ajoutée au moteur = (a) décision `move_after_shooting` (Purgation Run) offerte au gym et au bot PvE — sans colonne d'obs ni slot, donc les archives restent chargeables ; `--new` pour la lignée quand même (P0 à froid bat toute reprise) ; archives P0 (ex-p0ctrl), P0a, entnorm = JUGES hors famille (réponse arbitraire mais déterministe à (a) = biais fixe), membres de pool à ≤ 20 % ; ordre = UNE fenêtre moteur (bug fall_back → close-stage P1 → (a) → descente/FLY → T1 front → code option 2), re-gel écrit dans ROADMAP_INDEX Direction, puis GPU. Fenêtre livrée le jour même (suites 140–144 de `ROADMAP_INDEX.md`) ; le bug fall_back était une formation à deux étages aplatie par le plan rigide (socle rendu REVIVED sous une survivante à l'étage), corrigé en option B (niveau par figurine) — pas « le pool BFS ».
 Close-stage de P1 rejoué sur le moteur corrigé (fall_back seul) : **P1 PROMUE** — P0 0,689 / P0a 0,753 / P0b 0,791 / P1a 0,704 (moyennes de 3 × 300, graines tirées, planchers 0,65 / 0,60 tenus), `model_ArmageddonAgent_x1_P1.zip` + ligne `curriculum.log` (episodes_to_gate 55 000). Matrice de P1 sur ce même moteur (`logs/matrix_p1_20260918/`, 300 parties argmax) : **vs entnorm 0,78** (P1 du 16/09 : 0,68 ; P0 ≈ 0,72), **vs P0a 0,79** (P1 du 16/09 : 0,64), miroir P0/P0 0,493 (référence d'écart de siège). Ligne « P0 → P1 » du tableau de progrès hors famille : +6 pts contre le témoin sans parenté, +15 contre P0a.

@@ -72,6 +72,7 @@
       "pool": []
     },
     "P1": {
+      "_doc_2026_09_18": "CYCLE 3 (2026-09-18) : P0 = P0' (P0 neuf a froid sur le moteur re-gele 6fe25c341, graine 27182, apres l'ajout de l'action move_after_shooting) ; les archives sont des JUGES de l'ancien cycle, chargeables (l'action n'a ajoute ni colonne d'obs ni slot) mais dont la reponse a cette action est arbitraire et deterministe (biais fixe). Decision utilisateur du matin : archives a 20 % AU PLUS du budget ; part de bots 30 % inchangee (_doc_part_bots) ; le reste, 50 %, va au champion, parce que c'est lui que le gate exige a 0,65 et que la montee d'une etape suit son exposition au champion (P1 du 17 : ~22 000 parties contre P0 a 40 %, meme niveau 0,667 que B a 70 %). Deux archives, les deux plus fortes au gate de P1 (18/09) : P1b = P1 du cycle 2 promue le 18/09 (matrice : 0,79 contre P0a, 0,78 contre entnorm ; renommee P1b parce que 'P1' est le nom de l'etape que P1' rejoue et que la promotion ecrase le fichier homonyme) et P0b (0,791 au gate de P1 ; P0a 0,753, P1a 0,704 ecartees) ; 0,10 chacune. P1a / P0a ne sont plus dans le pool mais restent des juges de matrice. early_stop d'ETAPE : copie du bloc racine avec patience_probes 6 (30 000 parties sans +2 pts) au lieu de 4 — decision du 17/09 soir pour un run de check : la regle a 4 a tire au premier instant possible sur P1 (+1 pt en 20 000), et la courbe montait encore sur tout le reste ; les autres etapes gardent 4.",
       "_doc": "NOUVEAU CYCLE (2026-09-17, decision utilisateur) : P0 est le P0 NEUF entraine a froid sur le moteur fige (ex-ArmageddonAgent_x1_p0ctrl, robuste 0,903), et le pool de P1 contient, outre ce champion, TROIS ARCHIVES de l'ancien cycle (kind 'archive' : modeles etrangers au curriculum, deposes sous model_<agent>_<label>.zip + _vec_normalize.pkl, presence verifiee au lancement) : P1a = ancien P1 promu le 16 (P0 le bat a 0,557 : le sparring le plus dur), P0a = ancienne racine du 10 (0,753), P0b = premiere tentative du 10 (0,720). Quotas 0,40 / 0,15 / 0,075 / 0,075 (somme 0,70 = ratio_end) : le champion porte la plus grosse part parce que c'est lui que le gate exige a 0,65 ; la part des archives suit leur difficulte mesuree (matrice du 17, logs/matrix_heldout_20260917/). Gate : 0,65 contre P0, 0,60 contre chaque archive (plancher others). POURQUOI des archives : la matrice du 16 a montre que la lignee P0 -> P1 apprenait a battre SA famille (0,70 contre P0) sans rien gagner contre un style etranger (0,68 contre le temoin, comme P0) ; un humain est hors famille. Dossier : Documentation/Chantiers/backlog/plafonnement_p1.md section 5.15 fin. ANCIEN TEXTE, conserve pour l'historique : Premier champion issu du self-play : reprend P0 et l'affronte. Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST P0 a l'episode 0, il fait jeu egal par construction et n'a rien a etre protege ; une rampe ne ferait que substituer des parties de bots — gagnees a ~92 % — aux parties de pool, sans signal correctif. 30 % de bots et non 15 % : le pool de P1 n'a qu'UN membre, cf. _doc_part_bots. ⚠️ LE MODELE P1 EN SERVICE N'A PAS ETE ENTRAINE SOUS CE REGLAGE : sa config d'alors annoncait ratio_end 0.50 precede d'une rampe qui le faisait DEMARRER a 100 % de bots. MESURE de ce qu'il a REELLEMENT joue (tensorboard/P1, 80 075 episodes) : 25 063 episodes contre P0, soit 31,3 % — donc pres de 69 % de bots, et non les 50 % annonces. L'ecart n'a PAS ete elucide, le run n'etant pas rejoue. Retenir de ce chiffre qu'un ratio_end n'est pas une mesure : la seule lecture fiable de la part reellement jouee est le rapport entre les points de 03_selfplay/<membre> et ceux de actions/share_deploy_slot, a 500 pres (la fenetre de lissage). La decision du 2026-09-06 est de ne PAS le rejouer — le temps est deja paye — mais d'homogeneiser sa config avec le reste de la lignee. Ne pas lire les valeurs ci-dessous comme une description du modele P1 existant.",
       "role": "learner",
       "run_to_plateau": true,
@@ -80,10 +81,26 @@
       "ratio_start": 0.70,
       "ratio_end": 0.70,
       "pool": [
-        {"kind": "champion", "members": ["P0"], "weight": 0.40},
-        {"kind": "archive", "members": ["P1a"], "weight": 0.15},
-        {"kind": "archive", "members": ["P0a", "P0b"], "weight": 0.15}
+        {"kind": "champion", "members": ["P0"], "weight": 0.50},
+        {"kind": "archive", "members": ["P1b", "P0b"], "weight": 0.20}
       ],
+      "early_stop": {
+        "probe_window": 3,
+        "promote_score_vs_champion": 0.65,
+        "promote_score_vs_others": 0.6,
+        "promote_min_episodes": 30000,
+        "destroy_score_vs_champion": 0.5,
+        "destroy_min_episodes": 20000,
+        "full_pool_probe_every": 3,
+        "probe_every_episodes": 5000,
+        "snapshot_thresholds": [0.50, 0.60, 0.70],
+        "plateau": {
+          "patience_probes": 6,
+          "min_delta": 0.02,
+          "min_episodes": 40000,
+          "check_budget_cap": 100000
+        }
+      },
       "training_config_overrides": {
         "total_episodes": 200000
       }
