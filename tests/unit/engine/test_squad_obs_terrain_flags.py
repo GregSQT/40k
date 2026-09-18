@@ -47,10 +47,13 @@ _AREA_POLYGON = [[28, 18], [36, 18], [36, 22], [28, 22]]
 _DENSE_WALL = [[28, 18]]
 
 
-def _terrain_area(obscuring: bool) -> Dict[str, Any]:
+def _terrain_area(obscuring: bool, dense: bool) -> Dict[str, Any]:
+    # Categories DERIVEES des murs types par le loader (13.02) ; posees ici a la main puisque la
+    # zone est injectee sans fichier terrain. dense ⇒ obscuring (13.10), la fixture le respecte.
     return {
         "id": "area1",
-        "obscuring": obscuring,
+        "obscuring": obscuring or dense,
+        "dense": dense,
         "polygon_vertices": _AREA_POLYGON,
         "hexes": _AREA_HEXES,
     }
@@ -122,9 +125,9 @@ def _make_engine(cfg: Dict[str, Any], obscuring: bool = True, dense: bool = True
         eng = W40KEngine(config=build_engine_config(cfg))
     eng.reset()
     gs = eng.game_state
-    gs["terrain_areas"] = [_terrain_area(obscuring)]
+    gs["terrain_areas"] = [_terrain_area(obscuring, dense)]
     gs["dense_wall_hexes"] = _DENSE_WALL if dense else []
-    for key in ("_dense_wall_set_cache", "_obs_solid_terrain_areas", "_obscuring_area_sets_cache"):
+    for key in ("_dense_wall_set_cache", "_obscuring_area_sets_cache"):
         gs.pop(key, None)
     return eng
 
@@ -173,8 +176,10 @@ def test_cover_requires_hideable_keyword():
 
 
 def test_cover_without_obscuring_is_not_hidden():
-    """Zone de terrain NON obscurante : couvert oui (13.08), hidden non (13.09 exige obscurant)."""
-    eng = _make_engine(_config([(30, 20), (32, 20)], [(80, 20)], ["INFANTRY"]), obscuring=False)
+    """Zone de terrain NON obscurante (aucun mur) : couvert oui (13.08), hidden non (13.09)."""
+    eng = _make_engine(
+        _config([(30, 20), (32, 20)], [(80, 20)], ["INFANTRY"]), obscuring=False, dense=False
+    )
     f = _flags(eng)
     assert f["cover"] == 1.0
     assert f["hidden"] == 0.0
@@ -182,10 +187,13 @@ def test_cover_without_obscuring_is_not_hidden():
 
 
 def test_gone_to_ground_needs_solid_terrain():
-    """13.5 : sans terrain Solid (dense) dans la zone, hidden reste vrai mais GtG non."""
+    """13.09 + 13.5 : zone obscurante a murs LIGHT seuls (sans dense) → couvert oui, mais ni
+    hidden (13.09 exige « contains one or more dense terrain features ») ni GtG. Avant le
+    2026-09-18 le moteur accordait hidden sur le seul flag obscuring."""
     eng = _make_engine(_config([(30, 20), (32, 20)], [(80, 20)], ["INFANTRY"]), dense=False)
     f = _flags(eng)
-    assert f["hidden"] == 1.0
+    assert f["cover"] == 1.0
+    assert f["hidden"] == 0.0
     assert f["gtg"] == 0.0
 
 

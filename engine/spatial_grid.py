@@ -78,15 +78,25 @@ GRID_CH_SELF = 7
 # ici) : une cellule a cout 0 est soit hors pool, soit l origine meme de l escouade.
 GRID_CH_MOVE_COST = 8
 
-# Cases des zones de terrain OBSCURANTES (13.10), dilatees du rayon de socle de l escouade active
-# — exactement comme `GRID_CH_COVER`, et pour la meme raison : la regle testee de part et d autre
-# est « the model is WITHIN a terrain area », que le moteur evalue par CHEVAUCHEMENT DE SOCLE
-# (`compute_models_in_obscuring_terrain` delegue a `compute_models_within_terrain`, donc au meme
-# test disque<->polygone que le couvert). Peindre les hexes bruts decrirait un predicat que le
-# moteur n applique nulle part.
+# Cases des zones de terrain DENSES — zones « that contain one or more dense terrain features »
+# (13.09), c est-a-dire celles ou une figurine peut devenir `hidden` — dilatees du rayon de socle
+# de l escouade active, exactement comme `GRID_CH_COVER` et pour la meme raison : la regle testee
+# de part et d autre est « the model is WITHIN a terrain area », que le moteur evalue par
+# CHEVAUCHEMENT DE SOCLE (`compute_models_in_dense_terrain` delegue a
+# `compute_models_within_terrain`, donc au meme test disque<->polygone que le couvert). Peindre
+# les hexes bruts decrirait un predicat que le moteur n applique nulle part.
+#
+# POURQUOI `dense` (13.09) ET NON `obscuring` (13.10) : la categorie de zone est derivee des murs
+# types du fichier terrain (`terrain_utils.derive_area_categories`) — obscuring = mur light OU
+# dense, dense = mur dense. Le moteur n accorde `hidden` que dans une zone DENSE
+# (`compute_models_in_dense_terrain`) : une zone a mur light seul est obscurante sans jamais
+# cacher personne. Peindre l obscurant annoncerait donc « hidden possible » sur des zones ou le
+# moteur ne l accorde jamais (terrain-mc1 : 4 zones sur 15, mesure 2026-09-18). L effet propre de
+# 13.10 (couper la LoS entre DEUX AUTRES figurines) n est pas une propriete de la cellule ou l on
+# va se poser : il est deja porte, par paire, par `GRID_CH_LOS_EXPOSURE`.
 #
 # POURQUOI un canal SEPARE de `GRID_CH_COVER` plutot qu un couvert gradue (0,5 zone ordinaire /
-# 1,0 zone obscurante) : les deux regles ont des effets de signes potentiellement OPPOSES pour
+# 1,0 zone dense) : les deux regles ont des effets de signes potentiellement OPPOSES pour
 # l agent — le couvert 13.08 degrade la BS ennemie de 1, tandis qu etre `hidden` 13.09 rend
 # purement et simplement INTIRABLE au-dela de la portee de detection (exclusion du pool de cibles,
 # `shooting_handlers.py`). Un plan gradue unique force le premier conv a etre monotone en cette
@@ -94,10 +104,11 @@ GRID_CH_MOVE_COST = 8
 # lui imposent rien.
 #
 # CE QUE LE CANAL NE DIT PAS : `hidden` exige que TOUTES les figurines vivantes de l escouade
-# soient dans la zone. Le canal est per-cellule, donc per-figurine comme son jumeau couvert : il
-# dit « une figurine posee ici serait dans une zone obscurante », pas « l escouade entiere serait
-# cachee ». Meme optimisme que `GRID_CH_COVER`, assume de la meme facon.
-GRID_CH_OBSCURING = 9
+# soient dans la zone, et que l unite n ait pas tire ce tour ni le precedent. Le canal est
+# per-cellule, donc per-figurine comme son jumeau couvert : il dit « une figurine posee ici serait
+# dans une zone dense », pas « l escouade entiere serait cachee ». Meme optimisme que
+# `GRID_CH_COVER`, assume de la meme facon.
+GRID_CH_DENSE = 9
 
 # Part des escouades ennemies qui VOIENT la cellule, dans [0,1] : `n_vues / n_ennemies_sur_plateau`.
 #
@@ -144,7 +155,7 @@ GRID_CH_OCCUPANT_LEVEL = 11
 #: controle bouge, et l outil enverrait corriger un canal sain.
 GRID_CHANNEL_NAMES = (
     "wall", "ally", "enemy", "ez", "objective", "level", "cover", "self", "move_cost",
-    "obscuring", "los_exposure", "occupant_level",
+    "dense", "los_exposure", "occupant_level",
 )
 
 if len(GRID_CHANNEL_NAMES) != GRID_CHANNELS:

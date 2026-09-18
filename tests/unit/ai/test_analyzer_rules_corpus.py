@@ -622,3 +622,49 @@ def test_aucun_identifiant_instrumente_n_est_inconnu_du_corpus():
     assert inconnus == [], (
         f"identifiant(s) notés par le code mais absents de config/rules_corpus.json : {inconnus}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Statut ABSENT_* vs contrôle câblé : le corpus ne peut pas nier un contrôle qui tourne
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_une_regle_co_verifiee_par_un_controle_cable_n_est_pas_absente():
+    """Trouvé le 2026-09-18 : 10.07 (tir indirect) était déclarée ABSENT_LOG_MANQUANT avec la note
+    « Règle NON IMPLÉMENTÉE dans le moteur », alors que `indirect_fire_fail_below` (moteur) pose le
+    token [INDIRECT FIRE:X+] et que `check_indirect_fire_rule` (analyzer_hit) le juge, compteur
+    `indirect_fire_mismatch` porté par PROJ.1.2.indirect. La table de couverture affichait donc
+    la règle absente pendant que son contrôle comptait des fautes.
+
+    Verrou générique : une règle dont `co_verified_by` cite un exercice INSTRUMENTÉ dans le code
+    (site `note_rule_usage`) ET porteur de contrôles ne peut pas avoir un statut ABSENT_*.
+    """
+    corpus = {require_key(e, "id"): e for e in load_rules_corpus()}
+    instrumentees = _identifiants_instrumentes()
+    fautives = sorted(
+        rid
+        for rid, entry in corpus.items()
+        if str(entry.get("status", "")).startswith("ABSENT")
+        and any(
+            ref in instrumentees and corpus.get(ref, {}).get("controls")
+            for ref in entry.get("co_verified_by", [])
+        )
+    )
+    assert fautives == [], (
+        f"règle(s) déclarées ABSENT_* alors qu'un exercice câblé les co-vérifie : {fautives}"
+    )
+
+
+def test_10_07_est_couverte_par_le_controle_tir_indirect():
+    """Verrou nominatif de la correction : statut, lien d'exercice et libellés cohérents."""
+    corpus = {require_key(e, "id"): e for e in load_rules_corpus()}
+    rule = corpus["10.07"]
+    assert rule["status"] == "COUVERT"
+    assert "PROJ.1.2.indirect" in rule["co_verified_by"]
+    assert "NON IMPLÉMENTÉE" not in rule.get("status_note", "")
+    assert any("INDIRECT FIRE" in ev["description"] for ev in rule["log_evidence"])
+    exercice = corpus["PROJ.1.2.indirect"]
+    assert ["indirect_fire_mismatch"] in exercice["controls"]
+    assert "non implémentée" not in exercice["label"].lower()
+    assert "PROJ.1.2.indirect" in _identifiants_instrumentes(), (
+        "VERT VACANT : l'exercice doit être noté par un site note_rule_usage du code"
+    )

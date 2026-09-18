@@ -4,7 +4,6 @@
     {
       "id": "obscuring_band",
       "name": "obscuring band between squads",
-      "obscuring": true,
       "shape": "polygon",
       "vertices": [
         [40, 125],
@@ -14,5 +13,8 @@
       ],
       "objective": false
     }
+  ],
+  "walls": [
+    { "name": "obscuring_band_light", "type": "light", "hexes": [[41, 126]] }
   ]
 }

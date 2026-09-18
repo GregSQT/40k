@@ -8396,6 +8396,11 @@ def _attacker_model_can_reach_squad(
         )
         if edge > range_subhex:
             continue
+        # Murs de la PAIRE (13.11, LoS symétrique) : murs de l'étage du tireur ∪ murs de l'étage de
+        # CETTE figurine cible (∅ au sol). Même clé de cache « m:<mid> » que la LoS unité→unité.
+        pair_ignored_walls = ignored_wall_hexes | _walls_around_occupied_floor(
+            game_state, {"id": f"m:{mid}", "level": target_level}, footprint
+        )
         if target_hidden and require_visibility:
             # Cette figurine ne rend la cible atteignable que si elle est dans SA detection range :
             # base, ou base−3" si elle est "gone to ground" (masquée par un terrain Solid intervenant
@@ -8404,7 +8409,7 @@ def _attacker_model_can_reach_squad(
             if base_detection_subhex - detection_penalty < edge <= base_detection_subhex:
                 if dense_wall_set and _model_footprint_not_fully_visible_due_to_solid(
                     game_state, shooter_anchor, shooter_hexes, footprint, dense_wall_set,
-                    ignored_wall_hexes,
+                    pair_ignored_walls,
                 ):
                     eff_detection = base_detection_subhex - detection_penalty
             if edge > eff_detection:
@@ -8434,7 +8439,7 @@ def _attacker_model_can_reach_squad(
             floor_occ = [o for o in (shooter_occ, target_occ) if o is not None] or None
         visible, total, _ = _compute_visibility_with_obscuring(
             game_state, shooter_anchor, shooter_hexes, (tc, tr), footprint,
-            ignored_wall_hexes=ignored_wall_hexes,
+            ignored_wall_hexes=pair_ignored_walls,
             floor_occluders=floor_occ, z_start=z_start, z_end=z_end,
         )
         if visible > 0:

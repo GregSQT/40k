@@ -5,7 +5,7 @@
     {
       "id": "ruin_west",
       "name": "ruine ouest (étage 13.06)",
-      "obscuring": true,
+     
       "shape": "polygon",
       "vertices": [[20, 205], [70, 205], [70, 255], [20, 255]],
       "objective": false,
@@ -16,7 +16,7 @@
     {
       "id": "objective_center",
       "name": "marqueur central",
-      "obscuring": false,
+     
       "shape": "polygon",
       "vertices": [[100, 155], [120, 155], [120, 175], [100, 175]],
       "objective": true

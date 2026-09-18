@@ -83,7 +83,10 @@ def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "terrain_areas": [
             {
                 "id": "area1",
+                # 13.09 : zone contenant un terrain DENSE (flag derive des murs par le loader,
+                # pose a la main ici : zone injectee sans fichier terrain).
                 "obscuring": True,
+                "dense": True,
                 "polygon_vertices": _AREA_POLYGON,
                 "hexes": _AREA_HEXES,
             }
