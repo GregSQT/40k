@@ -624,22 +624,22 @@ decision_ctx_bin[11]     = decision_type_reserves_declaration       # 0.0 / 1.0 
 decision_ctx_bin[12]     = decision_type_reactive_move              # 0.0 / 1.0 — move réactif (L5) : accepter ou refuser la fenêtre
 decision_ctx_bin[13]     = decision_type_fall_back_mode             # 0.0 / 1.0 — mode de fall-back 09.07 : CHOICE_0 Desperate Escape, CHOICE_1 Ordered Retreat (declines)
 decision_ctx_bin[14]     = decision_type_suppress_target            # 0.0 / 1.0 — Indiscriminate Detonations : quelle escouade TOUCHÉE supprimer (candidats = entités ennemies, CHOICE_k)
+decision_ctx_bin[15]     = decision_type_consolidation_engaging     # 0.0 / 1.0 — consolidation 12.08 Engaging (mêlée 100, B2) : CHOICE_0 vers les ennemis à 3" (New Foes), CHOICE_1 sur place (declines)
 # RÉSERVÉ J4/J5 — AGENT_DECISION_TYPE_SLOTS 16→24 le 2026-09-18 (payé par le `--new` de la
 # refonte du bloc candidat) ; slots restants nuls jusqu'à implémentation. Candidats prévus :
 # decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention (§15.11) ; le reste
 # est de la marge. ⚠️ Da Jump n'ouvre PAS de type : c'est un appel de capacité (`rule_choice`
 # posé par `push_ability_call`, candidats [accorde `da_jump`] / [declines]) — comme Grot Orderly
 # et Finest Hour, il coûte 0 colonne — livré ainsi le 2026-09-18 (obs_id 39 sur l'escouade du WeirdBoy).
-decision_ctx_bin[15]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
-decision_ctx_bin[16]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
-decision_ctx_bin[17]     = decision_type_reserved_2    # marge
-decision_ctx_bin[18]     = decision_type_reserved_3    # marge
-decision_ctx_bin[19]     = decision_type_reserved_4    # marge
-decision_ctx_bin[20]     = decision_type_reserved_5    # marge
-decision_ctx_bin[21]     = decision_type_reserved_6    # marge
-decision_ctx_bin[22]     = decision_type_reserved_7    # marge
-decision_ctx_bin[23]     = decision_type_reserved_8    # marge
-decision_ctx_bin[24]     = decision_type_reserved_9    # marge
+decision_ctx_bin[16]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
+decision_ctx_bin[17]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
+decision_ctx_bin[18]     = decision_type_reserved_2    # marge
+decision_ctx_bin[19]     = decision_type_reserved_3    # marge
+decision_ctx_bin[20]     = decision_type_reserved_4    # marge
+decision_ctx_bin[21]     = decision_type_reserved_5    # marge
+decision_ctx_bin[22]     = decision_type_reserved_6    # marge
+decision_ctx_bin[23]     = decision_type_reserved_7    # marge
+decision_ctx_bin[24]     = decision_type_reserved_8    # marge
 
 # UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui décrivent
 # la MÊME grandeur partagent la colonne ; les colonnes qu'un type ne remplit pas restent à zéro, et

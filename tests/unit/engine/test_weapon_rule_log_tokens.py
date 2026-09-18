@@ -28,7 +28,8 @@ from engine.phase_handlers.attack_sequence import ANTI_RULE_IDS
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
-from tests.unit.engine._state_builders import units_cache_entry as _uc
+from tests.unit.engine._config_helpers import build_game_rules
+from tests.unit.engine._state_builders import MODEL_HEIGHT, units_cache_entry as _uc
 
 
 def _seq(monkeypatch, rolls):
@@ -77,12 +78,15 @@ def _game_state(
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
               "WEAPON_RULES": list(weapon_rules), "code": "test_weapon", "display_name": "Test Weapon"}
     weapons_key = "CC_WEAPONS" if melee else "RNG_WEAPONS"
+    # `level`, socle et `MODEL_HEIGHT` : portes par toute figurine de `models_cache` en production ;
+    # exiges depuis melee 100 par `get_fighting_models` (bilan 04.02 `fight_declaration`).
+    geometry = {"level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT}
     models_cache = {}
     intents = []
     for index in range(carriers):
         mid = f"A{index + 1}"
         attacker = {"id": mid, "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                    "ATTACK_LEFT": 1, "col": 0, "row": 0,
+                    "ATTACK_LEFT": 1, "col": 0, "row": 0, **geometry,
                     # 10.06 volet MONSTER/VEHICLE : le test se lit sur les keywords PROPRES de
                     # la figurine (`_model_is_monster_or_vehicle`), pas sur l'union 19.03.
                     "UNIT_KEYWORDS": ["VEHICLE"] if attacker_is_vehicle else [],
@@ -106,7 +110,7 @@ def _game_state(
         return {"id": mid, "squad_id": sid, "player": 1, "T": 4, "HP_CUR": 12, "HP_MAX": 12,
                 "ARMOR_SAVE": target_save, "INVUL_SAVE": 7,
                 "role": "leader" if target_is_character else None, "unitType": "Grunt",
-                "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": row,
+                "points_per_hp": 5.0, "VALUE": 10.0, "col": 0, "row": row, **geometry,
                 "RNG_WEAPONS": [], "CC_WEAPONS": [], "UNIT_RULES": []}
 
     models_cache["T1"] = _target_model("T1", "2", target_row)
@@ -140,6 +144,10 @@ def _game_state(
         "units": units,
         "unit_by_id": unit_by_id,
         "objectives": [], "units_moved": set(), "units_advanced": set(),
+        # Geometrie x1 (hex) : `engagement_zone` deja en subhexes, lu par `get_engagement_zone`
+        # via `get_fighting_models` (melee 100).
+        "inches_to_subhex": 1,
+        "config": {"game_rules": build_game_rules(engagement_zone=1)},
         intents_key: {"1": intents},
     }
 

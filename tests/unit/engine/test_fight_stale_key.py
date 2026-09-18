@@ -35,7 +35,7 @@ from shared.data_validation import ConfigurationError
 from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._config_helpers import build_game_rules
-from tests.unit.engine._state_builders import units_cache_entry as _uc
+from tests.unit.engine._state_builders import MODEL_HEIGHT, units_cache_entry as _uc
 
 
 @pytest.fixture()
@@ -164,17 +164,20 @@ def _fight_gs(n_attacks: int = 2) -> Dict[str, Any]:
         "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": n_attacks, "RNG": 1,
         "WEAPON_RULES": [], "code": "claw", "display_name": "Claw",
     }
+    # `level`, socle et `MODEL_HEIGHT` : portés par toute figurine de `models_cache` en production ;
+    # exigés depuis mêlée 100 par `get_fighting_models` (bilan 04.02 `fight_declaration`).
     attacker: Dict[str, Any] = {
         "id": "A1", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4,
         "SHOOT_LEFT": 1, "ATTACK_LEFT": n_attacks, "col": 0, "row": 0,
         "RNG_WEAPONS": [], "CC_WEAPONS": [weapon],
+        "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT,
     }
     target: Dict[str, Any] = {
         "id": "T1", "squad_id": "2", "UNIT_RULES": [], "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2,
         "ARMOR_SAVE": 7, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
         "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0,
         "RNG_WEAPONS": [], "CC_WEAPONS": [],
-        "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "OC": 1,
+        "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT, "OC": 1,
     }
     return {
         **turn_state_invariants(),

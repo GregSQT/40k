@@ -40,6 +40,8 @@ def _gs():
         # d'overrun ; garde « one additional pile-in move » présente comme en production.
         "engaged_at_fight_step_start": {_SQUAD_ID: True},
         "overrun_pile_in_done": set(),
+        # Exigé par `_fight_allocate_and_end` (initialisé à {} en production, w40k_core.reset).
+        "pending_squad_fight_intents": {},
     }
 
 
@@ -48,6 +50,9 @@ class _FakeEngine:
     # Extraits par la re-sélection de cible CC : le combat à vide traverse les deux.
     _fight_target_after_designated_death = wcore.W40KEngine._fight_target_after_designated_death
     _fight_resolve_with_target = wcore.W40KEngine._fight_resolve_with_target
+    # Mêlée 100 : le combat à vide (best_target_id None) aboutit à l'allocation + clôture
+    # 12.04 (`W40KEngine._fight_allocate_and_end`) ; lit `pending_squad_fight_intents`.
+    _fight_allocate_and_end = wcore.W40KEngine._fight_allocate_and_end
     _fight_v11_gym_settle = lambda self: None
 
     def __init__(self, gs):
@@ -166,6 +171,8 @@ def _gs_alive_enemy_out_of_pool():
         "squad_models": {_SQUAD_ID: [], _ALIVE_ENEMY: []},
         "engaged_at_fight_step_start": {_SQUAD_ID: True},
         "overrun_pile_in_done": set(),
+        # Exigé par `_fight_allocate_and_end` (initialisé à {} en production, w40k_core.reset).
+        "pending_squad_fight_intents": {},
     }
 
 

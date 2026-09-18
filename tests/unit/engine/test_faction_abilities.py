@@ -238,13 +238,17 @@ def _fight_state(
     # `col`/`row` sur les DEUX figurines : l'allocation des pertes mesure la distance à
     # l'ennemi le plus proche (`_precompute_nearest_enemy_dist`), donc la fixture doit poser
     # des positions — le jet seul s'en passait, l'émission du log non.
+    # `level`, socle et `MODEL_HEIGHT` : portés par toute figurine de `models_cache` en production ;
+    # exigés depuis mêlée 100 par `get_fighting_models` (bilan 04.02 `fight_declaration`).
+    geometry = {"level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5}
     attacker = {"id": "A1", "squad_id": "1", "player": 1, "T": 4, "CC_WEAPONS": [weapon],
                 "ATTACK_LEFT": 1, "HP_CUR": 3, "HP_MAX": 3, "ARMOR_SAVE": 6, "INVUL_SAVE": 7,
                 "role": None, "unitType": "Boy", "points_per_hp": 5.0, "VALUE": 10.0,
-                "col": 0, "row": 0}
+                "col": 0, "row": 0, **geometry}
     target_model = {"id": "T1", "squad_id": "2", "player": 2, "T": 4, "HP_CUR": 5, "HP_MAX": 5,
                     "ARMOR_SAVE": 6, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
-                    "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0, "UNIT_RULES": []}
+                    "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0, "UNIT_RULES": [],
+                    **geometry}
     units = [_unit("1", 1, attacker_faction), _unit("2", 2, defender_faction, ARMOR_SAVE=6)]
     gs = {
         **turn_state_invariants(),
@@ -254,8 +258,11 @@ def _fight_state(
                 "1": _declared_faction(attacker_faction),
                 "2": _declared_faction(defender_faction),
             },
-            "game_rules": {"bonus_malus_cap": 0},
+            # `engagement_zone` déjà en subhexes (x1) : lu par `get_engagement_zone` via
+            # `get_fighting_models` (mêlée 100).
+            "game_rules": {"bonus_malus_cap": 0, "engagement_zone": 1},
         },
+        "inches_to_subhex": 1,
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},

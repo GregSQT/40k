@@ -83,6 +83,10 @@ def tactical_data(**overrides: Any) -> Dict[str, Any]:
         "move_actions": 9, "move_flees": 1, "move_waits": 3, "move_advances": 4,
         "shoot_activations": 5, "shoot_waits": 2,
         "fight_activations": 3, "final_turn": 5,
+        # Lot melee-100 (06_fight/b_ a e_), lues en `require_key` par `log_tactical_metrics` ;
+        # DISTINCTES entre elles et des voisines, pour la meme raison que les reserves ci-dessous.
+        "engaging_consolidations_agent": 7, "engaging_consolidations_opponent": 8,
+        "new_foes_suffered": 2, "multi_level_fight_activations": 4, "engaged_idle_models": 9,
         "enemy_value_destroyed": 300.0, "ally_value_lost": 200.0,
         "total_ally_value": 1000.0, "total_enemy_value": 900.0,
         "initial_ally_models": 12, "initial_enemy_models": 15,

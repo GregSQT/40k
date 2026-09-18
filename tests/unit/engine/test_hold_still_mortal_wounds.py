@@ -25,6 +25,7 @@ import engine.phase_handlers.shared_utils as su
 import engine.phase_handlers.attack_sequence as aseq
 from shared.data_validation import HAZARD_CONTEXT_HOLD_STILL
 from tests.unit.engine._roll_helpers import roll_fight_intent
+from tests.unit.engine._state_builders import MODEL_HEIGHT
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +51,14 @@ _HOLD_STILL_RULE = {
 }
 
 
+# Socle et `MODEL_HEIGHT` : portes par toute figurine de `models_cache` en production ; exiges
+# depuis melee 100 par `get_fighting_models` (bilan 04.02 `fight_declaration`), avec `level`.
+_MODEL_GEOMETRY = {"BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT}
+
+
 def _attacker_model():
     return {
-        "squad_id": "PAIN", "player": 1,
+        "squad_id": "PAIN", "player": 1, **_MODEL_GEOMETRY,
         "T": 5, "col": 0, "row": 0, "level": 0, "HP_CUR": 3, "HP_MAX": 3,
         "ARMOR_SAVE": 5, "INVUL_SAVE": 7,
         "CC_WEAPONS": [_DOK_TOOLS, _URTY_SYRINGE],
@@ -63,7 +69,7 @@ def _attacker_model():
 
 def _target_model(*, hp=2):
     return {
-        "squad_id": "TGT", "player": 2,
+        "squad_id": "TGT", "player": 2, **_MODEL_GEOMETRY,
         "T": 4, "col": 5, "row": 5, "level": 0, "HP_CUR": hp, "HP_MAX": hp,
         "ARMOR_SAVE": 4, "INVUL_SAVE": 7,
         # Exige par `_resolve_one_manual_wound` (valeur detruite par point de vie perdu).
@@ -112,7 +118,10 @@ def _gs(*, vehicle=False, target_hp=2):
         # condition pour observer l'ordre degats normaux -> blessures mortelles en un appel.
         "player_types": {"0": "ai", "1": "ai", "2": "ai"},
         "_unit_move_version": 0,
-        "config": {"game_rules": {"bonus_malus_cap": 0}},
+        # `engagement_zone` deja en subhexes (x1) : lu par `get_engagement_zone` via
+        # `get_fighting_models` (melee 100).
+        "inches_to_subhex": 1,
+        "config": {"game_rules": {"bonus_malus_cap": 0, "engagement_zone": 1}},
     }
 
 

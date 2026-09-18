@@ -21,6 +21,8 @@ import random
 
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._config_helpers import build_game_rules
+from tests.unit.engine._state_builders import MODEL_HEIGHT, units_cache_entry as _uc
 
 
 def _seq(monkeypatch, rolls):
@@ -42,6 +44,9 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
     """Escouade '1' (au contact de '2') avec une arme de melee par figurine."""
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
               "WEAPON_RULES": list(weapon_rules), "code": "test_eviscerator", "display_name": "Eviscerator"}
+    # `level`, socle et `MODEL_HEIGHT` : portes par toute figurine de `models_cache` en production ;
+    # exiges depuis melee 100 par `get_fighting_models` (bilan 04.02 `fight_declaration`).
+    geometry = {"level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT}
     models = {}
     intents = []
     for i in range(attackers):
@@ -51,14 +56,14 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
             "HP_CUR": attacker_hp, "HP_MAX": attacker_hp, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             "role": None, "unitType": "Fighter", "points_per_hp": 5.0, "VALUE": 10.0,
             "col": 0, "row": 0, "UNIT_KEYWORDS": _kw(*attacker_keywords),
-            "CC_WEAPONS": [dict(weapon)], "UNIT_RULES": [],
+            "CC_WEAPONS": [dict(weapon)], "UNIT_RULES": [], **geometry,
         }
         intents.append({"model_id": mid, "target_unit_id": "2", "weapon_index": 0,
                         "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1})
     models["T1"] = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
                     "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0,
-                    "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []}
+                    "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [], **geometry}
     return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "fight",
@@ -67,8 +72,8 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
         "squad_models": {"1": [f"A{i}" for i in range(attackers)], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": attackers},
                         "2": {"model_count_at_start": 1}},
-        "units_cache": {"1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 0, "HP_CUR": attacker_hp * attackers, "HP_MAX": attacker_hp * attackers},
-                        "2": {"col": 1, "row": 0, "VALUE": 10.0, "player": 1, "HP_CUR": 9, "HP_MAX": 9}},
+        "units_cache": {"1": _uc(0, 0, player=0, value=10.0, hp=attacker_hp * attackers),
+                        "2": _uc(1, 0, player=1, value=10.0, hp=9)},
         "units": [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw(*attacker_keywords)},
                   {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY")}],
         "unit_by_id": {
@@ -76,6 +81,10 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
             "2": {"id": "2", "player": 1, "UNIT_RULES": [], "UNIT_KEYWORDS": _kw("INFANTRY")},
         },
         "objectives": [],
+        # Geometrie x1 (hex) : `engagement_zone` deja en subhexes, lu par `get_engagement_zone`
+        # via `get_fighting_models` (melee 100).
+        "inches_to_subhex": 1,
+        "config": {"game_rules": build_game_rules(engagement_zone=1)},
         "pending_squad_fight_intents": {"1": intents},
     }
 

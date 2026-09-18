@@ -33,7 +33,7 @@ from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._config_helpers import build_game_rules
-from tests.unit.engine._state_builders import units_cache_entry as _uc
+from tests.unit.engine._state_builders import MODEL_HEIGHT, units_cache_entry as _uc
 
 #: Les deux chemins d'allocation à couvrir : (phase, point d'entrée). Le paramètre porte la
 #: phase plutôt qu'un booléen — c'est lui qui choisit l'arme, la clé d'intents et le libellé.
@@ -70,7 +70,7 @@ def _target_model(index):
             # Exigés par `_recompute_squad_occupied_hexes` et `_recompute_squad_cache`, appelés
             # à chaque `destroy_model` : cette escouade perd des figurines, contrairement à
             # celles des fixtures de tir voisines.
-            "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "OC": 1}
+            "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT, "OC": 1}
 
 
 def _game_state(phase, n_target_models, n_attacks):
@@ -83,8 +83,12 @@ def _game_state(phase, n_target_models, n_attacks):
     melee = phase == "fight"
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": n_attacks, "RNG": 24,
               "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
+    # `level`, socle et `MODEL_HEIGHT` sur l'attaquant : portés par toute figurine de
+    # `models_cache` en production ; exigés depuis mêlée 100 par `get_fighting_models`
+    # (bilan 04.02 `fight_declaration`, émis avant l'allocation).
     attacker = {"id": "A1", "squad_id": "1", "UNIT_RULES": [], "player": 0, "T": 4,
                 "SHOOT_LEFT": 1, "ATTACK_LEFT": n_attacks, "col": 0, "row": 0,
+                "level": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT,
                 "RNG_WEAPONS": [] if melee else [weapon],
                 "CC_WEAPONS": [weapon] if melee else []}
     targets = {f"T{i}": _target_model(i) for i in range(n_target_models)}
