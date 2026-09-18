@@ -4,38 +4,32 @@
 
 ---
 
-## La question qu'on pose mal
+## La question qu'il faut se poser
 
-"Quand Games Workshop franchira-t-il le cap de l'IA ?"
-
+Dans les séminaires IA auxquels j'ai participé, chaque entreprise avait conscience qu'elle devait franchir le cap de l'IA, mais ne savait ni comment le faire, ni ce qu'elles pouvaient en attendre.
 Ce document répond à une question plus précise : que pourrait apporter à Games Workshop une IA sachant jouer à Warhammer 40,000 ?
 
 ---
 
 ## 1. Le premier gain : en interne
 
-### L'expertise humaine est inestimable, pas le temps
+### L’expertise humaine n’est pas quantifiable. Le temps l’est.
 
-Les développeurs et testeurs de Warhammer 40,000 sont une ressource précieuse. Leur expérience, leur expertise, leur intuition du jeu sont inestimables — elles ont mis des années à se construire et ne peuvent pas s'automatiser.
-
-Mais leur temps est limité. Et le rythme des sorties — codex, équilibrages, nouvelles éditions — est soutenu.
-
-C'est là qu'une IA sachant jouer à 40K devient un **facilitateur**.
+Les développeurs et testeurs de Warhammer 40,000 sont une ressource précieuse. Leur expérience, leur expertise, leur intuition du jeu sont inestimables — elles ont mis des années à se construire et elles sont inestimables.
+Cependant, leur temps est limité. Et le rythme des sorties — codex, équilibrages, nouvelles éditions — est soutenu.
+C'est là qu'une IA sachant jouer à 40K devient un **partenaire idéal**.
 
 ### De l'intuition à la mesure, en quelques minutes
 
 Mise en situation : un testeur expérimenté repère une combinaison qui semble trop forte, une valeur d'unité difficile à calibrer, une "force composition" dont l'équilibrage lui paraît perfectible.
-
-Vérifier cette intuition demande de jouer des parties. Et jouer des parties introduit deux problèmes structurels que, aujourd'hui, personne ne sait éliminer :
-
-- **L'objectivation.** Même après plusieurs parties, il demeure très délicat de statuer sur des points très sensibles pouvant impacter tout un pan du jeu.
-- **L'angle mort.** Une interaction non testée reste invisible jusqu'à ce que dix mille joueurs la trouvent après publication.
-- **Le niveau des joueurs.** Un résultat dépend d'eux autant que des règles. Deux testeurs inégaux, et la conclusion est faussée — sans qu'on puisse démêler la cause.
+Vérifier cette intuition demande de jouer des parties. Or, outre les contraintes logistiques qu'une partie demande (2 joueurs, agenda, temps de jeu), les ârties jouées ne suffiront peut-être pas à confirmer ou pas l'intuition :
+- **L'objectivation.** Même après plusieurs parties, il demeure très délicat de statuer sur des points de règle très sensibles pouvant impacter tout un pan du jeu.
+- **L'angle mort.** Une interaction non testée reste invisible jusqu'à ce des milliers de joueurs la trouvent après publication.
+- **Le niveau des joueurs.** Les statistiques issues des parties en tournoi ne tiennent pas compte d'une chose capitale : les niveaux de jeu des joueurs sont inégaux, et les statistique ne peuvent s'en afranchir.
 
 Ce que leur apporte une IA :
-Des milliers de parties et autant de statistiques par heure. Des datas, objectives, concrètes, sur lesquelles ils pourront s'appuyer pour statuer sur le point testé de manière objective.
-
-A ceci il faut ajouter une nuance que la plupart des approches ratent : **une IA parfaite n'est pas un joueur humain.** Une unité difficile à manier paraîtra excellente à une machine et décevra vos joueurs. On rejoue donc les mêmes affrontements avec une IA volontairement dégradée. Si l'unité s'effondre, elle n'est pas mal évaluée — elle est **technique**. Ce n'est pas le même remède, et c'est exactement la distinction qu'un designer a besoin de faire.
+Des milliers de parties et autant de statistiques fiables par heure. Des datas objectives, concrètes, sur lesquelles ils pourront s'appuyer pour statuer sur le sujet testé.
+A ceci il faut ajouter une nuance facilement ignorée : **une IA parfaite n'est pas un joueur humain.** Une unité difficile à manier pourrait paraître excellente jouée par une machine mais décevra des joueurs n'ayant pas le niveau de jeu necessaire pour l'exploiter au mieux. On rejoue donc les mêmes affrontements avec une IA volontairement dégradée. Si l'unité s'effondre, elle n'est pas mal évaluée — elle est **technique**. Ce n'est pas le même remède, et c'est exactement la distinction qu'un designer a besoin de faire.
 
 ### Le danger écarté
 
