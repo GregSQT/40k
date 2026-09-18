@@ -115,7 +115,7 @@ def test_the_level_by_cell_memo_keeps_its_terrain_alive():
     mapping = floor_level_by_cell(terrain, "round", 1, 0)
     assert mapping, "aucune cellule d'étage résolue : le test ne prouverait rien"
 
-    entries = [v for v in _FLOOR_LEVEL_BY_CELL_CACHE.values() if v[1] is mapping]
+    entries = [v for v in _FLOOR_LEVEL_BY_CELL_CACHE.values() if v[1].highest is mapping]
     assert entries, "la carte rendue n'est pas celle qui a été mémoïsée"
     assert entries[0][0] is terrain, (
         "l'entrée du mémo ne retient pas la liste `terrain_areas` : sa clé d'adresse peut "

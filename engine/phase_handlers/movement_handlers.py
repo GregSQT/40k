@@ -18,6 +18,7 @@ from functools import lru_cache
 from .generic_handlers import end_activation, _log_with_context
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
+from engine.terrain_utils import FloorLevelMaps, floor_level_maps
 from engine.combat_utils import (
     calculate_hex_distance,
     normalize_coordinates,
@@ -608,9 +609,11 @@ def squad_ascent_declared(game_state: Dict[str, Any], squad_id: str) -> bool:
     trajet par-figurine et le journal. Les désolidariser rouvrirait la classe « masque ⊆
     exécutable » : le masque offrirait des cellules dont l'exécution refuserait le niveau.
 
-    Faux par défaut — et c'est le régime courant : sans déclaration, TOUT le pipeline de move est
-    exactement celui d'avant la verticalité (destination au sol, aucun champ multi-niveaux
-    construit, aucun surcoût).
+    Faux par défaut — et c'est le régime courant. Sans déclaration, une escouade AU SOL suit
+    exactement le pipeline d'avant la verticalité (destination au sol, aucun champ multi-niveaux
+    construit, aucun surcoût) ; une figurine EN HAUTEUR ne monte jamais mais garde son étage là
+    où il continue et descend ailleurs (`model_rigid_level_map`), ce qui passe par la voie
+    par-figurine de l'érosion. La déclaration n'ouvre donc que la MONTÉE, pas la verticalité.
     """
     return str(squad_id) in game_state.get(ASCENT_DECLARED_KEY, set())  # get allowed : absent = aucune déclaration
 
@@ -627,48 +630,45 @@ def _squad_can_end_move_elevated(game_state: Dict[str, Any], unit: Dict[str, Any
     return bool(unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")))
 
 
-def squad_floor_level_map(
-    game_state: Dict[str, Any], model: Dict[str, Any]
-) -> Mapping[Tuple[int, int], int]:
-    """Carte `cellule -> niveau effectif` du socle de CETTE figurine (13.06), ou vide sans étage.
+def _model_floor_maps(game_state: Dict[str, Any], model: Dict[str, Any]) -> FloorLevelMaps:
+    """Cartes d'étage (`FloorLevelMaps`) du socle de CETTE figurine, ou vides sans terrain.
 
-    Enveloppe mémoïsée de `floor_level_by_cell` : la géométrie lue est celle de la FIGURINE (et
+    Enveloppe mémoïsée de `floor_level_maps` : la géométrie lue est celle de la FIGURINE (et
     son orientation), pas celle de l'escouade — depuis le pivot par-figurine, `update_model_position`
     écrit `model["orientation"]` sans resynchroniser celle de l'escouade, et mesurer l'empreinte
     dans une autre orientation que la sienne déclarerait un plancher tenable qui ne l'est pas.
-    """
-    from engine.terrain_utils import floor_level_by_cell
 
+    Le garde sur `terrain_areas` n'est pas un raccourci : la liste vide par défaut est un objet
+    NEUF à chaque lecture, et la mémo est clefée sur son `id()` — l'interroger la ferait manquer et
+    remplir son LRU à chaque appel.
+    """
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
     if not terrain_areas:
-        return {}
-    return floor_level_by_cell(terrain_areas, *_model_floor_geometry(model))
-
-
-def _model_floor_geometry(model: Dict[str, Any]) -> Tuple[str, Any, int]:
-    """`(forme, taille, orientation)` du socle de CETTE figurine, telles que le plancher les lit."""
-    return (
+        return _NO_FLOORS
+    return floor_level_maps(
+        terrain_areas,
         require_key(model, "BASE_SHAPE"),
         require_key(model, "BASE_SIZE"),
-        int(model.get("orientation", 0)),  # get allowed (socle rond non orienté)
+        socle_orientation(model),
     )
+
+
+_NO_FLOORS = FloorLevelMaps({}, {})
+
+
+def squad_floor_level_map(
+    game_state: Dict[str, Any], model: Dict[str, Any]
+) -> Mapping[Tuple[int, int], int]:
+    """Carte `cellule -> niveau effectif le plus haut` du socle de CETTE figurine (13.06)."""
+    return _model_floor_maps(game_state, model).highest
 
 
 def model_floor_cells_at_level(
     game_state: Dict[str, Any], model: Dict[str, Any], level: int
 ) -> FrozenSet[Tuple[int, int]]:
-    """Cellules où le socle de CETTE figurine tient à l'étage `level` (13.06), ou vide sans étage.
-
-    Jumelle de `squad_floor_level_map` sans l'écrasement par le niveau supérieur
-    (`floor_cells_by_level`) : c'est la carte d'une figurine qui GARDE son étage, qu'un plancher
-    plus haut le recouvre ou non.
-    """
-    from engine.terrain_utils import floor_cells_by_level
-
-    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
-    if not terrain_areas:
-        return frozenset()
-    return floor_cells_by_level(terrain_areas, *_model_floor_geometry(model)).get(
+    """Cellules où le socle de CETTE figurine tient à l'étage `level` (13.06), plancher plus haut
+    au-dessus ou non : la carte d'une figurine qui GARDE son étage."""
+    return _model_floor_maps(game_state, model).by_level.get(
         int(level), frozenset()
     )  # get allowed : aucun plancher à cet étage = aucune cellule
 
@@ -678,9 +678,10 @@ def model_rigid_level_map(
 ) -> Mapping[Tuple[int, int], int]:
     """Carte `cellule -> niveau d'arrivée` de CETTE figurine pour un squad move rigide (13.06).
 
-    SOURCE UNIQUE des niveaux qu'un plan rigide peut assigner à une figurine, lue par le plan
-    (`build_rigid_plan` via `model_move_destination_level`) et par l'érosion du masque
-    (`erode_move_pool_by_squad_block`) : une cellule absente vaut le sol.
+    SOURCE UNIQUE des niveaux qu'un plan rigide peut assigner à une figurine, lue en entier par
+    l'érosion du masque (`erode_move_pool_by_squad_block`) ; le plan (`build_rigid_plan`) en
+    interroge une seule cellule via `model_move_destination_level`, écrite sur les deux mêmes
+    primitives. Une cellule absente vaut le sol.
 
       - montée déclarée (`ascent`) : la carte complète de son socle (`squad_floor_level_map`) —
         elle peut monter, rester à son étage ou descendre selon la case d'arrivée ;
@@ -708,7 +709,7 @@ def model_rigid_level_map(
     origin = int(require_key(model, "level"))
     if origin < 1:
         return {}
-    return {cell: origin for cell in model_floor_cells_at_level(game_state, model, origin)}
+    return dict.fromkeys(model_floor_cells_at_level(game_state, model, origin), origin)
 
 
 def model_move_destination_level(
@@ -716,22 +717,20 @@ def model_move_destination_level(
 ) -> int:
     """Niveau où CETTE figurine finit son move en `(col, row)` — 0 (sol) ou l'étage résolu.
 
-    SOURCE UNIQUE du niveau de destination d'un squad move, lue dans `model_rigid_level_map`.
-    Sans déclaration, une figurine AU SOL rend le sol quel que soit le terrain — le régime
-    sans étage reste bit-à-bit identique à l'ancien ; une figurine EN HAUTEUR garde son étage
-    là où la case d'arrivée le porte, et descend ailleurs.
-
-    Le niveau rendu reste un HINT au sens de `place_model_at_effective_level` : la même carte est
-    interrogée par l'érosion du masque et par le plan, donc les deux désignent le même étage,
-    et le commit revérifie l'empreinte avant d'écrire.
+    Requête PONCTUELLE de `model_rigid_level_map`, sur les deux mêmes primitives : la carte
+    entière n'est pas reconstruite pour une seule lecture, `build_rigid_plan` l'appelant par
+    figurine et par candidate du pool. Sans déclaration, une figurine AU SOL rend le sol quel que
+    soit le terrain — le régime sans étage reste bit-à-bit identique à l'ancien.
     """
-    if not ascent and int(require_key(model, "level")) < 1:
-        return SQUAD_RIGID_MOVE_DESTINATION_LEVEL
-    return int(
-        model_rigid_level_map(game_state, model, ascent).get(
-            (int(col), int(row)), SQUAD_RIGID_MOVE_DESTINATION_LEVEL
+    cell = (int(col), int(row))
+    if ascent:
+        return squad_floor_level_map(game_state, model).get(
+            cell, SQUAD_RIGID_MOVE_DESTINATION_LEVEL
         )  # get allowed : hors étage = sol
-    )
+    origin = int(require_key(model, "level"))
+    if origin >= 1 and cell in model_floor_cells_at_level(game_state, model, origin):
+        return origin
+    return SQUAD_RIGID_MOVE_DESTINATION_LEVEL
 
 
 def _ascent_declaration_due_unit(
