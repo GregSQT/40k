@@ -45,10 +45,21 @@ export class WeirdBoy extends SwarmRangeSwarm {
         hazardous_threshold: 10,
       },
     },
+    // Da Jump (Psychic, once per turn, per army) : « In your Movement phase, you can roll 1 D6
+    // and on a result of: 1: This unit suffers D6 mortal wounds. 2-6: Place this unit in
+    // strategic reserves and it gains Deep Strike until the end of the phase. This unit can then
+    // make an ingress move (Including during the first battle round). » — l'escouade DU
+    // WeirdBoy (19.04), appel de capacité posé au début de la phase de mouvement.
+    { ruleId: "da_jump", displayName: "Da Jump" },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2, deadly_demise: 2, weapon_profile_scaling_by_model_count: 2 };
+  static RULES_STATUS = {
+    leader: 2,
+    deadly_demise: 2,
+    weapon_profile_scaling_by_model_count: 2,
+    da_jump: 2,
+  };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ"];

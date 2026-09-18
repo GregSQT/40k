@@ -67,18 +67,22 @@ def test_designate_premiere_ecriture_gagnante():
     assert gs["unit_by_id"]["1"]["designated_shoot_target_id"] == "101"
 
 
-def test_designate_porteur_cible_invisible_leve(monkeypatch):
-    """Porteur de Hail of Bolts désignant une cible qu'il ne VOIT pas : « select one enemy unit
-    visible to this unit » — erreur explicite, jamais une désignation muette."""
+def test_designate_ne_refait_pas_de_test_de_ligne_de_vue(monkeypatch):
+    """« visible to this unit » est tenu par construction (un intent n'existe que sur une cible
+    vue par sa figurine, 06.01) : la désignation n'appelle PAS `compute_unit_los` — un test
+    ancre-à-ancre y rendait un faux « invisible » sur une cible vue par trois figurines (roster
+    réserves, graine 2, 2026-09-18) et faisait tomber l'épisode."""
     from engine.phase_handlers import shooting_handlers
 
-    monkeypatch.setattr(shooting_handlers, "compute_unit_los",
-                        lambda gs, s, t: {"cover": False, "can_see": False})
+    def _never(*_a, **_k):
+        raise AssertionError("compute_unit_los ne doit pas être consulté à la désignation")
+
+    monkeypatch.setattr(shooting_handlers, "compute_unit_los", _never)
     gs = _game_state([], target=TARGET_FAR)
     del gs["unit_by_id"]["1"]["designated_shoot_target_id"]
     gs["unit_by_id"]["1"]["UNIT_RULES"] = [{
         "ruleId": "weapon_attacks_bonus_vs_designated_target", "displayName": "Hail of Bolts",
         "rule_args": {"weapon_code": "bolt_rifle", "attacks_bonus": 2},
     }]
-    with pytest.raises(ValueError, match="ne VOIT pas"):
-        designate_shoot_target(gs, "1", "101")
+    designate_shoot_target(gs, "1", "101")
+    assert gs["unit_by_id"]["1"]["designated_shoot_target_id"] == "101"

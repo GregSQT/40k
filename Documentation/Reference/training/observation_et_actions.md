@@ -629,7 +629,7 @@ decision_ctx_bin[14]     = decision_type_suppress_target            # 0.0 / 1.0 
 # decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention (§15.11) ; le reste
 # est de la marge. ⚠️ Da Jump n'ouvre PAS de type : c'est un appel de capacité (`rule_choice`
 # posé par `push_ability_call`, candidats [accorde `da_jump`] / [declines]) — comme Grot Orderly
-# et Finest Hour, il coûte 0 colonne.
+# et Finest Hour, il coûte 0 colonne — livré ainsi le 2026-09-18 (obs_id 39 sur l'escouade du WeirdBoy).
 decision_ctx_bin[15]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
 decision_ctx_bin[16]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
 decision_ctx_bin[17]     = decision_type_reserved_2    # marge

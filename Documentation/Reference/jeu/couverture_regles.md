@@ -387,6 +387,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | FLY keyword (Jump Pack, Land Speeder, WarTrakk) | 21.03 | ✅ |
 | Multi-level terrain + coût vertical | 13.06 | ✅ |
 | Strategic Reserves + Deep Strike | 20.01–20.04, 24.09 | ✅ |
+| Da Jump (WeirdBoy) — 20.02 repositionnement + Deep Strike accordé jusqu'à la fin de la phase, ingress dès le round 1 ; 1 → D6 MW psychiques | Datasheets - Orks p5 | ✅ 2026-09-18 |
 
 **Shooting Phase**
 

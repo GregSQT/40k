@@ -407,6 +407,13 @@ class AnalyzerState:
     #: lignes SUPPRESSES (grammaire 12), levées à la phase de commandement du suppresseur.
     suppressions_in_force: Dict[str, Tuple[str, int]] = field(default_factory=dict)
 
+    #: Da Jump (grammaire 13, `ai/analyzer_da_jump.py`) : jets relevés `{(épisode, tour, joueur)}`
+    #: (« once per turn, per army ») et l'attente ouverte par le dernier jet — `{"kind":
+    #: "ingress"|"suffers", "unit_id", "turn", "player", "episode"}` — soldée par la ligne
+    #: d'ingress ou la ligne SUFFERS [DA JUMP] de la même escouade, ou comptée en faute.
+    da_jump_rolled: Set[Tuple[int, int, int]] = field(default_factory=set)
+    da_jump_pending: Optional[Dict[str, Any]] = None
+
     #: Appels de capacité relevés (« ABILITY CALL <Nom> [USED|DECLINED] », `engine/ability_calls`),
     #: dans l'ordre du journal : {episode, turn, phase, player, unit_id, ability, used}. C'est la
     #: trace qui distingue « refusé » de « jamais proposé » pour Grot Orderly / Finest Hour / Da Jump.

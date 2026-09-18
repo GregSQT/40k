@@ -1576,6 +1576,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             # 06.02 : blessure mortelle (Desperate Escape 09.07) allouée à un CHARACTER avant
             # les bodyguards — même compteur que les autres phases, bucket de la phase.
             + _pair('alloc_character_over_bodyguard', 'move')
+            # Da Jump (WeirdBoy) : action de la phase de mouvement (ai/analyzer_da_jump.py).
+            + _pair('da_jump_invalid')
         ),
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
@@ -2031,6 +2033,8 @@ def parse_step_log(filepath: str) -> Dict:
         'blast_x_mismatch': {1: 0, 2: 0},
         # Primitive F — suppression sans touche / malus [SUPPRESSED] incohérent (ai/analyzer_suppression.py).
         'suppression_without_hit': {1: 0, 2: 0},
+        # Da Jump (ai/analyzer_da_jump.py) : once per turn, phase, issue ⇔ D6, ingress > 8", SUFFERS après FAILED.
+        'da_jump_invalid': {1: 0, 2: 0},
         # 05.03 / 06.02 / 24.28 — attaque allouée à un CHARACTER alors qu'un bodyguard de
         # l'unité est vivant (`[ALLOC_MODEL:]`), hors override [PRECISION] légal. Par PHASE de
         # la ligne : chaque bucket d'`error_totals` porte le sien (chantier chaîne d'attaque
@@ -2292,6 +2296,7 @@ def parse_step_log(filepath: str) -> Dict:
             'lethal_hits_wrong_wound_fight': {1: None, 2: None},
             'blast_x_mismatch': {1: None, 2: None},
             'suppression_without_hit': {1: None, 2: None},
+            'da_jump_invalid': {1: None, 2: None},
             'alloc_character_over_bodyguard': {
                 'move': {1: None, 2: None}, 'shooting': {1: None, 2: None},
                 'charge': {1: None, 2: None}, 'fight': {1: None, 2: None},

@@ -161,6 +161,9 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     # jet mais sur les CP. Observée parce que l'agent doit pouvoir ATTRIBUER le gain à l'unité
     # qui tient l'objectif ; ses CP seuls ne disent pas d'où ils viennent.
     "cp_gain_on_objective",
+    # Da Jump (WeirdBoy, chantier Armageddon 2026-09-18) : capacité ACTIVABLE — observée sur
+    # l'escouade tant que le WeirdBoy vit, proposée en candidat par `push_ability_call`.
+    "da_jump",
     # Deep Strike (24.09, chantier 04) : la SEULE capacité du vocabulaire qui ne change ni un
     # jet ni un mouvement, mais l'AIRE DE MISE EN PLACE d'un ingress move (20.04). Deux escouades
     # en réserves sont indiscernables sans elle, alors que l'une arrive dans la bande de 6" au

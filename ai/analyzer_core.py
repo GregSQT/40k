@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Tuple, cast
 from engine.constants import DRAW_WINNER
 from shared.data_validation import (
     require_key, require_present,
-    HAZARD_CONTEXT_EXHORTATION, HAZARD_CONTEXT_HOLD_STILL, HAZARD_CONTEXT_TAGS,
+    HAZARD_CONTEXT_DA_JUMP, HAZARD_CONTEXT_EXHORTATION, HAZARD_CONTEXT_HOLD_STILL, HAZARD_CONTEXT_TAGS,
 )
 from ai.analyzer_rules import (
     ALLOC_CHARACTER_BUCKET_BY_PHASE, MW_ABILITY_DICE_CHECKS, RUN_RULE_PRECISION_MW_TO_CHARACTER,
@@ -278,6 +278,7 @@ def net_mortal_wounds(brut: int, action_desc: str) -> int:
 _MW_ABILITY_RULE_IDS = {
     HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_HOLD_STILL]: "mortal_wounds_on_critical_wound",
     HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]: "mortal_wounds_on_fight_activation",
+    HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_DA_JUMP]: "da_jump",
 }
 #: Les deux tables (tag → rule_id ici, rule_id → contrôle des dés dans `analyzer_rules`)
 #: décrivent le MÊME inventaire : divergence = erreur au chargement, pas à la première ligne.
@@ -299,6 +300,7 @@ _MW_ABILITY_SUFFERS_RE = re.compile(
 #: libre venu du moteur, et le TYPE + l'INDEX suffisent a compter un taux de choix.
 _AGENT_DECISION_RE = re.compile(r'DECISION\s+\[([A-Za-z0-9_]+)\]\s+CHOICE_(\d+)')
 from ai import analyzer_suppression as _suppression
+from ai import analyzer_da_jump as _da_jump
 
 #: « Unit N(c,r) ABILITY CALL <Nom> [USED|DECLINED] » (`engine/ability_calls.py`).
 _ABILITY_CALL_RE = re.compile(r'ABILITY CALL (.+?) \[(USED|DECLINED)\]')
@@ -1426,7 +1428,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # une arrivée de réserves, et le round est connu — le verdict tombe des deux
                 # côtés.
                 note_rule_usage(stats, "PROJ.1.1.reserves_too_early", player)
-                if deploy_turn == 1:
+                # Da Jump (grammaire 13) : l'escouade repositionnée ce tour ingresse « including
+                # during the first battle round » — l'exemption 20.03 est portée par la ligne
+                # DA JUMP [REPOSITIONED] qui précède ; le contrôle de clearance suit.
+                _dj_repositioned = _da_jump.unit_repositioned_this_turn(state, unit_id, deploy_turn)
+                _da_jump.handle_ingress_after_da_jump(
+                    state, stats, config, line, unit_id, player, deploy_turn,
+                    (_line_models or {}).get(unit_id, {}),
+                )
+                if deploy_turn == 1 and not _dj_repositioned:
                     stats['reserves_too_early'][player] += 1
                     if stats['first_error_lines']['reserves_too_early'][player] is None:
                         stats['first_error_lines']['reserves_too_early'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
@@ -2151,6 +2161,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     state.last_phase_by_player[int(player)] = phase
 
                 if phase != state.last_phase and not _is_engine_event:
+                    # Da Jump : une attente (ingress ou SUFFERS) qui survit à la phase de
+                    # mouvement est une faute — jugée ICI, au changement de phase.
+                    _da_jump.on_phase_change(state, stats, line, phase, int(player))
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                         # Primitive F : les suppressions posées par ce joueur expirent au début
@@ -2418,6 +2431,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
                 # Determine action type and validate rules
                 action_unit_id = require_present(unit_id, "unit_id")
+                # Da Jump : une escouade repositionnée n'agit pas avant son ingress (hors table).
+                # AVANT la chaîne de branches : plusieurs d'entre elles `continue` (move, wait…)
+                # et la ligne d'ingress a déjà soldé l'attente dans le bloc DEPLOYED plus haut.
+                # Sur l'acteur de LA ligne (préfixe « Unit N( »), jamais `action_unit_id` qui est
+                # le dernier ID de HEADER/DEPLOYED, pas celui de la ligne.
+                if _dmg_actor_id is not None:
+                    _da_jump.check_unit_action_while_off_table(state, stats, line, _dmg_actor_id, int(player))
                 is_shoot_action = re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
                     r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+\d+',
@@ -2452,6 +2472,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
+                elif _da_jump.DA_JUMP_LINE_RE.search(action_desc):
+                        # Da Jump (grammaire 13) : « DA JUMP (D6=n) [REPOSITIONED|FAILED] ».
+                        action_type = 'da_jump'
+                        _da_jump.handle_da_jump_line(state, stats, line, action_desc, player, turn, phase)
                 elif _suppression.SUPPRESSES_LINE_RE.search(action_desc):
                         # Primitive F, grammaire 12 : « SUPPRESSES Unit M [SUPPRESSED→M] ».
                         # Branche AVANT le tir : la ligne nomme deux unités comme un SHOT.
@@ -2790,6 +2814,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         else:
                             _mwa_rule = _MW_ABILITY_RULE_IDS[_mwa_match.group(2)]
                             _mwa_src = _mwa_src_match.group(1)
+                            if _mwa_rule == "da_jump":
+                                _da_jump.handle_suffers_da_jump(
+                                    state, stats, line, _mwa_unit_id, player, int(_mwa_match.group(1)),
+                                )
                             # §1.7 : l'usage se compte sur l'unité SOURCE et son camp. Type ou
                             # camp inconnus = unité jamais vue en en-tête (journal tronqué) :
                             # on s'abstient, comme le fait le contrôle d'armurerie HAZARDOUS

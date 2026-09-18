@@ -96,9 +96,18 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       (`suppression_without_hit`), jamais un vieux format. Verrou :
 #:       test_primitive_f_unit_state_effects.py (producteur), test_analyzer_suppression.py (lecteur).
 #:
+#:  13 — tout Da Jump JETE (WeirdBoy) laisse « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] »
+#:       avant son effet : sur REPOSITIONED l escouade est hors table jusqu a sa ligne d ingress
+#:       de la MEME phase (chaque socle a plus de 8" de tout ennemi, zone adverse comprise, des le
+#:       round 1) ; sur MISCAST une ligne « SUFFERS n Mortal Wounds [DA JUMP] Trigger:1 MW:n » sur
+#:       la meme escouade (n <= 6, source PSYCHIC). Sur un journal log_grammar>=13, un ingress au
+#:       round 1 sans DA JUMP REPOSITIONED est une faute (`reserves_too_early`), un ingress a 8"
+#:       ou moins d un ennemi apres Da Jump aussi (`da_jump_invalid`). Verrous :
+#:       test_da_jump.py (producteur), test_analyzer_da_jump.py (lecteur).
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 12
+LOG_GRAMMAR_VERSION = 13
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1774,6 +1783,18 @@ class StepLogger:
             shocked = require_key(details, "battle_shocked")
             result = "SHOCKED" if shocked else "OK"
             return f"Unit {unit_with_coords} BATTLE-SHOCK Roll:2D6={roll_val} vs Ld{ld_val}+ → {result}"
+
+        elif action_type == "da_jump":
+            # Da Jump (WeirdBoy), grammaire 13 : « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] ».
+            # Sur REPOSITIONED, l escouade quitte la table (20.02) et sa ligne d ingress suit dans
+            # la meme phase ; sur MISCAST (le 1), sa ligne SUFFERS [DA JUMP] suit. « MISCAST » et
+            # non « FAILED » : `[FAILED]` est le token de STATUT de toute ligne, et le lecteur
+            # (`analyzer_core`, regex de ligne d action) le prendrait pour la fin du message.
+            roll = int(require_key(details, "da_jump_roll"))
+            outcome = str(require_key(details, "da_jump_outcome"))
+            if outcome not in ("REPOSITIONED", "MISCAST"):
+                raise ValueError(f"da_jump: issue inconnue {outcome!r}")
+            return f"{unit_label} DA JUMP (D6={roll}) [{outcome}]"
 
         elif action_type == "suppress_target":
             # Primitive F (Indiscriminate Detonations), grammaire 12 : « Unit N(c,r) SUPPRESSES

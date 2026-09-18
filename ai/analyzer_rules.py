@@ -343,9 +343,18 @@ def _mw_dice_error_threshold_d3(brut: int, dice: Optional[List[int]], trigger: O
 #: l'INVENTAIRE des capacités dont l'analyzer sait lire les dés ; `analyzer_core` le confronte à
 #: l'import à sa propre table tag → `rule_id` (`_MW_ABILITY_RULE_IDS`), si bien qu'une capacité
 #: ajoutée d'un côté sans l'autre lève au chargement du module, pas à la première ligne lue.
+def _mw_dice_error_da_jump(brut: int, dice: Optional[List[int]], trigger: Optional[int]) -> Optional[str]:
+    """Da Jump raté (`da_jump`) : « 1: This unit suffers D6 mortal wounds » — `Trigger:` porte le
+    D6 (= 1), `MW:` porte UN D6 dont N est la valeur (ai/analyzer_da_jump.py)."""
+    from ai.analyzer_da_jump import mw_dice_error_da_jump
+
+    return mw_dice_error_da_jump(brut, dice, trigger)
+
+
 MW_ABILITY_DICE_CHECKS: Dict[str, Any] = {
     "mortal_wounds_on_critical_wound": _mw_dice_error_sum_of_d6,
     "mortal_wounds_on_fight_activation": _mw_dice_error_threshold_d3,
+    "da_jump": _mw_dice_error_da_jump,
 }
 
 

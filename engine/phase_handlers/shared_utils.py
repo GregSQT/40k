@@ -4601,14 +4601,16 @@ def _roll_deadly_demise(game_state: Dict[str, Any], entry: Dict[str, Any]) -> Li
 
 def queue_mortal_wounds(
     game_state: Dict[str, Any], uid: str, n_wounds: int, log_payload: Dict[str, Any],
-    *, details_key: str,
+    *, details_key: str, is_psychic: bool = False,
 ) -> None:
     """Met en file `n_wounds` blessures mortelles pour `uid` (06.02), a attribuer par
     `drain_mortal_wound_queue` : AUTO si le proprietaire est programmatique, allocation manuelle
-    sinon. `log_payload` est la ligne DEJA emise ; `details_key` y recoit le detail par figurine."""
+    sinon. `log_payload` est la ligne DEJA emise ; `details_key` y recoit le detail par figurine.
+    `is_psychic` : source PSYCHIC (Da Jump rate) — Psychic Hood 24.12 s applique, sur les deux
+    chemins d attribution."""
     game_state.setdefault(MORTAL_WOUND_QUEUE_KEY, []).append({
         "kind": "victim", "uid": str(uid), "n_wounds": int(n_wounds),
-        "log_payload": log_payload, "details_key": details_key,
+        "log_payload": log_payload, "details_key": details_key, "is_psychic": bool(is_psychic),
     })
 
 
@@ -4636,10 +4638,17 @@ def drain_mortal_wound_queue(game_state: Dict[str, Any]) -> Optional[Dict[str, A
         details_key = str(entry["details_key"])
         log_payload = entry["log_payload"]
         n_wounds = int(entry["n_wounds"])
+        # get allowed : les entrees `deadly_demise` -> victimes sont construites sans le drapeau
+        # (une explosion n est jamais psychique) ; absent = False est leur valeur, pas un repli.
+        is_psychic = bool(entry.get("is_psychic", False))
         if is_programmatic_owner(game_state, require_key(require_key(game_state, "units_cache")[uid], "player")):
-            allocate_mortal_wounds(game_state, uid, n_wounds, True, log_payload[details_key])
+            allocate_mortal_wounds(
+                game_state, uid, n_wounds, True, log_payload[details_key], is_psychic=is_psychic
+            )
             continue
-        build_manual_hazard_allocation(game_state, uid, n_wounds, log_payload, details_key=details_key)
+        build_manual_hazard_allocation(
+            game_state, uid, n_wounds, log_payload, details_key=details_key, is_psychic=is_psychic
+        )
         if PENDING_HAZARD_ALLOCATION_KEY in game_state:
             return manual_allocation_waiting_payload(game_state, HAZARD_CTX)
     game_state.pop(MORTAL_WOUND_QUEUE_KEY, None)
@@ -8644,15 +8653,6 @@ SHOOT_HIT_TARGETS_KEY = "_shoot_hit_targets"
 #: Posee par `designate_shoot_target`, effacee par `_clear_shoot_activation_state`.
 DESIGNATED_SHOOT_TARGET_KEY = "designated_shoot_target_id"
 
-#: Effets de Primitive B qui LISENT la cible designee (« this unit's <arme> that targeted that
-#: selected unit »). Pour leurs porteurs, la designee doit etre VISIBLE (« select one enemy unit
-#: visible to this unit ») : `designate_shoot_target` le verifie.
-_DESIGNATED_TARGET_EFFECT_IDS: Tuple[str, ...] = (
-    "weapon_attacks_bonus_vs_designated_target",
-    "grant_weapon_rule_vs_designated_target",
-)
-
-
 def designate_shoot_target(
     game_state: Dict[str, Any], attacker_squad_id: str, target_squad_id: str
 ) -> None:
@@ -8664,24 +8664,18 @@ def designate_shoot_target(
     choix de l agent (SHOOT_SLOT). Une seconde declaration de la meme activation ne change donc
     rien (premiere ecriture gagnante).
 
-    Pour un porteur d un effet « vs cible designee », la datasheet exige une cible VISIBLE. La
-    priorite est declarable, donc vue par au moins une figurine sous un type de tir a ligne de
-    vue ; un porteur qui designerait une cible invisible (type de tir 10.07 sur une escouade
-    sans arme [INDIRECT FIRE] : impossible par le masque) est une chaine rompue, pas un cas de
-    jeu — erreur explicite (T1).
+    « select one enemy unit VISIBLE to this unit » (Hail of Bolts / Overlapping Detonations) est
+    tenu par CONSTRUCTION, pas par un second test de ligne de vue : le bonus ne s applique qu a
+    un intent dont la cible EST la designee, et un intent n existe que si sa figurine VOIT sa
+    cible (`_model_can_shoot_target`, 06.01, par figurine) — hors tir indirect 10.07, ou seules
+    les armes [INDIRECT FIRE] visent sans ligne de vue, armes que ni Hail of Bolts ni Overlapping
+    Detonations ne nomment. Un test unite→unite ancre-a-ancre (`compute_unit_los`) ici a rendu un
+    faux « invisible » sur une cible que trois figurines voyaient (mesure du 2026-09-18, roster
+    reserves, graine 2) : il n a pas la granularite de la regle et n est pas la source de verite.
     """
     attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
     if DESIGNATED_SHOOT_TARGET_KEY in attacker_unit:
         return
-    if any(unit_has_rule_effect(attacker_unit, eid) for eid in _DESIGNATED_TARGET_EFFECT_IDS):
-        from engine.phase_handlers.shooting_handlers import compute_unit_los
-        target_unit = require_unit_by_id(game_state, str(target_squad_id))
-        if not compute_unit_los(game_state, attacker_unit, target_unit)["can_see"]:
-            raise ValueError(
-                f"designate_shoot_target: l escouade {attacker_squad_id} designe la cible "
-                f"{target_squad_id} qu elle ne VOIT pas — « select one enemy unit visible to "
-                f"this unit » (Hail of Bolts / Overlapping Detonations)"
-            )
     attacker_unit[DESIGNATED_SHOOT_TARGET_KEY] = str(target_squad_id)
 
 
@@ -13815,9 +13809,13 @@ def _resolve_one_mortal_wound(
     cur = batch["current_model_id"]
     m = require_key(game_state, "models_cache")[cur]
     # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
-    # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent ici.
+    # Inclut feel_no_pain_near_objective ; PSYCHIC ssi la source l est (Da Jump rate, drapeau
+    # pose par `build_manual_hazard_allocation`). get allowed : une allocation de tir / combat
+    # (lot mortel de capacite, Hold Still) ne porte pas le drapeau — non psychique par nature.
     _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
-    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False, model_id=cur)
+    _fnp_ths = _collect_fnp_thresholds_mortal(
+        _fnp_unit, game_state, is_psychic=bool(alloc.get("is_psychic", False)), model_id=cur
+    )
     rec = _inflict_one_mortal_wound(game_state, cur, _fnp_ths, details)
     _count_mortal_details_in_summary(alloc["summary"], [rec])
     batch["pool_index"] += 1
@@ -14184,7 +14182,7 @@ HAZARD_CTX = ManualAllocCtx(
 
 def build_manual_hazard_allocation(
     game_state: Dict[str, Any], squad_id: str, n_wounds: int, log_payload: Dict[str, Any],
-    *, details_key: str = "hazardDetails",
+    *, details_key: str = "hazardDetails", is_psychic: bool = False,
 ) -> Dict[str, Any]:
     """Allocation manuelle de blessures mortelles HORS lot d attaques, defenseur humain :
     Desperate Escape 09.07, [HAZARDOUS] 24.15, et Exhortation of Rage (06.02, infligee a la
@@ -14218,6 +14216,8 @@ def build_manual_hazard_allocation(
         # Cle de la ligne emise qui recoit le detail par figurine : `hazardDetails` (24.15,
         # 09.07, Exhortation), `deadlyDemiseDetails` (24.08), `chargeImpactDetails`.
         "hazard_details_key": details_key,
+        # Source PSYCHIC (Da Jump rate) : lu par `_resolve_one_mortal_wound` pour Psychic Hood.
+        "is_psychic": bool(is_psychic),
     }
     return _manual_allocation_step(game_state, HAZARD_CTX)
 

@@ -55,7 +55,25 @@ de la lignée suit le chantier 8.
    abstention sur journal antérieur. `target_health_and_value` partagé avec `mortal_wounds_target`.
    Tests rouge→vert : 6 moteur (test_primitive_f), 6 sièges/journal (test_suppress_target_decision),
    6 analyzer (test_analyzer_suppression), 2 vitest.
-4. 🟡 Da Jump.
+4. ✅ **Da Jump** (2026-09-18). Non livré jusqu'ici sur un bloqueur périmé (« slot de ciblage
+   d'escouade amie », `AGENT_DECISION_TYPE_SLOTS = 8`) : la datasheet dit « place THIS unit » —
+   l'escouade du WeirdBoy. Règle `da_jump` (obs_id 39, `UNIT_RULE_EFFECT_IDS`, `WeirdBoy.ts`),
+   appel de capacité posé au début de la phase de mouvement à la première escouade candidate
+   (chaîne sur refus, une proposition par escouade et par tour), `once_claim("da_jump", (tour,
+   joueur))` sur le JET. 1 → D6 MW `is_psychic=True` (drapeau porté jusqu'au lot mortel manuel :
+   Psychic Hood joue), `hazard_origin="da_jump"` ; 2-6 → `reposition_unit_to_strategic_reserves`,
+   arrivée dès ce round, mise en place « anywhere » à plus de 8" (les commentaires « 9" » étaient
+   l'ancien texte 24.09), Deep Strike ACCORDÉ par le registre `deep_strike_granted_squads` (purgé
+   en fin de phase, jamais dans les UNIT_RULES), escouade remise au pool pour son ingress la même
+   phase. Le service de la file `rule_choice` après une décision qui change de phase est ajouté
+   (`_serve_queued_prompts_after_decision`) — sans lui l'appel attendait l'action suivante et
+   pouvait être servi dans la phase de tir. Journal `DA JUMP (D6=n) [REPOSITIONED|MISCAST]`
+   (grammaire 13 ; « MISCAST », `[FAILED]` étant le statut de ligne) + `SUFFERS n MW [DA JUMP]
+   Trigger:1 MW:n` ; analyzer `ai/analyzer_da_jump.py` (`da_jump_invalid`, PROJ.1.1.da_jump,
+   bucket §1.1 : once per turn, phase, issue ⇔ D6, hors table jusqu'à l'ingress, ingress > 8" en
+   métrique hex, MISCAST ⇒ SUFFERS, exemption `reserves_too_early` au round 1) et dés par
+   `MW_ABILITY_DICE_CHECKS["da_jump"]`. Moteur réel : 14 tests (`test_da_jump.py`, WeirdBoy
+   inline 19.04) + 9 analyzer.
 5. 🟡 Grot Orderly = choix d'agent.
 6. 🟡 Finest Hour = choix à la sélection.
 7. 🟡 Analyzer : FNP / InSv.

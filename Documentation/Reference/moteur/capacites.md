@@ -48,7 +48,7 @@ Le pooling rend l'ordre indifférent au réseau, mais **pas au debug**. Les ids 
 `UNIT_ABILITY_SLOTS = 8` garde un chemin de crash dur (débordement = `raise`), donc sa marge se lit sur la **mesure**, pas sur la projection :
 
 - **Mesuré le 2026-08-04 sur le dépôt réel** (`class UnitRegistry` de `ai/unit_registry.py` + `def unit_has_rule_effect` de `engine/phase_handlers/shared_utils.py` sur les effets du vocabulaire, 179 datasheets, puis les unions 19.04 légales — paires et trios bodyguard + leader + support validés par 19.01/24.22/24.34) : **2** effets au maximum par datasheet, **3** au maximum en vigueur sur une entité (`AssaultIntercessor + CaptainPowerWeaponBolter [+ Ancient]`). Marge actuelle : 5 slots.
-- **Projeté le 2026-08-30 sur les 25 capacités actées** (contrainte 19.01 : max 1 leader + 1 support par escouade ; Da Jump = action active, pas d'obs_id — même logique que Waaagh! en `global_bin`) : **6 au maximum** sur une entité, marge 2 slots.
+- **Projeté le 2026-08-30 sur les 25 capacités actées** (contrainte 19.01 : max 1 leader + 1 support par escouade ; Da Jump porte finalement l'obs_id 39 depuis le 2026-09-18 — un slot de plus sur l'escouade du WeirdBoy) : **6 au maximum** sur une entité, marge 2 slots.
 - **Mesuré le 2026-09-08, la projection ci-dessus étant réalisée** : les 14 dernières règles vives du chantier 06 sont entrées dans `UNIT_RULE_EFFECT_IDS` (vocabulaire porté de 24 à 38 entrées, `obs_size` inchangé à 16791). Mesure sur les **quatre rosters d'entraînement** chargés par le chemin du moteur (`agent_roster_ref` → fold 19.04), pas sur une reconstitution : **6 au maximum** en vigueur sur une entité — `Boyz + Warboss + PainBoy` → `feel_no_pain`, `hit_roll_bonus_fight`, `melee_attacks_bonus_while_waaagh`, `mortal_wounds_on_critical_wound`, `return_destroyed_models`, `secure_objective_on_control`. **Marge : 2 slots.** La projection est donc confirmée par la mesure, au même chiffre. Le verrou qui la rejoue est `def test_ability_slots_hold_on_the_real_training_rosters` (`tests/unit/engine/test_squad_obs_unit_rules.py`).
 
 8 et non 6 : dimensionner sur la mesure du jour laisserait zéro marge — une seule capacité ajoutée à une figurine rattachée ferait déborder. Le surcoût (2 scalaires × nombre d'entités) est négligeable face à la suppression d'un mode de défaillance dur.
@@ -374,7 +374,7 @@ Avant la bataille, à l'étape Declare Battle Formations, on peut placer des uni
 
 ### 20.02 — Unités repositionnées
 
-Unités retirées de la table pendant la bataille et replacées en réserves (le cas de **Da Jump**). Trois clauses :
+Unités retirées de la table pendant la bataille et replacées en réserves (le cas de **Da Jump**, livré le 2026-09-18 — voir §5 « Da Jump »). Trois clauses :
 
 - Utilisable en phase de mouvement même sur une unité ayant déjà bougé.
 - Une unité replacée le tour même où elle a fait un Advance / Fall Back / débarquement **a toujours fait** ce mouvement ce tour-là.
@@ -521,8 +521,10 @@ Mécanique : une seule clé d'activation `unit["designated_shoot_target_id"]`, �
 `designate_shoot_target` (shared_utils) au démarrage du tir sur les quatre chemins de déclaration
 (gym `squad_declare_shoot`, PvP `squad_declare_shoot_model` / `_weapon` / `_weapon_qty`), première
 écriture gagnante, effacée en fin d'activation ; lue par le Bloc B (bonus seulement si
-`intent.target == désignée`) et par Indiscriminate Detonations (Primitive F). Pour un porteur d'un
-effet « vs cible désignée », la désignée doit être **visible** (erreur explicite sinon). Journal :
+`intent.target == désignée`) et par Indiscriminate Detonations (Primitive F). « Visible to this
+unit » est tenu par construction : un intent n'existe que sur une cible vue par sa figurine (06.01),
+et le bonus ne joue que sur l'intent dont la cible est la désignée — aucun second test de ligne de
+vue (un test ancre-à-ancre rendait un faux « invisible »). Journal :
 `[DESIGNATED:<id>]` sur toute ligne SHOT (grammaire 11) ; l'analyzer ne lève le plafond
 `shoot_over_rng_nb` (PROJ.1.2.surcharge_atk) que pour les tirs sur la désignée et s'abstient sur les
 journaux antérieurs.
@@ -547,7 +549,7 @@ L'ordre compte : le FNP s'applique **après** que la sauvegarde a échoué et qu
 | Psychic Hood | Librarian | `feel_no_pain_vs_psychic` (seuil 4) | l'attaque provient d'une arme ou capacité `PSYCHIC` |
 | Unbreakable Resolve | Ancient | `feel_no_pain_near_objective` (seuil 4) | à portée d'un objectif **ou** à 6" du centre du champ de bataille |
 
-Le mot-clé `PSYCHIC` existe déjà sur les armes (`config/weapon_rules.json`). Les **capacités** psychiques (Da Jump) doivent aussi être marquées, sinon Psychic Hood sera incomplète. Les 6" d'Unbreakable Resolve se convertissent via `inches_to_subhex` — jamais de seuil en pouces absolus.
+Le mot-clé `PSYCHIC` existe déjà sur les armes (`config/weapon_rules.json`). Les **capacités** psychiques (Da Jump) le sont par `is_psychic=True` sur la file de blessures mortelles (`queue_mortal_wounds`, portée jusqu'au lot mortel manuel) : Psychic Hood joue sur le 1 de Da Jump. Les 6" d'Unbreakable Resolve se convertissent via `inches_to_subhex` — jamais de seuil en pouces absolus.
 
 ## Primitive D — `mortal_wounds`
 
@@ -567,9 +569,9 @@ Le helper commun « infliger N blessures mortelles à une unité » existe : `de
 | Hold Still and Say Aargh | Painboy | `mortal_wounds_on_critical_wound` | blessure critique de l'`'urty syringe` contre une unité non-`VEHICLE` → D6 MW |
 | Exhortation of Rage | Chaplain JP | `mortal_wounds_on_fight_activation` | sélection pour combattre : D6 → 4-5 : D3 MW ; 6 : 3 MW à une unité engagée |
 | Deadly Demise D3 | Weirdboy | `deadly_demise` | figurine détruite : D6 → sur 6, D3 MW à chaque unité dans 6" — **livrée hors passe** (registre + WeirdBoy, cf. Roadmap) |
-| Da Jump (échec) | Weirdboy | — | D6 = 1 → D6 MW à l'unité elle-même (réserves : §4) |
+| Da Jump (échec) | Weirdboy | `da_jump` (appel de capacité) | D6 = 1 → D6 MW **psychiques** à l'unité elle-même, tag `[DA JUMP]`, `Trigger:1 MW:n` — livré le 2026-09-18 |
 
-**Da Jump — bloqueur architectural** : l'effet principal (placement en réserves + Deep Strike accordé) requiert une action psychique de phase de mouvement (§16) absente du moteur. L'effet d'échec (D6 MW) dépend du même déclencheur. Impact mesuré : `AGENT_DECISION_TYPE_SLOTS = 8` est à saturation — ajouter `da_jump_target` bumpe le one-hot → **`obs_size` change** ; aucun slot de ciblage d'escouade amie n'existe dans l'action space (pas d'équivalent allié de `OATH_SLOTS`) → **`TOTAL_ACTION_SIZE` change**. Retrain `--new` obligatoire. Ne pas implémenter avant d'avoir tranché l'architecture d'actions §16.
+**Da Jump — livré le 2026-09-18** (`engine/phase_handlers/movement_handlers.py`, `apply_da_jump`). Le « bloqueur architectural » consigné ici jusqu'à cette date reposait sur une lecture PÉRIMÉE du texte : la datasheet dit *« Place **this** unit in strategic reserves »* — c'est l'escouade du WeirdBoy, **aucun ciblage d'escouade amie**, donc ni slot d'action ni type de décision (`da_jump_target` n'existe pas). Modélisation : règle `da_jump` (obs_id 39, `UNIT_RULE_EFFECT_IDS`, portée par `WeirdBoy.ts`, conférée à l'escouade par 19.04 tant qu'il vit) ; appel de capacité `push_ability_call(escouade, "da_jump", "move")` posé au début de la phase de mouvement à la première escouade candidate (chaîne : un refus passe à la suivante, une escouade n'est proposée qu'une fois par tour), tant que `once_claimed("da_jump", (tour, joueur))` est faux — le JET est l'usage, passer ne consomme rien. Acceptation → D6 (`resolve_dice_value`) : **1** → D6 blessures mortelles, `is_psychic=True` (Psychic Hood 24.12 joue), allocation par le défenseur (auto en gym, lot mortel manuel au siège humain, `hazard_origin="da_jump"`) ; **2-6** → `reposition_unit_to_strategic_reserves` (20.02), `set_reserves_arrival_round(round courant)`, `set_reserves_setup_distances(edge=None, clearance=8)`, Deep Strike ACCORDÉ par le registre `game_state["deep_strike_granted_squads"]` (lu par `unit_has_deep_strike`, purgé à `movement_phase_end` — jamais en écrivant les UNIT_RULES des figurines), et l'escouade (re)mise dans le pool d'activation : son ingress se joue dans la MÊME phase, dès le round 1, n'importe où à plus de 8" de tout ennemi, zone adverse comprise (24.09 : les « 9" » des anciens commentaires étaient l'ancien texte). 20.02 : `units_moved` / `units_advanced` intacts (une escouade qui avait Advance ne charge pas après l'ingress) ; 20.04 après ingress : `unit_ingress_move_locked`. Sièges : gym `CHOICE_0/1`, bot par `_bot_da_jump_policy` (accepte si aucun ennemi à 12" ou moins ET un objectif non contrôlé à plus de 12"), humain par le panneau rule_choice. Journal : `Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST]` (grammaire 13 ; « MISCAST » et non « FAILED », qui est le token de statut de toute ligne) puis la ligne d'ingress ou la ligne `SUFFERS n Mortal Wounds [DA JUMP] Trigger:1 MW:n` ; analyzer `da_jump_invalid` (PROJ.1.1.da_jump, `ai/analyzer_da_jump.py`) + dés par `mw_ability_dice_mismatch`. Tests : `tests/unit/engine/test_da_jump.py` (moteur réel, WeirdBoy inline), `tests/unit/ai/test_analyzer_da_jump.py`.
 
 **Deadly Demise 24.08** : le jet se fait **par figurine détruite**, après les débarquements d'urgence, et le X est tiré **séparément pour chaque unité** dans les 6" si c'est un nombre aléatoire. Trois détails qu'une implémentation rapide rate.
 
@@ -680,7 +682,7 @@ La règle **existe** (`UNIT_RULE_EFFECT_IDS`, `def _build_move_after_shooting_de
 | Thievin' Scavengers | Gretchin | §2 (CP) |
 | Rites of Battle | Captain Relic Shield | §2 — **non livrable** sans stratagèmes |
 | CORE: Deep Strike | Chaplain JP, Vanguard JP, Land Speeder | §4 |
-| Da Jump | Weirdboy | §4 (20.02) + primitive D — **non livrable** sans système d'actions §16 ; casse `obs_size` + `TOTAL_ACTION_SIZE` |
+| Da Jump | Weirdboy | §4 (20.02) + primitive D — **livré le 2026-09-18** comme appel de capacité (`obs_size` et `TOTAL_ACTION_SIZE` inchangés) |
 
 ## Déjà correct, à ne pas retoucher
 

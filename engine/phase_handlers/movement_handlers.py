@@ -1279,6 +1279,13 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # Check if phase complete immediately (no eligible units)
     if not game_state["move_activation_pool"]:
         return movement_phase_end(game_state)
+
+    # Da Jump (WeirdBoy) : « In your Movement phase, you can roll 1 D6 » — l'appel est posé au
+    # début de la phase, à la première escouade éligible (chaîne : un refus repose l'appel à la
+    # suivante, cf. `push_next_da_jump_call`). Aucun grant temporaire ne survit d'une phase à
+    # l'autre : purge défensive, jumelle de celle de `movement_phase_end`.
+    game_state.pop(DEEP_STRIKE_GRANTED_SQUADS_KEY, None)
+    push_next_da_jump_call(game_state)
     
     return {
         "phase_initialized": True,
@@ -5915,7 +5922,8 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
 # Le texte des trois clauses commence par « Unless otherwise stated » ou est explicitement
 # remplacé par des capacités : le round d'arrivée (Logan Grimnar fait arriver une unité au 1er
 # round), la distance au bord (« wholly within 9" of a battlefield edge » chez certaines) et la
-# distance aux ennemis (Da Jump pose « more than 9" away »). Les valeurs ci-dessous ne sont donc
+# distance aux ennemis (Deep Strike 24.09 : « more than 8" horizontally », que Da Jump accorde
+# jusqu'à la fin de la phase). Les valeurs ci-dessous ne sont donc
 # que les DÉFAUTS de la règle générique ; l'unité porte les siennes, qu'une autre unité peut lui
 # accorder (`set_reserves_arrival_round` / `set_reserves_setup_distances`).
 
@@ -5936,6 +5944,10 @@ INGRESS_OPPONENT_ZONE_OPEN_ROUND = 3
 STRATEGIC_RESERVES_LAST_ROUND = 3
 #: Identifiant de la capacité Deep Strike (24.09) dans `config/unit_rules.json`.
 DEEP_STRIKE_RULE_ID = "deep_strike"
+#: Escouades auxquelles Deep Strike est ACCORDÉ jusqu'à la fin de la phase de mouvement courante
+#: (Da Jump 2-6). Lu par `unit_has_deep_strike`, purgé par `movement_phase_end` et à chaque
+#: `movement_phase_start`. Un `set` d'ids d'escouade.
+DEEP_STRIKE_GRANTED_SQUADS_KEY = "deep_strike_granted_squads"
 
 #: Champs d'unité portant les trois paramètres. Posés par les DEUX constructeurs d'unité
 #: (`create_unit`, `_build_enhanced_unit`) ; absents d'une fixture moteur nu, auquel cas les
@@ -5988,7 +6000,8 @@ def set_reserves_setup_distances(
 
     ``edge_distance_inches`` : bande de bord en pouces, ou ``None`` pour « anywhere on the
     battlefield » (ce que disent Deep Strike 24.09 et Da Jump). ``enemy_clearance_inches`` : la
-    distance dont l'unité doit être à PLUS (8" par défaut, 9" pour Da Jump).
+    distance dont l'unité doit être à PLUS (8" par défaut, 8" aussi pour Da Jump — c'est le Deep
+    Strike 24.09 qu'elle accorde, « anywhere … more than 8" horizontally from all enemy units »).
     """
     unit = get_unit_by_id(game_state, str(unit_id))
     if unit is None:
@@ -6054,12 +6067,19 @@ def unit_has_deep_strike(game_state: Dict[str, Any], squad_id: str) -> bool:
     exactement ce que dit la règle.
 
     Une escouade sans figurine vivante n'a pas la capacité (et n'a rien à poser).
+
+    Deep Strike ACCORDÉ « until the end of the phase » (Da Jump 2-6) : registre explicite
+    `game_state["deep_strike_granted_squads"]`, purgé à la fin de la phase de mouvement —
+    jamais en modifiant les UNIT_RULES des figurines (T1 : un grant temporaire écrit dans les
+    règles de datasheet survivrait à sa durée).
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [models_cache[mid] for mid in squad_models.get(str(squad_id), []) if mid in models_cache]  # get allowed
     if not alive:
         return False
+    if str(squad_id) in game_state.get(DEEP_STRIKE_GRANTED_SQUADS_KEY, ()):  # get allowed : aucun grant = absent
+        return True
     for model in alive:
         rule_ids = {
             str(require_key(rule, "ruleId")) for rule in require_key(model, "UNIT_RULES")
@@ -6483,6 +6503,219 @@ def _ingress_clearance_mask_cached(
     return mask
 
 
+# ============================================================================
+# Da Jump (WeirdBoy — Datasheets - Orks p5) : appel de capacité de la phase de mouvement
+# ============================================================================
+# « Da Jump (Psychic, once per turn, per army): In your Movement phase, you can roll 1 D6 and on
+# a result of: 1: This unit suffers D6 mortal wounds. 2-6: Place this unit in strategic reserves
+# and it gains Deep Strike until the end of the phase. This unit can then make an ingress move
+# (Including during the first battle round). »
+# C'est l'escouade DU WeirdBoy (« this unit », 19.04 : la règle porte sur l'unité attachée), aucun
+# ciblage d'escouade amie. Le JET est l'usage : 1 comme 2-6 consomment le « once per turn, per
+# army » (`once_claim("da_jump", (tour, joueur))`) ; PASSER ne consomme rien.
+
+DA_JUMP_EFFECT_ID = "da_jump"
+#: 24.09 — « more than 8" horizontally from all enemy units », ce que Da Jump accorde.
+DA_JUMP_ENEMY_CLEARANCE_INCHES = 8
+#: Escouades à qui l'appel a DÉJÀ été posé ce tour : `{(tour, joueur, escouade)}`. Un refus passe
+#: à la suivante et ne revient pas sur la même — sans cette mémoire, la chaîne reproposerait la
+#: même escouade à l'infini.
+DA_JUMP_ASKED_KEY = "_da_jump_asked"
+
+
+def _da_jump_claim_key(game_state: Dict[str, Any], player: int) -> Tuple[int, int]:
+    return (int(require_key(game_state, "turn")), int(player))
+
+
+def da_jump_claimed_this_turn(game_state: Dict[str, Any], player: int) -> bool:
+    """Le joueur a-t-il déjà jeté Da Jump ce tour (1 ou 2-6, peu importe) ?"""
+    from engine.game_utils import once_claimed
+
+    return once_claimed(game_state, "da_jump", _da_jump_claim_key(game_state, player))
+
+
+def da_jump_candidate_squads(game_state: Dict[str, Any]) -> List[str]:
+    """Escouades du joueur actif à qui Da Jump peut être PROPOSÉ maintenant : vivantes, SUR LA
+    TABLE, portant l'effet (le WeirdBoy vit — `unit_has_rule_effect` lit les règles en vigueur
+    19.04), tant que l'armée n'a pas jeté ce tour. Ordre des unités = ordre de proposition."""
+    from engine.phase_handlers.shared_utils import (
+        entry_is_on_battlefield, is_unit_alive, unit_has_rule_effect,
+    )
+
+    current_player = int(require_key(game_state, "current_player"))
+    if da_jump_claimed_this_turn(game_state, current_player):
+        return []
+    units_cache = require_key(game_state, "units_cache")
+    turn = int(require_key(game_state, "turn"))
+    asked = game_state.get(DA_JUMP_ASKED_KEY, set())  # get allowed : aucun appel encore
+    found: List[str] = []
+    for unit in require_key(game_state, "units"):
+        uid = str(require_key(unit, "id"))
+        if int(require_key(unit, "player")) != current_player:
+            continue
+        if (turn, current_player, uid) in asked:
+            continue
+        if uid not in units_cache or not is_unit_alive(uid, game_state):
+            continue
+        if not entry_is_on_battlefield(units_cache[uid]):
+            continue
+        if unit_has_rule_effect(unit, DA_JUMP_EFFECT_ID):
+            found.append(uid)
+    return found
+
+
+def push_next_da_jump_call(game_state: Dict[str, Any]) -> Optional[str]:
+    """Pose l'appel Da Jump à la PREMIÈRE escouade candidate sans appel déjà en attente ; rend son
+    id, ou ``None`` s'il n'y a plus rien à proposer. Chaîne : le gestionnaire rappelle cette
+    fonction après un refus, jamais après un jet (l'usage du tour est consommé)."""
+    from engine.ability_calls import pending_ability_call_prompts, push_ability_call
+
+    if pending_ability_call_prompts(game_state, effect_id=DA_JUMP_EFFECT_ID):
+        return None
+    candidates = da_jump_candidate_squads(game_state)
+    if not candidates:
+        return None
+    push_ability_call(game_state, candidates[0], DA_JUMP_EFFECT_ID, "move")
+    game_state.setdefault(DA_JUMP_ASKED_KEY, set()).add(
+        (int(require_key(game_state, "turn")), int(require_key(game_state, "current_player")), candidates[0])
+    )
+    return candidates[0]
+
+
+def _da_jump_log(game_state: Dict[str, Any], squad_id: str, d6: int, outcome: str) -> None:
+    """« Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] » — Game Log et step.log
+    (`_STEP_LOG_TYPE_MAP["da_jump"]`, non-incrémentant), posée AVANT l'effet (position de
+    départ, comme un déplacement)."""
+    col, row = require_unit_position(squad_id, game_state)
+    append_action_log(game_state, {
+        "type": "da_jump",
+        "message": f"Unit {squad_id}({col},{row}) DA JUMP (D6={d6}) [{outcome}]",
+        "turn": require_key(game_state, "turn"),
+        "phase": "move",
+        "unitId": str(squad_id),
+        "player": int(require_key(require_unit_from_cache(str(squad_id), game_state, "da_jump"), "player")),
+        "col": col,
+        "row": row,
+        "daJumpRoll": int(d6),
+        "daJumpOutcome": outcome,
+        "timestamp": "server_time",
+    })
+
+
+def apply_da_jump(game_state: Dict[str, Any], squad_id: str, accepted: bool) -> Dict[str, Any]:
+    """Gestionnaire de l'appel Da Jump (`engine/ability_calls`, les trois sièges).
+
+    Refus → rien de consommé, l'appel passe à l'escouade candidate suivante (chaîne).
+    Acceptation → D6 (`resolve_dice_value`), usage du tour réclamé, puis :
+      1   → D6 blessures mortelles PSYCHIC à l'escouade elle-même (06.02, allocation par le
+            défenseur : lot mortel manuel au siège humain, auto sinon ; Psychic Hood 24.12 joue) ;
+      2-6 → 20.02 `reposition_unit_to_strategic_reserves`, arrivée dès CE round
+            (`set_reserves_arrival_round`), mise en place « anywhere » à plus de 8" des ennemis
+            (`set_reserves_setup_distances`), Deep Strike ACCORDÉ jusqu'à la fin de la phase
+            (registre `DEEP_STRIKE_GRANTED_SQUADS_KEY`), et l'escouade est (re)mise dans le pool
+            d'activation de mouvement pour son ingress move — 20.02 : « can be used on units that
+            have already moved that phase », `units_moved` / `units_advanced` restent intacts.
+    """
+    from engine.combat_utils import resolve_dice_value
+    from engine.game_utils import once_claim
+    from engine.phase_handlers.shared_utils import (
+        drain_mortal_wound_queue, mortal_wounds_ability_log_entry, queue_mortal_wounds,
+    )
+    from shared.data_validation import HAZARD_CONTEXT_DA_JUMP
+
+    squad_id = str(squad_id)
+    if not accepted:
+        push_next_da_jump_call(game_state)
+        return {}
+    if str(require_key(game_state, "phase")) != "move":
+        raise RuntimeError(
+            f"Da Jump : appel accepté hors phase de mouvement ({game_state.get('phase')!r}) — "
+            f"l'appel a survécu à sa phase"
+        )
+    player = int(require_key(require_unit_from_cache(squad_id, game_state, "da_jump"), "player"))
+    if da_jump_claimed_this_turn(game_state, player):
+        raise RuntimeError(
+            f"Da Jump : second jet du même tour pour le joueur {player} — « once per turn, per "
+            f"army » ; l'appel n'aurait pas dû être proposé"
+        )
+    d6 = int(resolve_dice_value("D6", "da_jump"))
+    once_claim(game_state, "da_jump", _da_jump_claim_key(game_state, player))
+    if d6 == 1:
+        _da_jump_log(game_state, squad_id, d6, "MISCAST")
+        mw = int(resolve_dice_value("D6", "da_jump_mortal_wounds"))
+        entry = mortal_wounds_ability_log_entry(
+            game_state, squad_id, squad_id, mw, HAZARD_CONTEXT_DA_JUMP, [],
+            dice=[mw], trigger_roll=d6,
+        )
+        append_action_log(game_state, entry)
+        game_state["hazard_origin"] = "da_jump"
+        game_state["hazard_origin_unit"] = squad_id
+        queue_mortal_wounds(
+            game_state, squad_id, mw, entry, details_key="hazardDetails", is_psychic=True
+        )
+        waiting = drain_mortal_wound_queue(game_state)
+        if waiting is not None:
+            return waiting
+        game_state.pop("hazard_origin", None)
+        game_state.pop("hazard_origin_unit", None)
+        return {"daJumpRoll": d6, "daJumpOutcome": "MISCAST"}
+    _da_jump_log(game_state, squad_id, d6, "REPOSITIONED")
+    reposition_unit_to_strategic_reserves(game_state, squad_id)
+    set_reserves_arrival_round(game_state, squad_id, int(require_key(game_state, "turn")))
+    set_reserves_setup_distances(
+        game_state, squad_id,
+        edge_distance_inches=None, enemy_clearance_inches=DA_JUMP_ENEMY_CLEARANCE_INCHES,
+    )
+    game_state.setdefault(DEEP_STRIKE_GRANTED_SQUADS_KEY, set()).add(squad_id)
+    pool = require_key(game_state, "move_activation_pool")
+    if squad_id not in [str(u) for u in pool]:
+        pool.append(squad_id)
+    # Le pool d'ingress est mémoïsé sur les positions ennemies et la signature de l'unité ; la
+    # signature a changé (bande de bord levée, clearance) — `ingress_pool_signature` la relit à
+    # chaque construction, aucune invalidation à faire ici.
+    return {"daJumpRoll": d6, "daJumpOutcome": "REPOSITIONED"}
+
+
+def _bot_da_jump_policy(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Politique DÉCLARÉE du siège bot : accepter si aucun ennemi n'est à 12" ou moins de
+    l'escouade ET qu'un objectif non contrôlé par son camp est à plus de 12" d'elle — le saut
+    sert à gagner un objectif hors de portée, pas à fuir un corps à corps qu'il ne peut pas
+    éviter (le -1 n'existe pas, mais un 1 coûte D6 blessures mortelles)."""
+    from engine.game_state import objective_hex_sets
+    from engine.hex_utils import min_distance_between_sets
+
+    units_cache = require_key(game_state, "units_cache")
+    squad_id = str(squad_id)
+    player = int(require_key(units_cache[squad_id], "player"))
+    footprint = set(entry_footprint(units_cache[squad_id]))
+    if not footprint:
+        return False
+    twelve = 12 * int(require_key(game_state, "inches_to_subhex"))
+    for _eid, enemy in enemy_entries_on_battlefield(units_cache, player):
+        enemy_cells = set(entry_footprint(enemy))
+        if enemy_cells and min_distance_between_sets(footprint, enemy_cells, twelve) <= twelve:
+            return False
+    controllers = game_state.get("objective_controllers", {})  # get allowed : aucun contrôle encore
+    objectives = require_key(game_state, "objectives")
+    for objective, zone in zip(objectives, objective_hex_sets(game_state)):
+        controller = controllers.get(str(require_key(objective, "id")))
+        if controller is not None and int(controller) == player:
+            continue
+        if zone and min_distance_between_sets(footprint, set(zone), twelve) > twelve:
+            return True
+    return False
+
+
+def _register_da_jump() -> None:
+    from engine.ability_calls import ABILITY_CALL_HANDLERS, register_ability_call
+
+    if DA_JUMP_EFFECT_ID not in ABILITY_CALL_HANDLERS:
+        register_ability_call(DA_JUMP_EFFECT_ID, handler=apply_da_jump, bot_policy=_bot_da_jump_policy)
+
+
+_register_da_jump()
+
+
 def ingress_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """Escouades du joueur actif éligibles à un ingress move CE TOUR-CI (20.03 + 20.04).
 
@@ -6746,6 +6979,8 @@ def clear_ingress_move_lock(game_state: Dict[str, Any]) -> None:
 def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """AI_MOVE.md: Clean up and end movement phase"""
     movement_clear_preview(game_state)
+    # Da Jump : « gains Deep Strike until the end of the phase » — le grant s'éteint ici.
+    game_state.pop(DEEP_STRIKE_GRANTED_SQUADS_KEY, None)
     
     # Track phase completion reason (tour_de_jeu.md compliance)
     if 'last_compliance_data' not in game_state:

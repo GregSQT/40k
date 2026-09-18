@@ -5194,6 +5194,27 @@ class W40KEngine(gym.Env):
             "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
 
+    def _serve_queued_prompts_after_decision(
+        self, success: bool, result: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Sert la file `rule_choice` quand la réponse à une décision a fait CHANGER de phase.
+
+        Une décision de phase de commandement (Waaagh!, Grot Orderly) résolue reprend la phase et
+        ouvre celle de mouvement, dont le début EMPILE des prompts (Da Jump, `push_ability_call`).
+        Les deux branches `agent_decision` rendent la main AVANT la cascade post-transition qui
+        sert la file pour les actions ordinaires : sans ce service, le prompt attendait l'action
+        suivante — et si celle-ci terminait la phase, il était servi dans la MAUVAISE phase.
+        Rien à faire si la réponse attend déjà quelqu'un ou si une décision est encore posée.
+        """
+        if not success or not isinstance(result, dict) or result.get("waiting_for_player"):
+            return success, result
+        if read_pending_agent_decision(self.game_state) is not None:
+            return success, result
+        queued = self._emit_next_rule_choice_prompt_if_needed()
+        if queued is not None:
+            return True, queued
+        return success, result
+
     def _resolve_suppress_target_decision_for_ai_seat(self) -> Optional[Dict[str, Any]]:
         """Répond, dans la MÊME requête, au choix de suppression posé au bot PvE.
 
@@ -6040,6 +6061,16 @@ class W40KEngine(gym.Env):
             if hazard_origin == "shoot":
                 return True, self._end_squad_shoot_activation(attacker_sid, outcome.get("shoot_result"))
             return _fight_v11_manual_state(self.game_state)
+        if hazard_origin == "da_jump":
+            # Da Jump raté (D6 = 1), blessures mortelles attribuées par le défenseur HUMAIN : rien
+            # à reprendre — l'appel est consommé, l'escouade reste sur la table (ou est détruite),
+            # la phase de mouvement continue là où elle en était.
+            return True, {
+                "action": "da_jump_resolved",
+                "unitId": sid,
+                "waiting_for_player": False,
+                "unit_destroyed": not is_unit_alive(sid, self.game_state),
+            }
         if hazard_origin == "charge":
             # Impact de charge (`charge_impact`) attribue par le defenseur humain : l activation
             # de charge est deja terminee, le resultat de la charge garde est rendu maintenant.
@@ -6136,7 +6167,7 @@ class W40KEngine(gym.Env):
             self._resolve_suppress_target_decision_for_ai_seat()
             self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
-            return decision_success, decision_result
+            return self._serve_queued_prompts_after_decision(decision_success, decision_result)
         if action.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(action)
         # Choix de l'escouade à activer (V11 §0.48 L2) : MÊME rang — le moteur est arrêté sur un
@@ -7564,6 +7595,9 @@ class W40KEngine(gym.Env):
         # Primitive F — effet de fin d'activation de tir, pas une action d'agent (le step du tir
         # est deja compte par ses lignes SHOT).
         "suppress_target",
+        # Da Jump : le step gym est celui de la decision (`CHOICE_0`, ligne ABILITY CALL) ; la
+        # ligne DA JUMP est le jet, pas une seconde action.
+        "da_jump",
         # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
         # actions d'agent au sens step gym, ce sont des décisions hors-step.
         "waaagh_call", "oath_selection",
@@ -7669,6 +7703,8 @@ class W40KEngine(gym.Env):
         # Primitive F — suppression (Indiscriminate Detonations) : « Unit N(c,r) SUPPRESSES
         # Unit M(c,r) [SUPPRESSED→M] », fin d'activation de tir (grammaire 12).
         "suppress_target": "suppress_target",
+        # Da Jump (WeirdBoy) : « Unit N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST] » (grammaire 13).
+        "da_jump": "da_jump",
         # L25 — 08.04 : déclaration Waaagh! (Orks) et désignation Oath of Moment (SM).
         # Non-incrementants : décisions hors-step de command phase, pas des actions gym.
         "waaagh_call": "waaagh_call",
@@ -8444,6 +8480,9 @@ class W40KEngine(gym.Env):
             # L1 — jet de battle-shock (01.07 / 08.03) : seuil Ld, jet 2D6, resultat.
             ("ld", "ld"),
             ("roll", "roll"),
+            # Da Jump : le D6 et son issue (REPOSITIONED | FAILED).
+            ("daJumpRoll", "da_jump_roll"),
+            ("daJumpOutcome", "da_jump_outcome"),
             ("battle_shocked", "battle_shocked"),
             # Mort par-figurine (type "dead", emit par destroy_model). Sans ces deux mappings,
             # `_format_replay_style_message` leve KeyError("Dead action missing required model_id")
@@ -8797,7 +8836,7 @@ class W40KEngine(gym.Env):
             self._resolve_suppress_target_decision_for_ai_seat()
             self._resolve_move_after_shooting_decision_for_ai_seat()
             self._resolve_reactive_move_decision_for_ai_seats()
-            return decision_success, decision_result
+            return self._serve_queued_prompts_after_decision(decision_success, decision_result)
 
         # Désignation d'Oath of Moment (chantier 03) : même rang que les deux ci-dessus — la
         # phase de commandement est arrêtée dessus, aucune action de phase n'a de sens tant

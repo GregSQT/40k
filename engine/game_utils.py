@@ -98,6 +98,8 @@ OnceClaimFamily = Literal[
     "coherency_penalized_turns",
     "cp_gain_on_objective_resolved",
     "_choice_timing_fired_events",
+    # Da Jump « once per turn, per army » : cle (tour, joueur) ; le JET est l usage (1 ou 2-6).
+    "da_jump",
 ]
 
 
