@@ -24,6 +24,8 @@
     "engagement_zone": 2,
     "engagement_zone_vertical": 5,
     "engagement_zone_vertical_detail": "Seuil vertical (POUCES) de l'engagement 3D (regle 03.04 = 5 vertical). NON scale en subhex (compare aux height_inches en pouces) — ne PAS ajouter a la liste de scaling w40k_core.",
+    "precision_mortal_wounds_to_character": false,
+    "precision_mortal_wounds_to_character_detail": "Blessures MORTELLES ([DEVASTATING WOUNDS] 24.10) d'une arme [PRECISION] 24.28 dont l'override a joue : false = elles suivent la cascade 06.02 comme toute blessure mortelle (non-CHARACTER entame, puis non-CHARACTER, puis CHARACTER) — lecture litterale des PDF, decision utilisateur du 2026-09-18 en attente de confirmation GW ; true = elles restent au groupe CHARACTER courant impose par [PRECISION]. Lue par le moteur (shared_utils._precision_mortal_wounds_to_character) ET par l'analyzer (ai/analyzer_rules.py), qui jugent la meme regle. Aucun defaut cote code : la cle est exigee.",
     "plunging_fire_height": 3,
     "plunging_fire_height_detail": "Seuil hauteur plancher (POUCES) de la regle Plunging Fire §22.05 : section d'un terrain feature >= 3 pouces. NON scale en subhex (compare aux floor_height_by_model en pouces) — ne PAS ajouter a la liste de scaling w40k_core. Pendant exact de engagement_zone_vertical.",
     "pile_in_target_range": 5,
