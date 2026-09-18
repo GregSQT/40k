@@ -329,6 +329,24 @@ describe("replayParser", () => {
     expect(episode.states[0].objective_control).toBeUndefined();
   });
 
+  it("lit le contrôleur d'une zone portant Mthd/OC1/OC2 (L18) et Sec (grammaire 15)", () => {
+    // ROUGE avant : `^(.+):Ctrl=(none|1|2)$` rejetait toute zone suivie de `:Mthd=…` — donc
+    // tout journal réel depuis le 2026-08-19. Le nom de zone porte des espaces (« rect b NW »).
+    const text = [
+      ...CONTROL_LOG_HEAD,
+      "[12:00:00] T1 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=1 CP2=1 ZONES=West:Ctrl=1:Mthd=default:OC1=4:OC2=0:Sec=1|North:Ctrl=none:Mthd=default:OC1=0:OC2=0:Sec=none",
+      "[12:00:01] T1 P1 MOVE : Unit 1(1,0) MOVED from (0,0) to (1,0)",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const episode = parse_log_file_from_text(text).episodes[0];
+    expect(episode.initial_state.objective_control).toEqual({
+      controllers: { West: 1, North: null },
+      victory_points: { 1: 0, 2: 0 },
+      command_points: { 1: 1, 2: 1 },
+    });
+  });
+
   it("ignore le récapitulatif OBJECTIVE CONTROL de fin d'épisode", () => {
     // Format différent (ni T{tour} ni VP1=) : le confondre avec un instantané écraserait
     // l'état affiché par un récapitulatif dépourvu de contrôleurs par nom.

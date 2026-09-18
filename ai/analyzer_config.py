@@ -272,6 +272,11 @@ class AnalyzerConfig:
     fnp_threshold_by_type: Dict[str, int]
     fnp_vs_psychic_by_type: Dict[str, int]
     fnp_near_objective_by_type: Dict[str, int]
+    #: OC de DATASHEET par type de figurine (02.02, sommé par 14.02) et `oc_bonus` (Relic Banner :
+    #: « This unit has +1 OC », +N à CHAQUE figurine de l'escouade tant que le porteur vit) par
+    #: type porteur — `ai/analyzer_objectives.py`.
+    unit_oc_by_type: Dict[str, int]
+    oc_bonus_by_type: Dict[str, int]
 
 
 def _rng_weapon_display_name(
@@ -376,6 +381,8 @@ def load_analyzer_config() -> AnalyzerConfig:
     fnp_threshold_by_type: Dict[str, int] = {}
     fnp_vs_psychic_by_type: Dict[str, int] = {}
     fnp_near_objective_by_type: Dict[str, int] = {}
+    unit_oc_by_type: Dict[str, int] = {}
+    oc_bonus_by_type: Dict[str, int] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
     effect_display_tokens: Dict[str, Set[str]] = {}
 
@@ -506,6 +513,9 @@ def load_analyzer_config() -> AnalyzerConfig:
         _insv_raw = require_key(unit_data, "INVUL_SAVE")
         if _numeric(_insv_raw) is not None:
             unit_invul_save_by_type[unit_type] = int(_insv_raw)
+        _oc_raw = require_key(unit_data, "OC")
+        if _numeric(_oc_raw) is not None:
+            unit_oc_by_type[unit_type] = int(_oc_raw)
         unit_attack_limits[unit_type] = {
             "rng_nb_by_weapon": rng_nb_by_weapon,
             "cc_nb_by_weapon": cc_nb_by_weapon,
@@ -768,6 +778,7 @@ def load_analyzer_config() -> AnalyzerConfig:
             # Effets DÉFENSIFS (Primitive F, `ai/analyzer_save.py`) : InSv conférée et les trois
             # Feel No Pain, lus dans `rule_args` — jamais redevinés d'après le nom de la datasheet.
             for _def_effect, _def_arg, _def_table in (
+                ("oc_bonus", "oc_bonus", oc_bonus_by_type),
                 ("invul_save_override", "value", invul_override_by_type),
                 ("feel_no_pain", "threshold", fnp_threshold_by_type),
                 ("feel_no_pain_vs_psychic", "threshold", fnp_vs_psychic_by_type),
@@ -956,5 +967,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         fnp_threshold_by_type=fnp_threshold_by_type,
         fnp_vs_psychic_by_type=fnp_vs_psychic_by_type,
         fnp_near_objective_by_type=fnp_near_objective_by_type,
+        unit_oc_by_type=unit_oc_by_type,
+        oc_bonus_by_type=oc_bonus_by_type,
         squadmates_by_type=squadmates_by_type,
     )

@@ -207,8 +207,12 @@ N(c,r) DA JUMP (D6=n) [REPOSITIONED|MISCAST]` avant son effet (ligne d'ingress d
 ou `SUFFERS n Mortal Wounds [DA JUMP] Trigger:1 MW:n`) ; `14` (2026-09-18) : toute activation
 dont les lignes portent `[FINEST HOUR]` est précédée, le même tour en phase FIGHT, d'une ligne
 `Unit N(c,r) ABILITY CALL Finest Hour [USED]` de la même escouade (l'appel est répondu à la
-sélection 12.04, le moteur ne pose plus le token de lui-même) ; l'historique complet des versions
-6–10 est dans `ai/step_logger.py` (en-tête `LOG_GRAMMAR_VERSION`). Ligne absente ⇒ 1.
+sélection 12.04, le moteur ne pose plus le token de lui-même) ; `15` (2026-09-18) : chaque zone de
+`T{tour} OBJECTIVE CONTROL: … ZONES=` porte `:Sec=<1|2|none>` (sécurisée PAR OBJECTIF, 14.03),
+l'instantané est réécrit quand cette sécurisation change, et toute sécurisation laisse une ligne
+`Unit N(c,r) SECURES <zone> [GET DA GOOD BITZ|OBJECTIVE SECURED]` en phase de commandement ;
+l'historique complet des versions 6–10 est dans `ai/step_logger.py` (en-tête `LOG_GRAMMAR_VERSION`).
+Ligne absente ⇒ 1.
 
 ⚠️ Sous la grammaire 5, un compteur d'usage à zéro dit que la règle **n'a pas joué**, et non plus
 que le journal ne sait pas le dire. C'est toute la valeur de la version : le premier état se

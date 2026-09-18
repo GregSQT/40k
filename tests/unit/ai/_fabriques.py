@@ -217,6 +217,9 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "fnp_threshold_by_type": {},
         "fnp_vs_psychic_by_type": {},
         "fnp_near_objective_by_type": {},
+        # Contrôle d'objectif (`ai/analyzer_objectives.py`) : OC de datasheet et Relic Banner.
+        "unit_oc_by_type": {},
+        "oc_bonus_by_type": {},
         # Coéquipiers d'escouade par type (pour _pair_is_conditional cross-unit) — vide par défaut.
         "squadmates_by_type": {},
         # Mots-clés en majuscules par type d'unité (Primitive B : Dakkablitz, etc.) — vide par défaut.

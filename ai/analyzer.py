@@ -1688,6 +1688,11 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             # (ai/analyzer_save.py), tir, mêlée et blessures mortelles — un compteur chacun.
             + _pair('save_threshold_mismatch')
             + _pair('fnp_threshold_mismatch')
+            # 14.02 / 14.03 / REVIVED (ai/analyzer_objectives.py) : contrôle d'objectif resommé
+            # par zone, sécurisation, restitution Grot Orderly.
+            + _pair('objective_control_mismatch')
+            + _pair('objective_secured_invalid')
+            + _pair('returned_models_invalid')
         ),
         # ── §1.5 à §2.7 : les buckets qui manquaient au TOTAL alors que le SUMMARY les
         # affichait en ❌. Sans eux, un run pouvait imprimer « ❌ 1.6 Double-activation par
@@ -2110,6 +2115,10 @@ def parse_step_log(filepath: str) -> Dict:
         # Effets défensifs (ai/analyzer_save.py) : seuil de sauvegarde 05.04 et Feel No Pain 24.12.
         'save_threshold_mismatch': {1: 0, 2: 0},
         'fnp_threshold_mismatch': {1: 0, 2: 0},
+        # Objectifs et restitution (ai/analyzer_objectives.py) : 14.02 resommé, 14.03, REVIVED.
+        'objective_control_mismatch': {1: 0, 2: 0},
+        'objective_secured_invalid': {1: 0, 2: 0},
+        'returned_models_invalid': {1: 0, 2: 0},
         'unit_revived': {1: 0, 2: 0},
         'shoot_invalid': {
             # 'no_los' RETIRE (2026-07-16) : cf. shoot_handler.py — LoS ancre-a-ancre contraire
@@ -2256,6 +2265,9 @@ def parse_step_log(filepath: str) -> Dict:
             'damage_missing_unit_hp': {1: None, 2: None},
             'save_threshold_mismatch': {1: None, 2: None},
             'fnp_threshold_mismatch': {1: None, 2: None},
+            'objective_control_mismatch': {1: None, 2: None},
+            'objective_secured_invalid': {1: None, 2: None},
+            'returned_models_invalid': {1: None, 2: None},
             'unit_revived': {1: None, 2: None},
             'fled_action': {1: None, 2: None},
             'shoot_invalid': {
@@ -4296,6 +4308,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Missing unit_hp on damage:   {dmg_missing_p1:6d}           {dmg_missing_p2:6d}")
     _counter_row("Seuil de sauvegarde (05.04):", 'save_threshold_mismatch')
     _counter_row("Feel No Pain (24.12):", 'fnp_threshold_mismatch')
+    _counter_row("Controle d'objectif resomme (14.02):", 'objective_control_mismatch')
+    _counter_row("Objectif securise (14.03):", 'objective_secured_invalid')
+    _counter_row("Figurines rendues (REVIVED):", 'returned_models_invalid')
     # EPISODES STATISTICS
     _switch_section("2.4")
     log_print("\n" + "-" * 80)

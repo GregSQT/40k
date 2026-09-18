@@ -1078,6 +1078,51 @@
       "status_note": "2026-09-18 (capacités-agent, prompt 7) : `Save R(<base>+ AP<n> → <eff>+)` recalculé par ai/analyzer_save.check_save_threshold — attendu = save_threshold du moteur (min(Sv − AP, InSv)), InSv effective = meilleure entre datasheet de la figurine allouée, invul_save_override des sources PRÉSENTES au Select Targets step (Waaagh! Banner 5+, Mental Fortress 4+) et waaagh_invul lu dans `T{tour} EFFECTS:` quand le Waaagh! est actif pour le camp défenseur. Abstention : segment sans base/AP, figurine ou datasheet inconnue, Sv symbolique, Waaagh! actif sans clé waaagh_invul (journal antérieur)."
     },
     {
+      "id": "PROJ.2.3.objective_control",
+      "section": "2.3",
+      "label": "Contrôle d'objectif resommé par zone (14.02) — OC de datasheet par socle dans l'aire, Relic Banner (+1 OC par figurine, 19.04), battle-shock (01.07/08.03), contrôleur (égalité, sécurisé)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "objective_control_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 8) : à chaque instantané `T{tour} OBJECTIVE CONTROL: … ZONES=`, ai/analyzer_objectives.expected_oc_sums resomme l'OC des deux camps par zone depuis les socles vivants (empreinte réelle ∩ aire), + oc_bonus par figurine si un porteur vivant le confère, 0 si l'escouade est battle-shocked ; écart avec OC1=/OC2= → faute ; contrôleur attendu = miroir de `_resolve_objective_controller` (plus haut niveau, égalité = personne sauf sécurisé, perdu seulement sur strictement plus). Abstention : escouade vivante sans socles connus, OC symbolique, instantané sans OC1=/OC2= (journal antérieur à L18)."
+    },
+    {
+      "id": "PROJ.2.3.objective_secured",
+      "section": "2.3",
+      "label": "Objectif sécurisé (14.03) — Get da Good Bitz / Objective Secured : apparition, maintien, perte",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "objective_secured_invalid"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 8), grammaire 15 : `Sec=<p>` d'un instantané ne peut apparaître qu'après une ligne « Unit N(c,r) SECURES <zone> [<capacité>] » de <p> (phase COMMAND de <p>, escouade vivante avec un socle dans l'aire, porteuse de secure_objective_on_control — 19.04 par note_special_rule_usage) et le contrôle revient à <p> ; une perte de `Sec=` sans niveau adverse strictement supérieur, ou un contrôleur ≠ <p> sur un objectif que <p> sécurise sans niveau strictement supérieur, est une faute. Journal < 15 : abstention."
+    },
+    {
+      "id": "PROJ.2.3.returned_models",
+      "section": "2.3",
+      "label": "Figurines rendues (REVIVED, Grot Orderly) — k ≤ D3, k ≤ mortes rendables, once per battle, phase COMMAND du propriétaire, types morts, aucun leader/support",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "returned_models_invalid"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "2026-09-18 (capacités-agent, prompt 8) : ai/analyzer_objectives.check_returned_models sur chaque ligne RETURNED (grammaire 10) — les figurines réellement mortes viennent de `dead_model_ids_episode` (DEAD / [MODELS:]), leurs types de `[MODEL_TYPES:]` ; un leader/support rendu (« bodyguard models ») est une faute."
+    },
+    {
       "id": "PROJ.2.3.fnp",
       "section": "2.3",
       "label": "Feel No Pain 24.12 — seuil, présence, compte (tir, mêlée, blessures mortelles)",
@@ -4027,8 +4072,11 @@
         "rule_id": "secure_objective_on_control"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Get da Good Bitz (Boyz) / Objective Secured (Intercessor) : en fin de phase de commandement, les objectifs contrôlés par l'unité sont sécurisés (secured_objectives). Passe 5 chantier 06."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.2.3.objective_secured (objective_secured_invalid, grammaire 15) : la ligne SECURES et le champ Sec= des instantanés — Get da Good Bitz (Boyz) / Objective Secured (Intercessor), 14.03. Usage §1.7 relevé sur la ligne SECURES (19.04).",
+      "co_verified_by": [
+        "PROJ.2.3.objective_secured"
+      ]
     },
     {
       "id": "unit.oc_bonus",
@@ -4040,8 +4088,11 @@
         "rule_id": "oc_bonus"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Relic Banner (Ancient) : +1 OC par figurine de l'unité via unit_effective_oc dans objective_control_contributions. Passe 5 chantier 06."
+      "status": "COUVERT",
+      "status_note": "Via PROJ.2.3.objective_control (objective_control_mismatch) : +oc_bonus à CHAQUE figurine de l'escouade tant qu'un porteur vit (Relic Banner, Ancient), dans l'OC resommé par zone à chaque instantané.",
+      "co_verified_by": [
+        "PROJ.2.3.objective_control"
+      ]
     },
     {
       "id": "unit.invul_save_override",
@@ -4105,8 +4156,11 @@
         "rule_id": "return_destroyed_models"
       },
       "controls": [],
-      "status": "IMPLÉMENTÉ",
-      "status_note": "Passe 6 chantier 06 (Primitive F), refondu le 2026-09-18 (capacités-agent, prompt 5) : « you can return up to D3 destroyed BODYGUARD models » — 1×/partie, appel de capacité posé au début de 08.04 (command_handlers._apply_return_destroyed_models → push_ability_call), refus = rien consommé et reproposé au tour suivant ; acceptation = D3 puis profil → placement ; seuls les bodyguard models (rôle ni leader ni support) reviennent, un Warboss mort jamais. Journal : ABILITY CALL Grot Orderly [USED|DECLINED] puis RETURNED. Porté par PainBoy (Grot Orderly)."
+      "status": "COUVERT",
+      "status_note": "Passe 6 chantier 06, refondu le 2026-09-18 (prompt 5 : appel de capacité, bodyguard models seulement) ; contrôlé depuis le prompt 8 via PROJ.2.3.returned_models (returned_models_invalid : k ≤ D3, k ≤ mortes rendables, once per battle, phase COMMAND du propriétaire, types morts, aucun leader/support). Journal : ABILITY CALL Grot Orderly [USED|DECLINED] puis RETURNED. Porté par PainBoy (Grot Orderly).",
+      "co_verified_by": [
+        "PROJ.2.3.returned_models"
+      ]
     }
   ]
 }

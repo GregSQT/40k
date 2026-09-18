@@ -113,9 +113,21 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       jamais un vieux format. Verrous : test_finest_hour_call.py (producteur),
 #:       test_analyzer_finest_hour_cap.py (lecteur).
 #:
+#:  15 — CONTROLE D OBJECTIF jugeable (14.02 / 14.03) : chaque zone de `T{tour} OBJECTIVE
+#:       CONTROL: … ZONES=` porte `:Sec=<1|2|none>` (securisee PAR OBJECTIF, `secured_objectives`),
+#:       l instantane est reecrit quand cette securisation change, et toute securisation laisse
+#:       une ligne « Unit N(c,r) SECURES <zone> [GET DA GOOD BITZ|OBJECTIVE SECURED] » en phase
+#:       de commandement de l escouade. Sur un journal log_grammar>=15, une securisation sans
+#:       ligne SECURES, hors phase de commandement du camp, ou sur un objectif non controle par
+#:       une escouade PRESENTE porteuse de `secure_objective_on_control`, est une faute
+#:       (`objective_secured_invalid`) ; l analyzer resomme aussi l OC par zone depuis les socles
+#:       (`objective_control_mismatch`) et juge chaque ligne RETURNED (`returned_models_invalid`).
+#:       Verrous : test_step_log_objective_secured.py (producteur),
+#:       test_analyzer_objective_control.py / test_analyzer_objective_secured.py (lecteur).
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 14
+LOG_GRAMMAR_VERSION = 15
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -504,7 +516,7 @@ class StepLogger:
 
     def log_objective_control_snapshot(
         self, turn, objectives, objective_controllers, victory_points, command_points,
-        control_method=None, oc_sums=None
+        control_method=None, oc_sums=None, secured_by=None,
     ):
         """Instantane FAISANT FOI du controle d'objectif, des VP et des CP (regles 14.02, 08.02).
 
@@ -527,6 +539,11 @@ class StepLogger:
         L18 — champs optionnels (absents dans les journaux anterieurs au 2026-08-19) :
         - `control_method` : "secured" | "default" (14.02/14.03), commun a tous les objectifs.
         - `oc_sums` : List[(OC_P1, OC_P2)] par objectif, dans le meme ordre que `objectives`.
+        Grammaire 15 (2026-09-18) :
+        - `secured_by` : `{obj_id: joueur}` (`game_state["secured_objectives"]`, 14.03 par
+          objectif — Get da Good Bitz / Objective Secured) → `:Sec=<1|2|none>` par zone. Sans
+          lui, la securisation PAR OBJECTIF n'etait ecrite nulle part (`Mthd=` est la methode
+          de mission, commune a tous) et 14.03 restait injugeable.
         """
         if not self.enabled:
             return
@@ -551,6 +568,14 @@ class StepLogger:
             if oc_sums is not None and idx < len(oc_sums):
                 oc1, oc2 = oc_sums[idx]
                 entry += f":OC1={oc1}:OC2={oc2}"
+            if secured_by is not None:
+                sec = secured_by.get(obj_id)  # get allowed : absent = objectif non securise
+                if sec is None:
+                    entry += ":Sec=none"
+                elif int(sec) in (1, 2):
+                    entry += f":Sec={int(sec)}"
+                else:
+                    raise ValueError(f"Unexpected secured_by for {obj_id}: {sec!r}")
             zone_entries.append(entry)
 
         vp1 = require_key(victory_points, 1)
@@ -1216,6 +1241,15 @@ class StepLogger:
                 )
             types_seg = " ".join(f"{mid}={mtype}" for mid, mtype in restored.items())
             return f"{unit_label} RETURNED {len(restored)} models [{ability}] (D3={d3}) [MODEL_TYPES: {types_seg}]"
+
+        elif action_type == "secure_objective":
+            # 14.03 (Get da Good Bitz / Objective Secured) : l'escouade SECURISE l'objectif
+            # qu'elle controle en fin de SA phase de commandement. Grammaire 15 : la ligne
+            # date l'evenement et nomme l'escouade (19.04 se juge sur elle) ; l'etat par
+            # objectif est `Sec=` de l'instantane OBJECTIVE CONTROL.
+            zone = str(require_key(details, "objective_name"))
+            ability = str(require_key(details, "ability_display_name")).upper()
+            return f"{unit_label} SECURES {zone} [{ability}]"
 
         elif action_type == "strategic_reserves_timeout":
             # 20.04 — destruction fin de 3e round. L'escouade est ENTIEREMENT detruite : le

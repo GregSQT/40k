@@ -25,7 +25,10 @@ _OBJECTIVES = ";".join(f"(30,{r})" for r in range(30, 33))
 class _Registry:
     units = {
         "Boyz": {"HP_MAX": 1, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
-        "PainBoy": {"HP_MAX": 3, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+        # `support` : le PainBoy est un CHARACTER (rôle d'allocation) — « bodyguard models »
+        # ne le désigne jamais (`returned_models_invalid`).
+        "PainBoy": {"HP_MAX": 3, "MOVE": 6, "MODEL_HEIGHT": 1.0,
+                    "UNIT_RULES": [{"ruleId": "support", "displayName": "Support"}]},
         "Grunt": {"HP_MAX": 5, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
     }
 
@@ -132,3 +135,74 @@ def test_la_restitution_est_jugee_en_coherence(tmp_path, monkeypatch):
     assert stats["squad_coherency_violations"][1] == 1, stats["first_error_lines"]["squad_coherency_violations"]
     stats = _parse(tmp_path, monkeypatch, _returned("1#r0=Boyz", "1#0@(20,20,z0) 1#r0@(20,21,z0)"))
     assert stats["squad_coherency_violations"][1] == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `returned_models_invalid` (ai/analyzer_objectives.py, PROJ.2.3.returned_models) — REVIVED
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BOY_MORT = (
+    "[10:00:01] E1 T1 P2 SHOOT : Unit 1 DEAD model=1#0 reason=combat "
+    "[MODELS: 1#1@(20,21,z0)] [SUCCESS]\n"
+)
+
+
+def _returned_at(types: str, models: str, count: int = 1, d3: int = 1, phase: str = "COMMAND",
+                 player: int = 1, sec: int = 2) -> str:
+    return (
+        f"[10:00:{sec:02d}] E1 T2 P{player} {phase} : Unit 1(20,20) RETURNED {count} models [GROT ORDERLY] (D3={d3}) "
+        f"[MODEL_TYPES: {types}] [MODELS: {models}] [SUCCESS]\n"
+    )
+
+
+def _invalid(stats) -> tuple:
+    first = stats["first_error_lines"]["returned_models_invalid"]
+    return stats["returned_models_invalid"], (first[1] or first[2] or {}).get("detail")
+
+
+def test_un_boy_mort_rendu_en_phase_de_commandement_est_correct(tmp_path, monkeypatch):
+    stats = _parse(tmp_path, monkeypatch, _BOY_MORT + _returned_at("1#r0=Boyz", "1#1@(20,21,z0) 1#r0@(20,22,z0)"))
+    assert stats["returned_models_invalid"] == {1: 0, 2: 0}, _invalid(stats)
+    assert stats["rule_usage"]["PROJ.2.3.returned_models"][1] == 1
+
+
+def test_plus_de_figurines_que_le_d3_est_une_faute(tmp_path, monkeypatch):
+    body = _BOY_MORT + (
+        "[10:00:01] E1 T1 P2 SHOOT : Unit 1 DEAD model=1#1 reason=combat [MODELS: 1#0@(20,20,z0)] [SUCCESS]\n"
+    )
+    # Deux figurines annoncées pour un D3 de 1 (le PainBoy rendu est une seconde faute, comptée à part).
+    stats = _parse(tmp_path, monkeypatch, body + _returned_at("1#r0=Boyz 1#r1=Boyz", "1#r0@(20,22,z0) 1#r1@(20,23,z0)", count=2, d3=1))
+    counts, detail = _invalid(stats)
+    assert counts[1] >= 1 and "D3 de 1" in str(detail), (counts, detail)
+
+
+def test_un_second_grot_orderly_dans_la_partie_est_une_faute(tmp_path, monkeypatch):
+    body = (
+        _BOY_MORT + _returned_at("1#r0=Boyz", "1#1@(20,21,z0) 1#r0@(20,22,z0)", sec=2)
+        + "[10:00:03] E1 T3 P2 SHOOT : Unit 1 DEAD model=1#r0 reason=combat [MODELS: 1#1@(20,21,z0)] [SUCCESS]\n"
+        + "[10:00:04] E1 T4 P1 COMMAND : Unit 1(20,20) RETURNED 1 models [GROT ORDERLY] (D3=1) "
+          "[MODEL_TYPES: 1#r1=Boyz] [MODELS: 1#1@(20,21,z0) 1#r1@(20,22,z0)] [SUCCESS]\n"
+    )
+    stats = _parse(tmp_path, monkeypatch, body)
+    counts, detail = _invalid(stats)
+    assert counts == {1: 1, 2: 0} and "Once per battle" in str(detail), (counts, detail)
+
+
+def test_un_type_jamais_mort_rendu_est_une_faute(tmp_path, monkeypatch):
+    stats = _parse(tmp_path, monkeypatch, _returned_at("1#r0=Boyz", "1#0@(20,20,z0) 1#1@(20,21,z0) 1#r0@(20,22,z0)"))
+    counts, detail = _invalid(stats)
+    assert counts[1] >= 1 and "rendable" in str(detail), (counts, detail)
+
+
+def test_un_support_rendu_est_une_faute(tmp_path, monkeypatch):
+    """« return up to D3 destroyed BODYGUARD models » : le PainBoy (support) ne revient jamais."""
+    stats = _parse(tmp_path, monkeypatch, _PAINBOY_MORT + _returned_at("1#r0=PainBoy", "1#0@(20,20,z0) 1#r0@(20,21,z0)"))
+    counts, detail = _invalid(stats)
+    assert counts == {1: 1, 2: 0} and "bodyguard" in str(detail), (counts, detail)
+
+
+def test_une_restitution_hors_phase_de_commandement_ou_hors_tour_est_une_faute(tmp_path, monkeypatch):
+    fight = _parse(tmp_path, monkeypatch, _BOY_MORT + _returned_at("1#r0=Boyz", "1#1@(20,21,z0) 1#r0@(20,22,z0)", phase="FIGHT"))
+    assert fight["returned_models_invalid"][1] == 1 and "phase FIGHT" in str(_invalid(fight)[1])
+    other = _parse(tmp_path, monkeypatch, _BOY_MORT + _returned_at("1#r0=Boyz", "1#1@(20,21,z0) 1#r0@(20,22,z0)", player=2))
+    assert other["returned_models_invalid"][2] == 1 and "tour de 2" in str(_invalid(other)[1])

@@ -213,6 +213,18 @@ class AnalyzerState:
     #: question « ce socle recouvre-t-il une aire ? » (Unbreakable Resolve, `ai/analyzer_save.py`,
     #: 14.02 « within range of a terrain objective while it is within that terrain area »).
     objective_cells: Set[Tuple[int, int]] = field(default_factory=set)
+    #: Aires d'objectif PAR NOM (entête `Objectives:` — même clé que `ZONES=` des instantanés),
+    #: et l'état du dernier instantané par zone : contrôleur et joueur sécurisant (14.03), la
+    #: mémoire contre laquelle le suivant est jugé (`ai/analyzer_objectives.py`).
+    objective_zones: Dict[str, Set[Tuple[int, int]]] = field(default_factory=dict)
+    objective_last_ctrl: Dict[str, Optional[int]] = field(default_factory=dict)
+    objective_last_sec: Dict[str, Optional[int]] = field(default_factory=dict)
+    #: Lignes « SECURES <zone> » vues depuis le dernier instantané : `{zone: joueur}`.
+    objective_secures_pending: Dict[str, int] = field(default_factory=dict)
+    #: Grot Orderly : escouades ayant déjà rendu des figurines cet épisode (« once per battle »),
+    #: et figurines rendues par escouade (retirées du compte des mortes rendables).
+    returned_models_used: Set[str] = field(default_factory=set)
+    returned_models_by_unit: Dict[str, List[str]] = field(default_factory=dict)
 
     #: IDs de socles retirés de `unit_model_hp` par `_resync_living_models` (log DEAD ou [MODELS:]
     #: montrant les survivants) AVANT que la ligne d'attaque correspondante ne soit traitée.

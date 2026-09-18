@@ -7668,6 +7668,8 @@ class W40KEngine(gym.Env):
         # Figurines RENDUES (Grot Orderly, phase de commandement) : evenement moteur qui suit
         # les decisions `returned_models_*`, pas un step d'agent.
         "return_destroyed_models",
+        # 14.03 — securisation d objectif en fin de phase de commandement : effet moteur.
+        "secure_objective",
         # V11 §9.3 P2 — RELEVE d'une decision agent resolue (`_record_agent_decision_action_log`).
         # Non-incrementant, et ce n'est PAS un choix par defaut : le step gym consomme par
         # `CHOICE_i` est deja compte par la ligne d'EFFET du meme step quand le type en produit
@@ -7771,6 +7773,9 @@ class W40KEngine(gym.Env):
         # qu'au detour du `[MODELS:]` d'une ligne suivante, sans datasheet — et l'analyzer
         # s'abstenait de tout verdict 19.04 sur l'escouade.
         "return_destroyed_models": "returned_models",
+        # 14.03 — securisation d un objectif (Get da Good Bitz / Objective Secured) en fin de
+        # phase de commandement : evenement moteur, grammaire 15, pas un step d agent.
+        "secure_objective": "secure_objective",
         # Mort par-figurine explicite (toute cause). Emis par destroy_model pour rendre visible
         # chaque suppression dans step.log — sans cet event, une figurine peut disparaître de
         # [MODELS:] d'une action ultérieure sans aucun signal intermédiaire (flush LIVE post-mort).
@@ -8482,6 +8487,11 @@ class W40KEngine(gym.Env):
             details["restored_model_types"] = _restored_types
             details["ability_display_name"] = require_key(raw_log, "abilityDisplayName")
             details["d3_roll"] = require_key(raw_log, "d3Roll")
+        # Securisation d objectif (14.03) : la zone et la capacite, exigees par le formateur.
+        _secured_zone = raw_log.get("objectiveName")  # get allowed : absent hors securisation
+        if _secured_zone is not None:
+            details["objective_name"] = _secured_zone
+            details["ability_display_name"] = require_key(raw_log, "abilityDisplayName")
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:
@@ -10548,12 +10558,17 @@ class W40KEngine(gym.Env):
         # gain de CP sans changement de controle ni de VP (08.02, chaque phase de commandement)
         # ne serait jamais journalise, et le replay afficherait un stock fige.
         command_points = require_key(self.game_state, "command_points")
+        # 14.03 : la securisation PAR OBJECTIF entre dans la cle — elle peut changer sans que
+        # controleur, VP ni CP ne bougent (fin de phase de commandement), et l instantane doit
+        # alors etre reecrit pour que `Sec=` (grammaire 15) date le changement.
+        secured_by = require_key(self.game_state, "secured_objectives")
         snapshot = (
             tuple(sorted((str(k), v) for k, v in controllers.items())),
             require_key(victory_points, 1),
             require_key(victory_points, 2),
             require_key(command_points, 1),
             require_key(command_points, 2),
+            tuple(sorted((str(k), int(v)) for k, v in secured_by.items())),
         )
         # get allowed : absent au tout premier passage de l'episode (cle purgee au reset)
         if snapshot == self.game_state.get(self.OBJECTIVE_CONTROL_LOGGED_KEY):
@@ -10580,6 +10595,7 @@ class W40KEngine(gym.Env):
             command_points,
             control_method=control_method,
             oc_sums=oc_sums,
+            secured_by={str(k): int(v) for k, v in secured_by.items()},
         )
 
     #: Dernier tour pour lequel l'instantané d'état a été écrit (déduplication).

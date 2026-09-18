@@ -233,18 +233,13 @@ def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int
     # Intercessor sur un board 44×60 : toute mesure bord-à-bord en découlait fausse.
     # Conversion résolue UNE FOIS par unit_type au chargement, empreinte mémoïsée : ce helper
     # est appelé deux fois par ligne de tir et une fois par ennemi vivant sur chaque WAIT.
-    socle = config.unit_socle_by_type.get(unit_type)  # get allowed : cache rempli à la demande
+    from ai.analyzer_perfig import scaled_socle_for_type
+    socle = scaled_socle_for_type(config, unit_type)
     if socle is None:
-        from engine.game_state import _scale_socle
-        from ai.analyzer import _get_inches_to_subhex_for_analyzer
-        data = config.unit_registry.get_unit_data(unit_type)
-        socle = _scale_socle(
-            require_key(data, "BASE_SHAPE"),
-            require_key(data, "BASE_SIZE"),
-            _get_inches_to_subhex_for_analyzer(),
-            f"analyzer_socle/{unit_type}",
+        raise ValueError(
+            f"analyzer_socle/{unit_type} : BASE_SIZE symbolique au registre, empreinte de tir "
+            "irrésoluble pour une unité réellement jouée"
         )
-        config.unit_socle_by_type[unit_type] = socle
     shape, size = socle
     return Socle(shape, size, int(col), int(row), set(_model_footprint(int(col), int(row), (shape, size))))
 

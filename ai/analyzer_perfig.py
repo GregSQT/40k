@@ -154,6 +154,48 @@ def _unit_base(unit_base: Dict[str, Base], unit_id: str) -> Base:
     return unit_base.get(unit_id, _DEFAULT_BASE)
 
 
+def scaled_socle_for_type(config: Any, unit_type: str) -> Optional[Base]:
+    """Socle d'une DATASHEET à la résolution du run — `(shape, size)` prêt pour `_model_footprint`.
+
+    Le registre porte le socle en unités ×10 ; le board le convertit (`_scale_socle`, la fonction
+    du MOTEUR : x1 normalise en round/1, x5 arrondit 13 → 6 et 16 → 8). Mémoïsé dans
+    `config.unit_socle_by_type`. SOURCE UNIQUE pour le tir (`_analyzer_socle`) et pour le contrôle
+    d'objectif par FIGURINE (`analyzer_objectives`) : l'entête n'écrit qu'un `base=` par ESCOUADE,
+    alors qu'un personnage attaché (16 mm) déborde du socle de ses Boyz (13 mm) — mesuré sur un
+    journal réel du 2026-09-18 : 1 OC de moins resommé que le moteur à chaque personnage sur le
+    bord d'une aire. `None` = socle symbolique au registre (référence non résolue), abstention.
+    """
+    from shared.data_validation import require_key
+
+    socle = config.unit_socle_by_type.get(unit_type)  # get allowed : cache rempli à la demande
+    if socle is not None:
+        return socle
+    from engine.game_state import _scale_socle
+    from ai.analyzer import _get_inches_to_subhex_for_analyzer
+    from ai.analyzer_config import _numeric
+    data = config.unit_registry.get_unit_data(unit_type)
+    raw_size = require_key(data, "BASE_SIZE")
+    if not isinstance(raw_size, list) and _numeric(raw_size) is None:
+        return None
+    socle = _scale_socle(
+        require_key(data, "BASE_SHAPE"), raw_size, _get_inches_to_subhex_for_analyzer(),
+        f"analyzer_socle/{unit_type}",
+    )
+    config.unit_socle_by_type[unit_type] = socle
+    return socle
+
+
+def model_base(state: Any, config: Any, unit_id: str, mid: str) -> Base:
+    """Socle d'UNE figurine : sa datasheet (`[MODEL_TYPES:]`) si elle est connue et résolue,
+    sinon celui de l'escouade (entête `base=`)."""
+    mtype = state.model_types.get(mid)  # get allowed : socle sans datasheet déclarée
+    if mtype is not None:
+        socle = scaled_socle_for_type(config, mtype)
+        if socle is not None:
+            return socle
+    return _unit_base(state.unit_base, unit_id)
+
+
 def squad_footprint(
     models: Dict[str, Tuple[int, int]],
     base: Base,
