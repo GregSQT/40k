@@ -346,6 +346,52 @@ def test_split_fire_end_also_suppresses_the_target(monkeypatch):
     assert gs["suppressed_squads"] == {"3": 1}
 
 
+def test_the_suppress_choice_pays_nothing_through_the_real_reward(monkeypatch):
+    """Le step `CHOICE_k` de `suppress_target` traverse le VRAI barème et paie zéro.
+
+    ROUGE avant le fix (2026-09-18) : la réponse était renommée `squad_shoot` sans `shoot_result`,
+    et `RewardCalculator` levait `ConfigurationError` (`require_key`) sur le chemin gym — les
+    autres tests de ce fichier neutralisent `calculate_reward`, ils ne pouvaient pas le voir.
+    Même contrat que `move_after_shooting` : le tir est payé au step du tir, décider ne paie rien."""
+    import random
+
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    bolter = _weapon("bolter", rng=24)
+    lascannon = _weapon("lascannon", rng=48, STR=12, AP=-3, DMG=1)
+    eng = _engine([
+        _unit_cfg(1, 1, [(10, 10)], rng_weapons=[bolter, lascannon], rules=[_SUPPRESS_RULE]),
+        _unit_cfg(2, 2, [(20, 10)]),
+        _unit_cfg(3, 2, [(30, 10)]),
+    ])
+    gs = eng.game_state
+    rc = _reward_calculator(eng)
+    shot_rewards: List[float] = []
+    for target_slot in (1, 0):
+        mask, _pool = eng.action_decoder.get_squad_action_mask_and_eligible_units(gs)
+        weapon_actions = [
+            i for i, opened in enumerate(mask) if opened and i >= SHOOT_WEAPON_SEL_SLOT_BASE
+        ]
+        assert weapon_actions, "aucun SHOOT_WEAPON_SEL ouvert"
+        eng._process_squad_action(eng.action_decoder.convert_squad_action(int(weapon_actions[0]), gs, _pool))
+        _success, shot = eng._process_squad_action(
+            eng.action_decoder.convert_squad_action(int(SHOOT_SLOT_BASE + target_slot), gs)
+        )
+        shot_rewards.append(rc.calculate_reward(True, shot, gs))
+    assert any(r > 0.0 for r in shot_rewards), "un tir à portée doit payer son espérance"
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "suppress_target", decision
+
+    _success, choice = eng._handle_agent_decision_action({"option_index": 0})
+
+    assert rc.calculate_reward(True, choice, gs) == 0.0
+    assert choice["action"] == "shoot", choice
+    assert "shoot_result" not in choice
+    assert choice["decision_type"] == "suppress_target"
+    assert choice["activation_ended"] is True
+    assert read_pending_agent_decision(gs) is None
+    assert gs["suppressed_squads"] == {decision["options"][0]["payload"]["target_eid"]: 1}
+
+
 # ── Bot PvE : la décision est répondue dans la MÊME requête, par la politique ────────────
 
 

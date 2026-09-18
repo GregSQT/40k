@@ -4905,12 +4905,13 @@ class W40KEngine(gym.Env):
             consume_pending_agent_decision(
                 self.game_state, decision_type="suppress_target", player=decision_player,
             )
+            # Le résultat garde l'`action` du handler (`shoot` sans tir, ou l'attente suivante) :
+            # le tir a été payé au step qui l'a résolu, avec son `shoot_result`. Le renommer en
+            # `squad_shoot` sans ce résumé faisait lever `RewardCalculator` (`require_key`) au
+            # step `CHOICE_k` du gym — même contrat que `move_after_shooting` juste au-dessus.
             success, result = shooting_handlers.apply_suppress_target_decision(
                 self.game_state, require_unit_by_id(self.game_state, decision_squad_id), payload,
             )
-            if result.get("action") not in ("move_after_shooting_select_destination",
-                                            "waiting_for_agent_decision"):
-                result["action"] = "squad_shoot"
             return success, {
                 **result,
                 "decision_type": decision_type,
@@ -5240,10 +5241,23 @@ class W40KEngine(gym.Env):
         """Les deux décisions de fin d'activation de tir posables au bot PvE, dans l'ordre où le
         handler les pose : la suppression (Indiscriminate Detonations) PUIS le repositionnement
         (Purgation Run) — la première reprend la fin d'activation, qui peut poser la seconde."""
-        settled = self._resolve_suppress_target_decision_for_ai_seat()
-        if settled is not None and isinstance(result, dict):
-            result = {**result, **settled}
+        result = self._merge_settled_decision(
+            result, self._resolve_suppress_target_decision_for_ai_seat()
+        )
         return self._settle_move_after_shooting_for_ai_seat(result)
+
+    @staticmethod
+    def _merge_settled_decision(
+        result: Dict[str, Any], settled: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Le payload de la réponse du bot recouvre celui de l'action (état FINAL), sauf
+        l'`action` : c'est le tir que ce step a joué, et son `shoot_result` reste dû."""
+        if settled is None or not isinstance(result, dict):
+            return result
+        merged = {**result, **settled}
+        if "action" in result:
+            merged["action"] = result["action"]
+        return merged
 
     def _settle_move_after_shooting_for_ai_seat(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """`_resolve_move_after_shooting_decision_for_ai_seat`, puis le payload rendu au client
@@ -5258,13 +5272,9 @@ class W40KEngine(gym.Env):
         d'arrivée, `decision_type`…) recouvrent celles de l'armement ; l'`action` et le
         `shoot_result` du tir restent ceux du tir — c'est lui que ce step a joué.
         """
-        settled = self._resolve_move_after_shooting_decision_for_ai_seat()
-        if settled is None or not isinstance(result, dict):
-            return result
-        merged = {**result, **settled}
-        if "action" in result:
-            merged["action"] = result["action"]
-        return merged
+        return self._merge_settled_decision(
+            result, self._resolve_move_after_shooting_decision_for_ai_seat()
+        )
 
     def _resolve_move_after_shooting_decision_for_ai_seat(self) -> Optional[Dict[str, Any]]:
         """Répond, dans la MÊME requête, au repositionnement post-tir posé au bot PvE.

@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import copy
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pytest
 
+from engine import macro_intents as mi
 from shared.data_validation import require_key
 
 PROJECT_ROOT = os.path.dirname(
@@ -35,6 +36,12 @@ SCENARIO = os.path.join(
     "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json",
 )
 COMBAT_ACTIONS = ("squad_shoot", "squad_shoot_split_target", "squad_fight")
+#: Slots qui engagent ou résolvent un combat : quand l'un d'eux est légal, une cible existe.
+#: `_play_and_spy` les joue en priorité — voir sa docstring.
+_COMBAT_SLOTS = frozenset(
+    list(mi.SHOOT_SLOTS) + list(mi.SHOOT_INDIRECT_SLOTS) + list(mi.SHOOT_WEAPON_SEL_SLOTS)
+    + list(mi.CHARGE_SLOTS) + list(mi.FIGHT_SLOTS) + list(mi.FIGHT_WEAPON_SLOTS)
+)
 
 
 def _make_env(reward_on_expectation: bool, agent_seat_mode: str = "p1"):
@@ -67,8 +74,62 @@ def _make_env(reward_on_expectation: bool, agent_seat_mode: str = "p1"):
     )
 
 
+def _closing_move_cell(env, legal: np.ndarray) -> Optional[int]:
+    """La cellule de déplacement légale la plus proche d'un ennemi vivant, ou None hors mouvement.
+
+    La carte cellule → hex est celle que le masque vient de mémoïser pour l'escouade désignée
+    (`read_squad_move_cell_map`) : la même que le décodeur relira, donc le hex choisi est
+    exactement celui que le moteur jouera."""
+    from engine.phase_handlers.shared_utils import (
+        MOVE_CELL_MAP_CACHE_KEY, is_unit_alive, read_squad_move_cell_map,
+    )
+
+    gs = env.engine.game_state
+    if str(require_key(gs, "phase")) != "move":
+        return None
+    # Le mover est `eligible_units[0]` — la dérivation que le décodeur applique lui-même. Le
+    # masque est memoïsé (jet d'Advance, carte de cellules) : le rappeler ne change rien.
+    _mask, eligible = env.engine.action_decoder.get_squad_action_mask_and_eligible_units(gs)
+    if not eligible:
+        return None
+    squad_id = str(require_key(eligible[0], "id"))
+    units_cache = require_key(gs, "units_cache")
+    mover_player = int(require_key(units_cache[squad_id], "player"))
+    enemies = [
+        (int(require_key(u, "col")), int(require_key(u, "row")))
+        for sid, u in units_cache.items()
+        if int(require_key(u, "player")) != mover_player and is_unit_alive(sid, gs)
+    ]
+    if not enemies:
+        return None
+    # Une escouade qui ARRIVE de réserves (20.04) joue les slots de déploiement, pas des cellules
+    # de mouvement : aucune carte n'est mémoïsée pour elle, il n'y a rien à rapprocher.
+    if squad_id not in gs.get(MOVE_CELL_MAP_CACHE_KEY, {}):  # get allowed : absent = ingress
+        return None
+    cell_map = read_squad_move_cell_map(gs, squad_id)
+    cells = [int(a) for a in legal if int(a) in cell_map]
+    if not cells:
+        return None
+
+    def _closest_enemy_distance(cell: int) -> float:
+        (col, row), _cost = cell_map[cell]
+        return min(float(np.hypot(col - ec, row - er)) for ec, er in enemies)
+
+    return min(cells, key=_closest_enemy_distance)
+
+
 def _play_and_spy(env, seed: int, max_steps: int) -> List[Dict[str, Any]]:
-    """Actions légales au hasard ; espion sur `calculate_reward` (chemin réel du moteur)."""
+    """Espion sur `calculate_reward` (chemin réel du moteur) sur une partie jouée par l'agent
+    en « approche puis combat » : un slot de tir / charge / mêlée est joué dès qu'il en existe un
+    de légal ; un déplacement va vers la cellule légale la plus proche d'un ennemi ; le reste
+    (activation, choix, oath…) est tiré au sort. L'adversaire reste `RandomBot`.
+
+    Au pur hasard, une activation offensive de l'agent AVEC cible est rare — 0 à 3 par partie
+    (mesuré le 2026-09-18 sur les graines 7, 11, 23, 42), et la graine 7 a perdu la seule qu'elle
+    avait quand la refonte du bloc candidat a déplacé la trajectoire ; sur cette graine les
+    escouades ne se sont jamais trouvées à portée en cinq rounds. Ce que ces tests prouvent est
+    une propriété de la RÉCOMPENSE, pas du hasard : rapprocher puis tirer garantit la matière à
+    vérifier sans dépendre de la trajectoire d'une graine."""
     calc = env.engine.reward_calculator
     original = calc.calculate_reward
     captured: List[Dict[str, Any]] = []
@@ -99,7 +160,13 @@ def _play_and_spy(env, seed: int, max_steps: int) -> List[Dict[str, Any]]:
         while not (terminated or truncated) and steps < max_steps:
             legal = np.flatnonzero(np.asarray(env.action_masks()))
             assert legal.size > 0
-            _obs, _reward, terminated, truncated, _info = env.step(int(rng.choice(legal)))
+            combat = [int(a) for a in legal if int(a) in _COMBAT_SLOTS]
+            if combat:
+                chosen = int(rng.choice(combat))
+            else:
+                closing = _closing_move_cell(env, legal)
+                chosen = closing if closing is not None else int(rng.choice(legal))
+            _obs, _reward, terminated, truncated, _info = env.step(chosen)
             steps += 1
     finally:
         calc.calculate_reward = original  # type: ignore[method-assign]

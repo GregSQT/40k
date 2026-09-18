@@ -193,7 +193,7 @@ def _apply_with_rolls(monkeypatch, rolls, *, target="ONLY_ENEMY"):
     def _fake_randint(a, b):
         return next(it)
 
-    def _fake_allocate(gs, target_eid, count, auto_resolve, details):
+    def _fake_allocate(gs, target_eid, count, auto_resolve, details, *, is_psychic=False):
         mw_applied.append({"target": target_eid, "count": count})
         # Comme la vraie allocation : un record par blessure, sur la figurine allouée.
         details.extend({"modelId": "e1a", "col": 5, "row": 5, "died": False} for _ in range(count))
@@ -287,7 +287,7 @@ def test_single_target_auto_applique_sans_decision(monkeypatch):
     def _fake_randint(a, b):
         return next(rolls)
 
-    def _fake_allocate(gs, target_eid, count, auto_resolve, details):
+    def _fake_allocate(gs, target_eid, count, auto_resolve, details, *, is_psychic=False):
         mw_applied.append({"target": target_eid, "count": count})
 
     def _fake_continue(self_engine, squad_id, target_slot):
@@ -332,7 +332,7 @@ def test_attaquant_detruit_par_deadly_demise_pas_de_crash(monkeypatch):
 
     settle_called = []
 
-    def _fake_allocate_destroys_attacker(gs, target_eid, count, auto_resolve, details):
+    def _fake_allocate_destroys_attacker(gs, target_eid, count, auto_resolve, details, *, is_psychic=False):
         # Simule la cascade Deadly Demise : retire l'attaquant de units_cache.
         gs["units_cache"].pop("CHAP", None)
 

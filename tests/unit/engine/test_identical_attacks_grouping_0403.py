@@ -171,7 +171,9 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     cree et l'allocation se termine immediatement — mais la boucle de GROUPEMENT, elle, est
     celle de la production, pas un miroir.
     """
-    from engine.phase_handlers.shared_utils import SHOOT_CTX, _build_manual_allocation
+    from engine.phase_handlers.shared_utils import (
+        SHOOT_CTX, _build_manual_allocation, designate_shoot_target,
+    )
 
     weapon = _weapon("Stub", [])
     models_cache = {
@@ -208,6 +210,10 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                   for i, r in enumerate(rolled)]
         },
     }
+    # Les intents sont poses directement, sans passer par `squad_declare_shoot` : la cible
+    # DESIGNEE de l'activation (grammaire 11, `[DESIGNATED:<id>]` sur chaque ligne de tir) est
+    # donc designee ici, comme le fait toute declaration de production.
+    designate_shoot_target(game_state, "1", "101")
     queue = list(rolled)
 
     def _fake_roller(gs, intent, targets_meta):
