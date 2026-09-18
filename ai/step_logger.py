@@ -78,9 +78,18 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       tests/unit/engine/test_returned_models_placement.py (ligne formatee) et
 #:       tests/unit/ai/test_analyzer_returned_models.py (lecteur).
 #:
+#:  11 — toute ligne SHOT porte `[DESIGNATED:<id>]`, l escouade ennemie DESIGNEE au demarrage
+#:       de l activation (cible prioritaire en gym, premiere declaree au siege humain — decision
+#:       2026-09-18, capacites.md §Primitive B). C est la clause « that targeted that selected
+#:       unit » de Hail of Bolts et d Overlapping Detonations : sur un journal log_grammar>=11,
+#:       leur bonus d attaques ne leve le plafond que des tirs dont la cible EST la designee ;
+#:       un tir bonifie ailleurs est une faute (`shoot_over_rng_nb`), jamais un vieux format.
+#:       Sur un journal anterieur, le lecteur s abstient (plafond bonifie sur toute cible).
+#:       Verrou : test_step_log_designated_target.py et test_analyzer_hail_of_bolts.py.
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 10
+LOG_GRAMMAR_VERSION = 11
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1292,6 +1301,12 @@ class StepLogger:
             _shoot_type = details.get("shoot_type")
             if _shoot_type is not None:
                 shot_tags.append(f"[SHOOT_TYPE:{_shoot_type}]")
+            # Grammaire 11 — [DESIGNATED:<id>] : l escouade ennemie DESIGNEE au demarrage de
+            # l activation (Hail of Bolts / Overlapping Detonations : « that targeted that
+            # selected unit »). Constante d activation, portee par TOUTES ses lignes de tir.
+            _designated = details.get("designated_target_id")
+            if _designated is not None:
+                shot_tags.append(f"[DESIGNATED:{_designated}]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"

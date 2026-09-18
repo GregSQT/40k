@@ -299,7 +299,7 @@ def test_gym_squad_shoot_suppresses_the_target():
 def test_split_fire_end_also_suppresses_the_target():
     """Le tir fractionné (`squad_shoot_split_target`, deux armes → deux cibles) termine par la
     même fin de datasheet : la PREMIÈRE cible déclarée est supprimée (choix moteur —
-    `_last_shoot_target_id` est posé par `setdefault` à chaque déclaration, donc la cible
+    `designated_shoot_target_id` est posé par `setdefault` à chaque déclaration, donc la cible
     principale). ROUGE avant le fix : `suppressed_squads` vide après le tir fractionné."""
     bolter = _weapon("bolter", rng=24)
     lascannon = _weapon("lascannon", rng=48, STR=12, AP=-3, DMG=6)

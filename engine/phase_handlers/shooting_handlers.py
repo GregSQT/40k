@@ -42,6 +42,7 @@ from .shared_utils import (
     entries_on_battlefield,
     entry_footprint,
     entry_is_on_battlefield,
+    DESIGNATED_SHOOT_TARGET_KEY,
 )
 
 # ============================================================================
@@ -5032,8 +5033,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_move_after_shooting_resolved"]
     if "_move_after_shooting_distance" in unit:
         del unit["_move_after_shooting_distance"]
-    if "_last_shoot_target_id" in unit:
-        del unit["_last_shoot_target_id"]
+    if DESIGNATED_SHOOT_TARGET_KEY in unit:
+        del unit[DESIGNATED_SHOOT_TARGET_KEY]
     if "_current_shoot_nb" in unit:
         del unit["_current_shoot_nb"]
     if "advance_range" in unit:
@@ -5419,15 +5420,15 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
 
     # Primitive F (chantier 06, passe 6) — suppress_target_on_shooting (Indiscriminate Detonations).
     # Déclenché après une vraie activation de tir : l'unité cible est supprimée jusqu'au début de
-    # la prochaine phase de commandement du tireur. La cible est le `priority_target_squad_id`
-    # mémorisé dans `_last_shoot_target_id` par squad_declare_shoot (shared_utils).
+    # la prochaine phase de commandement du tireur. La cible est la cible DESIGNEE de
+    # l'activation (`designate_shoot_target`, shared_utils — clé unique avec Hail of Bolts).
     if (
         arg5 == 1
         and arg1 == ACTION
         and arg3 in (SHOOTING, ADVANCE)
         and _unit_has_rule(unit, "suppress_target_on_shooting")
     ):
-        _suppress_target_id = unit.get("_last_shoot_target_id")
+        _suppress_target_id = unit.get(DESIGNATED_SHOOT_TARGET_KEY)
         if _suppress_target_id is not None:
             _suppressor_player = int(require_key(unit, "player"))
             game_state.setdefault("suppressed_squads", {})[str(_suppress_target_id)] = _suppressor_player

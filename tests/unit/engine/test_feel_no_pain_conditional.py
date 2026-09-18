@@ -106,7 +106,7 @@ def _shoot_gs(target_unit_rules, weapon):
         "role": None, "unitType": "Grunt", "points_per_hp": 5.0, "VALUE": 10.0,
         "col": 9, "row": 9, "UNIT_RULES": target_unit_rules,
     }
-    attacker_unit = {"id": "1", "player": 0, "UNIT_RULES": []}
+    attacker_unit = {"id": "1", "player": 0, "UNIT_RULES": [], "designated_shoot_target_id": "2"}
     target_unit = {"id": "2", "player": 1, "UNIT_RULES": target_unit_rules}
     return {
         **turn_state_invariants(),

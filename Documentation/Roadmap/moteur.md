@@ -7,6 +7,31 @@
 
 ---
 
+## Capacités Armageddon → décisions d'agent (lot du 2026-09-18) {#capacites-decisions-agent}
+
+Huit chantiers en séquence, ordre imposé par le prompt du 2026-09-18 ; référence vivante
+[capacites.md](../Reference/moteur/capacites.md). Aucun run lancé avant la fin du lot ; le `--new`
+de la lignée suit le chantier 8.
+
+1. ✅ **Hail of Bolts / Overlapping Detonations → cible DÉSIGNÉE** (2026-09-18). Le Bloc B de
+   `_manual_roll_intent` bonifiait CHAQUE cible du tir fractionné ; la datasheet dit « that targeted
+   that selected unit ». Modélisation : désignée = cible prioritaire (gym `SHOOT_SLOT`) ou première
+   déclarée (siège humain), clé unique `designated_shoot_target_id` posée par
+   `designate_shoot_target` sur les quatre chemins de déclaration (ex-`_last_shoot_target_id`, que
+   lisait la suppression), visibilité vérifiée pour les porteurs. Journal `[DESIGNATED:<id>]` sur
+   toute ligne SHOT (grammaire 11) ; l'analyzer ne lève le plafond `shoot_over_rng_nb` que pour
+   les tirs sur la désignée, abstention sur journal antérieur. Reproduction (deux Intercessors, deux
+   cibles) rendue 4 + 2 records au lieu de 4 + 4 ; 4 tests moteur + 6 analyzer rouge→vert.
+2. 🟡 Refonte du bloc candidat de décision — voir ROADMAP_INDEX.
+3. 🟡 Indiscriminate Detonations = unité TOUCHÉE, choix du joueur.
+4. 🟡 Da Jump.
+5. 🟡 Grot Orderly = choix d'agent.
+6. 🟡 Finest Hour = choix à la sélection.
+7. 🟡 Analyzer : FNP / InSv.
+8. 🟡 Analyzer : objectifs / REVIVED.
+
+---
+
 ## Chaîne d'attaque 100 % {#chaine-attaque-100}
 
 ✅ **Livré 2026-09-18** (`worktree-chaine-attaque-100`). Ordre des lots choisi par l'attaquant lot

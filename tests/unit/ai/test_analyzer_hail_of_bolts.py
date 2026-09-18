@@ -155,3 +155,95 @@ def test_bonus_19_04_ne_leve_pas_le_plafond_indefiniment(tmp_path):
     assert stats["shoot_over_rng_nb"][1] == 1, (
         f"Attendu 1 erreur shoot_over_rng_nb P1, obtenu {stats['shoot_over_rng_nb'][1]}"
     )
+
+
+# --- Grammaire 11 : `[DESIGNATED:<id>]` — le bonus ne vaut que sur la cible DÉSIGNÉE ------------
+#
+# « this unit's bolt rifles that targeted THAT selected unit have +2 A » : une seule escouade
+# désignée par activation (cible prioritaire en gym). Un tireur qui vise une AUTRE escouade
+# (hors portée de la prioritaire, second slot) n'a que NB. Sur un journal antérieur (token
+# absent), abstention : plafond bonifié sur toute cible, jamais une faute inventée.
+_UNITS_DEUX_CIBLES = (
+    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6"
+    " [MODEL_TYPES: 1#0=Intercessor 1#1=Intercessor]\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+)
+T2 = "(80,50)"
+
+
+def _tir_vers(seconde: int, coup: int, shooters: str, target: str, pos: str, designated: str | None) -> str:
+    tag = f" [DESIGNATED:{designated}]" if designated is not None else ""
+    return (
+        f"[10:00:{seconde:02d}] E1 T1 P1 SHOOT : Unit 1{S}"
+        f" SHOT{tag} Unit {target}{pos} with [Bolt Rifle]"
+        f" - Hit {coup}(3+) - Wound 5(4+) - → {target}#0 - Save 2(3+) - Dmg:1HP [R:+0.0]"
+        f" [MODELS: 1#0@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
+        f" 1#1@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)]"
+        f" [SHOOTER_MODELS: {shooters}] [ALLOC_MODEL: {target}#0] [SUCCESS]\n"
+    )
+
+
+def _stats_deux_cibles(tmp_path, n_shots_hors_designee: int, *, log_grammar: int | None) -> dict:
+    """1#0 tire 4 fois sur 101 (désignée) ; 1#1 tire `n_shots_hors_designee` fois sur 102."""
+    import ai.analyzer as an
+
+    designated = "101" if log_grammar is not None and log_grammar >= 11 else None
+    setup = _SETUP + (
+        f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102{T2} DEPLOYED from (-1,-1) to {T2}"
+        f" [R:+0.0] [MODELS: 102#0@(80,50,z0)] [SUCCESS]\n"
+    )
+    shots = "".join(_tir_vers(i + 2, i + 1, "1#0", "101", T, designated) for i in range(4))
+    shots += "".join(
+        _tir_vers(i + 6, i + 1, "1#1", "102", T2, designated) for i in range(n_shots_hors_designee)
+    )
+    log = tmp_path / "step.log"
+    log.write_text(
+        entete_step_log(
+            setup + shots, units=_UNITS_DEUX_CIBLES, ez_vertical_inches=None,
+            log_grammar=log_grammar,
+        )
+    )
+    return an.parse_step_log(str(log))
+
+
+def test_grammaire_11_tir_bonifie_hors_designee_est_une_erreur(tmp_path):
+    """1#1 tire 3 fois sur 102, qui n'est PAS la désignée (101) : plafond NB=2 → 1 erreur."""
+    stats = _stats_deux_cibles(tmp_path, 3, log_grammar=11)
+    assert stats["shoot_over_rng_nb"][1] == 1, (
+        f"Attendu 1 erreur shoot_over_rng_nb P1 (bonus hors désignée), "
+        f"obtenu {stats['shoot_over_rng_nb'][1]}"
+    )
+
+
+def test_grammaire_11_designee_bonifiee_et_autre_cible_a_nb(tmp_path):
+    """Journal CORRECT : 1#0 4 tirs sur la désignée, 1#1 2 tirs (NB) sur l'autre → 0 erreur."""
+    stats = _stats_deux_cibles(tmp_path, 2, log_grammar=11)
+    assert stats["shoot_over_rng_nb"][1] == 0, (
+        f"Attendu 0 erreur shoot_over_rng_nb P1, obtenu {stats['shoot_over_rng_nb'][1]}"
+    )
+
+
+def test_journal_anterieur_sans_token_abstention(tmp_path):
+    """Grammaire 10 (token absent) : le lecteur s'abstient — 3 tirs sur l'autre cible passent
+    sous le plafond bonifié (4), aucune faute inventée sur un journal qui ne peut pas la dire."""
+    stats = _stats_deux_cibles(tmp_path, 3, log_grammar=10)
+    assert stats["shoot_over_rng_nb"][1] == 0, (
+        f"Attendu 0 erreur sur un journal antérieur, obtenu {stats['shoot_over_rng_nb'][1]}"
+    )
+
+
+def test_grammaire_11_ligne_shot_sans_token_leve(tmp_path):
+    """Grammaire 11 déclarée mais ligne SHOT sans `[DESIGNATED:]` : panne du producteur, le
+    lecteur LÈVE au lieu de s'abstenir en silence."""
+    import pytest
+
+    import ai.analyzer as an
+
+    shots = _tir_vers(2, 1, "1#0", "101", T, None)
+    log = tmp_path / "step.log"
+    log.write_text(
+        entete_step_log(_SETUP + shots, units=_UNITS, ez_vertical_inches=None, log_grammar=11)
+    )
+    with pytest.raises(ValueError, match=r"DESIGNATED"):
+        an.parse_step_log(str(log))

@@ -500,6 +500,30 @@ Les règles d'arme du PDF 24 sont **déjà implémentées** (`config/weapon_rule
 
 **Attention Dakkablitz** : la datasheet écrit `blitzcannon` dans la composition et `Blitzkannon` dans le profil d'arme. Même arme, deux orthographes dans le PDF. Ne pas créer deux entrées.
 
+### Cible désignée (Hail of Bolts, Overlapping Detonations) — décision du 2026-09-18
+
+Les deux datasheets disent « select ONE enemy unit visible to this unit. While making attacks,
+this unit's <arme> **that targeted that selected unit** have … ». Le bonus ne vaut donc que pour
+les figurines qui tirent sur **une** escouade par activation, pas sur chaque cible du tir fractionné
+— c'est ce que le moteur faisait avant cette date (Bloc B de `_manual_roll_intent` : « la cible de
+l'intent EST la cible désignée »), et une figurine hors portée de la priorité qui prenait un second
+slot recevait le bonus à tort.
+
+**Modélisation retenue** : la cible désignée **est la cible prioritaire de l'activation** — en gym
+`priority_target_squad_id` (l'action `SHOOT_SLOT`), au siège humain la **première cible déclarée**.
+Aucune décision d'agent supplémentaire : la priorité est déjà son choix. Perte résiduelle assumée :
+une escouade qui veut le bonus sur sa cible secondaire doit en faire sa priorité.
+
+Mécanique : une seule clé d'activation `unit["designated_shoot_target_id"]`, écrite par
+`designate_shoot_target` (shared_utils) au démarrage du tir sur les quatre chemins de déclaration
+(gym `squad_declare_shoot`, PvP `squad_declare_shoot_model` / `_weapon` / `_weapon_qty`), première
+écriture gagnante, effacée en fin d'activation ; lue par le Bloc B (bonus seulement si
+`intent.target == désignée`) et par Indiscriminate Detonations (Primitive F). Pour un porteur d'un
+effet « vs cible désignée », la désignée doit être **visible** (erreur explicite sinon). Journal :
+`[DESIGNATED:<id>]` sur toute ligne SHOT (grammaire 11) ; l'analyzer ne lève le plafond
+`shoot_over_rng_nb` (PROJ.1.2.surcharge_atk) que pour les tirs sur la désignée et s'abstient sur les
+journaux antérieurs.
+
 ## Primitive C — `feel_no_pain`
 
 **Jet d'ignorance de blessure, après allocation, avant décrément des PV.**

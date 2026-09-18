@@ -309,19 +309,19 @@ def test_toughness_bonus_absent_retourne_base_t() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# suppress_target_on_shooting — stockage de _last_shoot_target_id
+# suppress_target_on_shooting — stockage de designated_shoot_target_id
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_suppress_target_pose_suppressed_squads() -> None:
     """Après activation de tir, suppressed_squads contient la cible si la règle est portée."""
     # Teste directement la logique de _handle_shooting_end_activation :
-    # si l'unité a suppress_target_on_shooting ET _last_shoot_target_id est posé,
+    # si l'unité a suppress_target_on_shooting ET designated_shoot_target_id est posé,
     # game_state["suppressed_squads"] reçoit l'id cible.
     attacker = _unit("atk", 1, unit_rules=[_rule("suppress_target_on_shooting")])
     target = _unit("tgt", 2)
     gs = _base_state([attacker, target])
     gs["phase"] = "shooting"
-    attacker["_last_shoot_target_id"] = "tgt"
+    attacker["designated_shoot_target_id"] = "tgt"
 
     # Appeler la fonction de production (gating arg5==1, arg1==ACTION, arg3==SHOOTING exigés)
     from engine.phase_handlers.shooting_handlers import (

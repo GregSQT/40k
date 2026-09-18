@@ -3872,14 +3872,14 @@
     {
       "id": "PROJ.1.5.grant_weapon_rule_vs_designated_target",
       "section": "1.5",
-      "label": "Overlapping Detonations — BLAST (dés extra/5 figs) vs non-MONSTER/VEHICLE (Primitive B)",
+      "label": "Overlapping Detonations — BLAST (dés extra/5 figs) vs non-MONSTER/VEHICLE, seulement sur la cible DÉSIGNÉE (Primitive B)",
       "applicability": {
         "kind": "unit_rule_in_roster",
         "rule_id": "grant_weapon_rule_vs_designated_target"
       },
       "controls": [],
       "status": "COUVERT",
-      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B) : bonus seulement si la cible de l'intent est la désignée de l'activation (`designated_shoot_target_id`, cible prioritaire — décision 2026-09-18, capacites.md §Primitive B). Contrôlé via PROJ.1.2.surcharge_atk (shoot_over_rng_nb, aucun compteur propre) : sur un journal grammaire ≥ 11, [DESIGNATED:<id>] borne le plafond aux tirs sur la désignée ; journal antérieur → abstention. Tests : test_primitive_b_granted_weapon_effects (moteur, deux cibles), test_analyzer_overlapping_detonations (analyzer)."
     },
     {
       "id": "PROJ.1.5.weapon_attacks_bonus_vs_keyword",
@@ -3896,14 +3896,14 @@
     {
       "id": "PROJ.1.5.weapon_attacks_bonus_vs_designated_target",
       "section": "1.5",
-      "label": "Hail of Bolts — +N A sur une arme spécifique vs cible désignée (Primitive B)",
+      "label": "Hail of Bolts — +N A sur une arme spécifique, seulement sur la cible DÉSIGNÉE (Primitive B)",
       "applicability": {
         "kind": "unit_rule_in_roster",
         "rule_id": "weapon_attacks_bonus_vs_designated_target"
       },
       "controls": [],
       "status": "COUVERT",
-      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B) : bonus seulement si la cible de l'intent est la désignée de l'activation (`designated_shoot_target_id`, cible prioritaire — décision 2026-09-18, capacites.md §Primitive B). Contrôlé via PROJ.1.2.surcharge_atk (shoot_over_rng_nb, aucun compteur propre) : sur un journal grammaire ≥ 11, [DESIGNATED:<id>] borne le plafond aux tirs sur la désignée ; journal antérieur → abstention. Tests : test_primitive_b_granted_weapon_effects (moteur, reproduction deux cibles), test_analyzer_hail_of_bolts (analyzer)."
     },
     {
       "id": "PROJ.1.5.weapon_profile_scaling_by_model_count",

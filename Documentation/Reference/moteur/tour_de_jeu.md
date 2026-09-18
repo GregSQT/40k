@@ -1240,9 +1240,10 @@ le tue, tir 2 annulé, fin d'activation.
    `units_cannot_charge` si elle bouge). L'humain garde son prompt
    `move_after_shooting_select_destination`. Le bot PvE répond dans la même requête, par sa
    politique (`_resolve_move_after_shooting_decision_for_ai_seat`, prédicat de siège partagé
-   `move_after_shooting_seat_is_model_driven`). Suppression : cible principale = PREMIÈRE
-   déclarée (`_last_shoot_target_id`, `setdefault`), sans contrôle « hit by one or more of those
-   attacks » — écart connu, non couvert. Tests `test_move_after_shooting_gym_path.py`.
+   `move_after_shooting_seat_is_model_driven`). Cible désignée de l'activation = PREMIÈRE
+   déclarée au siège humain, prioritaire en gym (`designate_shoot_target`, clé unique
+   `designated_shoot_target_id`, première écriture gagnante) — lue par Hail of Bolts /
+   Overlapping Detonations et par la suppression. Tests `test_move_after_shooting_gym_path.py`.
 
 ### Flux d'exécution complet (récapitulatif)
 

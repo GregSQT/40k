@@ -62,7 +62,7 @@ def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=
         "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(9, 9, player=1, hp=hp)},
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
         "unit_by_id": {
-            "1": {"id": "1", "UNIT_RULES": []},
+            "1": {"id": "1", "UNIT_RULES": [], "designated_shoot_target_id": "2"},
             "2": {"id": "2", "UNIT_RULES": [],
                   "UNIT_KEYWORDS": [{"keywordId": k} for k in target_keywords]},
         },

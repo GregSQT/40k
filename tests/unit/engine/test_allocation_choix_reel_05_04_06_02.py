@@ -56,7 +56,8 @@ def _game_state(weapon: Dict[str, Any], targets: List[Dict[str, Any]], *, precis
                "col": 0, "row": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "RNG_WEAPONS": [weapon],
                "UNIT_RULES": []}
     models = {"A0": shooter, **{m["id"]: m for m in targets}}
-    units = [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []},
+    units = [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": [],
+              "designated_shoot_target_id": "2"},
              {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY"), "UNIT_RULES": []}]
     return {
         **turn_state_invariants(),
