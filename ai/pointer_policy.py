@@ -48,6 +48,7 @@ de référence sur un cas jouet, tir ET move.
 """
 
 from functools import partial
+import math
 from typing import Any, Dict, Mapping, NamedTuple, Optional, Protocol, Tuple, Type
 
 import numpy as np
@@ -228,6 +229,70 @@ def check_logits_temperature(value: Any) -> float:
             f"model_params.logits_temperature doit etre un flottant > 0 (got {value!r})"
         )
     return float(value)
+
+
+#: Clés OBLIGATOIRES de `model_params.logits_temperature_regulation` (option 2, dossier
+#: plafonnement_p1.md) : toutes explicites, aucune valeur par défaut (T1).
+LOGITS_TEMPERATURE_REGULATION_KEYS: tuple[str, ...] = ("entropy_target", "gain", "t_min", "t_max")
+
+
+def check_logits_temperature_regulation(value: Any) -> dict[str, float] | None:
+    """`model_params.logits_temperature_regulation` : ``None`` (T fixe) ou la spec de la boucle.
+
+    Spec = dict aux QUATRE clés `entropy_target` (nats, > 0), `gain` (> 0, sans dimension),
+    `t_min` et `t_max` (bornes de T, 0 < t_min < t_max). Toute autre forme est refusée — un seul
+    refus pour `--new` (constructeur) et `--append` (`_apply_curriculum_model_params`), comme
+    `check_logits_temperature`.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(
+            "model_params.logits_temperature_regulation doit etre null ou un objet aux cles "
+            f"{LOGITS_TEMPERATURE_REGULATION_KEYS} (got {value!r})"
+        )
+    extra = set(value) - set(LOGITS_TEMPERATURE_REGULATION_KEYS)
+    missing = set(LOGITS_TEMPERATURE_REGULATION_KEYS) - set(value)
+    if extra or missing:
+        raise ValueError(
+            "model_params.logits_temperature_regulation : cles attendues "
+            f"{LOGITS_TEMPERATURE_REGULATION_KEYS}, manquantes {sorted(missing)}, "
+            f"inconnues {sorted(extra)}"
+        )
+    out: dict[str, float] = {}
+    for key in LOGITS_TEMPERATURE_REGULATION_KEYS:
+        raw = value[key]
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not raw > 0:
+            raise ValueError(
+                f"model_params.logits_temperature_regulation.{key} doit etre un flottant > 0 "
+                f"(got {raw!r})"
+            )
+        out[key] = float(raw)
+    if not out["t_min"] < out["t_max"]:
+        raise ValueError(
+            "model_params.logits_temperature_regulation : t_min doit etre < t_max "
+            f"(got {out['t_min']} >= {out['t_max']})"
+        )
+    return out
+
+
+def regulate_logits_temperature(
+    current: float, entropy_nats: float, spec: dict[str, float]
+) -> float:
+    """T de la PROCHAINE collecte, d'après l'entropie de π_T mesurée à cette update (option 2).
+
+    Loi multiplicative sur log T : ``T' = clip(T · exp(gain · (cible − H)), t_min, t_max)``.
+    H sous la cible → T monte (plus d'exploration) ; H au-dessus → T descend ; H = cible → T
+    inchangée. Multiplicative et non additive parce que T agit sur une échelle de logits (une
+    même correction relative vaut à T = 1 comme à T = 4), et bornée parce que rien n'empêche le
+    réseau d'absorber T en dilatant ses logits (mesuré S9 : entropie 1,07 → 0,72 nat en ~40 000
+    parties) — à la borne haute la boucle devient une T fixe à `t_max`, ce que la règle de lecture
+    du run doit prévoir. `entropy_nats` NaN (update sans mini-lot) → T inchangée.
+    """
+    if not math.isfinite(entropy_nats):
+        return float(current)
+    proposed = float(current) * math.exp(spec["gain"] * (spec["entropy_target"] - entropy_nats))
+    return min(spec["t_max"], max(spec["t_min"], proposed))
 
 
 class HeadNets(Protocol):

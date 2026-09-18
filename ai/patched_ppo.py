@@ -50,7 +50,10 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
-from ai.pointer_policy import PointerHeadNets, check_logits_temperature
+from ai.pointer_policy import (
+    PointerHeadNets, check_logits_temperature, check_logits_temperature_regulation,
+    regulate_logits_temperature,
+)
 from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
@@ -214,9 +217,18 @@ class PatchedMaskablePPO(MaskablePPO):
         advantage_source: str = "gae",
         q_coef: float | None = None,
         logits_temperature: float = 1.0,
+        logits_temperature_regulation: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """`entropy_normalize_by_legal` : cle `model_params`, voir `entropy_loss_normalized_by_legal`.
+
+        `logits_temperature_regulation` (option 2, dossier plafonnement_p1.md) : ``None`` = T fixe
+        (le regime S9) ; sinon la spec de la boucle qui, a chaque update, ajuste
+        `logits_temperature` pour tenir `train/entropy_loss` (entropie de π_T) a
+        `entropy_target` — voir `regulate_logits_temperature`. Regime de RUN comme T elle-meme :
+        exclue du zip, posee par le constructeur (`--new`) et par le profil (`--append`,
+        `_PLAIN_CURRICULUM_KEYS`). La T de depart reste `logits_temperature` (bornee au premier
+        reglage).
 
         Absente (False) : le terme d'entropie de la loss reste `-mean(H)`, strictement le
         comportement anterieur — seule la publication `train/entropy_loss_normalized` s'ajoute,
@@ -276,13 +288,25 @@ class PatchedMaskablePPO(MaskablePPO):
         # Avant `super().__init__` : la politique n'existe pas encore, le setter ne pose que
         # `_logits_temperature` ; `_setup_model` la reporte sur la politique construite.
         self.logits_temperature = logits_temperature
+        self.logits_temperature_regulation = logits_temperature_regulation
         super().__init__(*args, **kwargs)
 
     def _excluded_save_params(self) -> list[str]:
         return super()._excluded_save_params() + [
             "value_warmup_updates", "_vwu_done", "value_warmup_contract_id",
-            "_logits_temperature",
+            "_logits_temperature", "_logits_temperature_regulation",
         ]
+
+    # ── Regulation de la temperature (option 2) ──────────────────────────────────────────────
+
+    @property
+    def logits_temperature_regulation(self) -> dict[str, float] | None:
+        """Spec de la boucle T ← f(entropie), ou ``None`` (T fixe). Regime de RUN, exclu du zip."""
+        return self._logits_temperature_regulation
+
+    @logits_temperature_regulation.setter
+    def logits_temperature_regulation(self, value: Any) -> None:
+        self._logits_temperature_regulation = check_logits_temperature_regulation(value)
 
     # ── Température des logits (S9) ──────────────────────────────────────────────────────────
 
@@ -744,6 +768,15 @@ class PatchedMaskablePPO(MaskablePPO):
             )
         self.logger.record("train/entropy_loss", entropy_loss_mean)
         self.logger.record("train/entropy_loss_normalized", entropy_loss_normalized_mean)
+        # T qui a PRODUIT cette update (collecte et ratio) ; sous regulation, celle de la
+        # prochaine collecte est posee juste apres, sur la politique (transportee aux workers
+        # par `_serialize_policy_for_workers` au rollout suivant).
+        self.logger.record("train/logits_temperature", self.logits_temperature)
+        _regulation = self.logits_temperature_regulation
+        if _regulation is not None:
+            self.logits_temperature = regulate_logits_temperature(
+                self.logits_temperature, -float(entropy_loss_mean), _regulation
+            )
         self.logger.record("train/policy_gradient_loss", pg_loss_mean)
         self.logger.record("train/value_loss", value_loss_mean)
         self.logger.record("train/approx_kl", approx_kl_mean)
