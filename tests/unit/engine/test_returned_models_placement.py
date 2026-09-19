@@ -1274,3 +1274,41 @@ def test_la_restitution_ne_consomme_aucun_step_gym(tmp_path) -> None:
         f"la restitution a consommé {logger.episode_step_count} step(s) gym : {lignes[0]}"
     )
     assert logger.step_count == 0
+
+
+def test_la_restitution_sur_chemin_gym_consomme_un_step(tmp_path) -> None:
+    """La ligne `RETURNED` avec `consumes_gym_step=True` compte UN step dans `Steps=`.
+
+    Sur le chemin gym (`_dispatch_agent_decision_action` → `returned_models_placement`),
+    un `CHOICE_i` a été consommé : la ligne d'effet doit l'enregistrer, comme `move_after_shooting`
+    le fait pour sa propre décision. Sans ce flag, le step était perdu — `agent_decision` est
+    non-incrémentant (commentaire `_STEP_LOG_NON_INCREMENTING_TYPES`) et `return_destroyed_models`
+    l'est aussi par défaut, donc aucune ligne ne comptait le step gym.
+    """
+    from ai.step_logger import StepLogger
+    from engine.w40k_core import W40KEngine
+
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None)
+    apply_returned_models_placement(
+        gs, _SQUAD, [(6, 7), (6, 8)], [0, 1], d3=2, destroyed=2,
+        consumes_gym_step=True,
+    )
+    entry = next(e for e in gs["action_logs"] if e["type"] == "return_destroyed_models")
+    assert entry.get("consumes_gym_step") is True, entry
+
+    eng = W40KEngine.__new__(W40KEngine)
+    eng.game_state = gs
+    log = tmp_path / "step_gym.log"
+    logger = StepLogger(output_file=str(log), enabled=True, buffer_size=50)
+    logger.episode_number = 1
+    eng.step_logger = logger
+
+    eng._flush_squad_action_logs_to_step_logger(pre_action_turn=1)
+    logger._flush_buffer()
+
+    lignes = [l for l in log.read_text(encoding="utf-8").splitlines() if " RETURNED " in l]
+    assert len(lignes) == 1, log.read_text(encoding="utf-8")
+    assert logger.episode_step_count == 1, (
+        f"le chemin gym devrait compter 1 step, obtenu {logger.episode_step_count}"
+    )
+    assert logger.step_count == 1

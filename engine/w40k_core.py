@@ -4744,7 +4744,8 @@ class W40KEngine(gym.Env):
             intent = str(require_key(require_key(selected_option, "payload"), "intent"))
             decision_player = int(require_key(self.game_state, "current_player"))
             command_handlers.apply_returned_models_placement_decision(
-                self.game_state, decision_player, intent
+                self.game_state, decision_player, intent,
+                consumes_gym_step=True,
             )
             return True, self._resume_command_phase_after_faction_decision(
                 {
@@ -7902,8 +7903,11 @@ class W40KEngine(gym.Env):
         # 24.08 — jet de Deadly Demise, declenche par une mort de figurine : effet moteur, pas
         # une action d'agent. Meme statut que `dead`, dont la ligne le precede toujours.
         "deadly_demise",
-        # Figurines RENDUES (Grot Orderly, phase de commandement) : evenement moteur qui suit
-        # les decisions `returned_models_*`, pas un step d'agent.
+        # Figurines RENDUES (Grot Orderly, phase de commandement) : non-incrementant par DEFAUT
+        # (chemin bot/PvE, `_resolve_faction_decisions_for_ai_seats` — aucun step gym consomme).
+        # Sur le chemin gym (`_dispatch_agent_decision_action`), l'entree porte
+        # `consumes_gym_step: True` et la surcharge dans
+        # `_flush_squad_action_logs_to_step_logger` prend le relais.
         "return_destroyed_models",
         # 14.03 — securisation d objectif en fin de phase de commandement : effet moteur.
         "secure_objective",
@@ -7915,6 +7919,10 @@ class W40KEngine(gym.Env):
         # doublerait `episode_step_count` face a `episode_steps` du moteur pour ces types-la.
         # Les types SANS ligne d'effet (waaagh_call, reserves_declaration, fly/ascent_declaration)
         # etaient deja non-incrementants AVANT ce releve : il ne change rien pour eux.
+        # `returned_models_placement` : l'effet (`return_destroyed_models`) est dans CE set par
+        # defaut (chemin bot/PvE), mais porte `consumes_gym_step: True` sur le chemin gym — la
+        # surcharge dans `_flush_squad_action_logs_to_step_logger` garantit que le step n'est pas
+        # perdu.
         "agent_decision",
     })
 
@@ -8557,7 +8565,14 @@ class W40KEngine(gym.Env):
                 # coincident pour 14 des 15 entrees, et `return_destroyed_models` ->
                 # `returned_models` est la seule ou ils different. Interroger le set avec
                 # `action_type` y rendait donc True, et chaque Grot Orderly comptait un step.
-                step_increment=raw_type not in self._STEP_LOG_NON_INCREMENTING_TYPES,
+                #
+                # `return_destroyed_models` est dans le set (non-incrementant par defaut, chemin
+                # bot/PvE), mais porte `consumes_gym_step: True` quand l'emetteur
+                # (`apply_returned_models_placement`) a ete appele depuis un step gym
+                # (`_dispatch_agent_decision_action`). Cette surcharge par entree est le seul
+                # moyen d'etre juste pour les deux chemins sans changer le set.
+                step_increment=(raw_type not in self._STEP_LOG_NON_INCREMENTING_TYPES)
+                               or bool(raw_log.get("consumes_gym_step")),
                 action_details=self._build_step_log_details(raw_log, pre_action_turn),
             )
 

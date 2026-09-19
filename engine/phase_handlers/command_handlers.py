@@ -480,7 +480,8 @@ def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int
 
 
 def apply_returned_models_placement_decision(
-    game_state: Dict[str, Any], player: int, intent: str
+    game_state: Dict[str, Any], player: int, intent: str,
+    *, consumes_gym_step: bool = False,
 ) -> None:
     """Applique l'intention de placement choisie pour `returned_models_placement`.
 
@@ -516,6 +517,7 @@ def apply_returned_models_placement_decision(
         apply_returned_models_placement(
             game_state, squad_id, cells, selected,
             int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
+            consumes_gym_step=consumes_gym_step,
         )
     else:
         # Board changé depuis la pose : skip temporaire (non consomme once-per-battle),
@@ -1149,6 +1151,7 @@ def _returned_placement_plans(
 def apply_returned_models_placement(
     game_state: Dict[str, Any], squad_id: str,
     cells: Sequence[Tuple[int, int]], selected: Sequence[int], d3: int, destroyed: int,
+    *, consumes_gym_step: bool = False,
 ) -> None:
     """Crée les figurines rendues aux positions `cells` — ÉCRIVAIN UNIQUE de la restitution.
 
@@ -1252,7 +1255,7 @@ def apply_returned_models_placement(
             "capacite `return_destroyed_models` nommee dans ses UNIT_RULES"
         )
     anchor_col, anchor_row = int(require_key(uc, "col")), int(require_key(uc, "row"))
-    append_action_log(game_state, {
+    entry: Dict[str, Any] = {
         "type": "return_destroyed_models",
         "message": (
             f"Unit {squad_id}({anchor_col},{anchor_row}) RETURNED {len(cells)} models "
@@ -1268,7 +1271,10 @@ def apply_returned_models_placement(
         "restoredModelTypes": restored_model_types,
         "abilityDisplayName": ability_display_name,
         "d3Roll": int(d3),
-    })
+    }
+    if consumes_gym_step:
+        entry["consumes_gym_step"] = True
+    append_action_log(game_state, entry)
 
 
 def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
