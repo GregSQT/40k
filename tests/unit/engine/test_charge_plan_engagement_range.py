@@ -511,42 +511,58 @@ REACH_EZ_SUBHEX = 10  #: 2" à ISH = 5 — même valeur que le `game_rules` de `
 REACH_ROW = 62
 
 
-def _reach_state(self_size: int, target_size: int, target_col: int) -> Dict[str, Any]:
-    """Duel mono-figurine à ISH = 5 : chargeur `round`/`self_size`, cible `round`/`target_size`.
+#: Socles du roster Armageddon (`frontend/src/roster/`, `BASE_SIZE` en dixièmes de pouce) passés
+#: par `_scale_socle` à ISH = 5 : 13 (32 mm, 27 datasheets) → `round`/6, 16 (40 mm, 58 datasheets)
+#: → `round`/8, 20 → `round`/10, 35 → `round`/18, l'ovale [41, 21] → `oval`/[20, 10]. Trois de ces
+#: cinq socles ont un écart rayon continu / rayon discret non nul — le socle d'infanterie standard
+#: en fait partie. Les tailles testées ici sont donc celles du jeu, pas un échantillon inventé.
+ROSTER_SIZES_X5 = (6, 8, 10, 18)
 
-    Les tailles sont paramétrées parce que c'est LA variable du défaut : l'écart entre rayon
-    continu et rayon discret vaut 0 ou 1 subhex selon la taille (round/4 : 2 et 2 ; round/6 : 3
-    et 2), donc une borne fausse ne l'est pas pour tous les socles.
+
+def _reach_state(
+    self_size: Any, target_size: Any, target_col: int,
+    self_shape: str = "round", target_shape: str = "round",
+    self_orientation: int = 0, target_orientation: int = 0,
+) -> Dict[str, Any]:
+    """Duel mono-figurine à ISH = 5, socles paramétrés des deux côtés.
+
+    La TAILLE est la variable du défaut : l'écart entre rayon continu et rayon discret vaut 0 ou
+    1 subhex selon elle (round/8 : 4 et 4 ; round/6 : 3 et 2), donc une borne fausse ne l'est pas
+    pour tous les socles. La FORME l'est aussi, pour une autre raison : `euclidean_edge_distance`
+    traite une paire ronde↔ronde par un clearance analytique et toute paire non ronde par des
+    contours polygonaux — deux chemins distincts, dont un seul serait exercé sans ce paramètre.
     """
     charger = (10, REACH_ROW)
     target = (target_col, REACH_ROW)
     unit1 = {**unit_invariants(),
         "id": 1, "player": 1, "col": charger[0], "row": charger[1], "MOVE": 6, "HP_CUR": 1,
-        "BASE_SIZE": self_size, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
+        "BASE_SIZE": self_size, "BASE_SHAPE": self_shape, "UNIT_KEYWORDS": [], "level": 0,
     }
     unit2 = {**unit_invariants(),
         "id": 2, "player": 2, "col": target[0], "row": target[1], "MOVE": 6, "HP_CUR": 1,
-        "BASE_SIZE": target_size, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
+        "BASE_SIZE": target_size, "BASE_SHAPE": target_shape, "UNIT_KEYWORDS": [], "level": 0,
     }
     return {**turn_state_invariants(),
         "models_cache": {
             "1#0": {"col": charger[0], "row": charger[1], "level": 0, "player": 1,
-                    "squad_id": "1", "HP_CUR": 1, "BASE_SHAPE": "round",
-                    "BASE_SIZE": self_size, "orientation": 0},
+                    "squad_id": "1", "HP_CUR": 1, "BASE_SHAPE": self_shape,
+                    "BASE_SIZE": self_size, "orientation": self_orientation},
             "2#0": {"col": target[0], "row": target[1], "level": 0, "player": 2,
-                    "squad_id": "2", "HP_CUR": 1, "BASE_SHAPE": "round",
-                    "BASE_SIZE": target_size, "orientation": 0},
+                    "squad_id": "2", "HP_CUR": 1, "BASE_SHAPE": target_shape,
+                    "BASE_SIZE": target_size, "orientation": target_orientation},
         },
         "squad_models": {"1": ["1#0"], "2": ["2#0"]},
         "units_cache": {
             "1": {"col": charger[0], "row": charger[1], "player": 1,
-                  "occupied_hexes": set(
-                      compute_occupied_hexes(charger[0], charger[1], "round", self_size, 0)),
-                  "BASE_SHAPE": "round", "BASE_SIZE": self_size},
+                  "occupied_hexes": set(compute_occupied_hexes(
+                      charger[0], charger[1], self_shape, self_size, self_orientation)),
+                  "BASE_SHAPE": self_shape, "BASE_SIZE": self_size,
+                  "orientation": self_orientation},
             "2": {"col": target[0], "row": target[1], "player": 2,
-                  "occupied_hexes": set(
-                      compute_occupied_hexes(target[0], target[1], "round", target_size, 0)),
-                  "BASE_SHAPE": "round", "BASE_SIZE": target_size},
+                  "occupied_hexes": set(compute_occupied_hexes(
+                      target[0], target[1], target_shape, target_size, target_orientation)),
+                  "BASE_SHAPE": target_shape, "BASE_SIZE": target_size,
+                  "orientation": target_orientation},
         },
         "units": [unit1, unit2],
         "unit_by_id": {"1": unit1, "2": unit2},
@@ -592,7 +608,8 @@ def _engaging_cells_around(
 
 @pytest.mark.parametrize("target_col", [40, 41])
 @pytest.mark.parametrize(
-    "self_size, target_size", [(1, 1), (4, 4), (5, 5), (6, 6), (6, 18), (18, 18)]
+    "self_size, target_size",
+    [(1, 1), (4, 4), (5, 5)] + [(a, b) for a in ROSTER_SIZES_X5 for b in ROSTER_SIZES_X5],
 )
 def test_engage_reach_covers_every_engaging_cell(
     self_size: int, target_size: int, target_col: int
@@ -627,6 +644,70 @@ def test_engage_reach_covers_every_engaging_cell(
     # borne d'arrêt du BFS d'intention : il se paie à chaque construction de plan.
     assert reach <= farthest + 1, (
         f"borne {reach} trop large pour une distance engageante maximale de {farthest}"
+    )
+
+
+#: Socles NON RONDS, orientations comprises. Les orientations impaires sont là parce que
+#: l'empreinte discrète d'un ovale y perd un subhex de rayon (mesuré : `oval`/[21, 14] rend 10 aux
+#: orientations paires, 9 aux impaires) alors que son rayon circonscrit, lui, ne tourne pas.
+NON_ROUND_PAIRS = [
+    ("oval", [20, 10], 0, "round", 6, 0),
+    ("oval", [20, 10], 1, "round", 6, 0),
+    ("oval", [21, 14], 2, "oval", [18, 10], 2),
+    ("oval", [21, 14], 3, "oval", [18, 10], 3),
+    ("round", 6, 0, "oval", [21, 14], 5),
+    ("square", 6, 0, "round", 6, 0),
+    ("square", 10, 2, "square", 10, 3),
+]
+
+
+@pytest.mark.parametrize("target_col", [40, 41])
+@pytest.mark.parametrize(
+    "self_shape, self_size, self_or, target_shape, target_size, target_or", NON_ROUND_PAIRS
+)
+def test_engage_reach_covers_every_engaging_cell_for_non_round_bases(
+    self_shape: str, self_size: Any, self_or: int,
+    target_shape: str, target_size: Any, target_or: int, target_col: int,
+) -> None:
+    """Même contrat sur l'AUTRE chemin du prédicat : les contours polygonaux.
+
+    `euclidean_edge_distance` n'emprunte le clearance analytique que pour une paire
+    ronde↔ronde ; toute paire impliquant un `oval` ou un `square` passe par
+    `_socle_edge_primitives`. La borne, elle, s'écrit dans les deux cas avec
+    `bounding_radius_norm` — ce test est ce qui prouve que ce rayon majore bien ces contours-là,
+    au lieu de le supposer depuis la formule.
+
+    La borne n'est PAS serrée ici, et ne peut pas l'être : le rayon circonscrit d'un ovale vaut
+    son demi-grand-axe quelle que soit son orientation, alors que l'engagement le plus lointain
+    dépend de l'axe présenté. Marge mesurée sur 42 configurations : 0 à 2 subhexes. Le plafond de
+    2 est là pour qu'un élargissement au-delà se voie.
+
+    CE QUE CE TEST NE VERROUILLE PAS : l'ancienne borne (rayons d'empreinte + 1) passe ces sept
+    paires — mesuré en la réintroduisant, 18 rouges sur la paramétrisation ronde et 0 ici. C'est
+    un verrou de CONTRAT, pas de régression sur le défaut de la suite 168.
+    """
+    from engine.phase_handlers.shared_utils import _charge_engage_reach
+
+    gs = _reach_state(
+        self_size, target_size, target_col,
+        self_shape=self_shape, target_shape=target_shape,
+        self_orientation=self_or, target_orientation=target_or,
+    )
+    target = (target_col, REACH_ROW)
+    reach = _charge_engage_reach(
+        gs, "1", [gs["models_cache"]["1#0"]], [gs["units_cache"]["2"]], [target],
+        get_engagement_zone(gs),
+    )
+    engaging = _engaging_cells_around(gs, target, reach + 6)
+
+    assert engaging, "aucune cellule engageante : le balayage ne prouverait rien"
+    farthest = max(calculate_hex_distance(c, r, *target) for c, r in engaging)
+    assert farthest <= reach, (
+        f"cellules engageantes jusqu'a {farthest} pour une borne de {reach} : "
+        f"{sorted(c for c in engaging if calculate_hex_distance(c[0], c[1], *target) > reach)}"
+    )
+    assert reach <= farthest + 2, (
+        f"borne {reach} pour une distance engageante maximale de {farthest}"
     )
 
 

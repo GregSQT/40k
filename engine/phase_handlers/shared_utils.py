@@ -7613,6 +7613,13 @@ def _charge_engage_reach(
     UNE BORNE PAR GEOMETRIE : elle doit s'ecrire dans la meme geometrie que le predicat qu'elle
     majore (`engagement_distance_metric`), sans quoi elle ne majore rien.
 
+    REGLE : 01.04 MEASURING DISTANCES — « measure to or from the closest part of that model's
+    base » — et 03.04 ENGAGEMENT — « a model's engagement range is the area of the battlefield
+    within 2" horizontally and 5" vertically of it ». La mesure exacte est donc CONTINUE, de bord
+    a bord : c'est ce que fait la metrique `euclidean`, et c'est pourquoi la borne s'y ecrit avec
+    les rayons de socle et non avec ceux de l'empreinte discrete, qui n'est qu'une approximation
+    de grille.
+
     - ``hex`` : le predicat compare des EMPREINTES DISCRETES (`min_distance_between_sets`), donc
       la borne s'ecrit avec les rayons de ces memes empreintes (inegalite triangulaire
       hexagonale). Le ``+ 1`` est la parite de colonne : la forme d'une empreinte en depend, et
@@ -7631,6 +7638,9 @@ def _charge_engage_reach(
       pas hexagonal en ligne droite, 1,5 : c'est l'axe des colonnes, l'axe des lignes coutant
       sqrt(3) (verifie par balayage sur les deux parites). Elle est plus PETITE que la borne hex
       une fois sur deux (socles 8/8 : 18 contre 19, soit 114 cellules de moins par cible).
+      Ce n'est pas un cas de coin : passes par `_scale_socle` a ISH = 5, les socles du roster
+      donnent `round`/6 (32 mm, le socle d'infanterie standard), `round`/8, `round`/10,
+      `round`/18 et `oval`/[20, 10] — et trois des cinq ont un ecart non nul.
 
     Le ``1e-9`` est une garde de TRONCATURE, pas une marge metier : les rayons sont des multiples
     de 0,75, le quotient tombe donc pile sur un entier des que les deux socles sont ronds, et une
