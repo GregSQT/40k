@@ -3,7 +3,8 @@
 Le journal écrit ce que le moteur a appliqué et rien ne le vérifiait :
   - ``Save R(<base>+ AP<n> → <eff>+)`` — le seuil de sauvegarde EFFECTIF de la figurine allouée ;
   - ``Dmg:XHP [FNP:<sauvés>/<seuil>+ ×<tentatives>]`` — les jets Feel No Pain d'une attaque ;
-  - ``SUFFERS n Mortal Wounds [<tag>] … [FNP:<sauvés>]`` — leur miroir sur les blessures mortelles.
+  - ``SUFFERS n Mortal Wounds [<tag>] … [FNP_ROLLS: <mid>=<sauvés>/<seuil>+ ×<blessures> …]`` —
+    leur miroir sur les blessures mortelles, PAR FIGURINE.
 
 Deux compteurs, un par entrée du corpus (bucket §2.3 « dégâts ») :
 
@@ -26,9 +27,9 @@ Deux compteurs, un par entrée du corpus (bucket §2.3 « dégâts ») :
    (14.02 : « within range of a terrain objective while it is within that terrain area » — son
    socle recouvre l'aire) ou à 6" du centre, mesurés du BORD de son socle (01.04) avec la
    métrique de portée du run. Aucun FNP attendu → tout `[FNP:]` est une faute ;
-   FNP attendu, dégâts appliqués (`Dmg:X>0`) sans `[FNP:]` → faute SEULEMENT en grammaire
-   `FNP_MARKER_GRAMMAR` ou plus (ci-dessous) ; seuil ≠ attendu → faute ;
-   `X ≠ tentatives − sauvés` → faute.
+   FNP attendu, dégâts appliqués (`Dmg:X>0`) sans `[FNP:]` → faute ; seuil ≠ attendu → faute ;
+   `X ≠ tentatives − sauvés` → faute. Sur une ligne de blessures mortelles, le même jugement est
+   rendu PAR FIGURINE sur les entrées de `[FNP_ROLLS:]` (cf. `check_fnp_mortal`).
 
 « PRÉSENTE » = figurine de l'escouade cible au Select Targets step de l'activation
 (`SelectTargetsFreeze.models`) : c'est l'échéance de 19.04 avec sa dernière clause — « if that
@@ -36,12 +37,12 @@ last model was destroyed as the result of an attack, the ability applies until t
 unit has resolved all of its attacks » —, et le journal émet les lignes DEAD AVANT les lignes
 d'attaque de l'activation, donc les socles VIVANTS à la ligne sous-estimeraient les sources.
 
-L'ABSENCE du marqueur n'est jugée qu'à partir de `FNP_MARKER_GRAMMAR` : le marqueur est apparu
-en grammaire 7 (2026-08-20) sans incrément, et la branche `Save [DEVASTATING WOUNDS]` l'a omis
-jusqu'à la 16 alors que le moteur y jetait le dé — aucune version antérieure ne le garantit, et
-un journal de 7 à 15 compterait donc une faute INVENTÉE sur chaque ligne de dégâts. Les trois
-autres verdicts (présence sans source, seuil, compte) ne dépendent que de ce que la ligne PORTE
-et restent rendus à toute version.
+24.12 est cité mot pour mot : « Each time a model with this ability would lose a wound, roll
+one D6: on an X+, that wound is not lost. » Le jet est donc attaché à LA FIGURINE, et 06.02 en
+sélectionne une par blessure mortelle (« Select Model … The selected model loses 1 wound ») :
+c'est pourquoi le contrôle des blessures mortelles se rend par figurine et non sur un total.
+24.02 justifie le seuil unique : les instances d'une même capacité ne se cumulent pas, une seule
+s'applique, et le moteur prend la meilleure.
 
 CE QUI EST DÉLIBÉRÉMENT ÉCARTÉ (abstention, jamais une faute inventée) : segment `Save` sans
 base/AP (journal antérieur, `[DEVASTATING WOUNDS]`, `[NOT ALLOCATED]`) ; figurine allouée ou
@@ -55,6 +56,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
+from ai.analyzer_core import parse_fnp_rolls
 from ai.analyzer_rules import note_rule_usage
 from shared.data_validation import require_key
 
@@ -62,20 +64,26 @@ from shared.data_validation import require_key
 SAVE_SEGMENT_RE = re.compile(r"Save\s+(\d+)\((\d+)\+\s+AP(-?\d+)\s*→\s*(\d+)\+\)")
 #: `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` (attaque, `_save_segments`).
 FNP_ATTACK_RE = re.compile(r"\[FNP:(\d+)/(\d+)\+ ×(\d+)\]")
-#: `[FNP:<sauvés>]` (blessures mortelles, `SUFFERS`).
-FNP_MORTAL_RE = re.compile(r"\[FNP:(\d+)\]")
+#: `SUFFERS <n> Mortal Wounds` — total DÉCLARÉ, borne haute de ce que `[FNP_ROLLS:]` attribue
+#: (06.02 : « until either all of them have been inflicted or that unit is destroyed »).
+MORTAL_DECLARED_RE = re.compile(r"SUFFERS\s+(\d+)\s+Mortal\s+Wounds")
 DMG_RE = re.compile(r"Dmg:(\d+)HP")
 _ALLOC_MODEL_RE = re.compile(r"\[ALLOC_MODEL:\s*(\d+#[^\s\]]+)\s*\]")
 #: Sentinelle « pas d'InSv » du moteur (`save_threshold`).
 NO_INVUL = 7
 #: Blessures mortelles de source PSYCHIC (tags `HAZARD_CONTEXT_TAGS`) : Da Jump seulement.
 PSYCHIC_MORTAL_TAGS = ("[DA JUMP]",)
-
-#: Grammaire à partir de laquelle `[FNP:]` est GARANTI sur toute ligne d'attaque portant des
-#: dégâts (`ai/step_logger.LOG_GRAMMAR_VERSION`, entrée 16) — donc à partir de laquelle son
-#: absence est jugeable. Ne concerne PAS le miroir `[FNP:n]` de `SUFFERS` : celui-là n'est écrit
-#: que si au moins une blessure est sauvée, son absence reste indécidable à toute version.
-FNP_MARKER_GRAMMAR = 16
+#: Tags dont les blessures mortelles NE peuvent PAS tomber dans le sursis 19.04 : aucune
+#: allocation de tir ni de combat n'est ouverte quand elles sont infligées (24.15 est un test de
+#: hasard, 09.07 un jet de fuite, Da Jump un effet de mouvement). Sur eux seulement, les socles
+#: vivants à la ligne donnent exactement les sources que le moteur a lues, et le verdict de
+#: SOURCE est rendu. Hold Still and Say Aaargh tombe en pleine allocation de combat, et
+#: Exhortation of Rage n'est pas prouvée hors sursis : les deux s'abstiennent.
+#:
+#: Une EXPRESSION et non une liste de sous-chaînes : le producteur écrit `[HAZARDOUS:<n>]` dès
+#: que le compte d'armes 24.15 est connu, et `"[HAZARDOUS]" in ligne` est alors FAUX — le piège
+#: exact déjà payé une fois (`_HAZARDOUS_TAG_RE`, `ai/analyzer_core.py`).
+SOURCE_DECIDABLE_MORTAL_RE = re.compile(r"\[(?:HAZARDOUS(?::\d+)?|DESPERATE ESCAPE|DA JUMP)\]")
 
 SAVE_COUNTER = "save_threshold_mismatch"
 FNP_COUNTER = "fnp_threshold_mismatch"
@@ -277,11 +285,11 @@ def check_fnp(
     defender = int(state.unit_player.get(target_id, attacker_player))  # get allowed
     dmg = int(dmg_m.group(1)) if dmg_m else 0
     if fnp_m is None:
-        # FNP attendu (et sans ambiguïté), dégâts appliqués → le moteur devait jeter. Jugeable
-        # seulement si la grammaire GARANTIT le marqueur : en deçà, son absence ne distingue pas
-        # un moteur en panne d'un producteur qui ne l'écrivait pas encore.
-        if (dmg > 0 and None not in accepted and not ambiguous
-                and state.log_grammar >= FNP_MARKER_GRAMMAR):
+        # FNP attendu (et sans ambiguïté), dégâts appliqués → le moteur devait jeter. Jugé sans
+        # garde de version : la compatibilité avec les journaux antérieurs à la garantie a été
+        # abandonnée (décision du 2026-09-19), et une garde qu'aucun journal ne peut plus
+        # atteindre est du code mort qui dit le contraire de ce que fait le lecteur.
+        if dmg > 0 and None not in accepted and not ambiguous:
             _error(state, stats, FNP_COUNTER, defender, line,
                    f"Dmg:{dmg}HP sans [FNP:] alors qu'un Feel No Pain {min(t for t in accepted if t is not None)}+ "
                    "est porté par une source présente")
@@ -305,20 +313,56 @@ def check_fnp_mortal(
     state: Any, config: Any, stats: Dict[str, Any], line: str, action_desc: str,
     victim_id: str, victim_player: int,
 ) -> None:
-    """Blessures mortelles : `[FNP:n]` (n > 0) exige une source présente ; la source PSYCHIC est
-    lue sur le tag (`PSYCHIC_MORTAL_TAGS`). Le compte n'est pas jugé ici — le producteur n'écrit
-    ni seuil ni tentatives sur SUFFERS, et un jet entièrement raté ne laisse aucun token."""
-    m = FNP_MORTAL_RE.search(action_desc)
-    if m is None or int(m.group(1)) <= 0:
-        return
-    present = _present_types(state, None, victim_id)
-    if present is None:
-        return
-    is_psychic = any(tag in action_desc for tag in PSYCHIC_MORTAL_TAGS)
-    accepted, _ambiguous = expected_fnp_thresholds(
-        state, config, victim_id, present, alloc_model_id(action_desc), is_psychic,
-    )
+    """Blessures mortelles : chaque entrée de `[FNP_ROLLS:]` est jugée POUR SA FIGURINE (24.12,
+    06.02) — jet manquant alors qu'une source s'applique, jet revendiqué sans aucune source,
+    seuil faux, sauvés supérieurs aux blessures, total attribué supérieur au total déclaré.
+
+    La source PSYCHIC est lue sur le tag (`PSYCHIC_MORTAL_TAGS`), comme pour Da Jump.
+
+    CE QUI EST ÉCARTÉ, et pourquoi. 19.04 dernière clause : « if that last model was destroyed
+    as the result of an attack, the ability it was conferring upon the attached unit applies
+    until the attacking unit has resolved all of its attacks ». Le moteur l'implémente, et
+    n'ouvre ce sursis que pendant une allocation de TIR ou de COMBAT
+    (`_attack_allocation_in_progress`, `engine/phase_handlers/shared_utils.py`) : une source
+    morte y confère encore son Feel No Pain, ce que les socles vivants à la ligne ne disent pas.
+    Les verdicts de SOURCE ne sont donc rendus que sur les tags qui ne peuvent PAS tomber dans
+    ce sursis (`SOURCE_DECIDABLE_MORTAL_RE`) ; sur les autres, seuls les comptes sont jugés.
+    Abstention explicite, jamais une faute inventée.
+    """
+    rolls = parse_fnp_rolls(action_desc)
+    if rolls is None:
+        return  # `SUFFERS 0` : aucune blessure attribuée. L'absence sur une ligne qui en
+        # déclare est levée par `net_mortal_wounds`, pas comptée comme une faute de règle.
     note_rule_usage(stats, "PROJ.2.3.fnp", int(victim_player))
-    if not {t for t in accepted if t is not None}:
+    declared = MORTAL_DECLARED_RE.search(action_desc)
+    allocated = sum(w for _mid, _s, _t, w in rolls)
+    if declared is not None and allocated > int(declared.group(1)):
         _error(state, stats, FNP_COUNTER, int(victim_player), line,
-               f"[FNP:{m.group(1)}] sur des blessures mortelles sans aucun Feel No Pain porté par une source présente")
+               f"[FNP_ROLLS:] attribue {allocated} blessure(s) pour {declared.group(1)} déclarée(s)")
+    source_decidable = SOURCE_DECIDABLE_MORTAL_RE.search(action_desc) is not None
+    present = _present_types(state, None, victim_id)
+    is_psychic = any(tag in action_desc for tag in PSYCHIC_MORTAL_TAGS)
+    for mid, saves, threshold, wounds in rolls:
+        if saves > wounds:
+            _error(state, stats, FNP_COUNTER, int(victim_player), line,
+                   f"{mid} : {saves} sauvée(s) pour {wounds} blessure(s) attribuée(s)")
+            continue
+        if not source_decidable or present is None:
+            continue
+        accepted, ambiguous = expected_fnp_thresholds(
+            state, config, victim_id, present, mid, is_psychic,
+        )
+        if ambiguous:
+            continue
+        real = {t for t in accepted if t is not None}
+        if threshold is None:
+            if real and None not in accepted:
+                _error(state, stats, FNP_COUNTER, int(victim_player), line,
+                       f"{mid} encaisse {wounds} blessure(s) mortelle(s) sans jet Feel No Pain "
+                       f"alors qu'un {min(real)}+ est porté par une source présente")
+        elif not real:
+            _error(state, stats, FNP_COUNTER, int(victim_player), line,
+                   f"{mid} : Feel No Pain {threshold}+ jeté sans aucune source présente qui le porte")
+        elif threshold not in real:
+            _error(state, stats, FNP_COUNTER, int(victim_player), line,
+                   f"{mid} : seuil FNP {threshold}+ vs attendu {sorted(real)}")

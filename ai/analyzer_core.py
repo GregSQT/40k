@@ -5,7 +5,7 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 
 import re
 from functools import lru_cache
-from typing import Any, Dict, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from engine.constants import DRAW_WINNER
 from shared.data_validation import (
@@ -247,29 +247,64 @@ _SAME_ACTIVATION_LINE_RE = attack_line_re(r"SHOT|ATTACKED|FOUGHT|DID NOT ATTACK"
 #: Mort par-figurine : `Unit N DEAD model=<mid> reason=<raison>`. La raison est EXIGÉE par le
 #: formateur (`KeyError` sinon) : elle est donc sur chaque ligne DEAD de toute grammaire.
 _DEAD_EVENT_RE = re.compile(r'Unit (\d+)\S* DEAD model=(\S+) reason=(\w+)')
-#: 24.12 Feel No Pain sur les blessures MORTELLES. Le journal porte le total BRUT ; le tag dit
-#: combien de blessures la sauvegarde a annulées. Attention, ce n'est PAS le même tag que celui
-#: des dégâts d'attaque (`[FNP:{saves}/{seuil}+ ×{tentatives}]`, `step_logger.py:280`), qui est
-#: purement informatif parce que `Dmg:` y est déjà net.
-_FNP_SAVED_RE = re.compile(r'\[FNP:(\d+)\]')
+#: 24.12 Feel No Pain sur les blessures MORTELLES, grammaire 17 : `[FNP_ROLLS: <mid>=<sauvés>/
+#: <seuil>+ ×<blessures> …]`, une entrée par suite contiguë de blessures attribuées à la même
+#: figurine au même seuil — 06.02 sélectionne une figurine par blessure et 24.12 jette le dé de
+#: CETTE figurine —, `none` quand aucun Feel No Pain ne s'y appliquait. Ce n'est PAS le tag des
+#: dégâts d'attaque (`[FNP:<sauvés>/<seuil>+ ×<tentatives>]`), purement informatif parce que
+#: `Dmg:` y est déjà net : celui-ci porte la soustraction.
+_FNP_ROLLS_RE = re.compile(r'\[FNP_ROLLS:\s*([^\]]+)\]')
+#: Une entrée : `<mid>=<sauvés>/<seuil>+ ×<blessures>` ou `<mid>=none ×<blessures>`.
+_FNP_ROLL_ENTRY_RE = re.compile(r'([^\s=]+)=(?:none|(\d+)/(\d+)\+)\s+×(\d+)')
 
 
-def net_mortal_wounds(brut: int, action_desc: str) -> int:
-    """Blessures mortelles RÉELLEMENT subies : total du journal moins les sauvegardes FNP.
+def parse_fnp_rolls(action_desc: str) -> Optional[List[Tuple[str, int, Optional[int], int]]]:
+    """Entrées de `[FNP_ROLLS:]` sous la forme `(mid, sauvés, seuil, blessures)` — seuil `None`
+    quand aucun dé n'a été jeté pour cette figurine. `None` si le token est absent de la ligne.
 
-    UN SEUL lecteur du tag pour les TROIS lignes qui le portent — `[HAZARDOUS]` (24.15),
+    Lecteur UNIQUE du token, partagé par la soustraction des points de vie (ci-dessous) et par
+    le contrôle 24.12 (`ai/analyzer_save.check_fnp_mortal`) : deux expressions régulières pour
+    une même forme finissent par diverger, et c'est ainsi que le tag précédent a vécu sur deux
+    branches et pas sur la troisième.
+    """
+    m = _FNP_ROLLS_RE.search(action_desc)
+    if m is None:
+        return None
+    return [
+        (e.group(1),
+         int(e.group(2)) if e.group(2) is not None else 0,
+         int(e.group(3)) if e.group(3) is not None else None,
+         int(e.group(4)))
+        for e in _FNP_ROLL_ENTRY_RE.finditer(m.group(1))
+    ]
+
+
+def net_mortal_wounds(brut: int, action_desc: str, *, state: Any) -> int:
+    """Blessures mortelles RÉELLEMENT subies : celles qui ont été ATTRIBUÉES, moins celles
+    qu'un Feel No Pain a annulées (24.12).
+
+    UN SEUL lecteur pour les TROIS lignes qui portent le token — `[HAZARDOUS]` (24.15),
     `[DESPERATE ESCAPE]` (09.07) et les capacités de datasheet (06.02) — parce que les trois
     l'avaient déjà écrit chacune de leur côté et que deux d'entre elles ont vécu sans la
     soustraction : l'analyzer appliquait alors le total pré-FNP et tuait une unité que le moteur
-    avait laissée vivante, en silence. Le prochain tag de blessures mortelles n'aura qu'un
-    endroit à appeler.
+    avait laissée vivante, en silence.
+
+    Le total DÉCLARÉ ne fait plus foi : 06.02 résout ses blessures « until either all of them
+    have been inflicted or that unit is destroyed », si bien qu'une escouade qui tombe en cours
+    de séquence en encaisse moins qu'annoncé. Le token dit ce qui a réellement été attribué.
     """
-    if "[ALL FNP SAVED]" in action_desc:
+    if brut <= 0:
+        # `SUFFERS 0 … [NO ALLOC]` : aucune blessure attribuée, donc aucun jet à écrire. Même
+        # garde que celle qui protège `_alloc_model_from_line` sur ces lignes.
         return 0
-    saved = _FNP_SAVED_RE.search(action_desc)
-    if saved:
-        return max(0, brut - int(saved.group(1)))
-    return brut
+    rolls = parse_fnp_rolls(action_desc)
+    if rolls is None:
+        raise ValueError(
+            f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — une ligne "
+            f"`SUFFERS {brut} Mortal Wounds` sans `[FNP_ROLLS:]`. Le producteur le garantit "
+            "depuis la grammaire 17 ; son absence est une panne, pas un vieux format."
+        )
+    return max(0, sum(w for _mid, _s, _t, w in rolls) - sum(s for _mid, s, _t, _w in rolls))
 #: 06.02 par CAPACITÉ de datasheet. Les CLÉS viennent de `HAZARD_CONTEXT_TAGS`, table partagée
 #: avec l'émetteur, si bien qu'un tag ne peut pas être orthographié différemment des deux côtés.
 #: L'INVENTAIRE, lui, est écrit ici à la main : ajouter une capacité 06.02 au moteur ne l'ajoute
@@ -2687,7 +2722,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # appliquait les dégâts à une AUTRE unité — l'attribution fausse que ce
                         # site venait de fermer, rouverte sur le chemin de la ligne malformée.
                         if _hz_match and _dmg_actor_id is not None:
-                            _hz_mw = net_mortal_wounds(int(_hz_match.group(1)), action_desc)
+                            _hz_mw = net_mortal_wounds(int(_hz_match.group(1)), action_desc, state=state)
                             # Cible = acteur, nommé par le préfixe de la ligne (cf. garde ci-dessus).
                             _hz_unit_id = _dmg_actor_id
                             # 24.12 : `[FNP:n]` sur ces blessures exige une source présente.
@@ -2746,9 +2781,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # retient le dernier ID de header, pas celui de la ligne courante).
                             # grammar ≥ 6 : [ALLOC_MODEL:] présent si mw>0, lu comme pour tir/mêlée.
                             # grammar < 6 : None → chemin hérité (ordered_living_mids[0]).
-                            # mw==0 : aucun dé raté (step.log émet [NO ALLOC]) ou [ALL FNP SAVED]
-                            # → aucune blessure effective → aucune allocation possible ; on saute
-                            # le bloc de dégâts entièrement.
+                            # mw==0 : aucun dé raté (step.log émet [NO ALLOC]), ou toutes les
+                            # blessures sauvées par Feel No Pain — que `[FNP_ROLLS:]` dit désormais
+                            # seul → aucune blessure effective, aucune allocation possible ; on
+                            # saute le bloc de dégâts entièrement.
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
@@ -2792,7 +2828,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             action_desc,
                         )
                         if _de_match:
-                            _de_mw = net_mortal_wounds(int(_de_match.group(1)), action_desc)
+                            _de_mw = net_mortal_wounds(int(_de_match.group(1)), action_desc, state=state)
                             _de_unit_id = _dmg_actor_id
                             if _de_unit_id is not None:
                                 # 24.12 : `[FNP:n]` sur ces blessures exige une source présente.
@@ -2838,7 +2874,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # ADVERSAIRE, pas de l'unité elle-même — d'où `[FROM:<unité>]`, sans
                         # lequel la victime serait créditée de ses propres morts.
                         action_type = 'mortal_wounds_ability'
-                        _mwa_mw = net_mortal_wounds(int(_mwa_match.group(1)), action_desc)
+                        _mwa_mw = net_mortal_wounds(int(_mwa_match.group(1)), action_desc, state=state)
                         _mwa_unit_id = _dmg_actor_id
                         _mwa_src_match = re.search(r'\[FROM:([^\]]+)\]', action_desc)
                         if _mwa_unit_id is None or _mwa_src_match is None:

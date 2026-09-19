@@ -45,7 +45,7 @@ def _hazard_line(with_models: bool) -> str:
     suffix = f" [MODELS: 1#1@({A_ALIVE[0]},{A_ALIVE[1]},z0)]" if with_models else ""
     return (
         f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({A_DEAD[0]},{A_DEAD[1]})"
-        f" SUFFERS 1 Mortal Wounds [HAZARDOUS]{suffix} [SUCCESS]\n"
+        f" SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1]{suffix} [SUCCESS]\n"
     )
 
 _ADVANCE = (

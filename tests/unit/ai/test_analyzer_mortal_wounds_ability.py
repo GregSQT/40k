@@ -35,21 +35,21 @@ _UNITS = (
 
 _HOLD_STILL_3_MW = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101_m0=none ×3] [R:+0.0] [SUCCESS]\n"
 )
 _EXHORTATION_2_MW = (
     "[10:00:03] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 2 Mortal Wounds "
-    "[EXHORTATION DE RAGE] [FROM:1] [R:+0.0] [SUCCESS]\n"
+    "[EXHORTATION DE RAGE] [FROM:1] [FNP_ROLLS: 101_m0=none ×2] [R:+0.0] [SUCCESS]\n"
 )
 _SANS_SOURCE = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FNP_ROLLS: 101_m0=none ×5] [R:+0.0] [SUCCESS]\n"
 )
 # 5 BM sur une victime à HP_MAX=5 : la mort est le signal observable que les points de vie
 # ont réellement été retirés (`stats` n'expose pas `unit_hp`).
 _HOLD_STILL_FATAL = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101_m0=none ×5] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -113,22 +113,22 @@ def test_ligne_sans_source_est_une_erreur_de_format(tmp_path, monkeypatch):
 # ROUGE sans le fix : l'analyzer appliquait le total pré-FNP (5) → mort fausse.
 _FNP_PARTIEL_5MW_2SAVES = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP:2] [ALLOC_MODEL: 101_m0] "
-    "[R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101_m0=2/5+ ×5] "
+    "[ALLOC_MODEL: 101_m0] [R:+0.0] [SUCCESS]\n"
 )
 # Grunt (HP_MAX=5) subit 5 BM mais toutes sauvées par FNP → 0 BM nettes → survit.
 # ROUGE sans le fix : l'analyzer appliquait 5 BM → mort fausse.
 _FNP_TOTAL_5MW_ALL_SAVED = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [ALL FNP SAVED] "
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101_m0=5/5+ ×5] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
 
 def test_fnp_partiel_soustrait_des_blessures(tmp_path, monkeypatch):
     """ROUGE sans le fix : le total pré-FNP (5) était appliqué ; Grunt (HP=5) mourait alors
-    que le moteur lui avait laissé 2 PV. VERT avec le fix : [FNP:2] soustrait 2 → 3 BM nettes
-    → Grunt (HP=5) survit."""
+    que le moteur lui avait laissé 2 PV. VERT : `[FNP_ROLLS: 101_m0=2/5+ ×5]` dit 5 blessures
+    attribuées dont 2 sauvées → 3 BM nettes → Grunt (HP=5) survit."""
     stats = _parse(tmp_path, monkeypatch, _FNP_PARTIEL_5MW_2SAVES)
     assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
     deaths = stats["current_episode_deaths"]
@@ -138,11 +138,11 @@ def test_fnp_partiel_soustrait_des_blessures(tmp_path, monkeypatch):
 
 
 def test_fnp_total_annule_toutes_les_blessures(tmp_path, monkeypatch):
-    """ROUGE sans le fix : [ALL FNP SAVED] ignoré ; 5 BM appliquées → Grunt mourait.
-    VERT avec le fix : 0 BM nettes → Grunt (HP=5) survit."""
+    """« Tout sauvé » n'a plus de token propre : il se lit sur `[FNP_ROLLS:]`, dont les sauvés
+    égalent les blessures attribuées. ROUGE sans la soustraction : 5 BM appliquées → mort."""
     stats = _parse(tmp_path, monkeypatch, _FNP_TOTAL_5MW_ALL_SAVED)
     assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
     deaths = stats["current_episode_deaths"]
     assert not any(d[1] == "101" for d in deaths), (
-        f"Grunt (HP=5) doit survivre à 0 BM nettes ([ALL FNP SAVED]), got deaths={deaths}"
+        f"Grunt (HP=5) doit survivre à 0 BM nettes (5 sauvées sur 5), got deaths={deaths}"
     )

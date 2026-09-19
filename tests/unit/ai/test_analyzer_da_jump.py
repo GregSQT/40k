@@ -57,7 +57,7 @@ def _ingress(sec: int, col: int, row: int, turn: int = 1) -> str:
 def _suffers(sec: int, n: int, trigger: int = 1, mw: int | None = None) -> str:
     mw = n if mw is None else mw
     return (
-        f"[10:00:{sec:02d}] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS {n} Mortal Wounds [DA JUMP]"
+        f"[10:00:{sec:02d}] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS {n} Mortal Wounds [DA JUMP] [FNP_ROLLS: 1_m0=none ×{n}]"
         f" Trigger:{trigger} MW:{mw} [FROM:1]{_MODELS_ON} [ALLOC_MODEL: 1#0] [R:+0.0] [SUCCESS]\n"
     )
 

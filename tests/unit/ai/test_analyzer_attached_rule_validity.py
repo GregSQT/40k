@@ -83,7 +83,7 @@ _UNITS_SANS_COMPOSITION = (
 
 _HOLD_STILL = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101#0=none ×3] [R:+0.0] [SUCCESS]\n"
 )
 
 #: Le PainBoy (source de la capacité) est retiré AVANT le relevé : le `[MODELS:]` de la ligne
@@ -105,7 +105,7 @@ _PAINBOY_MORT_AVEC_SOCLE_RENDU = (
 #: Relevé par l'escouade 5 (Boyz sans personnage), même type que l'escouade attachée 1.
 _HOLD_STILL_UNITE_5 = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:5] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:5] [FNP_ROLLS: 101#0=none ×3] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -120,7 +120,7 @@ _PAINBOY_RENDU = (
 #: grammaire 2).
 _HOLD_STILL_G10 = (
     "[10:00:02] E1 T2 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101#0=none ×3] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 #: Même ligne, mais c'est un Boy qui revient : la source (PainBoy) reste morte.
 _BOY_RENDU = (

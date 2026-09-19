@@ -759,12 +759,44 @@ def test_deadly_demise_action_log_atteint_step_log_sans_consommer_de_step(tmp_pa
 
 
 def test_format_replay_style_message_hazardous_mortal_wounds() -> None:
-    """VERROU : le formatter HAZARDOUS émet [ALLOC_MODEL:] — supprimer target_model_id rend ce test ROUGE."""
+    """VERROU : le formatter HAZARDOUS émet [FNP_ROLLS:] puis [ALLOC_MODEL:] — supprimer l'un
+    ou l'autre rend ce test ROUGE."""
     logger = StepLogger(enabled=False)
     result = logger._format_replay_style_message(
-        1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2, "target_model_id": "3#0"}
+        1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2,
+                         "target_model_id": "3#0",
+                         "fnp_rolls_mortal": [{"model_id": "3#0", "threshold": 5,
+                                               "wounds": 2, "saves": 1}]}
     )
-    assert result == "Unit 3(2, 4) SUFFERS 2 Mortal Wounds [HAZARDOUS] [ALLOC_MODEL: 3#0]"
+    assert result == (
+        "Unit 3(2, 4) SUFFERS 2 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 3#0=1/5+ ×2] "
+        "[ALLOC_MODEL: 3#0]"
+    )
+
+
+def test_format_replay_style_message_hazardous_missing_fnp_rolls_raises() -> None:
+    """VERROU grammaire 17 : une ligne qui attribue des blessures sans dire ses jets Feel No
+    Pain par figurine lève — 24.12 en impose un par blessure, l'absence est une panne."""
+    from shared.data_validation import ConfigurationError
+
+    logger = StepLogger(enabled=False)
+    with pytest.raises(ConfigurationError, match=r"sans detail par blessure"):
+        logger._format_replay_style_message(
+            1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2,
+                             "target_model_id": "3#0"}
+        )
+
+
+def test_format_replay_style_message_hazardous_all_saved_omits_alloc_model() -> None:
+    """Toutes les blessures sauvées : aucune figurine n'a perdu de PV, donc pas d'[ALLOC_MODEL:].
+    « Tout sauvé » se lit sur le token, sans second tag qui dise le même fait."""
+    logger = StepLogger(enabled=False)
+    result = logger._format_replay_style_message(
+        1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2,
+                         "fnp_rolls_mortal": [{"model_id": "3#0", "threshold": 5,
+                                               "wounds": 2, "saves": 2}]}
+    )
+    assert result == "Unit 3(2, 4) SUFFERS 2 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 3#0=2/5+ ×2]"
 
 
 def test_format_replay_style_message_hazardous_missing_mortal_wounds_raises() -> None:
@@ -777,13 +809,16 @@ def test_format_replay_style_message_hazardous_missing_mortal_wounds_raises() ->
 
 
 def test_format_replay_style_message_hazardous_missing_target_model_id_raises() -> None:
-    """VERROU : un payload sans target_model_id lève ConfigurationError (grammar 6 : modèle obligatoire)."""
+    """VERROU : une blessure RESTÉE sans target_model_id lève (grammaire 6 : figurine obligatoire
+    dès qu'un point de vie est retiré)."""
     from shared.data_validation import ConfigurationError
 
     logger = StepLogger(enabled=False)
     with pytest.raises(ConfigurationError, match=r"target_model_id"):
         logger._format_replay_style_message(
-            1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2}
+            1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2,
+                             "fnp_rolls_mortal": [{"model_id": "3#0", "threshold": 5,
+                                                   "wounds": 2, "saves": 1}]}
         )
 
 

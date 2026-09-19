@@ -8706,17 +8706,30 @@ class W40KEngine(gym.Env):
             details["hazard_context"] = _hazard_ctx
         _hazard_details = raw_log.get("hazardDetails")  # get allowed : absent sur les types sans HAZARDOUS
         if _hazard_details:
+            # 06.02 attribue CHAQUE blessure a une figurine selectionnee, et 24.12 jette le de
+            # de cette figurine-la : le detail par blessure est regroupe PAR FIGURINE, dans
+            # l ordre d allocation, et non aplati en un compte de sauvegardes. Une meme ligne
+            # peut melanger une figurine a 5+, une a 4+ et une sans aucun Feel No Pain ; le
+            # compte agrege ne permettait d en juger aucune.
+            # Regroupement CONTIGU, pas par cle de figurine : le journal rend la suite reelle
+            # des selections 06.02, sans supposer qu une figurine ne peut pas etre reselectionnee
+            # apres une autre. Un seuil qui change pour la meme figurine ouvre alors une entree,
+            # au lieu d etre avale par la premiere.
             _real_hit = None
-            _fnp_saves_mortal = 0
+            _fnp_rolls: List[Dict[str, Any]] = []
             for _d in _hazard_details:
-                if _d.get("fnpSaved"):
-                    _fnp_saves_mortal += 1
+                _mid = str(require_key(_d, "modelId"))
+                _th = _d.get("fnpThreshold")  # get allowed : absent = aucun de jete
+                if not _fnp_rolls or _fnp_rolls[-1]["model_id"] != _mid or _fnp_rolls[-1]["threshold"] != _th:
+                    _fnp_rolls.append({"model_id": _mid, "threshold": _th, "wounds": 0, "saves": 0})
+                _fnp_rolls[-1]["wounds"] += 1
+                if _d.get("fnpSaved"):  # get allowed : absent = blessure non sauvee
+                    _fnp_rolls[-1]["saves"] += 1
                 elif _real_hit is None:
                     _real_hit = _d
             if _real_hit:
                 details["target_model_id"] = _real_hit["modelId"]
-            if _fnp_saves_mortal > 0:
-                details["fnp_saves_mortal"] = _fnp_saves_mortal
+            details["fnp_rolls_mortal"] = _fnp_rolls
         # L15 — 24.15 HAZARDOUS : nombre d'armes et jets individuels (absents pour Desperate Escape).
         _hazard_wc = raw_log.get("hazardousWeaponCount")  # get allowed
         if _hazard_wc is not None:

@@ -58,7 +58,7 @@ def _returned(types: str, models: str, count: int = 1) -> str:
 #: Blessure mortelle sur l'escouade 1 : la ligne nomme le socle alloué, dont on lit les PV.
 def _mw_sur_socle(mid: str, n: int) -> str:
     return (
-        f"[10:00:03] E1 T2 P2 FIGHT : Unit 1(20,20) SUFFERS {n} Mortal Wounds [DESPERATE ESCAPE] "
+        f"[10:00:03] E1 T2 P2 FIGHT : Unit 1(20,20) SUFFERS {n} Mortal Wounds [DESPERATE ESCAPE] [FNP_ROLLS: 1_m0=none ×{n}] "
         f"[ALLOC_MODEL: {mid}] [R:+0.0] [SUCCESS]\n"
     )
 
