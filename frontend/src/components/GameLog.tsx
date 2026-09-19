@@ -118,9 +118,7 @@ const resolveRuleDescription = (
   // de règle contenant un deux-points).
   const prefixMatch = tokenLabel.match(/^([^:]+):/);
   if (prefixMatch) {
-    const prefixDescription = ruleDescriptionByLookup.get(
-      normalizeRuleLookupKey(prefixMatch[1])
-    );
+    const prefixDescription = ruleDescriptionByLookup.get(normalizeRuleLookupKey(prefixMatch[1]));
     if (prefixDescription) {
       return prefixDescription;
     }

@@ -1121,10 +1121,11 @@ export const BoardReplay: React.FC = () => {
                   hitAbility: action.hit_ability,
                   woundAbility: action.wound_ability,
                   woundBonusAbility: action.wound_bonus_ability,
-                  // [DEVASTATING WOUNDS] n'est PAS repris ici : en mêlée `step.log` écrit
-                  // `Save None(T+)` au lieu du segment `Save [DEVASTATING WOUNDS]` du tir, que le
-                  // parseur cherche — le champ serait mort. C'est aussi la cause d'un défaut
-                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Reference/jeu/armes.md.
+                  // [DEVASTATING WOUNDS] n'est PAS repris ici. La raison d'origine (« la mêlée
+                  // écrit `Save None(T+)` ») ne vaut plus : `_save_segments` est devenu le site
+                  // unique des deux branches et le parseur reconnaît `Save [DEVASTATING WOUNDS]`
+                  // en mêlée (verrou dans `replayParser.test.ts`). Ne reste que ce mapping-ci,
+                  // absent — défaut d'affichage suivi dans Documentation/Reference/jeu/armes.md.
                   woundRerollRule: action.wound_reroll_rule,
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,
