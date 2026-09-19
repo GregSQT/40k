@@ -7963,7 +7963,24 @@ def charge_build_valid_plan(
         )
 
     plan: List[Tuple[str, int, int, int]] = []
-    occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
+    # EMPREINTES deja reservees par ce plan, jamais les seuls centres — 03 ENDING A MOVE « No
+    # models in that unit are on another model ». A x5 (socles round/6 = 19 cases, round/18 = 91)
+    # deux socles poses sur des cases DISTINCTES se chevauchent : mesure sur une escouade de 5
+    # figurines chargeant un ennemi a 40 subhex, union de 88 cases pour 95 attendues.
+    occupied_after: Set[Tuple[int, int]] = set()
+
+    def _charge_candidate_footprint(
+        model: Dict[str, Any], col: int, row: int
+    ) -> Optional[Set[Tuple[int, int]]]:
+        """Empreinte du socle en (col,row) si elle ne recouvre aucune empreinte deja posee par
+        ce plan, sinon ``None``. Appelee APRES `_reachable` et `_hex_legal_for_charge` : le
+        balayage de la branche (b) atteint des milliers de cellules par anneau, et construire
+        une empreinte y coute plus que les deux predicats qu'elle suit."""
+        fp = set(compute_occupied_hexes(
+            int(col), int(row), require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"),
+            int(model.get("orientation", 0)),  # get allowed
+        ))
+        return None if fp & occupied_after else fp
 
     # Sélecteur de métrique de la CHARGE, pas celui du move : cf. `move_plan_distance_mode`.
     from engine.phase_handlers.charge_handlers import _charge_distance_metric
@@ -8101,6 +8118,8 @@ def charge_build_valid_plan(
                 nc, nr, game_state, squad_id, m, _non_target_enemies, _occupied_by_others
             ):
                 continue
+            if _charge_candidate_footprint(m, nc, nr) is None:
+                continue
             _tier = _candidate_tier(mid, m, nc, nr)
             if _tier >= 3:
                 continue
@@ -8151,6 +8170,8 @@ def charge_build_valid_plan(
                             _occupied_by_others,
                         ):
                             continue
+                        if _charge_candidate_footprint(m, nc, nr) is None:
+                            continue
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
                             continue  # doit etre strictement plus proche
@@ -8168,7 +8189,13 @@ def charge_build_valid_plan(
         # Niveau d'arrivee SOL, comme le plan rigide de move : le moteur ne monte jamais, et
         # « pas de niveau » signifierait pour commit_move « garder le niveau courant » (etage).
         plan.append((mid, picked[0], picked[1], SQUAD_RIGID_MOVE_DESTINATION_LEVEL))
-        occupied_after.add(picked)
+        _picked_fp = _charge_candidate_footprint(m, picked[0], picked[1])
+        if _picked_fp is None:
+            raise RuntimeError(
+                f"charge_build_valid_plan: empreinte de {mid} en {picked} en conflit avec le "
+                "plan alors qu'elle vient d'etre retenue — filtre de candidats casse."
+            )
+        occupied_after |= _picked_fp
 
     # Validation finale (11.04 AFTER MOVING) : l'UNITE doit etre engagee avec CHACUNE des
     # cibles declarees. 03.04 : l'unite est engagee des qu'UNE de ses figurines est dans l'ER
@@ -14628,17 +14655,25 @@ def _assign_cells_toward_enemies(
     (12.03 WHILE MOVING ; 12.08 WHILE MOVING, modes Ongoing et Engaging). Dupliquer
     l'algorithme rouvrirait la classe de bug §0.18, qui existait deja en double exemplaire.
 
-    TROIS PALIERS par figurine, du plus serre au plus large, chacun « si possible » (A1,
-    2026-09-18 ; miroir du pool PvP `_fight_pile_in_build_model_pool` closer/engaged) :
-      1. CONTACT socle a socle (couplage maximum figurine -> cellule bord a bord) ;
-      2. sinon une cellule ENGAGEE (≤ zone d'engagement, bord a bord) avec la cible la plus
-         proche, dans tout le budget — mesuree par la primitive d'engagement, contre l'entree
-         de la cible la plus proche (``target_ids`` ; sans lui, palier saute) ;
-      3. sinon la cellule strictement plus proche de la cible la plus proche, dans TOUT le
+    DEUX PALIERS par figurine, chacun « si possible » (miroir du pool PvP
+    `_fight_pile_in_build_model_pool`, qui rend closer/engaged et n'a jamais eu de palier
+    contact) :
+      1. une cellule ENGAGEE (≤ zone d'engagement, bord a bord) avec la cible la plus proche,
+         dans tout le budget — mesuree par la primitive d'engagement, contre l'entree de la
+         cible la plus proche (``target_ids`` ; sans lui, palier saute) ;
+      2. sinon la cellule strictement plus proche de la cible la plus proche, dans TOUT le
          budget (pas seulement le premier anneau qui rapproche).
+    Les figurines sont servies de la PLUS CONTRAINTE a la moins contrainte (nombre de cellules
+    engageantes), puis une passe de REPRISE rattrape celles qu'une camarade encore a sa position
+    de depart bloquait au moment de leur tour.
     Mesure du defaut ferme (bench bot contre bot, 40 parties, moteur 5b2422dd5) : 100 figurines
     sur 762 finissaient hors engagement apres pile-in ; le repli sortait au premier anneau qui
     rapprochait sans jamais chercher une cellule engagee a deux cases.
+    PALIER CONTACT RETIRE le 2026-09-19 : il couplait les figurines aux VOISINS DU CENTRE ennemi,
+    six cases toutes situees DANS l'empreinte de l'ennemi des que son socle depasse une case —
+    donc jamais applicable a la resolution de production (x5). 12.03 n'exige pas le contact
+    (« engaged with it if possible ») et l'encart 12 demande de maximiser le nombre de figurines
+    ENGAGEES : le couplage maximisait la mauvaise quantite.
 
     L'immobilite des figurines au contact est appliquee inconditionnellement : elle est **sans
     objet** en mode Engaging (unite non engagee => aucune figurine au contact), donc correcte
@@ -14730,15 +14765,9 @@ def _assign_cells_toward_enemies(
             ez=_ez, metric=_metric,
         )
 
-    # 2. Cellules bord-a-bord atteignables (legalite hors-plan uniquement).
-    b2b_cells: Set[Tuple[int, int]] = set()
-    for ec, er in enemy_positions:
-        for nc, nr in get_hex_neighbors(ec, er):
-            if _cell_base_legal(nc, nr):
-                b2b_cells.add((nc, nr))
-    # 12.03 WHILE MOVING : « each model that is moved must end its move closer to the closest
+    # 2. 12.03 WHILE MOVING : « each model that is moved must end its move closer to the closest
     # pile-in target ». Precalcule par mover : cible la plus proche + distance d'origine.
-    # Miroir du pool PvP (`_fight_pile_in_build_model_pool`, `start_min`) et de la branche (b).
+    # Miroir du pool PvP (`_fight_pile_in_build_model_pool`, `start_min`).
     _model_closest_ep: Dict[str, Tuple[int, int]] = {}
     _model_orig_dist: Dict[str, int] = {}
     for _mid in movers:
@@ -14749,50 +14778,57 @@ def _assign_cells_toward_enemies(
         )
         _model_closest_ep[_mid] = _cep
         _model_orig_dist[_mid] = calculate_hex_distance(_oc, _orow, _cep[0], _cep[1])
-    # Admissibilite PAR FIGURINE, independante du plan (trajet + WHILE + AFTER) : calculee UNE
-    # fois, le point fixe ci-dessous ne fait varier que `blocked`. AFTER en dernier : la mesure
-    # d'engagement est la plus couteuse des trois, ne la payer que sur une case deja plus proche.
-    admissible: Dict[str, List[Tuple[int, int]]] = {
-        mid: sorted(
-            cell for cell in b2b_cells
-            if _reach_by_mid[mid](cell[0], cell[1])
-            and calculate_hex_distance(
-                cell[0], cell[1], _model_closest_ep[mid][0], _model_closest_ep[mid][1]
-            ) < _model_orig_dist[mid]
-            and _keeps_start_engagements(mid, cell[0], cell[1])
-        )
-        for mid in movers
+
+    # 3. OCCUPATION PAR EMPREINTE, jamais par centre — 03 ENDING A MOVE « No models in that unit
+    #    are on another model ». Le plan ne suivait que les CENTRES des coequipieres : a la
+    #    resolution de production (x5, socles round/6 = 19 cases) deux socles se chevauchent
+    #    sans partager leur centre. Mesure sur une escouade de deux figurines en (40,40) et
+    #    (40,47) face a un ennemi en (40,62) : plan [('1#0',39,52),('1#1',39,56)], union de 37
+    #    cases pour 38 attendues — et `commit_move` l'acceptait, il ne revalide pas par contrat.
+    #    Une figurine occupe son empreinte de DEPART tant qu'elle n'a pas bouge ; quand elle
+    #    part, c'est cette empreinte entiere qui se libere.
+    def _model_footprint(mid: str, col: int, row: int) -> Set[Tuple[int, int]]:
+        m = models_cache[mid]
+        return set(compute_occupied_hexes(
+            int(col), int(row), require_key(m, "BASE_SHAPE"), require_key(m, "BASE_SIZE"),
+            int(m.get("orientation", 0)),  # get allowed
+        ))
+
+    origin_fp: Dict[str, Set[Tuple[int, int]]] = {
+        mid: _model_footprint(mid, origins[mid][0], origins[mid][1]) for mid in mids
     }
+    occupied_self: Set[Tuple[int, int]] = set()
+    for _fp in origin_fp.values():
+        occupied_self |= _fp
 
-    # 3. Couplage maximum figurine -> cellule B2B (12.03 « engaged with it if possible » +
-    #    « maximise the number of models that are engaged »). Une cellule qui est l'origine
-    #    d'une camarade n'est utilisable QUE si cette camarade la quitte : on part du cas le
-    #    plus contraint (aucune origine disponible) et on libere, par point fixe, les origines
-    #    des figurines dont le couplage confirme le depart. `blocked` decroit strictement a
-    #    chaque tour -> convergence ; et a chaque iteration le resultat est deja sans collision.
-    blocked: Set[Tuple[int, int]] = {origins[mid] for mid in mids}
-    matching: Dict[str, Tuple[int, int]] = {}
-    while True:
-        candidates = {
-            mid: [cell for cell in admissible[mid] if cell not in blocked]
-            for mid in movers
-        }
-        matching = _max_b2b_matching(candidates)
-        freed = {origins[mid] for mid in matching}
-        if not freed - static_cells or blocked - freed == blocked:
-            break
-        blocked = (blocked - freed) | static_cells
+    def _legal_footprint(mid: str, col: int, row: int) -> Optional[Set[Tuple[int, int]]]:
+        """Empreinte de `mid` en (col,row) si chacune de ses cases est libre HORS plan (plateau,
+        murs, autres escouades), sinon ``None``. `_cell_base_legal` ne juge que la case centrale,
+        ce qui suffit a x1 (socle = une case) mais laissait un socle de plusieurs cases
+        chevaucher l'ennemi qu'il approche. La disjonction avec les COEQUIPIERES depend du plan
+        en cours : elle est testee a l'affectation, pas ici."""
+        fp = _model_footprint(mid, col, row)
+        return fp if all(_cell_base_legal(fc, fr) for fc, fr in fp) else None
 
-    # 4. Assemblage. Les origines des figurines NON couplees restent occupees : le pile-in est
-    #    optionnel (encart 12 : « you don't have to pile in »), elles peuvent rester sur place.
-    chosen: Dict[str, Tuple[int, int]] = {mid: origins[mid] for mid in immobile}
-    chosen.update(matching)
-    taken: Set[Tuple[int, int]] = set(static_cells) | set(matching.values())
-    unmatched = [mid for mid in movers if mid not in matching]
-    taken |= {origins[mid] for mid in unmatched}
-
-    # Palier 2 : entree-cache de la cible la plus proche de chaque figurine, par position de
-    # figurine cible. Sans `target_ids` (appel de test), le palier est saute.
+    # 4. PALIER CONTACT SUPPRIME (2026-09-19). Il couplait les figurines aux VOISINS DU CENTRE
+    #    de chaque figurine ennemie. A x5 ces six cases sont TOUTES a l'interieur de l'empreinte
+    #    ennemie (mesure sur un socle round/6 : `get_hex_neighbors(40,62)` rend six cases toutes
+    #    dans `occupied_hexes` de l'ennemi), donc toutes rejetees : le couplage maximum ne
+    #    s'appliquait jamais a la resolution de production. Et il maximisait la mauvaise
+    #    quantite : 12.03 WHILE MOVING dit « engaged with it if possible », l'encart 12 dit
+    #    « units will pile in to maximise the number of models that are ENGAGED » — le contact
+    #    socle a socle n'est exige nulle part. Le jumeau PvP (`_fight_pile_in_build_model_pool`)
+    #    n'a jamais eu ce palier : il rend closer/engaged.
+    #
+    #    Candidats par figurine : TOUT le budget, legalite hors-plan + trajet + strictement plus
+    #    proche — surensemble trivialement prouve des cellules engagees atteignables, aucune
+    #    borne geometrique ne le retrecit (le disque `ez + rayon + rayon` du chemin charge N'EST
+    #    PAS un surensemble en metrique euclidienne : mesure sur un socle round/6 a x5, cellules
+    #    engagees jusqu'a 8 subhex du centre ennemi pour une borne de 7). Tries par distance a la
+    #    cible puis par anneau (deplacement minimal a distance egale).
+    #
+    #    Entree-cache de la cible la plus proche de chaque figurine, par position de figurine
+    #    cible. Sans `target_ids` (appel de test), la mesure d'engagement est sautee.
     from engine.spatial_relations import unit_entries_within_engagement_zone
 
     _entry_by_pos: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -14801,104 +14837,123 @@ def _assign_cells_toward_enemies(
         for _pos in _squad_model_positions(game_state, str(_tid)):
             _entry_by_pos[_pos] = _te
 
-    def _footprint_legal(mid: str, col: int, row: int) -> bool:
-        """EMPREINTE entiere legale (plateau, murs, autres escouades) — `_cell_base_legal` ne
-        juge que la cellule centrale, ce qui suffit a x1 (socle = une case) mais laissait un
-        socle de plusieurs cases chevaucher l'ennemi qu'il approche des que le candidat n'est
-        plus a un subhex de l'origine."""
-        fp = compute_occupied_hexes(
-            int(col), int(row), require_key(models_cache[mid], "BASE_SHAPE"),
-            require_key(models_cache[mid], "BASE_SIZE"),
-            int(models_cache[mid].get("orientation", 0)),  # get allowed
-        )
-        return all(_cell_base_legal(fc, fr) for fc, fr in fp)
-
-    for mid in unmatched:
+    # Un SEUL balayage par figurine produit les deux paliers : les destinations legales hors plan
+    # (palier 2, « strictement plus proche ») et, parmi elles, celles qui ENGAGENT la cible la
+    # plus proche (palier 1). Les mesurer deux fois doublerait la mesure d'engagement, la plus
+    # couteuse des trois (~10 us par cellule, mesuree a x5).
+    _legal_cells: Dict[str, List[Tuple[Tuple[int, int], Set[Tuple[int, int]]]]] = {}
+    _engaged_cells: Dict[str, List[Tuple[Tuple[int, int], Set[Tuple[int, int]]]]] = {}
+    for mid in movers:
         oc, orow = origins[mid]
-        # `_model_closest_ep` et `_model_orig_dist` sont precalcules plus haut (WHILE MOVING).
         tc, tr = _model_closest_ep[mid]
         orig_dist = _model_orig_dist[mid]
-        _closest_entry = _entry_by_pos.get(_model_closest_ep[mid])  # get allowed : None = pas de palier 2
-        # Candidats : tout le budget, legalite hors-plan + trajet + strictement plus proche.
-        # Tries par distance a la cible puis par anneau (deplacement minimal a distance egale).
-        candidates_ring: List[Tuple[int, int, int, int]] = []
+        _closest_entry = _entry_by_pos.get(_model_closest_ep[mid])  # get allowed : None = palier saute
+        ring: List[Tuple[int, int, int, int]] = []
         for d_col in range(-pile_in_budget, pile_in_budget + 1):
             for d_row in range(-pile_in_budget, pile_in_budget + 1):
                 if d_col == 0 and d_row == 0:
                     continue
                 nc, nr = oc + d_col, orow + d_row
-                if not _cell_base_legal(nc, nr) or (nc, nr) in taken:
+                if not _cell_base_legal(nc, nr):
                     continue
                 if not _reach_by_mid[mid](nc, nr):
                     continue
                 cand_d = calculate_hex_distance(nc, nr, tc, tr)
                 if cand_d >= orig_dist:
                     continue
-                candidates_ring.append((cand_d, max(abs(d_col), abs(d_row)), nc, nr))
-        candidates_ring.sort()
-        best: Optional[Tuple[int, int]] = None
-        if _closest_entry is not None:
-            # Palier 2 : la premiere cellule (la plus proche) ENGAGEE avec la cible la plus
-            # proche. AFTER (engagements de depart) puis mesure d'engagement, la plus couteuse.
-            for _cand_d, _ring, nc, nr in candidates_ring:
-                if not _footprint_legal(mid, nc, nr) or not _keeps_start_engagements(mid, nc, nr):
-                    continue
-                synth = _synth_model_entry(
-                    game_state, str(squad_id), models_cache[mid], nc, nr,
-                    level=int(require_key(models_cache[mid], "level")),
-                )
-                if unit_entries_within_engagement_zone(
-                    synth, _closest_entry, _ez, game_state=game_state, memoise=False
-                ):
-                    best = (nc, nr)
+                ring.append((cand_d, max(abs(d_col), abs(d_row)), nc, nr))
+        ring.sort()
+        legal: List[Tuple[Tuple[int, int], Set[Tuple[int, int]]]] = []
+        engaged_here: List[Tuple[Tuple[int, int], Set[Tuple[int, int]]]] = []
+        for _cand_d, _ring_d, nc, nr in ring:
+            fp = _legal_footprint(mid, nc, nr)
+            if fp is None or not _keeps_start_engagements(mid, nc, nr):
+                continue
+            legal.append(((nc, nr), fp))
+            if _closest_entry is None:
+                continue
+            synth = _synth_model_entry(
+                game_state, str(squad_id), models_cache[mid], nc, nr,
+                level=int(require_key(models_cache[mid], "level")),
+            )
+            if unit_entries_within_engagement_zone(
+                synth, _closest_entry, _ez, game_state=game_state, memoise=False
+            ):
+                engaged_here.append(((nc, nr), fp))
+        _legal_cells[mid] = legal
+        _engaged_cells[mid] = engaged_here
+
+    # 5. ORDRE : la figurine qui a le MOINS de cellules engageantes choisit la premiere. C'est
+    #    l'encart 12 (« maximise the number of models that are engaged ») applique sous la
+    #    contrainte d'empreinte : une figurine qui n'a qu'une seule case engageante ne doit pas
+    #    se la voir prendre par une camarade qui en a six autres — le defaut exact que le
+    #    couplage maximum fermait. Ce couplage ne peut PAS etre conserve : deux socles poses sur
+    #    des cases DISTINCTES se chevauchent des que le socle depasse une case, donc le conflit
+    #    n'est plus « une case pour une figurine » et Kuhn ne rend plus un maximum (c'est la
+    #    raison d'etre de l'ILP du chemin PvP, `pile_in_autoplace_plan`, dont le cout mesure —
+    #    335 ms par plan a x5 — l'exclut du chemin gym). L'ordre glouton par contrainte
+    #    croissante n'est pas l'optimum exact, il en est la meilleure approximation a cout nul.
+    ordered_movers = sorted(
+        movers, key=lambda mid: (len(_engaged_cells[mid]), movers.index(mid))
+    )
+
+    # 6. Affectation. Les figurines non deplacees restent sur place : le pile-in est optionnel
+    #    (encart 12 « you don't have to pile in »), et leur empreinte d'origine reste occupee.
+    chosen: Dict[str, Tuple[int, int]] = {mid: origins[mid] for mid in immobile}
+    # Empreinte COURANTE de chaque figurine dans le plan : son origine tant qu'elle n'a pas
+    # bouge, sa destination ensuite. C'est elle qu'il faut retirer de l'occupation pour savoir
+    # ce qui bloque VRAIMENT une figurine — retirer son empreinte d'origine apres qu'elle a
+    # bouge rendrait libres des cases occupees par une camarade.
+    _placed_fp: Dict[str, Set[Tuple[int, int]]] = dict(origin_fp)
+    for mid in ordered_movers:
+        reserved = occupied_self - origin_fp[mid]
+        best: Optional[Tuple[Tuple[int, int], Set[Tuple[int, int]]]] = None
+        for _source in (_engaged_cells[mid], _legal_cells[mid]):
+            for cell, fp in _source:
+                if not (fp & reserved):
+                    best = (cell, fp)
                     break
+            if best is not None:
+                break
         if best is None:
-            # Palier 3 : la cellule strictement plus proche, dans tout le budget.
-            for _cand_d, _ring, nc, nr in candidates_ring:
-                if _footprint_legal(mid, nc, nr) and _keeps_start_engagements(mid, nc, nr):
-                    best = (nc, nr)
-                    break
-        if best is None:
-            chosen[mid] = (oc, orow)  # reste sur place : sa cellule est deja dans `taken`
+            chosen[mid] = origins[mid]  # reste sur place : son empreinte reste occupee
         else:
-            taken.discard((oc, orow))  # elle part : son origine redevient libre
-            chosen[mid] = best
-            taken.add(best)
+            _cell, _bfp = best
+            occupied_self -= origin_fp[mid]
+            occupied_self |= _bfp
+            chosen[mid] = _cell
+            _placed_fp[mid] = _bfp
+
+    # 7. REPRISE. Une figurine servie TOT peut avoir ete bloquee par l'empreinte de DEPART d'une
+    #    camarade qui, elle, a bouge ensuite : la cellule engageante qu'elle visait n'est libre
+    #    qu'a la FIN du plan. Aucune contrainte n'est relachee — les cellules viennent de
+    #    `_engaged_cells`, deja filtrees trajet + WHILE (strictement plus proche) + AFTER
+    #    (engagements de depart) + empreinte legale hors plan — seule l'occupation a change.
+    #    Mesure sur 4 parties bot x5 avant cette passe : 29 figurines hors engagement, dont 14
+    #    avaient une cellule engageante libre dans le plan rendu.
+    #    Le point fixe s'arrete des qu'un tour n'ameliore rien ; chaque tour n'augmente que le
+    #    nombre de figurines engagees, donc il converge.
+    _engaged_positions = {
+        mid: {cell for cell, _fp in _engaged_cells[mid]} for mid in movers
+    }
+    for _ in range(len(movers)):
+        _improved = False
+        for mid in ordered_movers:
+            if chosen[mid] in _engaged_positions[mid]:
+                continue
+            reserved = occupied_self - _placed_fp[mid]
+            for cell, fp in _engaged_cells[mid]:
+                if fp & reserved:
+                    continue
+                occupied_self = reserved | fp
+                chosen[mid] = cell
+                _placed_fp[mid] = fp
+                _improved = True
+                break
+        if not _improved:
+            break
 
     return chosen
-
-
-def _max_b2b_matching(
-    candidates: Dict[str, List[Tuple[int, int]]]
-) -> Dict[str, Tuple[int, int]]:
-    """Couplage maximum figurine -> cellule bord-a-bord (algorithme de Kuhn).
-
-    12.03 WHILE MOVING impose « engaged with it **if possible** » a chaque figurine deplacee,
-    et l'encart du meme PDF donne l'intention : « units will pile in to **maximise** the number
-    of models that are engaged ». Un parcours glouton dans l'ordre des index ne maximise pas :
-    la 1re figurine prend la cellule dont la 2e avait un besoin exclusif. Le couplage maximum
-    est la formulation exacte de cette obligation, et il est **independant de l'ordre**.
-
-    ``candidates`` : {model_id: [cellules B2B legales et atteignables]}.
-    Retour : {model_id: cellule} pour les figurines couplees (les autres n'ont pas de B2B
-    possible dans ce couplage maximum).
-    """
-    match_cell: Dict[Tuple[int, int], str] = {}
-
-    def _augment(mid: str, visited: Set[Tuple[int, int]]) -> bool:
-        for cell in candidates[mid]:
-            if cell in visited:
-                continue
-            visited.add(cell)
-            holder = match_cell.get(cell)
-            if holder is None or _augment(holder, visited):
-                match_cell[cell] = mid
-                return True
-        return False
-
-    for mid in candidates:
-        _augment(mid, set())
-    return {mid: cell for cell, mid in match_cell.items()}
 
 
 def fight_pile_in_plan(
