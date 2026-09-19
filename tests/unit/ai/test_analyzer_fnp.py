@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from ai.analyzer_save import FNP_MARKER_GRAMMAR
+from ai.step_logger import LOG_GRAMMAR_VERSION
 from tests.unit.ai._fabriques import entete_step_log
 
 _OBJECTIVES = ";".join(f"(50,{r})" for r in range(50, 53))
@@ -52,7 +52,7 @@ def _shot(target: str, pos: str, mid: str, tail: str, sec: int = 3, wound: int =
 
 
 def _stats(tmp_path, body: str, units: str = _UNITS, setup: str = _SETUP,
-           log_grammar: int = FNP_MARKER_GRAMMAR) -> dict:
+           log_grammar: int = LOG_GRAMMAR_VERSION) -> dict:
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
@@ -74,7 +74,7 @@ def _stats_x5(tmp_path, body: str) -> dict:
         _SETUP + body + _END, units=_UNITS, objectives=_OBJECTIVES, inches_to_subhex=5,
         board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
         rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)",
-        log_grammar=FNP_MARKER_GRAMMAR,
+        log_grammar=LOG_GRAMMAR_VERSION,
     ))
     return an.parse_step_log(str(log))
 
@@ -216,17 +216,6 @@ def test_degats_sans_jet_fnp_alors_que_le_painboy_vit_est_une_faute(tmp_path):
     assert "sans [FNP:]" in _first(stats)
 
 
-def test_blessures_mortelles_avec_fnp_sans_source_sont_une_faute(tmp_path):
-    body = (
-        "[10:00:03] E1 T1 P2 MOVE : Unit 103(30,40) SUFFERS 1 Mortal Wounds [DA JUMP] Trigger:1 MW:2"
-        " [FROM:103] [FNP:1] [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)] [ALLOC_MODEL: 103#0]"
-        " [R:+0.0] [SUCCESS]\n"
-    )
-    stats = _stats(tmp_path, body)
-    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
-    assert "blessures mortelles" in _first(stats)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Grammaire 16 : le marqueur est GARANTI sur toute ligne de dégâts, 24.10 comprise
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,20 +240,114 @@ def test_sauvegarde_sautee_sans_marqueur_reste_une_faute(tmp_path):
     assert "sans [FNP:]" in _first(stats)
 
 
-@pytest.mark.parametrize("tail", [_DEVASTATING, "Save 2(5+ AP-1 → 6+) - Dmg:1HP"])
-def test_journal_anterieur_a_la_garantie_n_invente_aucune_faute(tmp_path, tail):
-    """Le marqueur est apparu en grammaire 7 sans incrément, et la branche 24.10 l'a omis
-    jusqu'à la 16 : aucune version antérieure ne le garantit, donc son absence n'y est pas
-    jugeable — ni sur une sauvegarde sautée, ni sur une sauvegarde ratée."""
-    stats = _stats(tmp_path, _shot("101", "(30,20)", "101#0", tail, wound=6),
-                   log_grammar=FNP_MARKER_GRAMMAR - 1)
+# ─────────────────────────────────────────────────────────────────────────────
+# Grammaire 17 : blessures mortelles, un verdict PAR FIGURINE (24.12 + 06.02)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MODELS_101 = " [MODELS: 101#0@(30,20,z0) 101#1@(31,20,z0) 101#2@(32,20,z0)]"
+
+
+def _suffers(target: str, pos: str, rolls: str, wounds: int = 1,
+             tag: str = "[DA JUMP] Trigger:1 MW:2", alloc: str = "", models: str = "") -> str:
+    """Une ligne `SUFFERS` fabriquée ; `rolls` est le contenu de `[FNP_ROLLS:]`."""
+    _alloc = f" [ALLOC_MODEL: {alloc}]" if alloc else ""
+    _models = models or " [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)]"
+    return (
+        f"[10:00:03] E1 T1 P2 MOVE : Unit {target}{pos} SUFFERS {wounds} Mortal Wounds {tag}"
+        f" [FROM:{target}] [FNP_ROLLS: {rolls}]{_models}{_alloc} [R:+0.0] [SUCCESS]\n"
+    )
+
+
+def test_blessures_mortelles_jet_sans_source_est_une_faute(tmp_path):
+    """Unit 103 ne porte aucun Feel No Pain : un dé revendiqué pour son socle est une faute."""
+    stats = _stats(tmp_path, _suffers("103", "(30,40)", "103#0=1/5+ ×1", alloc="103#0"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans aucune source présente" in _first(stats)
+
+
+def test_blessures_mortelles_jet_conforme_ne_compte_aucune_faute(tmp_path):
+    """Le PainBoy vit : Dok's Toolz 5+ sur les deux blessures attribuées au même socle."""
+    stats = _stats(tmp_path, _suffers("101", "(30,20)", "101#0=1/5+ ×2", wounds=2,
+                                      alloc="101#0", models=_MODELS_101))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
+    assert stats["rule_usage"]["PROJ.2.3.fnp"][2] == 1
+
+
+def test_blessures_mortelles_sans_jet_alors_qu_une_source_vit_est_une_faute(tmp_path):
+    """24.12 : « Each time a model with this ability WOULD LOSE A WOUND, roll one D6 ». Le
+    moteur n'a pas le choix ; `none` dit qu'il ne l'a pas fait."""
+    stats = _stats(tmp_path, _suffers("101", "(30,20)", "101#0=none ×2", wounds=2,
+                                      alloc="101#0", models=_MODELS_101))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "sans jet Feel No Pain" in _first(stats)
+
+
+def test_blessures_mortelles_seuil_faux_est_une_faute(tmp_path):
+    stats = _stats(tmp_path, _suffers("101", "(30,20)", "101#0=0/6+ ×1",
+                                      alloc="101#0", models=_MODELS_101))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "seuil FNP 6+" in _first(stats)
+
+
+def test_blessures_mortelles_plus_de_sauvees_que_de_blessures_est_une_faute(tmp_path):
+    stats = _stats(tmp_path, _suffers("101", "(30,20)", "101#0=2/5+ ×1",
+                                      alloc="101#0", models=_MODELS_101))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "2 sauvée(s) pour 1 blessure(s)" in _first(stats)
+
+
+def test_blessures_mortelles_attribuees_au_dela_du_declare_est_une_faute(tmp_path):
+    """06.02 borne l'attribution au total déclaré : « until either all of them have been
+    inflicted or that unit is destroyed »."""
+    stats = _stats(tmp_path, _suffers("101", "(30,20)", "101#0=0/5+ ×3", wounds=1,
+                                      alloc="101#0", models=_MODELS_101))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "attribue 3 blessure(s) pour 1 déclarée(s)" in _first(stats)
+
+
+def test_deux_figurines_de_la_meme_ligne_ont_chacune_leur_seuil(tmp_path):
+    """LE cas qu'un compte agrégé ne pouvait pas dire. 06.02 sélectionne une figurine par
+    blessure : l'Intercessor 102#0 n'a aucun Feel No Pain, l'Ancient 102#1 en a un 4+ parce
+    qu'il est dans l'aire de l'objectif. Un total unique aurait menti sur l'un des deux."""
+    body = (
+        "[10:00:02] E1 T1 P2 MOVE : Unit 102(50,50) MOVED from (80,80) to (50,50)"
+        " [MODELS: 102#0@(1,1,z0) 102#1@(50,51,z0)] [R:+0.0] [SUCCESS]\n"
+        + _suffers("102", "(50,50)", "102#0=none ×1 102#1=1/4+ ×1", wounds=2, alloc="102#0",
+                   models=" [MODELS: 102#0@(1,1,z0) 102#1@(50,51,z0)]")
+    )
+    stats = _stats(tmp_path, body)
     assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
 
 
-def test_journal_anterieur_juge_toujours_ce_que_la_ligne_porte(tmp_path):
-    """La garde ne couvre QUE l'absence : un `[FNP:]` sans source reste une faute à toute
-    version, sa présence ne dépendant d'aucune garantie de grammaire."""
-    stats = _stats(tmp_path, _shot("103", "(30,40)", "103#0", "Save 2(5+ AP-1 → 6+) - Dmg:0HP [FNP:1/5+ ×1]"),
-                   log_grammar=FNP_MARKER_GRAMMAR - 1)
-    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
-    assert "sans aucun Feel No Pain" in _first(stats)
+def test_le_tag_24_15_a_compte_d_armes_reste_jugeable(tmp_path):
+    """Le producteur écrit `[HAZARDOUS:<n>]` dès que le compte d'armes est connu, et
+    `"[HAZARDOUS]" in ligne` est alors FAUX : un test de sous-chaîne aurait suspendu le verdict
+    de source sur toute ligne 24.15 réelle. VERROU : revenir à une liste de sous-chaînes rougit."""
+    stats = _stats(tmp_path, _suffers("103", "(30,40)", "103#0=1/5+ ×1",
+                                      tag="[HAZARDOUS:2]", alloc="103#0"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}, _first(stats)
+    assert "sans aucune source présente" in _first(stats)
+
+
+def test_hold_still_s_abstient_sur_la_source_mais_juge_les_comptes(tmp_path):
+    """19.04 dernière clause : sous une allocation de combat, une source tuée confère encore sa
+    règle. Hold Still tombe dans cette fenêtre, donc les socles vivants à la ligne ne disent pas
+    les sources — verdict de source suspendu, comptes toujours jugés."""
+    tag = "[HOLD STILL AND SAY AARGH] MW:1"
+    sans_source = _stats(tmp_path, _suffers("103", "(30,40)", "103#0=1/5+ ×1", tag=tag, alloc="103#0"))
+    assert sans_source["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(sans_source)
+    compte_faux = _stats(tmp_path, _suffers("103", "(30,40)", "103#0=2/5+ ×1", tag=tag, alloc="103#0"))
+    assert compte_faux["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "2 sauvée(s) pour 1 blessure(s)" in _first(compte_faux)
+
+
+def test_ligne_de_blessures_sans_le_token_est_une_panne_du_producteur(tmp_path):
+    """La grammaire 17 le garantit ; son absence n'est pas un vieux format, et il n'existe
+    aucune valeur avec laquelle poursuivre la soustraction des points de vie."""
+    ligne = (
+        "[10:00:03] E1 T1 P2 MOVE : Unit 103(30,40) SUFFERS 1 Mortal Wounds [DA JUMP]"
+        " Trigger:1 MW:2 [FROM:103] [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)]"
+        " [ALLOC_MODEL: 103#0] [R:+0.0] [SUCCESS]\n"
+    )
+    with pytest.raises(ValueError, match=r"sans `\[FNP_ROLLS:\]`"):
+        _stats(tmp_path, ligne)

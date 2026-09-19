@@ -272,7 +272,7 @@ def test_la_ligne_step_log_porte_trigger_puis_mw(monkeypatch):
     msg = logger._format_replay_style_message("ONLY_ENEMY", "hazardous", details)
     assert msg == (
         "Unit ONLY_ENEMY(5,5) SUFFERS 3 Mortal Wounds [EXHORTATION DE RAGE] Trigger:5 MW:3 "
-        "[FROM:CHAP] [ALLOC_MODEL: e1a]"
+        "[FROM:CHAP] [FNP_ROLLS: e1a=none ×3] [ALLOC_MODEL: e1a]"
     ), msg
 
 

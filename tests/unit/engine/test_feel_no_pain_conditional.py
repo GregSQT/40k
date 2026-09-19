@@ -569,6 +569,25 @@ def test_mw_seuils_recalcules_quand_la_figurine_allouee_change(monkeypatch):
     assert applied == 3, f"T1 rate, T2 sans FNP : 3 MW appliquées, obtenu {applied}"
     assert [d["modelId"] for d in details] == ["T1", "T2", "T2"]
     assert calls == ["T1", "T2"], f"une collecte par figurine allouée, obtenu {calls}"
+    # Grammaire 17 : le SEUIL réellement appliqué est écrit par blessure, y compris quand le dé
+    # échoue — c'est lui qui distingue « jeté et raté » de « jamais jeté ».
+    assert [d.get("fnpThreshold") for d in details] == [4, None, None], details
+
+
+def test_mw_le_seuil_applique_est_ecrit_meme_quand_le_de_echoue(monkeypatch):
+    """24.12 impose un dé par blessure ; sans le seuil sur la blessure RATÉE, une ligne sans
+    sauvegarde ne dit pas si le moteur a jeté ou s'il a oublié. VERROU : n'écrire le seuil que
+    sur `fnpSaved` rend cette assertion rouge."""
+    monkeypatch.setattr(su, "_model_is_near_objective_or_center", lambda gs, mid: True)
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)   # tous les dés ratent
+    gs = _mw_gs([_OBJ_RULE_4])
+    gs["models_cache"]["T1"]["HP_CUR"] = 2
+    gs["models_cache"]["T1"]["HP_MAX"] = 2
+    details: list = []
+    applied = allocate_mortal_wounds(gs, "2", 2, auto_resolve=True, details_sink=details)
+    assert applied == 2, f"aucun dé ne sauve, obtenu {applied}"
+    assert [d.get("fnpSaved") for d in details] == [None, None], details
+    assert [d["fnpThreshold"] for d in details] == [4, 4], details
 
 
 # ---------------------------------------------------------------------------

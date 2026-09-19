@@ -155,3 +155,55 @@ def test_grammaire_16_pas_de_marqueur_sans_fnp_sur_sauvegarde_sautee(tmp_path: P
     content = _read(log)
     assert "Save [DEVASTATING WOUNDS] - Dmg:3HP" in content, content
     assert "[FNP:" not in content
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grammaire 17 — `[FNP_ROLLS:]` sur les lignes de blessures mortelles
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _mortal(rolls, wounds: int, alloc: str = "3#0") -> Dict[str, Any]:
+    d: Dict[str, Any] = {
+        "current_turn": 1,
+        "reward": 0.0,
+        "unit_with_coords": "3(2,4)",
+        "hazardous_mortal_wounds": wounds,
+        "fnp_rolls_mortal": rolls,
+    }
+    if alloc:
+        d["target_model_id"] = alloc
+    return d
+
+
+def _emit_mortal(details: Dict[str, Any]) -> str:
+    return StepLogger(enabled=False)._format_replay_style_message(3, "hazardous", details)
+
+
+def test_grammaire_17_token_par_figurine() -> None:
+    """06.02 sélectionne une figurine par blessure et 24.12 jette le dé de CETTE figurine :
+    deux figurines de seuils différents sur la même ligne donnent deux entrées, dans l'ordre.
+
+    Cycle rouge→vert : n'écrire qu'une entrée agrégée dans `_mortal_fnp_token` fait rougir.
+    """
+    msg = _emit_mortal(_mortal(
+        [{"model_id": "3#0", "threshold": None, "wounds": 1, "saves": 0},
+         {"model_id": "3#1", "threshold": 4, "wounds": 2, "saves": 1}],
+        wounds=3,
+    ))
+    assert "[FNP_ROLLS: 3#0=none ×1 3#1=1/4+ ×2]" in msg, msg
+
+
+def test_grammaire_17_zero_sauve_est_ecrit() -> None:
+    """Le dé a été jeté et a raté : le token le dit. C'est tout l'écart avec l'ancien compte,
+    qui ne s'écrivait qu'au-dessus de zéro et rendait son absence indécidable."""
+    msg = _emit_mortal(_mortal(
+        [{"model_id": "3#0", "threshold": 5, "wounds": 2, "saves": 0}], wounds=2,
+    ))
+    assert "[FNP_ROLLS: 3#0=0/5+ ×2]" in msg, msg
+
+
+def test_grammaire_17_aucune_blessure_aucun_token() -> None:
+    """`SUFFERS 0` : rien n'a été attribué, donc rien à dire, et `[NO ALLOC]` tient la ligne."""
+    msg = _emit_mortal({"current_turn": 1, "reward": 0.0, "unit_with_coords": "3(2,4)",
+                        "hazardous_mortal_wounds": 0})
+    assert "[FNP_ROLLS:" not in msg and "[NO ALLOC]" in msg, msg

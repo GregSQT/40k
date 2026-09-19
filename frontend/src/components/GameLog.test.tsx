@@ -44,6 +44,28 @@ function expandFirstEntry(): void {
   fireEvent.click(screen.getByRole("button", { name: "Voir le détail" }));
 }
 
+/** Une ligne de blessures mortelles (06.02) et son détail PAR BLESSURE. */
+function hazardEvent(details: Record<string, unknown>[]): GameLogEvent {
+  return {
+    id: "event_1",
+    timestamp: new Date(0),
+    type: "hazardous",
+    message: "Unit 3 SUFFERS 2 Mortal Wounds",
+    turnNumber: 1,
+    phase: "SHOOT",
+    player: 1,
+    unitId: 3,
+    hazardDetails: details,
+  } as unknown as GameLogEvent;
+}
+
+/** Textes de TOUTES les lignes de détail rendues (une par blessure mortelle). */
+function detailRowTexts(): string[] {
+  return Array.from(document.querySelectorAll(".game-log-entry__shot-detail-row")).map(
+    (row) => row.textContent ?? ""
+  );
+}
+
 /** Texte COMPLET de la ligne de détail du premier tir.
  *
  *  Pas `getByText` : un token de règle reconnu est rendu en `RuleReferenceTag` (un `<button>`
@@ -427,6 +449,39 @@ describe("GameLog — jets Feel No Pain", () => {
     });
     fireEvent.mouseEnter(tag);
     expect(document.body.textContent).toContain("24.12");
+  });
+
+  /**
+   * Blessures MORTELLES. 24.12 : « Each time a model with this ability would lose a wound, roll
+   * one D6 » ; 06.02 sélectionne une figurine par blessure. Le détail portait déjà une ligne par
+   * blessure, mais taisait l'issue du dé : une blessure ANNULÉE par un Feel No Pain s'affichait
+   * exactement comme une blessure encaissée qui n'avait pas tué.
+   */
+  it("distingue une blessure mortelle sauvée d'une blessure encaissée", () => {
+    render(
+      <GameLog
+        events={[
+          hazardEvent([
+            { modelId: "3#0", col: 2, row: 4, died: false, fnpThreshold: 5, fnpSaved: true },
+            { modelId: "3#1", col: 3, row: 4, died: true, fnpThreshold: 5 },
+          ]),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    const rows = detailRowTexts();
+    expect(rows[0]).toContain("[FNP:5+ ✓]");
+    expect(rows[0]).not.toContain("💀");
+    expect(rows[1]).toContain("[FNP:5+ ✗]");
+    expect(rows[1]).toContain("💀");
+  });
+
+  it("n'affiche aucun marqueur sur une blessure mortelle sans dé jeté", () => {
+    render(<GameLog events={[hazardEvent([{ modelId: "3#0", col: 2, row: 4, died: false }])]} />);
+    expandFirstEntry();
+    // ANCRE POSITIVE : sans elle, une ligne non rendue satisferait le `not.toContain`.
+    expect(detailRowTexts()[0]).toContain("1 MW at (2,4)");
+    expect(detailRowTexts()[0]).not.toContain("[FNP:");
   });
 
   it("lève sur un record de FNP incomplet plutôt que d'inventer un seuil", () => {

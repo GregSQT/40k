@@ -40,11 +40,11 @@ _UNITS = (
 # Grammaire : `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` — §1.2 de analyzer_couverture.md.
 # La ligne est émise dans la phase SHOOTING (après résolution des attaques de tir) ou FIGHT.
 _HAZARDOUS_3_MW = (
-    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS] "
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×3] "
     "[R:+0.0] [SUCCESS]\n"
 )
 _HAZARDOUS_FIGHT = (
-    "[10:00:02] E1 T1 P1 FIGHT : Unit 1(20,20) SUFFERS 2 Mortal Wounds [HAZARDOUS] "
+    "[10:00:02] E1 T1 P1 FIGHT : Unit 1(20,20) SUFFERS 2 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×2] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -60,17 +60,17 @@ _END = (
 # La branche DE utilise _dmg_actor_id (correct) et non action_unit_id (stale après header 101).
 # Phase MOVE ≠ SHOOT exclut le garde "excess wound lost" (05) basé sur kill_context.
 _DESPERATE_ESCAPE_3_MW = (
-    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] "
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] [FNP_ROLLS: 1_m0=none ×3] "
     "[R:+0.0] [SUCCESS]\n"
 )
 _DESPERATE_ESCAPE_SHOOT_1_MW = (
-    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(20,20) SUFFERS 1 Mortal Wounds [DESPERATE ESCAPE] "
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(20,20) SUFFERS 1 Mortal Wounds [DESPERATE ESCAPE] [FNP_ROLLS: 1_m0=none ×1] "
     "[R:+0.0] [SUCCESS]\n"
 )
 # Branche HAZARDOUS sur unité déjà morte : phase SHOOTING ≠ phase MOVE du kill_context
 # → damage_missing_unit_hp doit être incrémenté (pas "excess wound lost").
 _HAZARDOUS_SHOOT_1_MW = (
-    "[10:00:03] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[10:00:03] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -160,12 +160,12 @@ def test_hazardous_fight_phase_goes_to_fight_counter(tmp_path, monkeypatch):
 # PROJ.1.2 faux positifs — Desperate Escape 09.07 produit [DESPERATE ESCAPE], pas [HAZARDOUS].
 # L'analyzer ne doit pas comptabiliser ces lignes comme des erreurs HAZARDOUS.
 _DESPERATE_ESCAPE_MW = (
-    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 2 Mortal Wounds [DESPERATE ESCAPE] "
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 2 Mortal Wounds [DESPERATE ESCAPE] [FNP_ROLLS: 1_m0=none ×2] "
     "[R:+0.0] [SUCCESS]\n"
 )
 # Coup fatal : 3 BM sur une unité à HP_MAX=3 → doit tuer l'unité et alimenter current_episode_deaths.
 _DESPERATE_ESCAPE_FATAL = (
-    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] "
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] [FNP_ROLLS: 1_m0=none ×3] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -303,7 +303,7 @@ _UNITS_TWO = (
 )
 # HAZARDOUS sur Unit 1 (HazUnit), mais Unit 2 (NoHazUnit) est le dernier header vu.
 _HAZARDOUS_UNIT1_AFTER_UNIT2_HEADER = (
-    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -375,7 +375,7 @@ _UNITS_MIXED = (
     "[10:00:00] Unit 101 (SquadType) P2: Starting position (21,21), HP_MAX=3 base=round/1\n"
 )
 _HAZARDOUS_1_MW_MIXED = (
-    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -453,7 +453,7 @@ def test_hazardous_pas_de_faux_positif_porteur_mort_avant_suffers(tmp_path, monk
     body = _MODELS_SQUAD_SEUL + _HAZARDOUS_1_MW_MIXED
     stats = _parse_mixed(tmp_path, monkeypatch, body, weapons_cache=cache)
     assert stats["hazardous_mortal_wounds"][1] == 1, (
-        "La ligne SUFFERS 1 Mortal Wounds [HAZARDOUS] doit être traitée et incrémenter le compteur."
+        "La ligne SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1] doit être traitée et incrémenter le compteur."
     )
     assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
         "PlasmaModel (1#0) porte une arme HAZARDOUS : même retiré de unit_model_hp par une ligne "
@@ -487,12 +487,12 @@ _UNITS_G6 = (
 )
 # Ligne 1 : HAZARDOUS nomme 1#1 → doit tuer 1#1 (HP=1).
 _HAZARDOUS_ALLOC_1_1 = (
-    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1] "
     "[ALLOC_MODEL: 1#1] [R:+0.0] [SUCCESS]\n"
 )
 # Ligne 2 : nomme 1#1 à nouveau → avec le fix 1#1 est morte → alloc_model_unknown=1.
 _HAZARDOUS_ALLOC_1_1_REPET = (
-    "[10:00:03] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[10:00:03] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×1] "
     "[ALLOC_MODEL: 1#1] [R:+0.0] [SUCCESS]\n"
 )
 
@@ -577,42 +577,42 @@ def test_desperate_escape_0_mw_no_crash_no_damage_grammar6(tmp_path, monkeypatch
 
 _DESPERATE_ESCAPE_ALL_FNP_SAVED = (
     "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 1 Mortal Wounds [DESPERATE ESCAPE] "
-    "[FNP:1] [ALL FNP SAVED] [MODELS: 1#0@(20,20,z0)] [R:+0.0] [SUCCESS]\n"
+    "[FNP_ROLLS: 1_m0=1/5+ ×1] [MODELS: 1#0@(20,20,z0)] [R:+0.0] [SUCCESS]\n"
 )
 
 
 _HAZARDOUS_ALL_FNP_SAVED = (
     "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
-    "[FNP:1] [ALL FNP SAVED] [MODELS: 1#0@(20,20,z0)] [R:+0.0] [SUCCESS]\n"
+    "[FNP_ROLLS: 1_m0=1/5+ ×1] [MODELS: 1#0@(20,20,z0)] [R:+0.0] [SUCCESS]\n"
 )
 
 
 def test_hazardous_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
-    """VERROU : [ALL FNP SAVED] sur une ligne HAZARDOUS ne lève pas ValueError.
+    """VERROU : une ligne HAZARDOUS dont tous les Feel No Pain ont sauvé ne lève pas ValueError.
 
-    Le producteur (step_logger.py l.1339) omet [ALLOC_MODEL:] quand tous les FNP
-    ont sauvé les blessures mortelles. L'analyzer appelait quand même
-    _alloc_model_from_line (guard _hz_mw > 0 est vrai) → crash sur grammar >= 6.
-    Avec le fix : [ALL FNP SAVED] court-circuite le bloc de dégâts, HP inchangé.
+    Le producteur omet `[ALLOC_MODEL:]` quand aucune blessure n'est restée. L'analyzer
+    appelait quand même `_alloc_model_from_line` (la garde `_hz_mw > 0` était vraie) → crash
+    sur grammar >= 6. Depuis la grammaire 17, « tout sauvé » se lit sur `[FNP_ROLLS:]`, dont
+    les sauvés égalent les blessures attribuées : dégâts nets nuls, HP inchangé.
     """
     stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_ALL_FNP_SAVED, log_grammar=6)
-    assert stats["parse_errors"] == [], "[ALL FNP SAVED] HAZARDOUS ne doit générer aucune parse_error"
+    assert stats["parse_errors"] == [], "tout sauvé (HAZARDOUS) ne doit générer aucune parse_error"
     assert stats["hazardous_mortal_wounds"][1] == 0, (
-        "[ALL FNP SAVED] : aucun dommage net, le compteur ne doit pas être incrémenté"
+        "tout sauvé : aucun dommage net, le compteur ne doit pas être incrémenté"
     )
 
 
 def test_desperate_escape_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
-    """VERROU : même cas que test_hazardous_all_fnp_saved_no_crash_no_damage_grammar6 sur [DESPERATE ESCAPE]."""
+    """VERROU : même cas que le jumeau HAZARDOUS, sur [DESPERATE ESCAPE]."""
     stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_ALL_FNP_SAVED, log_grammar=6)
-    assert stats["parse_errors"] == [], "[ALL FNP SAVED] DESPERATE ESCAPE ne doit générer aucune parse_error"
+    assert stats["parse_errors"] == [], "tout sauvé (DESPERATE ESCAPE) ne doit générer aucune parse_error"
 
 
 # ── Format [HAZARDOUS:N] — step_logger.py:1323 émet ce tag quand hazardous_weapon_count est connu.
 # Sans le fix, "[HAZARDOUS]" n'est pas sous-chaîne de "[HAZARDOUS:3]" (le ']' diffère) →
 # la branche HAZARDOUS est sautée et hazardous_mortal_wounds reste à 0.
 _HAZARDOUS_COUNT_TAG = (
-    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS:3] "
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS:3] [FNP_ROLLS: 1_m0=none ×3] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -636,11 +636,11 @@ def test_hazardous_count_tag_incrémente_mortal_wounds(tmp_path, monkeypatch):
 # ROUGE sans le fix : l'analyzer appliquait le total pré-FNP (3) → mort fausse.
 _HAZARDOUS_3MW_FNP2 = (
     "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS] "
-    "[FNP:2] [ALLOC_MODEL: 1_m0] [R:+0.0] [SUCCESS]\n"
+    "[FNP_ROLLS: 1_m0=2/5+ ×3] [ALLOC_MODEL: 1_m0] [R:+0.0] [SUCCESS]\n"
 )
 _DESPERATE_ESCAPE_3MW_FNP2 = (
     "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] "
-    "[FNP:2] [ALLOC_MODEL: 1_m0] [R:+0.0] [SUCCESS]\n"
+    "[FNP_ROLLS: 1_m0=2/5+ ×3] [ALLOC_MODEL: 1_m0] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -650,11 +650,11 @@ _DESPERATE_ESCAPE_3MW_FNP2 = (
 ])
 def test_fnp_partiel_soustrait_des_blessures(tag, ligne, tmp_path, monkeypatch):
     """ROUGE sans le fix : 3 BM totales appliquées → Unit 1 (HP=3) mourait.
-    VERT avec le fix : [FNP:2] soustrait 2 → 1 BM nette → Unit 1 survit.
+    VERT : `[FNP_ROLLS: 1_m0=2/5+ ×3]` dit 3 blessures attribuées dont 2 sauvées → 1 BM nette.
 
     Les deux tags portent la MÊME règle 24.12 et passent par le même lecteur
     (`net_mortal_wounds`) : les séparer en deux fonctions au corps identique laissait deux
-    copies à corriger, et c'est ainsi que `[FNP:n]` a vécu sur un tag et pas sur l'autre.
+    copies à corriger, et c'est ainsi que la soustraction a vécu sur un tag et pas sur l'autre.
     """
     stats = _parse(tmp_path, monkeypatch, ligne, weapons_cache={})
     assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
@@ -671,7 +671,7 @@ def test_fnp_partiel_soustrait_des_blessures(tag, ligne, tmp_path, monkeypatch):
 # Unit 2 — l'unité du header, jamais celle de la ligne — c'est-à-dire exactement l'attribution
 # fausse que la lecture par préfixe avait fermée, rouverte sur le chemin de la ligne malformée.
 _HAZARDOUS_SANS_PREFIXE_UNIT = (
-    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1 SUFFERS 3 Mortal Wounds [HAZARDOUS] "
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1 SUFFERS 3 Mortal Wounds [HAZARDOUS] [FNP_ROLLS: 1_m0=none ×3] "
     "[R:+0.0] [SUCCESS]\n"
 )
 

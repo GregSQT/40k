@@ -215,7 +215,13 @@ l'instantané est réécrit quand cette sécurisation change, et toute sécurisa
 `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` dès qu'un Feel No Pain a été jeté, sauvegarde SAUTÉE par
 [DEVASTATING WOUNDS] comprise — le marqueur était apparu en grammaire 7 sans incrément, et cette
 branche-là l'omettait alors que le moteur y jette le dé ; la ligne `SUFFERS N Mortal Wounds` reste
-hors garantie (marqueur `[FNP:<sauvés>]`, écrit seulement si au moins une blessure est sauvée) ;
+hors garantie — voir `17` ci-dessous, qui la lui donne ; `17` (2026-09-19) : toute ligne
+« SUFFERS <n> Mortal Wounds » déclarant n >= 1 porte `[FNP_ROLLS: <mid>=<sauvés>/<seuil>+
+×<blessures> …]`, une entrée par suite contiguë de blessures attribuées à la même figurine au même
+seuil et `<mid>=none ×<n>` quand aucun Feel No Pain ne s'y appliquait — 24.12 attache le jet à la
+FIGURINE et 06.02 en sélectionne une par blessure, si bien qu'une ligne mélange plusieurs seuils ;
+son absence est une panne du producteur, et `[ALL FNP SAVED]` est supprimé, « tout sauvé » se
+lisant sur le token ;
 l'historique complet des versions 6–10 est dans `ai/step_logger.py` (en-tête `LOG_GRAMMAR_VERSION`).
 Ligne absente ⇒ 1.
 

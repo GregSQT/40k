@@ -32,6 +32,17 @@ const ruleToken = (name?: string): string => {
 const flagToken = (applies: boolean | undefined, ruleName: string): string =>
   applies ? ruleToken(ruleName) : "";
 
+/**
+ * Issue du Feel No Pain (24.12) d'UNE blessure mortelle : `` [FNP:4+ ✓]`` quand le dé l'a
+ * sauvée, `` [FNP:4+ ✗]`` quand il l'a ratée, rien quand aucun dé n'a été jeté. Sans ce
+ * libellé, une blessure annulée par un Feel No Pain s'affichait exactement comme une blessure
+ * encaissée qui n'avait pas tué : le détail montrait « 1 MW » dans les deux cas.
+ */
+const mortalFnpLabel = (h: HazardDetail): string => {
+  if (h.fnpThreshold === undefined) return "";
+  return ` [FNP:${h.fnpThreshold}+ ${h.fnpSaved ? "✓" : "✗"}]`;
+};
+
 /** `` [FNP:<sauvés>/<seuil>+ ×<tentatives>]`` quand un Feel No Pain (24.12) a été jeté sur les
  *  dégâts de cette attaque, chaîne vide sinon.
  *
@@ -839,7 +850,7 @@ export const GameLog: React.FC<GameLogProps> = ({
                                 key={`${h.modelId}#mw${occ}`}
                                 className="game-log-entry__shot-detail-row"
                               >
-                                {`${i + 1}/${all.length} | Unit ${squadId} # Model ${modelIdx} - 1 MW at (${h.col},${h.row})${h.died ? " 💀" : ""}`}
+                                {`${i + 1}/${all.length} | Unit ${squadId} # Model ${modelIdx} - 1 MW at (${h.col},${h.row})${mortalFnpLabel(h)}${h.died ? " 💀" : ""}`}
                               </div>
                             );
                           });

@@ -44,6 +44,12 @@ def _hazard_details(
         d["hazardous_dice_rolls"] = dice_rolls
     if mortal_wounds > 0:
         d["target_model_id"] = alloc_model_id or "model-1"
+        # Grammaire 17 : les jets Feel No Pain par figurine (24.12 + 06.02). Aucune source ici,
+        # ces cas jugeant le compte d'armes et les dés 24.15.
+        d["fnp_rolls_mortal"] = [
+            {"model_id": alloc_model_id or "model-1", "threshold": None,
+             "wounds": mortal_wounds, "saves": 0}
+        ]
     return d
 
 

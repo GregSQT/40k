@@ -213,9 +213,12 @@ Hood 4+ si `[PSYCHIC]` ou Da Jump, Unbreakable Resolve 4+ si l'Ancient alloué e
 d'objectif (`state.objective_cells`, entête `Objectives:`) ou à 6" du centre — mesuré depuis le
 2026-09-18 du BORD du socle (01.04) par `ranged_edge_distance_to_cell` et la métrique `metric.ranged`
 du run, donc jugé à TOUTE résolution ; l'abstention x5 est levée ; présence sans source, absence avec
-source et `Dmg>0` (**seulement en grammaire ≥ 16**, `FNP_MARKER_GRAMMAR` — avant, aucune version ne
-garantissait le marqueur et la branche `Save [DEVASTATING WOUNDS]` l'omettait), compte
-`Dmg ≠ n − s` ; miroir `[FNP:n]` sur SUFFERS (présence sans source, jamais l'absence). Corpus : 24.12 → COUVERT
+source et `Dmg>0` (jugé sans garde de version depuis le 2026-09-19 : la compatibilité avec les
+journaux antérieurs à la garantie est abandonnée, et la garde qui les protégeait est retirée), compte
+`Dmg ≠ n − s` ; sur les lignes SUFFERS, **`[FNP_ROLLS:]` depuis la grammaire 17** rend le même
+jugement PAR FIGURINE (jet manquant alors qu'une source s'applique, jet sans source, seuil faux,
+sauvés > blessures, attribué > déclaré), le verdict de SOURCE étant suspendu sur les tags qui
+peuvent tomber dans le sursis 19.04 d'une allocation d'attaque. Corpus : 24.12 → COUVERT
 (la note « jet et seuil absents » était périmée), PROJ.1.9.feel_no_pain/_vs_psychic/_near_objective
 → COUVERT via 24.12, unit.invul_save_override et unit.waaagh → COUVERT, unit.toughness_bonus_while_waaagh
 → COUVERT via PROJ.1.4.blessure (contrôlé depuis `analyzer_wound.target_bodyguard_toughness`).

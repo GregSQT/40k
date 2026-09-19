@@ -50,6 +50,12 @@ def _details(
         d["mortal_wound_source_id"] = source_id
     if mortal_wounds > 0:
         d["target_model_id"] = "model-1"
+    if mortal_wounds > 0:
+        # Grammaire 17 : toute ligne qui attribue des blessures dit ses jets Feel No Pain par
+        # figurine (24.12 + 06.02). Aucune source ici : ces cas jugent les tags et les dés.
+        d["fnp_rolls_mortal"] = [
+            {"model_id": "model-1", "threshold": None, "wounds": mortal_wounds, "saves": 0}
+        ]
     return d
 
 

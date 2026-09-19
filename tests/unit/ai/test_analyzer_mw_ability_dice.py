@@ -40,9 +40,12 @@ _UNITS = (
 def _line(n: int, tag: str, segs: str) -> str:
     # Grammaire ≥ 2 : toute ligne qui applique des dégâts nomme la figurine allouée.
     alloc = " [ALLOC_MODEL: 101#0]" if n > 0 else " [NO ALLOC]"
+    # Grammaire 17 : toute ligne qui attribue des blessures dit ses jets Feel No Pain par
+    # figurine. Aucune source ici, donc `none` — ces cas jugent les DÉS de la capacité.
+    fnp = f" [FNP_ROLLS: 101#0=none \u00d7{n}]" if n > 0 else ""
     return (
         f"[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS {n} Mortal Wounds "
-        f"{tag}{segs} [FROM:1]{alloc} [R:+0.0] [SUCCESS]\n"
+        f"{tag}{segs}{fnp} [FROM:1]{alloc} [R:+0.0] [SUCCESS]\n"
     )
 
 

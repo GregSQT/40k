@@ -129,18 +129,31 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       qui porte un segment `Dmg:<n>HP` porte aussi `[FNP:<sauves>/<seuil>+ ×<tentatives>]` des
 #:       qu un Feel No Pain a ete jete — sauvegarde SAUTEE par [DEVASTATING WOUNDS] comprise,
 #:       branche qui l omettait depuis l apparition du marqueur (grammaire 7, 2026-08-20) alors
-#:       que le moteur y jette bien le de. Sur un journal log_grammar>=16, des degats sans
-#:       marqueur contre une escouade porteuse d une source de FNP PRESENTE sont une FAUTE
-#:       (`fnp_threshold_mismatch`) ; en deca, l ABSENCE n est jamais jugee, aucune version
-#:       anterieure ne garantissant le marqueur. La ligne `SUFFERS N Mortal Wounds` n entre PAS
-#:       dans cette garantie : son marqueur a une autre forme (`[FNP:<sauves>]`, sans seuil ni
-#:       tentatives) et n est ecrit que si au moins une blessure est sauvee — son absence y reste
-#:       indecidable, et l analyzer ne juge que sa PRESENCE. Verrous : test_step_log_fnp.py
-#:       (producteur), test_analyzer_fnp.py (lecteur).
+#:       que le moteur y jette bien le de. Des degats sans marqueur contre une escouade porteuse
+#:       d une source de FNP PRESENTE sont une FAUTE (`fnp_threshold_mismatch`), sans garde de
+#:       version : la compatibilite avec les journaux anterieurs a ete abandonnee le 2026-09-19,
+#:       et le lecteur ne porte plus de branche pour eux. La ligne `SUFFERS N Mortal Wounds` n entre PAS
+#:       dans cette garantie : elle a son propre token, refondu en grammaire 17 ci-dessous.
+#:       Verrous : test_step_log_fnp.py (producteur), test_analyzer_fnp.py (lecteur).
+#:
+#:  17 — JETS FEEL NO PAIN DES BLESSURES MORTELLES, PAR FIGURINE. Toute ligne « SUFFERS <n>
+#:       Mortal Wounds » declarant n >= 1 porte `[FNP_ROLLS: <mid>=<sauves>/<seuil>+ ×<blessures>
+#:       ...]`, une entree par suite contigue de blessures attribuees a la meme figurine au meme
+#:       seuil, dans l ordre d attribution 06.02, et `<mid>=none ×<n>` pour une figurine qui a
+#:       encaisse sans qu aucun Feel No Pain ne s applique. 24.12 attache le jet a LA FIGURINE et
+#:       06.02 en selectionne une par blessure : une ligne peut donc melanger plusieurs seuils,
+#:       ce que l ancien compte agrege `[FNP:<sauves>]` ne pouvait pas dire — il ne s ecrivait
+#:       meme pas quand aucune blessure n etait sauvee, si bien que son absence ne distinguait
+#:       pas « aucune source » de « jets tous rates ». Sur un journal log_grammar>=17, l absence
+#:       du token sur une ligne qui declare des blessures est une panne du producteur
+#:       (`parse_error`), et l analyzer juge par figurine la presence, le seuil et le compte.
+#:       `[ALL FNP SAVED]` est SUPPRIME : « tout sauve » se lit sur le token, et deux ecritures
+#:       du meme fait divergent. Verrous : test_step_log_fnp.py (producteur),
+#:       test_analyzer_fnp.py / test_analyzer_hazardous.py (lecteur).
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 16
+LOG_GRAMMAR_VERSION = 17
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -378,6 +391,44 @@ def _damage_segment(damage, *, fnp_saves, fnp_attempts, fnp_threshold) -> str:
     if fnp_saves is not None and fnp_attempts is not None:
         seg += f" [FNP:{fnp_saves}/{fnp_threshold}+ ×{fnp_attempts}]"
     return seg
+
+
+def _mortal_fnp_token(details, declared_wounds, unit_with_coords) -> str:
+    """`[FNP_ROLLS: <mid>=<sauves>/<seuil>+ ×<blessures> ...]` — jets Feel No Pain 24.12 d une
+    ligne `SUFFERS`, PAR FIGURINE et dans l ordre d attribution 06.02.
+
+    POURQUOI PAR FIGURINE, et pas un compte de sauvegardes. 24.12 : « Each time A MODEL WITH
+    THIS ABILITY would lose a wound, roll one D6 ». 06.02 : « Select Model … The selected model
+    loses 1 wound », avec une selection par blessure. Une meme ligne peut donc allouer ses
+    blessures a plusieurs figurines dont les seuils different — un Ancient a 4+ pres d un
+    objectif et un Intercessor sans rien — et un total agrege ne permet d en juger aucune.
+
+    POURQUOI LES FIGURINES SANS JET Y FIGURENT (`<mid>=none ×<n>`). Sans elles, le lecteur ne
+    sait pas quelles figurines ont encaisse, et doit rejouer la selection 06.02 pour le deviner.
+    C est exactement ce que l analyzer faisait des degats d attaque avant `[ALLOC_MODEL:]`, avec
+    200 PV par figurine faux sur 173 129 compares. La ligne PUBLIE ce qui a ete fait.
+
+    Present sur toute ligne declarant au moins une blessure : son absence est une panne du
+    producteur, pas un vieux format. `[ALL FNP SAVED]` a disparu avec lui — « tout sauve » se
+    lit desormais sur le token, et deux tokens pour un seul fait divergent tot ou tard.
+    """
+    rolls = details.get("fnp_rolls_mortal")  # get allowed : absent = payload sans detail
+    if not rolls:
+        raise ConfigurationError(
+            f"SUFFERS {declared_wounds} Mortal Wounds sans detail par blessure — la grammaire 17 "
+            f"garantit les jets Feel No Pain par figurine ; payload: "
+            f"unit_with_coords={unit_with_coords!r}"
+        )
+    parts = []
+    for entry in rolls:
+        mid = require_key(entry, "model_id")
+        wounds = int(require_key(entry, "wounds"))
+        threshold = entry["threshold"]
+        if threshold is None:
+            parts.append(f"{mid}=none ×{wounds}")
+        else:
+            parts.append(f"{mid}={int(require_key(entry, 'saves'))}/{int(threshold)}+ ×{wounds}")
+    return f"[FNP_ROLLS: {' '.join(parts)}]"
 
 
 def _rerolled_token(details, field_name: str) -> str:
@@ -1521,19 +1572,26 @@ class StepLogger:
             _mwsrc = details.get("mortal_wound_source_id")
             if _mwsrc is not None:
                 dice_suffix += f" [FROM:{_mwsrc}]"
-            # L12 — FNP mortal wounds : suffixe si au moins une blessure sauvée.
-            _fnp_saves_mortal = details.get("fnp_saves_mortal")  # get allowed
-            _fnp_suffix = f" [FNP:{_fnp_saves_mortal}]" if _fnp_saves_mortal else ""
             if int(hazardous_mortal_wounds) == 0:
                 return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag}{dice_suffix} [NO ALLOC]"
+            # Grammaire 17 — jets Feel No Pain PAR FIGURINE (24.12 + 06.02).
+            _fnp_suffix = f" {_mortal_fnp_token(details, hazardous_mortal_wounds, unit_with_coords)}"
             target_model_id = details.get("target_model_id")  # get allowed : absent si tout sauve par FNP
             if target_model_id is None:
-                if _fnp_saves_mortal is None:
+                # Seule absence LEGITIME : aucune blessure n est restee, donc aucune figurine n a
+                # perdu de PV a nommer. Le token le dit deja (sauves == blessures attribuees) ;
+                # hors de ce cas, une ligne qui retire des PV sans nommer la figurine est la
+                # donnee manquante que `[ALLOC_MODEL:]` existe pour interdire.
+                _rolls = require_key(details, "fnp_rolls_mortal")
+                if sum(int(require_key(r, "saves")) for r in _rolls) != sum(
+                    int(require_key(r, "wounds")) for r in _rolls
+                ):
                     raise ConfigurationError(
-                        f"hazardous: target_model_id manquant et fnp_saves_mortal absent — "
-                        f"payload: unit_with_coords={unit_with_coords!r}, wounds={hazardous_mortal_wounds}"
+                        f"hazardous: target_model_id manquant alors que des blessures sont "
+                        f"restees — payload: unit_with_coords={unit_with_coords!r}, "
+                        f"wounds={hazardous_mortal_wounds}"
                     )
-                return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix} [ALL FNP SAVED]"
+                return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix}"
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix} [ALLOC_MODEL: {target_model_id}]"
 
         elif action_type == "attacks_not_made":

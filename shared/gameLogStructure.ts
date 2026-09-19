@@ -200,6 +200,15 @@ export interface HazardDetail {
   col: number;
   row: number;
   died: boolean;
+  /**
+   * Seuil du Feel No Pain (24.12) réellement jeté pour CETTE blessure, absent si aucun dé n'a
+   * été jeté. 24.12 attache le jet au modèle (« each time a model with this ability would lose
+   * a wound ») et 06.02 sélectionne un modèle par blessure mortelle : deux blessures d'une même
+   * ligne peuvent donc être jetées à deux seuils différents, ou l'une jetée et l'autre pas.
+   */
+  fnpThreshold?: number;
+  /** Le dé a sauvé la blessure : le modèle ne perd pas le point de vie. */
+  fnpSaved?: boolean;
 }
 
 /**
