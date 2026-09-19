@@ -196,6 +196,7 @@ from engine.debug_trace import CH_STEP, trace
 from engine.reward_calculator import RewardCalculator
 from engine.game_state import (
     GameStateManager, initial_command_points, initial_faction_ability_state,
+    validate_level,
 )
 from engine.macro_intents import (
     ACTION_FAMILIES,
@@ -2123,6 +2124,24 @@ class W40KEngine(gym.Env):
                 )
                 unit["reserves_repositioned"] = bool(
                     original_config.get("reserves_repositioned", False)  # get allowed (idem)
+                )
+                # NIVEAU — jumeau de la position, restauré ICI pour la raison écrite plus haut :
+                # l'objet `unit` survit d'un épisode à l'autre. Une escouade qui finit l'épisode N
+                # dans une ruine porte `level = 1` (écrit par la synchronisation d'ancre du move),
+                # et ce niveau repartait tel quel sur l'épisode N+1 alors que la position, elle,
+                # était remise à celle du scénario ou à la sentinelle.
+                #
+                # Pour une unité MONO-FIGURINE, `build_units_cache` juste en dessous relit ce
+                # niveau et appelle `floor_height_at(-1, -1, 1)` : le reset LÈVE
+                # (« no floor at level 1 contains cell (-1, -1) »). Pour une escouade
+                # multi-figurines il n'y a pas d'erreur, mais l'entrée de cache sort à `level = 1`
+                # avec toutes ses figurines au sol, ce qui rompt l'invariant « niveau de l'unité =
+                # niveau de l'ancre ».
+                #
+                # Même sémantique que `create_unit` (game_state.py), comme les champs ci-dessus :
+                # un scénario sans étage ne porte pas la clé, et le sol est alors le cas métier.
+                unit["level"] = validate_level(
+                    original_config.get("level", 0), unit["id"]  # get allowed (cf. `create_unit`)
                 )
             else:
                 raise ValueError(f"Unit {unit['id']} not found in scenario config during reset")
