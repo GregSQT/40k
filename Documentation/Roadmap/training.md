@@ -186,20 +186,24 @@ stratagèmes, donc aucun des outils par lesquels la vraie règle paie le premier
 livrée de l'équilibrage officiel déplace le déséquilibre au lieu de le supprimer. Rééquilibrer
 vraiment demande ces outils, chantier moteur non ouvert.
 
-**LIGNÉE RELANCÉE À FROID le 2026-09-19 (décision utilisateur, option A).** Run P0 neuf lancé à
-16:27, `bash scripts/train.sh --agent ArmageddonAgent_x1 --training-config x1_long --scenario bot
---resolution 1 --etape P0 --total-episodes 50000` (l'étape pose `--new` elle-même), log
-`training_x1_09-p00-marquage.log`. `--new` a archivé les 8 artefacts du run précédent sous
-l'horodatage `20260919-162703` ; P0′ du 18/09 reste par ailleurs sous
-`ArmageddonAgent_x1_27182_robust_0.8922.zip`, byte à byte identique à l'ancien
-`model_ArmageddonAgent_x1_P0.zip` (md5 `f4894bbf61e9cdfd28435022fa41930a`), donc la clôture
-d'étape ne détruira rien. Durée attendue ~6 h (référence : 6 h 03 pour le P0′ du 18/09). **Règle de
-lecture reprise telle quelle du P0′** : holdout bots et trois sondes de référence à 300 parties
-argmax sièges 50/50 ; robuste **< 0,85** contre les bots = relance avec une autre graine, UNE seule
-fois. ⚠️ Aucun chiffre de ce run ne se compare à un chiffre d'avant le changement de mission.
+**LIGNÉE À RELANCER À FROID — AUCUN RUN LANCÉ.** Un départ P0 a été lancé le 2026-09-19 à 16:28
+puis ARRÊTÉ par l'utilisateur à 8 % (3 880 parties sur 50 000) : d'autres modifications moteur
+restent à livrer, et la Discipline A interdit de les merger pendant un run. Rien n'en subsiste
+côté modèles — `--new` avait déplacé le canonique sous l'horodatage `20260919-162703`, il a été
+remis en place et son md5 est identique à l'avant-run
+(`f4894bbf61e9cdfd28435022fa41930a`, le même que `model_ArmageddonAgent_x1_P0.zip` et que
+`ArmageddonAgent_x1_27182_robust_0.8922.zip`). Résidus à nettoyer avant le vrai départ : les huit
+copies `*_20260919-162703*`, les quatre `ppo_checkpoint_20260919-162732_240000_steps*` et
+`tensorboard/x1_long_ArmageddonAgent_x1/run_20260919-162730`.
 
-**RUPTURE DE COMPARABILITÉ.** Les parties jouées changent, donc Discipline A : pendant ce run,
-aucun merge `engine/` ou `ai/` dans `main` et aucun JSON de `config/` touché. Aucun chiffre de siège antérieur au 2026-09-19
+**Commande du départ, quand les modifications seront livrées** (l'étape pose `--new` elle-même,
+`--etape` + `--new` est refusé) :
+`source /home/greg/40k/.venv/bin/activate && bash scripts/train.sh --agent ArmageddonAgent_x1
+--training-config x1_long --scenario bot --resolution 1 --etape P0 --total-episodes 50000`.
+Sans le venv, `python3` est celui du système et le run meurt à l'import de numpy. Durée ~6 h.
+
+**RUPTURE DE COMPARABILITÉ.** Les parties jouées ont changé, donc Discipline A s'appliquera
+pendant ce run : aucun merge `engine/` ou `ai/` dans `main`, aucun JSON de `config/` touché. Aucun chiffre de siège antérieur au 2026-09-19
 ne se compare à un chiffre postérieur, et le « gap de siège » de 12 à 14 points publié depuis août
 mesurait pour partie ce défaut de mission — d'autant que le holdout tourne entièrement sur
 `terrain-mc1`, le terrain au plus grand écart structurel. Les `step.log` antérieurs ne se relisent
