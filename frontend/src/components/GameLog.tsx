@@ -52,6 +52,20 @@ const fnpToken = (saves?: number, threshold?: number, attempts?: number): string
   return ` [FNP:${saves}/${threshold}+ ×${attempts}]`;
 };
 
+/** Nombre de blessures mortelles réellement subies sur une attaque [DEVASTATING WOUNDS] 24.10.
+ *
+ *  C'est le même nombre que le segment `Dmg:` porte sur une attaque ordinaire — les PV retirés,
+ *  après le plafond « une figurine par blessure critique » et après Feel No Pain. Une attaque
+ *  dévastatrice SANS ce nombre est une donnée invalide, pas un cas d'affichage : 24.10 fait de la
+ *  caractéristique D le nombre de blessures mortelles, il n'existe pas d'attaque dévastatrice
+ *  dont on ignore la quantité. */
+const mortalWoundCount = (damageDealt?: number): number => {
+  if (damageDealt === undefined) {
+    throw new Error("[DEVASTATING WOUNDS] shot record without damageDealt");
+  }
+  return damageDealt;
+};
+
 /** Jet de dé : « final » seul, ou « initial->final » quand le dé a été relancé.
  *
  *  `== null` et pas `=== undefined` : une attaque sans jet ([TORRENT], touche [SUSTAINED HITS],
@@ -733,25 +747,19 @@ export const GameLog: React.FC<GameLogProps> = ({
                                   );
                                 }
                                 if (shot.strengthResult === "SUCCESS") {
-                                  if (shot.saveRoll !== undefined) {
+                                  if (shot.devastating) {
+                                    // 24.10 : sur une blessure critique, la séquence d'attaque
+                                    // S'ARRÊTE et la cible subit des blessures MORTELLES égales à
+                                    // la caractéristique D. Il n'y a donc pas de sauvegarde
+                                    // « refusée » à annoncer, et ce que la cible perd n'est pas
+                                    // un dégât ordinaire : 06.02 retire 1 PV par blessure, sans
+                                    // aucun jet, une figurine au plus par blessure critique. Un
+                                    // segment unique remplace le couple Svg/Dmg — sur le tir
+                                    // comme sur la mêlée, qui partagent ce rendu.
                                     parts.push(
-                                      `Svg: ${shot.saveSuccess ? "✓" : "✗"}${rollWithReroll(shot.saveRoll, shot.saveRollInitial)}`
-                                    );
-                                  } else if (shot.devastating) {
-                                    // 24.10 : « no saving throw can be made ». Sans ce segment, la
-                                    // sauvegarde disparaissait de la ligne sans explication.
-                                    parts.push(`Svg: aucune${ruleToken("DEVASTATING WOUNDS")}`);
-                                  }
-                                  if (!shot.saveSuccess && shot.damageDealt !== undefined) {
-                                    // Le token du FNP est COLLÉ aux dégâts, comme dans step.log :
-                                    // c'est lui qui explique un `Dmg: 0` sur une sauvegarde ratée,
-                                    // et l'écart entre les dés de dégâts et les PV réellement
-                                    // perdus. Les deux branches qui impriment des dégâts
-                                    // (sauvegarde ratée et sauvegarde SAUTÉE par [DEVASTATING
-                                    // WOUNDS] 24.10) passent par cette ligne unique — elles ne
-                                    // peuvent donc pas diverger, comme côté moteur.
-                                    parts.push(
-                                      `Dmg: ${shot.damageDealt}${fnpToken(
+                                      `MW: ${mortalWoundCount(shot.damageDealt)}${ruleToken(
+                                        "DEVASTATING WOUNDS"
+                                      )}${fnpToken(
                                         shot.fnpSaves,
                                         shot.fnpThreshold,
                                         shot.fnpAttempts
@@ -762,6 +770,32 @@ export const GameLog: React.FC<GameLogProps> = ({
                                       shot.targetRow !== undefined
                                     ) {
                                       parts.push(`(${shot.targetCol},${shot.targetRow})`);
+                                    }
+                                  } else {
+                                    if (shot.saveRoll !== undefined) {
+                                      parts.push(
+                                        `Svg: ${shot.saveSuccess ? "✓" : "✗"}${rollWithReroll(shot.saveRoll, shot.saveRollInitial)}`
+                                      );
+                                    }
+                                    if (!shot.saveSuccess && shot.damageDealt !== undefined) {
+                                      // Le token du FNP est COLLÉ aux dégâts, comme dans step.log :
+                                      // c'est lui qui explique un `Dmg: 0` sur une sauvegarde
+                                      // ratée, et l'écart entre les dés de dégâts et les PV
+                                      // réellement perdus. Le segment `MW:` ci-dessus l'accole de
+                                      // la même façon : 24.12 s'applique aux blessures mortelles.
+                                      parts.push(
+                                        `Dmg: ${shot.damageDealt}${fnpToken(
+                                          shot.fnpSaves,
+                                          shot.fnpThreshold,
+                                          shot.fnpAttempts
+                                        )}`
+                                      );
+                                      if (
+                                        shot.targetCol !== undefined &&
+                                        shot.targetRow !== undefined
+                                      ) {
+                                        parts.push(`(${shot.targetCol},${shot.targetRow})`);
+                                      }
                                     }
                                   }
                                   if (shot.targetDied) {
@@ -834,12 +868,24 @@ export const GameLog: React.FC<GameLogProps> = ({
                             const [squadId, modelIdx] = h.modelId.split("#");
                             const occ = (seen.get(h.modelId) ?? 0) + 1;
                             seen.set(h.modelId, occ);
+                            // 24.12 : sur un X+, le PV n'est PAS perdu. Sans ce mot, une blessure
+                            // annulée s'écrivait comme une blessure subie. Le token du dé est
+                            // accolé exactement comme au segment des dégâts d'une attaque — même
+                            // grammaire, donc un dé JETÉ se dit même quand il rate.
+                            const outcome = h.fnpSaved ? "1 MW not lost" : "1 MW";
+                            const row = `${i + 1}/${all.length} | Unit ${squadId} # Model ${modelIdx} - ${outcome} at (${h.col},${h.row})${fnpToken(
+                              h.fnpSaves,
+                              h.fnpThreshold,
+                              h.fnpAttempts
+                            )}${h.died ? " 💀" : ""}`;
                             return (
                               <div
                                 key={`${h.modelId}#mw${occ}`}
                                 className="game-log-entry__shot-detail-row"
                               >
-                                {`${i + 1}/${all.length} | Unit ${squadId} # Model ${modelIdx} - 1 MW at (${h.col},${h.row})${h.died ? " 💀" : ""}`}
+                                {/* JUMEAU du détail par-tir : le token `[FNP:…]` a la même forme
+                                    ici, donc il doit avoir la même bulle d'aide. */}
+                                {renderMessageWithRuleDescriptions(row, event.ruleHintByLabel)}
                               </div>
                             );
                           });

@@ -200,6 +200,22 @@ export interface HazardDetail {
   col: number;
   row: number;
   died: boolean;
+  /**
+   * Feel No Pain 24.12 : cette blessure mortelle n'a PAS été perdue. 06.02 dit que la figurine
+   * sélectionnée perd 1 PV ; 24.12 dit que sur un X+ ce PV n'est pas perdu — sans ce champ, une
+   * blessure annulée s'affichait exactement comme une blessure subie.
+   */
+  fnpSaved?: boolean;
+  /**
+   * MÊME trio que `ShootDetail` côté attaques, et même sens : leur absence signifie « aucun dé
+   * jeté », pas « zéro sauvé ». Une blessure mortelle fait perdre 1 PV (06.02), donc
+   * `fnpAttempts` vaut toujours 1 et `fnpSaves` 0 ou 1 ; `fnpThreshold` est le seuil appliqué —
+   * le meilleur (24.02) —, qui varie d'une figurine à l'autre selon sa position et les règles
+   * d'unité en vigueur, et sans lequel le marqueur ne se vérifie pas.
+   */
+  fnpSaves?: number;
+  fnpAttempts?: number;
+  fnpThreshold?: number;
 }
 
 /**
