@@ -13,7 +13,7 @@
 04.02 / 24.11) ; A1 pile-in gym « engagée si possible » en trois paliers (12.03) ; A2 charge gym
 « contact si possible » (11.04) ; A3/A4 consolidation gym : sélection engaging réelle, objective
 « closer if not » (12.08) ; A5 passe de l'étape Fight (PDF 25) ; B2 consolidation engaging =
-décision de l'agent (`consolidation_engaging`, 15e type) ; B3 pile-in d'overrun dirigé vers la cible désignée (**parité masque/commit rétablie le 2026-09-18, suite 160** : oracle unique `overrun_pile_in_plan_for_slot`, un plan par slot ; et décision `consolidation_engaging` armée seulement si le plan existe) ; P8 quatre
+décision de l'agent (`consolidation_engaging`, 15e type) ; B3 pile-in d'overrun dirigé vers la cible désignée (**parité masque/commit rétablie le 2026-09-18, suite 160** : oracle unique `overrun_pile_in_plan_for_slot`, un plan par slot ; et décision `consolidation_engaging` armée seulement si le plan existe) ; **empreintes de socles et palier contact, 2026-09-19, suite 164** : les plans gym suivent l'occupation par empreinte et non par centre, le palier contact est retiré (mort à x5) au profit d'un service par contrainte croissante et d'une passe de reprise ; P8 quatre
 courbes `06_fight/` ; P9 quatre contrôles analyzer (#70–#73) ; corrections de review avant merge (passe A5 sur toutes
 les éligibles + handoff à l'adversaire, driver PvE et décision B2, analyzer #70 et ER non-cible,
 `fight_can_pass` — `melee_100.md` §7). **Change les parties jouées →
