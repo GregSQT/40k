@@ -6815,9 +6815,23 @@ def reposition_unit_to_strategic_reserves(game_state: Dict[str, Any], squad_id: 
         )
     squad_models = require_key(game_state, "squad_models")
     models_cache = require_key(game_state, "models_cache")
+    # Hors table = AU SOL. La sentinelle (-1,-1) n'appartient à aucun plancher, donc une figurine
+    # retirée en gardant `level >= 1` rend l'état incohérent : `_recompute_squad_occupied_hexes`
+    # relit le niveau STOCKÉ et interroge `floor_height_at(-1, -1, level)`, qui lève. Même
+    # remise à zéro, et pour la même raison, que le move d'escouade rigide plus haut dans ce
+    # fichier. Le niveau n'est PAS un effet de 20.02 (la règle énumère ce qui doit être
+    # PRÉSERVÉ : advance/fall-back/disembark, battle-shock) : c'est l'invariant de la sentinelle
+    # (`spatial_relations.entry_is_on_battlefield`). Il se solde ici et pas dans
+    # `update_model_position`, dont le contrat accepte explicitement « une écriture sans niveau
+    # (retrait hors table) » et laisse donc le niveau à son appelant.
     for model_id in squad_models.get(str(squad_id), []):  # get allowed
         if model_id in models_cache:
+            models_cache[model_id]["level"] = 0
             update_model_position(game_state, model_id, -1, -1)
+    units_entry = require_key(game_state, "units_cache").get(str(squad_id))  # get allowed
+    if units_entry is not None:
+        units_entry["level"] = 0
+    unit["level"] = 0
     set_unit_coordinates(unit, -1, -1)
     unit["deployed_on_turn"] = None
     unit["in_strategic_reserves"] = True
