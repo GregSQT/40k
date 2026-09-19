@@ -32,6 +32,7 @@ import gymnasium as gym
 import numpy as np
 
 from ai.analyzer_config import AnalyzerConfig
+from ai.step_logger import MIN_SUPPORTED_LOG_GRAMMAR
 from engine.action_decoder import ActionDecoder
 from engine.macro_intents import ACTION_FAMILIES
 from engine.observation_builder import ObservationBuilder
@@ -323,11 +324,13 @@ def entete_step_log(
     `objectives=None` omet la ligne Objectives : les épisodes sans ce marqueur ne requièrent pas
     de snapshot `T<n> OBJECTIVE CONTROL:`.
 
-    `log_grammar=None` (défaut) OMET la ligne `Log grammar:` — le lecteur lève alors la version 1
-    et prend ses chemins de repli. C'est le régime historique de cette fabrique, gardé tel quel :
-    ~25 fichiers en dépendent. Le renseigner produit un journal qui DÉCLARE sa grammaire, seul
-    moyen d'exercer les branches que le vrai StepLogger emprunte en production (il écrit toujours
-    la ligne). Sans ce paramètre, ces branches-là n'étaient atteintes par aucun test.
+    `log_grammar=None` (défaut) déclare `MIN_SUPPORTED_LOG_GRAMMAR`, la plus ancienne version que
+    le lecteur accepte. Ce défaut OMETTAIT la ligne jusqu'au 2026-09-19, si bien que ~68 fichiers
+    fabriquaient un journal de grammaire 1 et n'exerçaient que des chemins de repli que la
+    production n'emprunte jamais — le vrai StepLogger écrit toujours la ligne. Depuis que les
+    branches de compatibilité ont été retirées, un tel journal est REFUSÉ à l'ouverture
+    (`parse_log_grammar_version`), et ce défaut-ci est le seul qui décrive ce que le producteur
+    écrit vraiment. Passer un entier reste possible pour vérifier le refus lui-même.
     """
     ez = 2 * inches_to_subhex
     rules: Dict[str, str] = {
@@ -354,7 +357,8 @@ def entete_step_log(
         obj = objectives or ";".join(f"(150,{r})" for r in range(150, 156))
         objectives_line = f"[10:00:00] Objectives: rect b NW:{obj}\n"
     rosters_line = f"[10:00:00] Rosters: {rosters}\n" if rosters else ""
-    grammar_line = "" if log_grammar is None else f"[10:00:00] Log grammar: {log_grammar}\n"
+    _grammar = MIN_SUPPORTED_LOG_GRAMMAR if log_grammar is None else log_grammar
+    grammar_line = f"[10:00:00] Log grammar: {_grammar}\n"
     return (
         "=== STEP-BY-STEP ACTION LOG ===\n"
         "================================================================================\n\n"

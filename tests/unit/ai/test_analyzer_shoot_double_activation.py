@@ -17,6 +17,7 @@ from typing import Any
 
 import ai.analyzer as an
 from tests.unit.ai._fabriques import entete_step_log
+from ai.step_logger import MIN_SUPPORTED_LOG_GRAMMAR
 
 # Trois unités : 1 et 2 (P1, tireurs), 101 (P2, cible).
 # Positionnées loin pour éviter tout contrôle d'engagement ou de LoS.
@@ -49,6 +50,7 @@ _EPISODE_HEADER = (
     "[10:00:00] Rosters: scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)\n"
     "[10:00:00] Walls: none\n"
     "[10:00:00] Board: cols=44 rows=60 inches_to_subhex=1 hex_radius=2.78 margin=1\n"
+    f"[10:00:00] Log grammar: {MIN_SUPPORTED_LOG_GRAMMAR}\n"
     "[10:00:00] Run rules: cohesion.global_subhex=9 cohesion.min_neighbors=1 "
     "cohesion.model_subhex=2 engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
     "metric.engagement=hex metric.ranged=hex move.thru_enemy=False "
@@ -91,7 +93,7 @@ def _shot(turn: int, player: int, uid: str, scol: int, srow: int) -> str:
     """Ligne SHOT minimale — pas de weapon pour rester hors du bloc weapon_match."""
     return (
         f"[12:00:0{turn}] E1 T{turn} P{player} SHOOT : "
-        f"Unit {uid}({scol},{srow}) SHOT Unit 101(5,30) Dmg:0HP [SUCCESS]"
+        f"Unit {uid}({scol},{srow}) SHOT [DESIGNATED:101] Unit 101(5,30) Dmg:0HP [ALLOC_MODEL: 101#0] [SUCCESS]"
     )
 
 

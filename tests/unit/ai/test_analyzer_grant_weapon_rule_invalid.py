@@ -29,7 +29,7 @@ _FOUGHT_LINE = (
     f" [MODELS: 1#0@({FIGHTER[0]},{FIGHTER[1]},z0)]"
     " [SHOOTER_MODELS: 1#0]"
     " [MODEL_TYPES: 1#0=Bigboss]"
-    " [R:+0.0] [SUCCESS]\n"
+    " [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 

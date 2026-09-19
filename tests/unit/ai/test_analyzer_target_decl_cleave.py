@@ -62,7 +62,6 @@ def _make_log(body: str) -> str:
         objectives=OBJECTIVES,
         metric_engagement="hex",
         metric_ranged="hex",
-        log_grammar=2,
         units=_UNITS,
     )
 

@@ -55,11 +55,11 @@ def _command(sec: int, player: int, turn: int) -> str:
     return f"[10:00:{sec:02d}] E1 T{turn} P{player} COMMAND : Unit 1{S} WAIT [R:+0.0] [SUCCESS]\n"
 
 
-def _stats(tmp_path, body: str, log_grammar: int = 12) -> dict:
+def _stats(tmp_path, body: str) -> dict:
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(entete_step_log(_SETUP + body, units=_UNITS, ez_vertical_inches=None, log_grammar=log_grammar))
+    log.write_text(entete_step_log(_SETUP + body, units=_UNITS, ez_vertical_inches=None))
     return an.parse_step_log(str(log))
 
 
@@ -109,10 +109,3 @@ def test_la_suppression_expire_a_la_phase_de_commandement_du_suppresseur(tmp_pat
     stats = _stats(tmp_path, body)
     assert stats["suppression_without_hit"] == {1: 1, 2: 0}
 
-
-def test_journal_anterieur_abstention(tmp_path):
-    """Grammaire 11 : la ligne SUPPRESSES n'est pas garantie — aucune faute inventée, ni sur une
-    suppression sans touche ni sur un malus orphelin."""
-    body = _shot(2, "102", T2, hit=False) + _suppresses(3, "102", T2) + _enemy_shot(4, "101", T1, suppressed_token=True)
-    stats = _stats(tmp_path, body, log_grammar=11)
-    assert stats["suppression_without_hit"] == {1: 0, 2: 0}

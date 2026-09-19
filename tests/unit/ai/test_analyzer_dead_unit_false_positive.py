@@ -33,13 +33,13 @@ DEPLOY_MODELS = "[MODELS: 101#0@(80,50) 101#1@(84,50) 101#2@(88,50)]"
 STEP_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n",
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
-        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 {DEPLOY_MODELS}\n"
+        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 101#0@(80,50)] [MODEL_TYPES: 101#0=AssaultIntercessor] {DEPLOY_MODELS}\n"
     ),
     ez_vertical_inches=None,
 )
@@ -55,9 +55,9 @@ STEP_LOG = entete_step_log(
 DEAD_BEFORE_SHOT_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
     "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
         "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
@@ -79,8 +79,8 @@ DEAD_BEFORE_ALL_SHOTS_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
     "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
-    "[10:00:04] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
         "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
@@ -91,9 +91,9 @@ DEAD_BEFORE_ALL_SHOTS_LOG = entete_step_log(
 DEAD_BEFORE_SHOT_CROSS_TURN_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
     "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:03] E1 T3 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    "[10:00:03] E1 T3 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
         "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
@@ -106,8 +106,8 @@ DEAD_BEFORE_SHOT_CROSS_TURN_LOG = entete_step_log(
 SHOT_AT_CORPSE_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
-    "[10:00:03] E1 T3 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:03] E1 T3 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
         "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
@@ -139,10 +139,10 @@ _DEPLOIEMENTS_DEUX_ATTAQUANTS = (
 # tirs de Unit 5 — dont la ligne d'attaque, comme toujours, SUIT l'annonce de la mort.
 DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_LOG = entete_step_log(
     _DEPLOIEMENTS_DEUX_ATTAQUANTS
-    + "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 103(90,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 103#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 103#0] [SUCCESS]\n"
+    + "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:103] Unit 103(90,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 103#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 103#0] [SUCCESS]\n"
     "[10:00:03] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:04] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
-    "[10:00:05] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:05] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
     units=_UNITS_DEUX_ATTAQUANTS,
     ez_vertical_inches=None,
 )
@@ -150,10 +150,10 @@ DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_LOG = entete_step_log(
 # cadavre est visé par une unité tierce et la faute doit rester comptée.
 CADAVRE_VISE_PAR_UNE_TIERCE_UNITE_LOG = entete_step_log(
     _DEPLOIEMENTS_DEUX_ATTAQUANTS
-    + "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 103(90,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 103#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 103#0] [SUCCESS]\n"
+    + "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:103] Unit 103(90,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 103#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 103#0] [SUCCESS]\n"
     "[10:00:03] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:04] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
-    "[10:00:05] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:05] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
     units=_UNITS_DEUX_ATTAQUANTS,
     ez_vertical_inches=None,
 )
@@ -286,8 +286,8 @@ DEAD_BEFORE_ALL_FIGHTS_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(51,50) DEPLOYED from (-1,-1) to (51,50) [R:+0.0] [MODELS: 102#0@(51,50,z0)] [SUCCESS]\n"
     "[10:00:02] E1 T1 P2 FIGHT : Unit 102(51,50) DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:03] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
-    "[10:00:04] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n",
+    "[10:00:03] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50,z0)]\n"
         "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (51,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(51,50,z0)]\n"
@@ -304,10 +304,10 @@ DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_FIGHT_LOG = entete_step_log(
     "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 5(52,50) DEPLOYED from (-1,-1) to (52,50) [R:+0.0] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(51,50) DEPLOYED from (-1,-1) to (51,50) [R:+0.0] [MODELS: 102#0@(51,50,z0)] [SUCCESS]\n"
     "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103(53,50) DEPLOYED from (-1,-1) to (53,50) [R:+0.0] [MODELS: 103#0@(53,50,z0)] [SUCCESS]\n"
-    "[10:00:02] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 103(53,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 103(53,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 103#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
     "[10:00:03] E1 T1 P2 FIGHT : Unit 102(51,50) DEAD model=102#0 reason=combat [SUCCESS]\n"
-    "[10:00:04] E1 T1 P1 FIGHT : Unit 5(52,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n"
-    "[10:00:05] E1 T1 P1 FIGHT : Unit 5(52,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n",
+    "[10:00:04] E1 T1 P1 FIGHT : Unit 5(52,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n"
+    "[10:00:05] E1 T1 P1 FIGHT : Unit 5(52,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50,z0)]\n"
         "[10:00:00] Unit 5 (SternguardVeteranBoltRifle) P1: Starting position (52,50), HP_MAX=2 base=round/6 [MODELS: 5#0@(52,50,z0)]\n"

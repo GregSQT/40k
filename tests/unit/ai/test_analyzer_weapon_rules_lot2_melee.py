@@ -36,7 +36,9 @@ def _fought_line(unit_type: str, weapon: str, detail: str) -> str:
         f" [MODELS: 1#0@({FIGHTER[0]},{FIGHTER[1]},z0)]"
         f" [SHOOTER_MODELS: 1#0]"
         f" [MODEL_TYPES: 1#0={unit_type}]"
-        f" [R:+0.0] [SUCCESS]\n"
+        # Grammaire 2 : nommee seulement quand la ligne applique des degats.
+        + (" [ALLOC_MODEL: 101#0]" if "Dmg:" in detail else "")
+        + f" [R:+0.0] [SUCCESS]\n"
     )
 
 

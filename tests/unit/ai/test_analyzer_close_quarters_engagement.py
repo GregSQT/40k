@@ -53,26 +53,26 @@ _UNITS = (
 )
 
 _SHOT_AT_ENGAGED = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 _SHOT_AT_FAR = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 102{F} with [Heavy Bolt Pistol]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:102] Unit 102{F} with [Heavy Bolt Pistol]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
 )
 
 
 _KILLS_ENGAGED = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 _EXCESS_SHOT_AFTER_KILL = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
     " - Hit 5(3+) - Wound 2(4+) [R:+0.0] [SUCCESS]\n"
 )
 _KILLS_FAR = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 102{F} with [Heavy Bolt Pistol]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:102] Unit 102{F} with [Heavy Bolt Pistol]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
 )
 
 

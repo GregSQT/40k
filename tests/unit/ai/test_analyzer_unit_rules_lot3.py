@@ -94,7 +94,7 @@ def test_verrou_reroll_save_fight_compte_exercice(tmp_path):
         "[10:00:06] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 101(50,51) with [Close Combat Weapon]"
         " - Hit 4(3+) - Wound 5(4+) - Save 3(3+ AP0 → 3+) [REROLLED:2]"
         " - Dmg:0HP [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(50,51,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
@@ -120,10 +120,10 @@ def test_verrou_oath_target_match_pas_erreur(tmp_path):
         # EFFECTS avec oath_target=101 pour P1
         "[10:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 none\n"
         # SHOT avec [OATH OF MOMENT] dans segment Wound, cible = 101 (correspond à oath_target)
-        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(90,50) with [Bolt Pistol]"
+        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(90,50) with [Bolt Pistol]"
         " - Hit 5(3+) - Wound 5(4+) [OATH OF MOMENT] - Save 2(3+) - Dmg:0HP"
         " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(90,50,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
@@ -149,10 +149,10 @@ def test_verrou_oath_target_mismatch_detecte(tmp_path):
         "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(92,50) DEPLOYED from (-1,-1) to (92,50) [R:+0.0] [SUCCESS]\n"
         # EFFECTS avec oath_target=101 mais on tire sur 102
         "[10:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 none\n"
-        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(92,50) with [Bolt Pistol]"
+        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:102] Unit 102(92,50) with [Bolt Pistol]"
         " - Hit 5(3+) - Wound 5(4+) [OATH OF MOMENT] - Save 2(3+) - Dmg:0HP"
         " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 102#0@(92,50,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
@@ -176,7 +176,7 @@ def test_verrou_oath_fight_match_pas_erreur(tmp_path):
         "[10:00:06] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 101(50,51) with [Close Combat Weapon]"
         " - Hit 4(3+) - Wound 5(3+) [OATH OF MOMENT] - Save 3(3+) - Dmg:1HP"
         " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(50,51,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
@@ -204,7 +204,7 @@ def test_verrou_oath_fight_mismatch_detecte(tmp_path):
         "[10:00:06] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(52,51) with [Close Combat Weapon]"
         " - Hit 4(3+) - Wound 5(3+) [OATH OF MOMENT] - Save 3(3+) - Dmg:1HP"
         " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 102#0@(52,51,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
@@ -228,10 +228,10 @@ def test_verrou_ctp_detecte_quand_eff_meilleure_que_ap(tmp_path):
         "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
         "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(60,50) DEPLOYED from (-1,-1) to (60,50) [R:+0.0] [SUCCESS]\n"
         # Save format : base=3, AP=-1, eff=3 → eff(3) < base-ap_val(3-(-1)=4) → CTP appliqué
-        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(60,50) with [Boltstorm Gauntlet]"
+        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(60,50) with [Boltstorm Gauntlet]"
         " - Hit 5(3+) - Wound 5(4+) - Save 3(3+ AP-1 → 3+) - Dmg:0HP"
         " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(60,50,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
@@ -251,10 +251,10 @@ def test_verrou_ctp_non_compte_sans_amelioration(tmp_path):
         "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
         "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(60,50) DEPLOYED from (-1,-1) to (60,50) [R:+0.0] [SUCCESS]\n"
         # base=3, AP=-1, eff=4 → eff(4) == base-ap_val(4) → pas de CTP
-        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(60,50) with [Boltstorm Gauntlet]"
+        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(60,50) with [Boltstorm Gauntlet]"
         " - Hit 5(3+) - Wound 5(4+) - Save 4(3+ AP-1 → 4+) - Dmg:0HP"
         " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(60,50,z0)]"
-        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")

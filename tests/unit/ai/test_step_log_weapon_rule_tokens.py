@@ -284,10 +284,10 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
     cela peuple `state.units_advanced`, ce qui permet de valider le fallback grammaire < 4
     de la règle ASSAULT (shoot_handler.py : `shooter_id in state.units_advanced`).
 
-    `log_grammar` déclare la version de grammaire de l'entête. `None` (défaut) l'OMET, donc le
-    lecteur lève 1 et prend ses chemins de repli — le seul régime que ce fichier exerçait. La
-    renseigner à `LOG_GRAMMAR_VERSION` reproduit ce qu'écrit le vrai StepLogger, c'est-à-dire le
-    régime de PRODUCTION, où le token fait autorité (`_eligibility_rule_applied`).
+    `log_grammar` déclare la version de grammaire de l'entête. `None` (défaut) laisse la
+    fabrique annoncer la version minimale lisible, le seul régime qui subsiste : le lecteur
+    refuse tout journal en deçà, et le token fait autorité partout
+    (`_eligibility_rule_applied`).
     """
     import ai.analyzer as an
 

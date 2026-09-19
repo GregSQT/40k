@@ -66,27 +66,27 @@ _DEPLOY = _DEPLOY_FAM1  # compat alias
 
 # Ligne de tir SANS token [CLOSE-QUARTERS] — grammaire 4 sans confirmation du portier.
 _SHOOT_BOLT_RIFLE_NO_TOKEN = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
     " - Hit 4(3+) - Wound 3(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Ligne de tir AVEC token [CLOSE-QUARTERS] — grammaire 4, portier a validé.
 _SHOOT_BOLT_RIFLE_WITH_TOKEN = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [CLOSE-QUARTERS] Unit 101{T} with [Bolt Rifle]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [CLOSE-QUARTERS] [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
     " - Hit 4(3+) - Wound 3(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Famille 2 : cible = Unit 102 (HORS zone d'engagement per-fig, à 12 subhex > EZ 10).
 # Le token [CLOSE-QUARTERS] confirme que le moteur considère cependant l'engagement valide.
 _SHOOT_HBP_NO_TOKEN = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 102{T2} with [Heavy Bolt Pistol]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:102] Unit 102{T2} with [Heavy Bolt Pistol]"
     " - Hit 4(3+) - Wound 3(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
 )
 _SHOOT_HBP_WITH_TOKEN = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [CLOSE-QUARTERS] Unit 102{T2} with [Heavy Bolt Pistol]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [CLOSE-QUARTERS] [DESIGNATED:102] Unit 102{T2} with [Heavy Bolt Pistol]"
     " - Hit 4(3+) - Wound 3(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
 )
 
 
-def _parse(tmp_path, units: str, shoot_line: str, grammar: int | None = 4, deploy: str | None = None):
+def _parse(tmp_path, units: str, shoot_line: str, deploy: str | None = None):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
@@ -94,7 +94,6 @@ def _parse(tmp_path, units: str, shoot_line: str, grammar: int | None = 4, deplo
         entete_step_log(
             (deploy if deploy is not None else _DEPLOY_FAM1) + shoot_line,
             units=units,
-            log_grammar=grammar,
         )
     )
     return an.parse_step_log(str(log))
@@ -126,7 +125,7 @@ def test_fam1_token_cq_previent_engaged_non_close_quarters(tmp_path):
 
 
 def test_fam1_verrou_sans_token_le_fp_se_produit(tmp_path):
-    """VERROU : sans le token (ou grammar < 4), le faux positif famille 1 se produit bien.
+    """VERROU : sans le token, le faux positif famille 1 se produit bien.
 
     Ce test doit rester VERT (le FP se produit == compteur == 1). S'il passe à 0, le contrôle
     est mort et la correction ne prouve plus rien.
@@ -177,20 +176,3 @@ def test_fam2_verrou_sans_token_fp_se_produit(tmp_path):
         "Sans [CLOSE-QUARTERS], cible à 12 subhex doit déclencher close_quarters_shot_at_unengaged_target"
     )
 
-
-def test_fam2_token_ignore_en_grammaire_3_fp_se_produit(tmp_path):
-    """Anti-vert-vacant : le token [CLOSE-QUARTERS] n'est lu qu'à partir de la grammaire 4.
-
-    Scénario : le token est présent dans la ligne de tir, mais le log déclare `Log grammar: 3`.
-    `_eligibility_rule_applied` renvoie False pour grammar < 4, donc le token ne remplace pas
-    le verdict BFS de `shooter_engaged_with_target`. La cible à TARGET_OUTSIDE est hors EZ
-    per-fig → close_quarters_at_unengaged=True → compteur == 1.
-
-    Si la garde `state.log_grammar >= 4` était retirée de `_eligibility_rule_applied`, le
-    token serait reconnu même en grammar=3, `shooter_engaged_with_target` deviendrait True
-    et ce test passerait à 0 (rouge). C'est exactement le défaut que ce test verrouille.
-    """
-    stats = _parse(tmp_path, _UNITS_FAM2, _SHOOT_HBP_WITH_TOKEN, grammar=3, deploy=_DEPLOY_FAM2)
-    assert stats["close_quarters_shot_at_unengaged_target"][1] == 1, (
-        "Grammar 3 : le token [CLOSE-QUARTERS] doit être ignoré, la cible hors EZ doit déclencher le compteur"
-    )

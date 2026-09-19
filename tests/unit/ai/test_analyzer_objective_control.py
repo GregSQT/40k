@@ -44,14 +44,14 @@ def _snapshot(zones: str, turn: int = 2, sec: int = 5) -> str:
     return f"[10:00:{sec:02d}] T{turn} OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES={zones}\n"
 
 
-def _stats(tmp_path, body: str, grammar: int = 15) -> dict:
+def _stats(tmp_path, body: str) -> dict:
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         _SETUP + body + _END, units=_UNITS, objectives=_OBJ, inches_to_subhex=1,
         board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
-        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=grammar,
+        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)",
     ))
     return an.parse_step_log(str(log))
 
@@ -134,8 +134,3 @@ def test_un_controleur_inchange_entre_deux_frontieres_n_est_pas_juge(tmp_path):
     stale = _stats(tmp_path, first + _BOYZ_IN + _snapshot("rect b NW:Ctrl=none:Mthd=default:OC1=4:OC2=0:Sec=none"))
     assert stale["objective_control_mismatch"] == {1: 0, 2: 0}, _first(stale)
 
-
-def test_journal_sans_oc_par_zone_est_une_abstention(tmp_path):
-    stats = _stats(tmp_path, _BOYZ_IN + _snapshot("rect b NW:Ctrl=1"), grammar=10)
-    assert stats["objective_control_mismatch"] == {1: 0, 2: 0}
-    assert stats["rule_usage"]["PROJ.2.3.objective_control"][1] == 0

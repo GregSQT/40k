@@ -23,6 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
+from ai.step_logger import MIN_SUPPORTED_LOG_GRAMMAR
 from ai.analyzer_core import agent_decision_option_rate
 from ai.analyzer_rules import coverage_gaps, coverage_rows, load_rules_corpus, new_rule_usage_counters, note_rule_usage, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED, VERDICT_UNDECIDABLE
 
@@ -176,7 +177,7 @@ _LOG_GRAMMAR_RE = re.compile(r'^\[[^\]]*\]\s*Log grammar:\s*(\d+)\s*$')
 
 
 def parse_log_grammar_version(filepath: str) -> int:
-    """Version de grammaire déclarée par l'entête `Log grammar:` — 1 si la ligne est absente.
+    """Version de grammaire déclarée par l'entête `Log grammar:`, REFUSÉE si trop ancienne.
 
     ⚠️ CE QUE CETTE VERSION SERT À FAIRE, et c'est sa seule raison d'exister : distinguer
     « le journal ne PORTE pas cette donnée » de « le producteur a OUBLIÉ de l'écrire ».
@@ -184,24 +185,43 @@ def parse_log_grammar_version(filepath: str) -> int:
     Sans elle, un lecteur qui ne trouve pas `[ALLOC_MODEL:]` sur une ligne de dégâts n'a d'autre
     choix que de retomber en silence sur une reconstruction approximative — le repli qui masque
     une panne au lieu de la dire. Avec elle, l'absence devient une ERREUR sur un journal qui
-    promet la donnée, et reste un fait normal sur un journal antérieur.
+    promet la donnée.
 
-    Une version INCONNUE (> celles gérées) n'est pas une erreur : un journal plus récent porte
-    au moins ce que promettent les versions antérieures — c'est la règle qui rend le numéro
-    utile, et `ai/step_logger.LOG_GRAMMAR_VERSION` ne s'incrémente que pour une garantie
-    NOUVELLE, jamais pour un changement cosmétique.
+    REFUS EN DESSOUS DE `MIN_SUPPORTED_LOG_GRAMMAR`, et c'est ici qu'il se rend, une fois, au
+    même titre que le refus d'un journal sans échelle (`parse_board_scale_from_log`). Les
+    branches de compatibilité ont été retirées : le lecteur ne sait plus s'abstenir sur les
+    journaux d'avant, il y compterait des fautes INVENTÉES. Une ligne de dégâts sans `[FNP:]`
+    contre une escouade porteuse d'un Feel No Pain comptait ainsi 1 faute en grammaire 7 comme
+    en 17, sans un mot. Refuser une fois vaut mieux que N abstentions dispersées — et mieux
+    encore qu'un crash tardif sur la première ligne mal formée, à 30 000 lignes de l'entête.
+
+    L'ABSENCE de la ligne tombe sous le même refus : elle vaut la grammaire 1, qui ne veut plus
+    dire « vieux journal » mais « journal qu'on ne sait plus lire ».
+
+    Une version INCONNUE (> celles gérées) n'est toujours PAS une erreur : un journal plus récent
+    porte au moins ce que promettent les versions antérieures.
     """
+    version = 1
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
             m = _LOG_GRAMMAR_RE.match(line)
             if m:
-                return int(m.group(1))
+                version = int(m.group(1))
+                break
             # L'entête est un bloc contigu : dès la première ligne d'action, la ligne de version
             # ne viendra plus. Balayer 35 Mo pour une ligne absente coûterait le prix d'une passe
-            # entière à chaque journal d'ancienne grammaire.
+            # entière à chaque journal refusé.
             if "=== ACTIONS START ===" in line:
                 break
-    return 1
+    if version < MIN_SUPPORTED_LOG_GRAMMAR:
+        raise ValueError(
+            f"{filepath}: journal en grammaire {version}, la plus ancienne lisible étant "
+            f"{MIN_SUPPORTED_LOG_GRAMMAR} (`Log grammar:` de l'entête ; son absence vaut 1). Les "
+            "branches de compatibilité ont été retirées le 2026-09-19 : analyser ce journal "
+            "compterait des fautes inventées au lieu de s'abstenir. Rejouer le run avec le "
+            "producteur courant est le seul moyen d'en obtenir un verdict."
+        )
+    return version
 
 
 def parse_run_rules_from_log(filepath: str) -> Dict[str, str]:

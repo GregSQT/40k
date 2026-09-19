@@ -80,7 +80,6 @@ STEP_LOG = entete_step_log(
     objectives=OBJECTIVES,
     metric_engagement="hex",
     metric_ranged="hex",
-    log_grammar=2,
     units=(
         "[10:00:00] Unit 1 (BoyzNobKustomShoota) P1: Starting position (-1,-1), HP_MAX=5 "
         "base=round/1\n"

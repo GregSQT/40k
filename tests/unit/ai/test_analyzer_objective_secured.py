@@ -25,14 +25,14 @@ def _secures(unit: str = "1", pos: str = "(50,50)", phase: str = "COMMAND", play
     )
 
 
-def _stats(tmp_path, body: str, grammar: int = 15) -> dict:
+def _stats(tmp_path, body: str) -> dict:
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         _SETUP + body + _END, units=_UNITS, objectives=_OBJ, inches_to_subhex=1,
         board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
-        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=grammar,
+        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)",
     ))
     return an.parse_step_log(str(log))
 
@@ -120,9 +120,3 @@ def test_une_securisation_reprise_sans_passer_par_none_exige_un_niveau_stricteme
     assert on_tie["objective_secured_invalid"] == {1: 0, 2: 1}, _first(on_tie)
     assert "sans niveau strictement supérieur" in _first(on_tie)
 
-
-def test_journal_anterieur_a_la_grammaire_15_est_une_abstention(tmp_path):
-    body = _BOYZ_IN + _snapshot("rect b NW:Ctrl=1:Mthd=default:OC1=4:OC2=0", sec=3)
-    stats = _stats(tmp_path, body, grammar=14)
-    assert stats["objective_secured_invalid"] == {1: 0, 2: 0}
-    assert stats["rule_usage"]["PROJ.2.3.objective_secured"] == {1: 0, 2: 0}

@@ -38,14 +38,14 @@ _SETUP = (
 # Unit 2 combat en premier grâce à FIGHTS FIRST, alors que unit 1 (chargée) n'a pas encore combattu.
 _FIGHT_FIGHTS_FIRST = (
     f"[10:00:03] E1 T1 P1 FIGHT : Unit 2{OTH} FOUGHT Unit 101{T} with [Close Combat Weapon]"
-    " [FIGHTS FIRST] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0]"
+    " [FIGHTS FIRST] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0]"
     " [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 
 # Même situation, sans le token : doit produire une violation (prémisse du test d'exemption).
 _FIGHT_WITHOUT_FIGHTS_FIRST = (
     f"[10:00:03] E1 T1 P1 FIGHT : Unit 2{OTH} FOUGHT Unit 101{T} with [Close Combat Weapon]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0]"
+    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0]"
     " [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 

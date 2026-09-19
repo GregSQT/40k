@@ -46,13 +46,13 @@ _UNIT1_PILE_IN_NO_FIGHT = (
 # Unité 2 (non-chargée) combat l'unité 101.
 _UNIT2_FIGHTS = (
     f"[10:00:04] E1 T1 P1 FIGHT : Unit 2{OTH} FOUGHT Unit 101{T} with [Close Combat Weapon]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
+    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 
 # Prémisse : sans PILED IN, unit 2 combat alors que unit 1 (chargée) n'a pas été activée → violation.
 _UNIT2_FIGHTS_BEFORE_UNIT1 = (
     f"[10:00:03] E1 T1 P1 FIGHT : Unit 2{OTH} FOUGHT Unit 101{T} with [Close Combat Weapon]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
+    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 
 

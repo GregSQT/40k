@@ -58,9 +58,9 @@ _SHOOTERS = "[SHOOTER_MODELS: 1#0 1#1]"
 def _shot(n: int) -> str:
     """Une ligne d'attaque de tir, les DEUX socles désignés comme tireurs."""
     return (
-        f"[10:00:0{n} ] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [{WEAPON}]"
+        f"[10:00:0{n} ] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [{WEAPON}]"
         f" - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP {_MODELS} {_SHOOTERS}"
-        " [R:+0.0] [SUCCESS]\n"
+        " [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
     ).replace(" ]", "]")
 
 

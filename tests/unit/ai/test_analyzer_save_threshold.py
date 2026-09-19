@@ -58,7 +58,7 @@ def _stats(tmp_path, body: str) -> dict:
     log.write_text(entete_step_log(
         _SETUP + body + _END, units=_UNITS, objectives=_OBJECTIVES, inches_to_subhex=1,
         board="cols=100 rows=100", hex_radius="1.0", ez_vertical_inches=None,
-        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)", log_grammar=14,
+        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=ork (ref)"
     ))
     return an.parse_step_log(str(log))
 

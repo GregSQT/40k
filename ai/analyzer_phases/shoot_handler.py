@@ -244,18 +244,14 @@ def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int
     return Socle(shape, size, int(col), int(row), set(_model_footprint(int(col), int(row), (shape, size))))
 
 
-def _eligibility_rule_applied(state: "AnalyzerState", action_desc: str, token: str,
-                              legacy: bool) -> bool:
+def _eligibility_rule_applied(action_desc: str, token: str) -> bool:
     """USAGE d'une règle d'ÉLIGIBILITÉ au tir : [ASSAULT] 10.05, [CLOSE-QUARTERS] 10.06.
 
-    Le TOKEN fait autorité dès que la grammaire le garantit (`LOG_GRAMMAR_VERSION >= 4`). En
-    dessous il n'était pas écrit du tout : `legacy` reconstruit alors le fait depuis l'état, la
-    seule mesure possible sur ces journaux-là. `legacy` est un booléen déjà calculé par
-    l'appelant, donc son évaluation immédiate ne coûte rien.
+    Le TOKEN fait autorité, et lui seul. Il est garanti depuis la grammaire 4, sous laquelle
+    aucun journal n'est plus lu : la reconstruction depuis l'état qui servait aux journaux
+    antérieurs redevinait ce que la ligne dit maintenant elle-même.
     """
-    if state.log_grammar >= 4:
-        return re.search(token, action_desc, re.IGNORECASE) is not None
-    return legacy
+    return re.search(token, action_desc, re.IGNORECASE) is not None
 
 
 def handle_shoot(
@@ -584,7 +580,7 @@ def handle_shoot(
                     'line': line.strip()
                 })
 
-        if not is_close_quarters and _eligibility_rule_applied(state, action_desc, r'\[CLOSE-QUARTERS\]', False):
+        if not is_close_quarters and _eligibility_rule_applied(action_desc, r'\[CLOSE-QUARTERS\]'):
             is_close_quarters = True
 
     if weapon_match and weapon_display_name is not None:
@@ -833,7 +829,7 @@ def handle_shoot(
                 _shooter_living = state.current_line_models.get(shooter_id)  # get allowed
                 _living_mids_set = set(_shooter_living) if _shooter_living is not None else None
                 _designated_match = re.search(r'\[DESIGNATED:(\d+)\]', action_desc)
-                if state.log_grammar >= 11 and _designated_match is None:
+                if _designated_match is None:
                     raise ValueError(
                         f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — "
                         f"ligne SHOT sans `[DESIGNATED:<id>]`, que cette grammaire garantit : "
@@ -1047,7 +1043,7 @@ def handle_shoot(
             position_override=(shooter_col, shooter_row),
         )
 
-    if not shooter_engaged_with_target and _eligibility_rule_applied(state, action_desc, r'\[CLOSE-QUARTERS\]', False):
+    if not shooter_engaged_with_target and _eligibility_rule_applied(action_desc, r'\[CLOSE-QUARTERS\]'):
         shooter_engaged_with_target = True
 
     engagement_verdict = ranged_engagement_verdict(
@@ -1236,12 +1232,8 @@ def handle_shoot(
         pl_int = int(shooter_pl) if shooter_pl is not None else player
         if '[TWIN-LINKED]' in action_desc:
             stats['weapon_rule_usage'][("TWIN_LINKED", weapon_key)][pl_int] += 1
-        # [ASSAULT] 24.04 — règle d'éligibilité : token si la grammaire le garantit, sinon
-        # reconstruction depuis l'état (arme [ASSAULT] + tireur ayant avancé ce tour).
-        if _eligibility_rule_applied(
-            state, action_desc, r'\[ASSAULT\]',
-            shooter_id in state.units_advanced and 'ASSAULT' in weapon_rules_list,
-        ):
+        # [ASSAULT] 24.04 — règle d'éligibilité : le token dit que la règle a joué.
+        if _eligibility_rule_applied(action_desc, r'\[ASSAULT\]'):
             key = ("ASSAULT", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
         # [RAPID FIRE X] 24.30 — USAGE, même régime que [HEAVY] : le token n'est écrit que si le
@@ -1271,12 +1263,8 @@ def handle_shoot(
         # les attaques où elle a réellement pesé, jamais celles où l'arme la déclare seulement.
         if re.search(r'\[PRECISION\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("PRECISION", weapon_key)][pl_int] += 1
-        # [CLOSE-QUARTERS] 10.06 — même régime que [ASSAULT] ; repli état-based : arme
-        # [CLOSE_QUARTERS] et tireur engagé avec SA cible.
-        if _eligibility_rule_applied(
-            state, action_desc, r'\[CLOSE-QUARTERS\]',
-            is_close_quarters and shooter_engaged_with_target,
-        ):
+        # [CLOSE-QUARTERS] 10.06 — même régime que [ASSAULT].
+        if _eligibility_rule_applied(action_desc, r'\[CLOSE-QUARTERS\]'):
             stats['weapon_rule_usage'][("CLOSE_QUARTERS", weapon_key)][pl_int] += 1
         if heavy_applied_in_log:
             # [HEAVY] 24.16 — USAGE seulement, jamais VALIDITE. Le contrôle de validité

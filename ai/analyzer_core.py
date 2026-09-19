@@ -206,8 +206,7 @@ def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) ->
     m = _ALLOC_MODEL_RE.search(action_desc)
     if m:
         return m.group(1)
-    if state.log_grammar >= 2:
-        raise ValueError(
+    raise ValueError(
             f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — une "
             "attaque applique des dégâts sans segment `[ALLOC_MODEL:]`. Le producteur "
             "(`ai/step_logger`, via `_resolve_one_manual_wound`) garantit ce segment sur toute "
@@ -1164,7 +1163,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # datasheet est une panne du producteur, pas un socle « de datasheet inconnue »
                 # sur lequel s'abstenir. Les ids rendus sont rares : la ligne est testée une
                 # fois, la boucle par socle ne tourne que sur celles qui en portent.
-                _check_returned_ids = state.log_grammar >= 10 and '#r' in line
+                _check_returned_ids = '#r' in line
                 for _uid, _models in state.current_line_models.items():
                     if not _models:
                         continue
@@ -2789,7 +2788,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 stats['hazardous_mortal_wounds'][player] += _hz_mw
                                 _judge_character_allocation(
                                     state, config, stats, action_desc=action_desc, line=line,
-                                    target_id=_hz_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    target_id=_hz_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                     phase=phase, player=player,
                                 )
                                 _apply_damage_and_handle_death(
@@ -2802,7 +2801,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     state.unit_deaths, state.unit_kill_context, stats,
                                     positions_by_model=state.positions_by_model,
                                     models_invalidated=state.models_invalidated,
-                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                     pending_model_removals=None,
                                     dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
@@ -2838,7 +2837,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             elif _de_mw > 0:
                                 _judge_character_allocation(
                                     state, config, stats, action_desc=action_desc, line=line,
-                                    target_id=_de_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    target_id=_de_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                     phase=phase, player=player,
                                 )
                                 _apply_damage_and_handle_death(
@@ -2851,7 +2850,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     state.unit_deaths, state.unit_kill_context, stats,
                                     positions_by_model=state.positions_by_model,
                                     models_invalidated=state.models_invalidated,
-                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                     pending_model_removals=None,
                                     dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
@@ -2909,7 +2908,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # (`MW:` sommés, `Trigger:` comparé à 4+). Sur un journal antérieur
                             # les dés ne sont pas garantis : absence = vieux format, pas faute.
                             # La faute est au camp de la SOURCE, dont c'est la capacité.
-                            if state.log_grammar >= 9:
                                 _mwa_err = mw_ability_dice_error(
                                     _mwa_rule, int(_mwa_match.group(1)), action_desc
                                 )
@@ -2924,7 +2922,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             if _mwa_mw > 0:
                                 _judge_character_allocation(
                                     state, config, stats, action_desc=action_desc, line=line,
-                                    target_id=_mwa_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    target_id=_mwa_unit_id, alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                     phase=phase, player=player,
                                 )
                                 _apply_damage_and_handle_death(
@@ -2937,7 +2935,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     state.unit_deaths, state.unit_kill_context, stats,
                                     positions_by_model=state.positions_by_model,
                                     models_invalidated=state.models_invalidated,
-                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                     pending_model_removals=None,
                                     dead_model_ids_episode=state.dead_model_ids_episode,
                                 )

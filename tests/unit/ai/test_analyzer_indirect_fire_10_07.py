@@ -25,8 +25,10 @@ OBJECTIVES = ";".join(f"(200,{r})" for r in range(150, 156))
 
 _HEADER = entete_step_log(
     units=(
-        f"[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position {S}, HP_MAX=2 base=round/6\n"
-        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T}, HP_MAX=2 base=round/6\n"
+        f"[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position {S}, HP_MAX=2 base=round/6"
+        f" [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [MODEL_TYPES: 1#0=AssaultIntercessor]\n"
+        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T}, HP_MAX=2 base=round/6"
+        f" [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)] [MODEL_TYPES: 101#0=AssaultIntercessor]\n"
     ),
     rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
     objectives=OBJECTIVES,
@@ -46,39 +48,39 @@ _END = (
 # Le moteur affiche BS_après_couvert (4+) et non max(4,6)=6+ : eff < floor est LÉGAL.
 # 6+ plancher, BS=3→4 après couvert (eff=4 < floor=6 — légal), roll manqué.
 _VALID_6_MISS = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
     " - Hit 3(3+->4+) [COVER] [INDIRECT FIRE:6+] [R:+0.0] [FAILED]\n"
 )
 # 6+ plancher, roll=6 (critique) → touche avec Wound.
 _VALID_6_HIT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
     " - Hit 6(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 5(4+) - Save 2(3+) - Dmg:1HP"
-    " [R:+0.0] [SUCCESS]\n"
+    " [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # 4+ plancher (spotter), BS=3→4 après couvert, eff=4 == floor=4.
 _VALID_4_HIT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
     " - Hit 4(3+->4+) [COVER] [INDIRECT FIRE:4+] - Wound 5(4+) - Save 2(3+) - Dmg:1HP"
-    " [R:+0.0] [SUCCESS]\n"
+    " [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 # ── invalide ──────────────────────────────────────────────────────────────────────────────────
 # [COVER] absent : invariant violé.
 _INVALID_NO_COVER = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
-    " - Hit 4(3+->6+) [INDIRECT FIRE:6+] [R:+0.0] [FAILED]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
+    " - Hit 4(3+->6+) [INDIRECT FIRE:6+] [ALLOC_MODEL: 101#0] [R:+0.0] [FAILED]\n"
 )
 
 # ── exceptions légitimes ──────────────────────────────────────────────────────────────────────
 # [IGNORES COVER] : le couvert n'est pas accordé → le contrôle DOIT ignorer la ligne.
 _IGNORES_COVER = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
     " - Hit 4(3+) [IGNORES COVER] [INDIRECT FIRE:6+] [R:+0.0] [FAILED]\n"
 )
 # Tir normal sans token indirect : le contrôle ne doit pas intervenir.
 _NORMAL_SHOT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 

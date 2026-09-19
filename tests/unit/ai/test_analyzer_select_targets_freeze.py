@@ -49,26 +49,26 @@ _HEADER = entete_step_log(
 # pour toute mesure ultérieure — c'est la situation où l'ancre décide de tout.
 _MELEE_KILL = (
     f"[10:00:02] E1 T1 P1 FIGHT : Unit 2(38,20) FOUGHT Unit 101(39,20) with [Close Combat Weapon]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
+    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 # Activation de tir du tireur, DEUX lignes. La première tue encore une figurine : le moteur
 # ré-ancre l'escouade sur la survivante, et la deuxième ligne porte donc une AUTRE ancre.
 _SHOT_1 = (
-    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1(25,20) SHOT Unit 101(40,20) with [Sternguard Bolt Rifle]"
-    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1(25,20) SHOT [DESIGNATED:101] Unit 101(40,20) with [Sternguard Bolt Rifle]"
+    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 _SHOT_2 = (
-    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1(25,20) SHOT Unit 101(41,20) with [Sternguard Bolt Rifle]"
-    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1(25,20) SHOT [DESIGNATED:101] Unit 101(41,20) with [Sternguard Bolt Rifle]"
+    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Cible DÉTRUITE au tour 1, visée de nouveau au tour 2 : le gel n'a ni PV ni socles à rendre.
 _KILL_SQUAD = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1(25,20) SHOT Unit 102(50,20) with [Sternguard Bolt Rifle]"
-    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1(25,20) SHOT [DESIGNATED:102] Unit 102(50,20) with [Sternguard Bolt Rifle]"
+    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
 )
 _SHOT_AT_DEAD = (
-    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1(25,20) SHOT Unit 102(50,20) with [Sternguard Bolt Rifle]"
-    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1(25,20) SHOT [DESIGNATED:102] Unit 102(50,20) with [Sternguard Bolt Rifle]"
+    " - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [ALLOC_MODEL: 102#0] [R:+0.0] [SUCCESS]\n"
 )
 _DEAD_TARGET_HEADER = _HEADER.replace(
     "[10:00:00] === ACTIONS START ===",

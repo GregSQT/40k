@@ -52,13 +52,13 @@ def _setup(brawler: tuple[int, int]) -> str:
 
 # Arme NON-[CLOSE_QUARTERS] : c'est 04.02 qu'on teste, pas la restriction d'armes de 10.06.
 _SHOT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Le MÊME tir, mortel (la cible a 2 PV) : elle est retirée de l'état AVANT que le contrôle ne mesure.
 _SHOT_KILLS = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -161,8 +161,8 @@ _UNIT2_CONSOLIDATED = (
 )
 
 _SHOT_T2 = (
-    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 

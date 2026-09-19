@@ -34,12 +34,16 @@ OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
 def _log(target: tuple[int, int]) -> str:
     s, t = f"({SHOOTER[0]},{SHOOTER[1]})", f"({target[0]},{target[1]})"
+    # 10.06 : le moteur ne pose `[CLOSE-QUARTERS]` que lorsque la regle a rendu le tir legal,
+    # donc sur la cible ENGAGEE seulement. Depuis la grammaire 4 ce token fait autorite pour
+    # l usage (`_eligibility_token_usage`), si bien que son absence vaut « la regle n a pas joue ».
+    cq = " [CLOSE-QUARTERS]" if target == ENGAGED_TARGET else ""
     body = (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{s} SHOT Unit 101{t} with [{WEAPON}]"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{s} SHOT [DESIGNATED:101] Unit 101{t} with [{WEAPON}]{cq}"
         f" - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP"
         f" [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)]"
         f" [TARGET_MODELS: 101#0@({target[0]},{target[1]},z0)]"
-        " [SHOOTER_MODELS: 1#0] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
         "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
     )

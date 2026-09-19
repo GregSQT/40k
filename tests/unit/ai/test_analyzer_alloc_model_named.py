@@ -29,6 +29,7 @@ from __future__ import annotations
 import pytest
 
 from tests.unit.ai._fabriques import entete_step_log
+from ai.step_logger import MIN_SUPPORTED_LOG_GRAMMAR
 
 # Board x1 (inches_to_subhex=1) : 1 hex = 1 pouce.
 TIREUR = (10, 20)
@@ -63,16 +64,14 @@ def _jet(seconde: int, *, mid: str | None, degats: int = 2) -> str:
     token = f" [ALLOC_MODEL: {mid}]" if mid else ""
     return (
         f"[10:00:{seconde:02d}] E1 T1 P2 SHOOT : Unit 102({TIREUR[0]},{TIREUR[1]}) "
-        f"SHOT Unit 1({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] "
+        f"SHOT [DESIGNATED:1] Unit 1({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] "
         f"- Hit 4(3+) - Wound 5(4+) - Save 2(5+) - Dmg:{degats}HP [R:+0.0] "
         f"[MODELS: 102#0@({TIREUR[0]},{TIREUR[1]},z0)] [SHOOTER_MODELS: 102#0]{token} [SUCCESS]\n"
     )
 
 
-def _analyse(tmp_path, corps: str, *, grammaire: int = 2) -> dict:
-    entete = _ENTETE
-    if grammaire >= 2:
-        entete += f"[10:00:00] Log grammar: {grammaire}\n"
+def _analyse(tmp_path, corps: str) -> dict:
+    entete = _ENTETE + f"[10:00:00] Log grammar: {MIN_SUPPORTED_LOG_GRAMMAR}\n"
     log = tmp_path / "step.log"
     log.write_text(entete + _UNITES + corps)
     import ai.analyzer as an
@@ -156,14 +155,7 @@ def test_un_token_exige_et_absent_est_une_erreur_explicite(tmp_path):
     en silence sur la devinette que ce chantier vient de retirer.
     """
     with pytest.raises(ValueError, match=r"ALLOC_MODEL"):
-        _analyse(tmp_path, _jet(2, mid=None), grammaire=2)
-
-
-def test_un_journal_d_ancienne_grammaire_reste_lisible(tmp_path):
-    """L'exigence ne vaut que pour les journaux qui la promettent : les archives se relisent."""
-    stats = _analyse(tmp_path, _jet(2, mid=None), grammaire=1)
-    assert stats["shoot_invalid"][2]["total"] == 1, "le journal doit avoir été analysé"
-    assert stats["state_resync"]["alloc_model_unknown"] == 0
+        _analyse(tmp_path, _jet(2, mid=None))
 
 
 def test_dead_avant_shoot_n_est_pas_alloc_model_unknown(tmp_path):
@@ -187,7 +179,7 @@ def test_dead_avant_shoot_n_est_pas_alloc_model_unknown(tmp_path):
     )
     shoot_line = (
         "[10:00:03] E1 T1 P2 SHOOT : Unit 102(10,20) "
-        "SHOT Unit 1(30,20) with [Sternguard Bolt Rifle] "
+        "SHOT [DESIGNATED:1] Unit 1(30,20) with [Sternguard Bolt Rifle] "
         "- Hit 4(3+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] "
         "[MODELS: 102#0@(10,20,z0)] [SHOOTER_MODELS: 102#0] [ALLOC_MODEL: 1#0] [SUCCESS]\n"
     )
@@ -198,8 +190,7 @@ def test_dead_avant_shoot_n_est_pas_alloc_model_unknown(tmp_path):
         hex_radius="13.9",
         margin=5,
         objectives=OBJECTIVES,
-        metric_ranged="hex",
-        log_grammar=2,
+        metric_ranged="hex"
     )
     unites_hp1 = (
         "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=1 "

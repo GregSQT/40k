@@ -55,13 +55,13 @@ def _blow() -> str:
     )
 
 
-def _parse(tmp_path, body: str, grammar: int = 14):
+def _parse(tmp_path, body: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         _SETUP + body + _END, units=_UNITS, objectives=OBJECTIVES,
-        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)", log_grammar=grammar,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
     ))
     return an.parse_step_log(str(log))
 
@@ -86,7 +86,3 @@ def test_a_declined_call_does_not_raise_the_cap(tmp_path):
     stats = _parse(tmp_path, _call("DECLINED") + _blow() * (NB + FH_BONUS))
     assert stats["fight_over_cc_nb"][1] == FH_BONUS and _fh_errors(stats)
 
-
-def test_grammar_13_abstains(tmp_path):
-    stats = _parse(tmp_path, _blow() * (NB + FH_BONUS), grammar=13)
-    assert stats["fight_over_cc_nb"][1] == 0 and _fh_errors(stats) == []

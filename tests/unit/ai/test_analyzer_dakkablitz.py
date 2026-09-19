@@ -84,8 +84,8 @@ _SETUP = _SETUP_TMPL.format(
 def _tir(seconde: int, coup: int) -> str:
     return (
         f"[10:00:{seconde:02d}] E1 T1 P1 SHOOT : Unit 1{S}"
-        f" SHOT Unit 101{T} with [Blitzcannon]"
-        f" - Hit {coup}(4+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0]"
+        f" SHOT [DESIGNATED:101] Unit 101{T} with [Blitzcannon]"
+        f" - Hit {coup}(4+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0]"
         f" [MODELS: 1#0@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)]"
         f" [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
     )

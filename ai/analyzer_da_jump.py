@@ -34,7 +34,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from ai.analyzer_rules import note_rule_usage
 
 DA_JUMP_LINE_RE = re.compile(r"Unit (\d+)\((\d+),\s*(\d+)\) DA JUMP \(D6=(\d)\) \[(REPOSITIONED|MISCAST)\]")
-DA_JUMP_GRAMMAR = 13
 COUNTER = "da_jump_invalid"
 
 
@@ -65,8 +64,6 @@ def handle_da_jump_line(
         return False
     unit_id, d6, outcome = m.group(1), int(m.group(4)), m.group(5)
     player = int(player)
-    if state.log_grammar < DA_JUMP_GRAMMAR:
-        return True
     note_rule_usage(stats, "PROJ.1.1.da_jump", player)
     key = (state.current_episode_num, int(turn), player)
     if key in state.da_jump_rolled:
@@ -179,8 +176,6 @@ def handle_ingress_after_da_jump(
 
 def handle_suffers_da_jump(state: Any, stats: Dict[str, Any], line: str, unit_id: str, player: int, brut: int) -> None:
     """Ligne « SUFFERS n Mortal Wounds [DA JUMP] » : solde l'attente MISCAST de la même escouade."""
-    if state.log_grammar < DA_JUMP_GRAMMAR:
-        return
     pending = state.da_jump_pending
     if pending is None or pending["kind"] != "suffers" or pending["unit_id"] != str(unit_id):
         _error(state, stats, int(player), line,

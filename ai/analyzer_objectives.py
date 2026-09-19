@@ -54,7 +54,6 @@ RETURNED_RE = re.compile(r"RETURNED\s+(\d+)\s+models\s+\[([^\]]+)\]\s+\(D3=(\d+)
 CONTROL_COUNTER = "objective_control_mismatch"
 SECURED_COUNTER = "objective_secured_invalid"
 RETURNED_COUNTER = "returned_models_invalid"
-SECURED_GRAMMAR = 15
 
 
 def _error(state: Any, stats: Dict[str, Any], counter: str, player: int, line: str, detail: str) -> None:
@@ -209,7 +208,7 @@ def handle_objective_control_snapshot(
                         _error(state, stats, CONTROL_COUNTER, 1, line,
                                f"zone {name} : contrôleur imprimé {ctrl} vs attendu {exp_ctrl} "
                                f"(OC {printed_oc}, précédent {prev_ctrl}, sécurisé {prev_sec_for_ctrl})")
-        if sec != "absent" and state.log_grammar >= SECURED_GRAMMAR:
+        if sec != "absent":
             _judge_secured(state, stats, line, name, ctrl, printed_oc, sec, prev_sec, secured_line)
         state.objective_last_ctrl[name] = ctrl
         state.objective_last_sec[name] = sec if sec != "absent" else None

@@ -27,6 +27,7 @@ import pytest
 
 import ai.analyzer as an
 from tests.unit.ai._fabriques import entete_step_log
+from ai.step_logger import MIN_SUPPORTED_LOG_GRAMMAR
 
 # ── Constantes communes ──────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ _EPISODE_HEADER = (
     "[10:00:00] Rosters: scale=100pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)\n"
     "[10:00:00] Walls: none\n"
     f"[10:00:00] Board: {_BOARD} inches_to_subhex={_SCALE} hex_radius=2.78 margin=1\n"
+    f"[10:00:00] Log grammar: {MIN_SUPPORTED_LOG_GRAMMAR}\n"
     "[10:00:00] Run rules: cohesion.global_subhex=9 cohesion.min_neighbors=1 "
     "cohesion.model_subhex=2 engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
     "metric.engagement=hex metric.ranged=euclidean "

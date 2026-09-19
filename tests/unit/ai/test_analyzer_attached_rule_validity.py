@@ -83,7 +83,7 @@ _UNITS_SANS_COMPOSITION = (
 
 _HOLD_STILL = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101#0=none ×3] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101#0=none ×3] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 #: Le PainBoy (source de la capacité) est retiré AVANT le relevé : le `[MODELS:]` de la ligne
@@ -105,7 +105,7 @@ _PAINBOY_MORT_AVEC_SOCLE_RENDU = (
 #: Relevé par l'escouade 5 (Boyz sans personnage), même type que l'escouade attachée 1.
 _HOLD_STILL_UNITE_5 = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:5] [FNP_ROLLS: 101#0=none ×3] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:5] [FNP_ROLLS: 101#0=none ×3] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -129,8 +129,7 @@ _BOY_RENDU = (
 )
 
 
-def _parse(tmp_path, monkeypatch, units: str, rule_to_units, body: str = _HOLD_STILL,
-           log_grammar=None):
+def _parse(tmp_path, monkeypatch, units: str, rule_to_units, body: str = _HOLD_STILL):
     import ai.analyzer as an
     import ai.analyzer_config as ac_mod
 
@@ -146,7 +145,6 @@ def _parse(tmp_path, monkeypatch, units: str, rule_to_units, body: str = _HOLD_S
         board="cols=40 rows=40",
         objectives=_OBJECTIVES,
         units=units,
-        log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -248,7 +246,7 @@ def test_socle_rendu_declare_par_sa_ligne_rend_le_verdict(tmp_path, monkeypatch)
     stats = _parse(
         tmp_path, monkeypatch, _UNITS_ATTACHEE,
         {"mortal_wounds_on_critical_wound": {"PainBoy"}, "return_destroyed_models": {"PainBoy"}},
-        body=_PAINBOY_MORT + _PAINBOY_RENDU + _HOLD_STILL_G10, log_grammar=10,
+        body=_PAINBOY_MORT + _PAINBOY_RENDU + _HOLD_STILL_G10,
     )
     assert not stats["parse_errors"], stats["parse_errors"]
     assert stats["returned_models"][1] == 1, "la ligne RETURNED n'est pas lue"
@@ -265,36 +263,11 @@ def test_socle_rendu_declare_par_sa_ligne_rend_le_verdict(tmp_path, monkeypatch)
     stats = _parse(
         tmp_path, monkeypatch, _UNITS_ATTACHEE,
         {"mortal_wounds_on_critical_wound": {"PainBoy"}, "return_destroyed_models": {"PainBoy"}},
-        body=_PAINBOY_MORT + _BOY_RENDU + _HOLD_STILL_G10, log_grammar=10,
+        body=_PAINBOY_MORT + _BOY_RENDU + _HOLD_STILL_G10,
     )
     assert not stats["parse_errors"], stats["parse_errors"]
     assert stats["special_rule_usage_invalid"][("mortal_wounds_on_critical_wound", "Boyz")][1] == 1, (
         "un Boy rendu ne ramène pas le PainBoy : la source est morte, l'usage est fautif"
-    )
-
-
-def test_socle_rendu_de_datasheet_inconnue_suspend_le_verdict(tmp_path, monkeypatch):
-    """JOURNAL ANTÉRIEUR à la grammaire 10 — 19.04 : « Should those models later be revived,
-    those abilities will once more apply ».
-
-    Une figurine rendue reçoit un id `1#r0` absent de `[MODEL_TYPES:]` : sa datasheet est
-    inconnue, donc l'analyzer ne peut pas dire si la source est de retour. Il s'abstient — la
-    compter INVALID accuserait le moteur d'une faute que la règle lui permet, et une escouade
-    dont tous les survivants sont des socles rendus verrait TOUS ses usages comptés fautifs.
-    """
-    import ai.analyzer as an
-
-    stats = _parse(
-        tmp_path, monkeypatch, _UNITS_ATTACHEE,
-        {"mortal_wounds_on_critical_wound": {"PainBoy"}},
-        body=_PAINBOY_MORT_AVEC_SOCLE_RENDU + _HOLD_STILL,
-    )
-    assert not stats["parse_errors"], f"aucune erreur de format attendue, got {stats['parse_errors']}"
-    assert stats["special_rule_usage"][("mortal_wounds_on_critical_wound", "Boyz")][1] == 1, (
-        "prémisse : l'usage est bien relevé, socle rendu présent"
-    )
-    assert an.error_totals(stats)["special_rules_invalid"] == 0, (
-        "datasheet du socle rendu inconnue : abstention, pas une faute inventée"
     )
 
 

@@ -43,13 +43,15 @@ def _body_line(unit_type: str, weapon: str, detail: str, *, hazardous_roll: int 
     """Ligne SHOT complète avec [MODEL_TYPES:] pour résoudre l'arme."""
     hz = f" [HAZARDOUS] Roll:{hazardous_roll}" if hazardous_roll is not None else ""
     return (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [{weapon}]"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [{weapon}]"
         f" - {detail}{hz}"
         f" [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)]"
         f" [TARGET_MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)]"
         " [SHOOTER_MODELS: 1#0]"
         f" [MODEL_TYPES: 1#0={unit_type}]"
-        " [R:+0.0] [SUCCESS]\n"
+        # Grammaire 2 : nommee des que la ligne applique des degats.
+        + (" [ALLOC_MODEL: 101#0]" if "Dmg:" in detail else "")
+        + " [R:+0.0] [SUCCESS]\n"
     )
 
 
@@ -61,8 +63,8 @@ def _log(*shot_lines: str, unit_type: str = "Intercessor") -> str:
         f" [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)]\n"
     )
     body = "".join(shot_lines) + EPISODE_TAIL
-    # log_grammar non spécifié → grammaire 1 (défaut). Les compteurs TORRENT, LETHAL HITS,
-    # ANTI-X, etc. utilisent re.search() direct, indépendant de la version de grammaire.
+    # log_grammar non spécifié → la fabrique annonce la version minimale lisible. Les
+    # compteurs TORRENT, LETHAL HITS, ANTI-X utilisent re.search() direct de toute façon.
     return entete_step_log(body, units=units, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
                            objectives=OBJECTIVES)
 
@@ -300,7 +302,7 @@ def _fight_body_line(unit_type: str, weapon: str, detail: str) -> str:
         f" [MODEL_TYPES: 1#0={unit_type}]"
         " [TARGET_DECL:1]"
         " [FIGHT_SUBPHASE:fight]"
-        " [R:+0.0] [SUCCESS]\n"
+        " [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
     )
 
 

@@ -39,9 +39,9 @@ _HEADER = entete_step_log(
 )
 
 _SHOT = (
-    "[10:00:0{t}] E1 T{t} P1 SHOOT : Unit 1(10,20) SHOT Unit {target}({tc},20)"
+    "[10:00:0{t}] E1 T{t} P1 SHOOT : Unit 1(10,20) SHOT [DESIGNATED:{target}] Unit {target}({tc},20)"
     " with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:{dmg}HP"
-    " [R:+0.0] [MODELS: 1#0@(10,20,z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
+    " [ALLOC_MODEL: {target}#0] [R:+0.0] [MODELS: 1#0@(10,20,z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
 )
 
 
@@ -94,7 +94,7 @@ def test_achever_un_blesse_n_est_pas_un_tir_sur_cible_intacte(tmp_path):
         # T1 : l'allié 2 blesse 101 au corps à corps. 101 rejoint les blessés en vue.
         + "[10:00:01] E1 T1 P1 FIGHT : Unit 2(13,20) FOUGHT Unit 101(14,20)"
           " with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP"
-          " [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
+          " [ALLOC_MODEL: 101#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
         # T2 : on ACHÈVE 102, blessé. C'est le bon choix de cible, pas une faute.
         + _SHOT.format(t=2, target=102, tc=18, dmg=1)
     )

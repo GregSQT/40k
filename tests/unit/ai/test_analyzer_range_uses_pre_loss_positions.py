@@ -56,7 +56,7 @@ _COMMON: dict[str, Any] = dict(
 STEP_LOG = entete_step_log(
     f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
     f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({PROCHE[0]},{PROCHE[1]}) DEPLOYED from (-1,-1) to ({PROCHE[0]},{PROCHE[1]}) [R:+0.0] [MODELS: 101#0@({PROCHE[0]},{PROCHE[1]},z0) 101#1@({LOIN[0]},{LOIN[1]},z0)] [SUCCESS]\n"
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [TARGET_MODELS: 101#1@({LOIN[0]},{LOIN[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n",
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT [DESIGNATED:101] Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [TARGET_MODELS: 101#1@({LOIN[0]},{LOIN[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n",
     board="cols=44 rows=60",
     **_COMMON,
 )
@@ -70,8 +70,8 @@ LOIN_2 = (44, 20)  # 34 hex : hors portée, comme LOIN
 STEP_LOG_ACTIVATION = entete_step_log(
     f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
     f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({LOIN[0]},{LOIN[1]}) DEPLOYED from (-1,-1) to ({LOIN[0]},{LOIN[1]}) [R:+0.0] [MODELS: 101#0@({LOIN[0]},{LOIN[1]},z0) 101#1@({LOIN_2[0]},{LOIN_2[1]},z0)] [SUCCESS]\n"
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({LOIN[0]},{LOIN[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({LOIN_2[0]},{LOIN_2[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n",
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT [DESIGNATED:101] Unit 101({LOIN[0]},{LOIN[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT [DESIGNATED:101] Unit 101({LOIN_2[0]},{LOIN_2[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n",
     board="cols=48 rows=60",
     **_COMMON,
 )
@@ -139,15 +139,16 @@ def test_la_deuxieme_ligne_d_une_activation_est_encore_jugee(tmp_path):
     assert stats["shoot_range_unverifiable"][1] == 0
 
 # Troisième journal : la cible perd une figurine dans une activation, puis un AUTRE tireur la vise
-# dans une activation SUIVANTE. Entre les deux, aucun segment ne redonne ses socles : le gel de la
-# nouvelle activation part donc d'une carte vide, et le contrôle ne PEUT pas juger. C'est le seul
-# cas où renoncer est légitime — et c'est celui que le compteur doit rendre visible.
+# dans une activation SUIVANTE. Le tir de la première NOMME la figurine touchée, si bien que le
+# survivant garde sa position connue et que l'activation suivante se juge normalement. Avant que
+# `[ALLOC_MODEL:]` soit lu partout, le lecteur perdait ici toute la carte de la cible et
+# renonçait : ce journal mesure ce que l'allocation nominative a rendu jugeable.
 STEP_LOG_SANS_SOCLE = entete_step_log(
     f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
     f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1] + 2}) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SUCCESS]\n"
     f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({PROCHE[0]},{PROCHE[1]}) DEPLOYED from (-1,-1) to ({PROCHE[0]},{PROCHE[1]}) [R:+0.0] [MODELS: 101#0@({PROCHE[0]},{PROCHE[1]},z0) 101#1@({LOIN[0]},{LOIN[1]},z0)] [SUCCESS]\n"
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
-    f"[10:00:03] E1 T2 P1 SHOOT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SHOOTER_MODELS: 2#0] [SUCCESS]\n",
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT [DESIGNATED:101] Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) SHOT [DESIGNATED:101] Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SHOOTER_MODELS: 2#0] [SUCCESS]\n",
     board="cols=48 rows=60",
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
@@ -158,12 +159,12 @@ STEP_LOG_SANS_SOCLE = entete_step_log(
 )
 
 
-def test_un_tir_non_jugeable_est_compte_comme_tel(tmp_path):
-    """TÉMOIN POSITIF du compteur : à 0 partout, il ne prouverait rien.
+def test_une_perte_nommee_laisse_l_activation_suivante_jugeable(tmp_path):
+    """La figurine touchée est NOMMÉE, donc le survivant reste situé : le tir suivant se juge.
 
-    Ici le contrôle a une raison LÉGITIME de se taire — plus aucun socle connu pour la cible.
-    Il doit alors le DIRE, pas afficher la même chose qu'un tir jugé conforme. Sans cette
-    assertion, un compteur cassé (jamais incrémenté) passerait tous les autres tests du fichier.
+    C'est le gain de l'allocation nominative. Tant que le journal taisait laquelle était
+    tombée, le lecteur perdait la carte de la cible et renonçait à mesurer — un tir hors
+    portée passait alors inaperçu, ce que la seconde assertion interdit désormais.
     """
     import ai.analyzer as an
 
@@ -171,11 +172,12 @@ def test_un_tir_non_jugeable_est_compte_comme_tel(tmp_path):
     log.write_text(STEP_LOG_SANS_SOCLE)
     stats = an.parse_step_log(str(log))
 
-    assert stats["shoot_range_unverifiable"][1] == 1, (
-        "le second tir a été jugé alors qu'aucun socle de la cible n'est connu, ou son "
-        "renoncement n'a pas été compté"
+    assert stats["shoot_range_unverifiable"][1] == 0, (
+        "le survivant est situé : rien n'autorise le contrôle à renoncer"
     )
-    assert stats["shoot_invalid"][1]["out_of_range"] == 0
+    assert stats["shoot_invalid"][1]["out_of_range"] == 1, (
+        "le second tir vise une cible hors portée et doit être compté comme tel"
+    )
 
 
 # ── Quatrième journal : DEAD-before-SHOOT ──────────────────────────────────────────────────────
@@ -201,7 +203,7 @@ STEP_LOG_DEAD_BEFORE_SHOOT = entete_step_log(
     f"[MODELS: 103#1@({_DEAD_BEFORE_SHOOT_LOIN[0]},{_DEAD_BEFORE_SHOOT_LOIN[1]},z0)] [SUCCESS]\n"
     # La ligne de tir qui a causé la mort de 103#0 — socle à portée (12 hex) de l'arme (24")
     f"[10:00:03] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) "
-    f"SHOT Unit 103({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]}) "
+    f"SHOT [DESIGNATED:103] Unit 103({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]}) "
     f"with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] "
     f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] "
     f"[SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 103#0] [SUCCESS]\n",
@@ -210,8 +212,7 @@ STEP_LOG_DEAD_BEFORE_SHOOT = entete_step_log(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
         "[10:00:00] Unit 103 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=1 base=round/1\n"
     ),
-    **{k: v for k, v in _COMMON.items() if k not in ("units",)},
-    log_grammar=2,
+    **{k: v for k, v in _COMMON.items() if k not in ("units",)}
 )
 
 

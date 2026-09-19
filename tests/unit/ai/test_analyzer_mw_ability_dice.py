@@ -49,7 +49,7 @@ def _line(n: int, tag: str, segs: str) -> str:
     )
 
 
-def _parse(tmp_path, monkeypatch, body: str, *, log_grammar: int | None = 9):
+def _parse(tmp_path, monkeypatch, body: str):
     import ai.analyzer as an
     import ai.analyzer_config as ac_mod
 
@@ -62,7 +62,6 @@ def _parse(tmp_path, monkeypatch, body: str, *, log_grammar: int | None = 9):
         board="cols=40 rows=40",
         objectives=_OBJECTIVES,
         units=_UNITS,
-        log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -162,11 +161,9 @@ def test_jet_rate_compte_un_usage_mais_aucune_blessure(tmp_path, monkeypatch):
     assert stats["mw_ability_dice_mismatch"] == {1: 0, 2: 0}
 
 
-def test_ancienne_grammaire_ne_juge_pas_les_des(tmp_path, monkeypatch):
-    """Avant la grammaire 9 les dés n'étaient pas garantis : une ligne sans `Trigger:` ni `MW:`
-    est un vieux format, pas une faute."""
+def test_une_ligne_sans_segment_de_des_est_une_faute(tmp_path, monkeypatch):
+    """Les dés sont garantis : une ligne sans `Trigger:` ni `MW:` est une panne du
+    producteur, plus jamais un vieux format — aucun journal antérieur n'est lu."""
     body = _line(2, "[EXHORTATION DE RAGE]", "")
-    stats = _parse(tmp_path, monkeypatch, body, log_grammar=8)
-    assert stats["mw_ability_dice_mismatch"] == {1: 0, 2: 0}
-    stats = _parse(tmp_path, monkeypatch, body, log_grammar=9)
-    assert stats["mw_ability_dice_mismatch"][1] == 1, "en grammaire 9 le segment est exigible"
+    stats = _parse(tmp_path, monkeypatch, body)
+    assert stats["mw_ability_dice_mismatch"][1] == 1, "le segment est exigible"

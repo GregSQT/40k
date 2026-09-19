@@ -93,8 +93,8 @@ def _adjacent_shot_stats(tmp_path, shooter_id: str, weapon: str, name: str):
     body = (
         f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit {shooter_id}{V} DEPLOYED from (-1,-1) to {V} [R:+0.0] [SUCCESS]\n"
         f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{E} DEPLOYED from (-1,-1) to {E} [R:+0.0] [SUCCESS]\n"
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit {shooter_id}{V} SHOT Unit 101{E} with [{weapon}] "
-        f"- Hit 4(4+) - Wound 5(3+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit {shooter_id}{V} SHOT [DESIGNATED:101] Unit 101{E} with [{weapon}] "
+        f"- Hit 4(4+) - Wound 5(3+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
     )
     log = tmp_path / name
     log.write_text(entete_step_log(body, units=_MV_UNITS))
@@ -341,19 +341,23 @@ _STALE_SETUP = (
     "[10:00:02] E1 T1 P2 MOVE : Unit 101(50,10) MOVED from (50,10) to (50,10)"
     "[R:+0.0] [MODELS: 101#0@(50,10) 101#1@(31,10)] [SUCCESS]\n"
 )
-# Tir 1 : une figurine de 101 tombe. Laquelle ? le log ne le dit pas.
+# Tir 1 : `101#1`, le socle colle a l unite 2, tombe — l allocation est nominative depuis la
+# grammaire 2, et c est cette mort-la qui doit liberer l engagement pour l activation suivante.
 _STALE_TIR_1 = (
-    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
-    "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+    # La perte est DECLAREE : `[MODELS:]` de la ligne DEAD ne porte plus que le survivant.
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 101 DEAD model=101#1 reason=combat"
+    " [MODELS: 101#0@(50,10)] [R:+0.0] [SUCCESS]\n"
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT [DESIGNATED:101] Unit 101(50,10) with [Bolt Rifle] "
+    "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#1] [R:+0.0] [SUCCESS]\n"
 )
 # Tir 2 : même tireur, même cible, donc même activation — l'ancre loguée est déjà celle du survivant.
 _STALE_TIR_2 = (
-    "[10:00:04] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT [DESIGNATED:101] Unit 101(50,10) with [Bolt Rifle] "
     "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) [R:+0.0] [SUCCESS]\n"
 )
 # Tir 3 : activation SUIVANTE, tireur non engagé (l'unité 2, elle, serait exemptée par 10.06).
 _STALE_TIR_3 = (
-    "[10:00:05] E1 T1 P1 SHOOT : Unit 3(45,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+    "[10:00:05] E1 T1 P1 SHOOT : Unit 3(45,10) SHOT [DESIGNATED:101] Unit 101(50,10) with [Bolt Rifle] "
     "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) [R:+0.0] [SUCCESS]\n"
 )
 

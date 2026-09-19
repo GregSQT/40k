@@ -74,8 +74,8 @@ def test_une_blessure_automatique_reste_une_touche_reussie():
 def test_lethal_hits_ne_declenche_aucune_faute_de_bout_en_bout(tmp_path):
     """Le jumeau du test ci-dessus par le VRAI chemin : sans lui, la regex seule ne prouve rien."""
     lethal = (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
-        " - Hit 6(3+) - Wound None(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
+        " - Hit 6(3+) - Wound None(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
     )
     stats = _stats(tmp_path, lethal)
     assert stats["shoot_hit_result_mismatch"][1] == 0, stats["first_error_lines"]["shoot_hit_result_mismatch"][1]
@@ -104,8 +104,8 @@ OBJECTIVES = ";".join(f"(200,{r})" for r in range(150, 156))
 
 _HEADER = entete_step_log(
     units=(
-        f"[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position {S}, HP_MAX=2 base=round/6\n"
-        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T}, HP_MAX=2 base=round/6\n"
+        f"[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position {S}, HP_MAX=2 base=round/6 [MODELS: 1#0@{S}] [MODEL_TYPES: 1#0=AssaultIntercessor]\n"
+        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T}, HP_MAX=2 base=round/6 [MODELS: 101#0@{T}] [MODEL_TYPES: 101#0=AssaultIntercessor]\n"
     ),
     rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
     objectives=OBJECTIVES,
@@ -117,21 +117,21 @@ _END = ("[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b N
         "Total=0, Duration=1.000s\n")
 
 _LEGAL_HIT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 _LEGAL_MISS = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
     " - Hit 2(3+) [R:+0.0] [FAILED]\n"
 )
 # Un 1 non modifié qui blesse quand même : la faute que 05.01 interdit explicitement.
 _ONE_THAT_WOUNDS = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
-    " - Hit 1(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
+    " - Hit 1(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Un 6 non modifié rendu comme un échec : la faute symétrique.
 _SIX_THAT_MISSES = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Heavy Bolt Pistol]"
     " - Hit 6(3+) [R:+0.0] [FAILED]\n"
 )
 
@@ -168,19 +168,19 @@ def test_un_6_non_modifie_rendu_comme_un_echec_est_compte(tmp_path):
 # Sans le max(target, plancher), check_hit_result prédit HIT (roll=4, BS=4+) et trouve
 # MISS → faux positif. Ces deux lignes discriminent l'implémentation correcte.
 _INDIRECT_MISS_ABOVE_BS = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolter]"
     " - Hit 4(3+->4+) [COVER] [INDIRECT FIRE:6+] [R:+0.0] [FAILED]\n"
 )
 _INDIRECT_HIT_ON_CRIT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
-    " - Hit 6(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolter]"
+    " - Hit 6(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Mismatch sous plancher : roll=4, BS=4+, plancher=6+ — le moteur écrit Wound (HIT), attendu MISS.
 # Ce scénario prouve le chemin de détection ; sans le max(target, plancher) le mismatch serait
 # absorbé comme faux positif inverse.
 _INDIRECT_MISMATCH_WOUND_SOUS_PLANCHER = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
-    " - Hit 4(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T} with [Bolter]"
+    " - Hit 4(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -217,7 +217,7 @@ def test_le_jumeau_melee_est_branche(tmp_path):
     """Le tir et la mêlée doivent tomber sur le MÊME contrôle — c'est le défaut n°1 du dépôt."""
     fight = (
         f"[10:00:03] E1 T1 P1 FIGHT : Unit 1{S} FOUGHT Unit 101{T} with [Astartes Chainsword]"
-        " - Hit 1(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+        " - Hit 1(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
     )
     stats = _stats(tmp_path, fight)
     assert stats["fight_hit_result_mismatch"][1] == 1

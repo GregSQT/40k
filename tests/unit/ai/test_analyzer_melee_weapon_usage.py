@@ -41,7 +41,8 @@ def _log(*, with_cleave_token: bool) -> str:
     body = (
         f"[10:00:02] E1 T1 P1 FIGHT : Unit 1{a} FOUGHT{token} Unit 101{t} with [{WEAPON}]"
         f" - Hit 4(3+) - Wound 5(3+) - Save 2(3+) - Dmg:2HP"
-        f" [FIGHT_SUBPHASE:fight] {models} [SHOOTER_MODELS: 1#1] [R:+0.0] [SUCCESS]\n"
+        f" [FIGHT_SUBPHASE:fight] {models} [SHOOTER_MODELS: 1#1] [ALLOC_MODEL: 101#0]"
+        f" [R:+0.0] [SUCCESS]\n"
         "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
         "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
     )

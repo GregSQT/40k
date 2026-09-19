@@ -85,7 +85,7 @@ DD_PHASE_PRECEDENTE_LOG = entete_step_log(
     + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEAD model=4#0 reason=combat [SUCCESS]\n"
     + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEADLY DEMISE Roll:6 → Unit 105(51,50) SUFFERS 2 MW [DEADLY DEMISE] [SUCCESS]\n"
     + "[10:00:02] E1 T1 P2 SHOOT : Unit 105 DEAD model=105#0 reason=hazard [SUCCESS]\n"
-    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
+    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT [DESIGNATED:4] Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
     + _fought("105", "(51,50)", "106", "(52,50)", "10:00:05", dmg=False),
     units=_UNITS, ez_vertical_inches=None,
 )
@@ -96,8 +96,8 @@ DD_TUE_LE_TIREUR_LOG = entete_step_log(
     + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEAD model=4#0 reason=combat [SUCCESS]\n"
     + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEADLY DEMISE Roll:6 → Unit 105(51,50) SUFFERS 2 MW [DEADLY DEMISE] [SUCCESS]\n"
     + "[10:00:02] E1 T1 P2 SHOOT : Unit 105 DEAD model=105#0 reason=hazard [SUCCESS]\n"
-    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
-    + "[10:00:04] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT Unit 4(50,50) with [Slugga] - Hit 2(3+) [R:+0.0] [SHOOTER_MODELS: 105#0] [SUCCESS]\n",
+    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT [DESIGNATED:4] Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
+    + "[10:00:04] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT [DESIGNATED:4] Unit 4(50,50) with [Slugga] - Hit 2(3+) [R:+0.0] [SHOOTER_MODELS: 105#0] [SUCCESS]\n",
     units=_UNITS, ez_vertical_inches=None,
 )
 
@@ -118,8 +118,8 @@ DD_PUIS_TIR_SUR_LE_CADAVRE_LOG = entete_step_log(
     + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEAD model=4#0 reason=combat [SUCCESS]\n"
     + "[10:00:02] E1 T1 P1 SHOOT : Unit 4 DEADLY DEMISE Roll:6 → Unit 105(51,50) SUFFERS 2 MW [DEADLY DEMISE] [SUCCESS]\n"
     + "[10:00:02] E1 T1 P2 SHOOT : Unit 105 DEAD model=105#0 reason=hazard [SUCCESS]\n"
-    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
-    + "[10:00:05] E1 T1 P1 SHOOT : Unit 5(53,50) SHOT Unit 105(51,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 105#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 5#0] [ALLOC_MODEL: 105#0] [SUCCESS]\n",
+    + "[10:00:03] E1 T1 P2 SHOOT : Unit 105(51,50) SHOT [DESIGNATED:4] Unit 4(50,50) with [Slugga] - Hit 4(3+) - Wound 5(4+) - → 4#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 105#0] [ALLOC_MODEL: 4#0] [SUCCESS]\n"
+    + "[10:00:05] E1 T1 P1 SHOOT : Unit 5(53,50) SHOT [DESIGNATED:105] Unit 105(51,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 105#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [SHOOTER_MODELS: 5#0] [ALLOC_MODEL: 105#0] [SUCCESS]\n",
     units=_UNITS, ez_vertical_inches=None,
 )
 

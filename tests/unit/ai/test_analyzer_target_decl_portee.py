@@ -46,7 +46,7 @@ STEP_LOG_WITH_DECL = entete_step_log(
     f"[10:00:02] E1 T1 P2 DEPLOYMENT : Unit 101{T_ANCHOR} DEPLOYED from (-1,-1) to {T_ANCHOR} [R:+0.0] "
     f"[MODELS: 101#1@({T1_POS[0]},{T1_POS[1]},z0)] [SUCCESS]\n"
     # Tir hors portée depuis positions reconstruites, mais [TARGET_DECL:2] indique 2 socles.
-    f"[10:00:03] E1 T1 P1 SHOOT : Unit 1{S} [TARGET_DECL:2] SHOT Unit 101{T_ANCHOR} "
+    f"[10:00:03] E1 T1 P1 SHOOT : Unit 1{S} [TARGET_DECL:2] SHOT [DESIGNATED:101] Unit 101{T_ANCHOR} "
     f"with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:0HP [R:+0.0] "
     f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 101#1] [SUCCESS]\n",
     inches_to_subhex=1,
@@ -55,7 +55,6 @@ STEP_LOG_WITH_DECL = entete_step_log(
     margin=5,
     objectives=OBJECTIVES,
     metric_ranged="hex",
-    log_grammar=2,
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 "
         "base=round/1\n"
@@ -70,7 +69,7 @@ STEP_LOG_WITHOUT_DECL = entete_step_log(
     f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
     f"[10:00:02] E1 T1 P2 DEPLOYMENT : Unit 101{T_ANCHOR} DEPLOYED from (-1,-1) to {T_ANCHOR} [R:+0.0] "
     f"[MODELS: 101#1@({T1_POS[0]},{T1_POS[1]},z0)] [SUCCESS]\n"
-    f"[10:00:03] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T_ANCHOR} "
+    f"[10:00:03] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:101] Unit 101{T_ANCHOR} "
     f"with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:0HP [R:+0.0] "
     f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 101#1] [SUCCESS]\n",
     inches_to_subhex=1,
@@ -79,7 +78,6 @@ STEP_LOG_WITHOUT_DECL = entete_step_log(
     margin=5,
     objectives=OBJECTIVES,
     metric_ranged="hex",
-    log_grammar=2,
     units=(
         "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 "
         "base=round/1\n"

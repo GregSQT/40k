@@ -40,12 +40,12 @@ _UNITS = (
 # L'unité 2 combat alors que l'unité 1 a chargé et n'a pas encore été activée : faute 12.04.
 _FIGHT_NO_KILL = (
     f"[10:00:03] E1 T1 P1 FIGHT : Unit 2{OTH} FOUGHT Unit 101{T} with [Close Combat Weapon]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
+    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 # Le MÊME coup, mortel : la cible disparaît de l'état avant que le contrôle ne mesure.
 _FIGHT_KILLS = (
     f"[10:00:03] E1 T1 P1 FIGHT : Unit 2{OTH} FOUGHT Unit 101{T} with [Close Combat Weapon]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
+    " - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:2HP [ALLOC_MODEL: 101#0] [R:+0.0] [FIGHT_SUBPHASE:fight] [SUCCESS]\n"
 )
 
 

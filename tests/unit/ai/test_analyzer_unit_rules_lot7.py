@@ -59,10 +59,10 @@ DEPLOY_TORRENT = (
 def _shoot_log(middle: str, tmp_path) -> dict:
     body = (
         DEPLOY_TORRENT
-        + f"[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(90,50) with [Sternguard Bolt Rifle]"
+        + f"[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(90,50) with [Sternguard Bolt Rifle]"
         f" - {middle} - Save 2(3+) - Dmg:0HP"
         f" [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(90,50,z0)]"
-        f" [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        f" [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(
@@ -104,7 +104,7 @@ def _fight_log(middle: str, tmp_path) -> dict:
         + f"[10:00:06] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 101(50,51) with [Astartes Chainsword]"
         f" - {middle} - Save 2(3+) - Dmg:0HP"
         f" [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(50,51,z0)]"
-        f" [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        f" [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(
@@ -215,10 +215,10 @@ def _blast_log(blast_x: int, tmp_path) -> dict:
     )
     body = (
         DEPLOY_BLAST
-        + f"[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(90,50) with [Plasma Cannon (Standard)]"
+        + f"[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(90,50) with [Plasma Cannon (Standard)]"
         f" - Hit 4(3+) - Wound 5(3+) - Save 2(3+) - Dmg:1HP [BLAST:{blast_x}]"
         f" [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: {target_models}]"
-        f" [SHOOTER_MODELS: 1#0] [TARGET_DECL:5] [R:+0.0] [SUCCESS]\n"
+        f" [SHOOTER_MODELS: 1#0] [TARGET_DECL:5] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         + EPISODE_END
     )
     log_text = entete_step_log(

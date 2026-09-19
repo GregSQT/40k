@@ -29,27 +29,27 @@ class _Registry:
 
 # Unité 1 (P1) = PainBoy attaquant ; unité 101 (P2) = victime.
 _UNITS = (
-    "[10:00:00] Unit 1 (PainBoy) P1: Starting position (20,20), HP_MAX=3 base=round/1\n"
-    "[10:00:00] Unit 101 (Grunt) P2: Starting position (21,21), HP_MAX=5 base=round/1\n"
+    "[10:00:00] Unit 1 (PainBoy) P1: Starting position (20,20), HP_MAX=3 base=round/1 [MODELS: 1#0@(20,20)] [MODEL_TYPES: 1#0=PainBoy]\n"
+    "[10:00:00] Unit 101 (Grunt) P2: Starting position (21,21), HP_MAX=5 base=round/1 [MODELS: 101#0@(21,21)] [MODEL_TYPES: 101#0=Grunt]\n"
 )
 
 _HOLD_STILL_3_MW = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 3 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101_m0=none ×3] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:1,2 [FROM:1] [FNP_ROLLS: 101#0=none ×3] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 _EXHORTATION_2_MW = (
     "[10:00:03] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 2 Mortal Wounds "
-    "[EXHORTATION DE RAGE] [FROM:1] [FNP_ROLLS: 101_m0=none ×2] [R:+0.0] [SUCCESS]\n"
+    "[EXHORTATION DE RAGE] [FROM:1] [FNP_ROLLS: 101#0=none ×2] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 _SANS_SOURCE = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FNP_ROLLS: 101_m0=none ×5] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FNP_ROLLS: 101#0=none ×5] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # 5 BM sur une victime à HP_MAX=5 : la mort est le signal observable que les points de vie
 # ont réellement été retirés (`stats` n'expose pas `unit_hp`).
 _HOLD_STILL_FATAL = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101_m0=none ×5] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101#0=none ×5] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 
 
@@ -113,21 +113,21 @@ def test_ligne_sans_source_est_une_erreur_de_format(tmp_path, monkeypatch):
 # ROUGE sans le fix : l'analyzer appliquait le total pré-FNP (5) → mort fausse.
 _FNP_PARTIEL_5MW_2SAVES = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101_m0=2/5+ ×5] "
-    "[ALLOC_MODEL: 101_m0] [R:+0.0] [SUCCESS]\n"
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101#0=2/5+ ×5] "
+    "[ALLOC_MODEL: 101#0] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
 )
 # Grunt (HP_MAX=5) subit 5 BM mais toutes sauvées par FNP → 0 BM nettes → survit.
 # ROUGE sans le fix : l'analyzer appliquait 5 BM → mort fausse.
 _FNP_TOTAL_5MW_ALL_SAVED = (
     "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
-    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101_m0=5/5+ ×5] "
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP_ROLLS: 101#0=5/5+ ×5] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
 
 def test_fnp_partiel_soustrait_des_blessures(tmp_path, monkeypatch):
     """ROUGE sans le fix : le total pré-FNP (5) était appliqué ; Grunt (HP=5) mourait alors
-    que le moteur lui avait laissé 2 PV. VERT : `[FNP_ROLLS: 101_m0=2/5+ ×5]` dit 5 blessures
+    que le moteur lui avait laissé 2 PV. VERT : `[FNP_ROLLS: 101#0=2/5+ ×5]` dit 5 blessures
     attribuées dont 2 sauvées → 3 BM nettes → Grunt (HP=5) survit."""
     stats = _parse(tmp_path, monkeypatch, _FNP_PARTIEL_5MW_2SAVES)
     assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"

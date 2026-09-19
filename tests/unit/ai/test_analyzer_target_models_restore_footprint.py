@@ -30,11 +30,11 @@ FLED_TO = (44, 50)         # arrivée : hors de portée d'engagement du survivan
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
 STEP_LOG = entete_step_log(
-    f"[10:00:02] E1 T1 P2 SHOOT : Unit 101({FLEEING[0]},{FLEEING[1]}) SHOT Unit 1({ANCHOR_FAR[0]},{ANCHOR_FAR[1]}) with [Bolt Pistol]"
+    f"[10:00:02] E1 T1 P2 SHOOT : Unit 101({FLEEING[0]},{FLEEING[1]}) SHOT [DESIGNATED:1] Unit 1({ANCHOR_FAR[0]},{ANCHOR_FAR[1]}) with [Bolt Pistol]"
     f" - Hit 4(3+) - Wound 5(4+) - Save 1(3+) - Dmg:2HP"
     f" [MODELS: 101#0@({FLEEING[0]},{FLEEING[1]},z0)]"
     f" [TARGET_MODELS: 1#1@({SURVIVOR[0]},{SURVIVOR[1]},z0)]"
-    " [SHOOTER_MODELS: 101#0] [R:+0.0] [SUCCESS]\n"
+    " [SHOOTER_MODELS: 101#0] [ALLOC_MODEL: 1#0] [R:+0.0] [SUCCESS]\n"
     f"[10:00:03] E1 T2 P2 MOVE : Unit 101({FLED_TO[0]},{FLED_TO[1]}) FLED"
     f" from ({FLEEING[0]},{FLEEING[1]}) to ({FLED_TO[0]},{FLED_TO[1]})"
     f" [R:+0.0] [MODELS: 101#0@({FLED_TO[0]},{FLED_TO[1]},z0)] [SUCCESS]\n"

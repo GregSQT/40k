@@ -59,8 +59,8 @@ def _avance(depart: str, arrivee: str, horodatage: str = "10:00:03") -> str:
 # qu'aucun lecteur n'exigeait le nom d'arme sur une ligne à sauvegarde — `note_shoot_allocation`
 # l'exige désormais (un groupe de tir anonyme est inidentifiable, T1).
 _TIR = (
-    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(90,50) with [Bolt Rifle]"
-    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(90,50) with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 101#0] [SUCCESS]\n"
 )
 
 

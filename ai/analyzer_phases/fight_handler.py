@@ -113,15 +113,10 @@ def _cc_cap_for_line(
     return cap + cleave_dice, cleave_error if cleave_error is not None else finest_hour_error
 
 
-#: Grammaire à partir de laquelle la ligne « ABILITY CALL Finest Hour [USED] » est GARANTIE
-#: avant tout `[FINEST HOUR]` (chantier capacités-agent, prompt 6).
-FINEST_HOUR_CALL_GRAMMAR = 14
-
-
 def _finest_hour_call_used(state: "AnalyzerState", fighter_id: Optional[str], turn: Optional[int]) -> bool:
     """`[FINEST HOUR]` est-il couvert par un appel USED de la même escouade, ce tour, en FIGHT ?
     Journal antérieur à la grammaire 14, ou site appelé sans identité de ligne : abstention."""
-    if state.log_grammar < FINEST_HOUR_CALL_GRAMMAR or fighter_id is None or turn is None:
+    if fighter_id is None or turn is None:
         return True
     return any(
         call["used"] and call["ability"] == "Finest Hour"

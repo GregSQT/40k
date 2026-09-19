@@ -63,7 +63,7 @@ def _mw_sur_socle(mid: str, n: int) -> str:
     )
 
 
-def _parse(tmp_path, monkeypatch, body: str, *, log_grammar=10, units: str = _UNITS):
+def _parse(tmp_path, monkeypatch, body: str, *, units: str = _UNITS):
     import ai.analyzer as an
     import ai.analyzer_config as ac_mod
 
@@ -75,7 +75,7 @@ def _parse(tmp_path, monkeypatch, body: str, *, log_grammar=10, units: str = _UN
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         body, inches_to_subhex=1, board="cols=40 rows=40", objectives=_OBJECTIVES,
-        units=units, log_grammar=log_grammar,
+        units=units,
     ))
     return an.parse_step_log(str(log))
 
@@ -113,17 +113,18 @@ def test_le_socle_rendu_entre_a_ses_pv_pleins_de_datasheet(tmp_path, monkeypatch
     assert not stats["current_episode_deaths"], "le PainBoy rendu (3 PV) ne meurt pas de 2 BM"
 
 
-def test_un_socle_rendu_non_declare_est_une_panne_en_grammaire_10(tmp_path, monkeypatch):
-    """Sans ligne RETURNED, un `#r` dans [MODELS:] est une panne du producteur — mais seulement
-    à partir de la grammaire qui le garantit."""
+def test_un_socle_rendu_non_declare_est_une_panne(tmp_path, monkeypatch):
+    """Sans ligne RETURNED, un `#r` dans [MODELS:] est une panne du producteur.
+
+    La garantie date de la grammaire 10 ; aucun journal anterieur n etant plus lu, le
+    verdict ne connait plus de version ou il s abstiendrait.
+    """
     body = (
         "[10:00:02] E1 T2 P1 MOVE : Unit 1(20,20) MOVED from (20,20) to (20,20) "
         "[MODELS: 1#0@(20,20,z0) 1#r0@(20,21,z0)] [R:+0.0] [SUCCESS]\n"
     )
-    stats = _parse(tmp_path, monkeypatch, body, log_grammar=10)
+    stats = _parse(tmp_path, monkeypatch, body)
     assert any("socle rendu 1#r0" in e["error"] for e in stats["parse_errors"]), stats["parse_errors"]
-    stats = _parse(tmp_path, monkeypatch, body, log_grammar=9)
-    assert not any("socle rendu" in e["error"] for e in stats["parse_errors"]), stats["parse_errors"]
 
 
 def test_compte_et_datasheets_doivent_concorder(tmp_path, monkeypatch):
@@ -344,7 +345,7 @@ def _journal_de_la_chaine(tmp_path, monkeypatch, ligne_moteur, morts):
     )
     return _parse(
         tmp_path, monkeypatch, f"{morts_lignes}{ligne_moteur}\n",
-        log_grammar=LOG_GRAMMAR_VERSION, units=units,
+        units=units,
     )
 
 

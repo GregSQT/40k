@@ -17,13 +17,21 @@ from shared.data_validation import require_key, ConfigurationError, HAZARD_CONTE
 
 from ai.bot_registry import bot_display_name
 
-__all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
+__all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'MIN_SUPPORTED_LOG_GRAMMAR',
+           'assert_step_log_written']
 
 
 #: Version de la GRAMMAIRE du journal, ecrite a l entete de chaque episode (`Log grammar:`).
 #: Elle dit ce que le journal GARANTIT porter — ce qui permet a un lecteur de traiter une donnee
 #: manquante comme une PANNE et non comme un vieux format, sans jamais retomber en silence sur
 #: une reconstruction approximative.
+#:
+#: DEPUIS LE 2026-09-19, LE LECTEUR NE PORTE PLUS DE BRANCHE PAR VERSION. Les garanties
+#: ci-dessous decrivent l HISTOIRE du producteur, plus les chemins du lecteur : celui-ci refuse
+#: a l ouverture tout journal sous `MIN_SUPPORTED_LOG_GRAMMAR` (`parse_log_grammar_version`,
+#: ai/analyzer.py) et juge le reste sans garde. Les mentions « sur un journal log_grammar>=N »
+#: se lisent donc comme la date a laquelle la garantie est apparue, non comme une condition
+#: encore evaluee quelque part.
 #:
 #:   1 — grammaire d avant le 2026-08-12 : aucune ligne ne nomme la figurine cible allouee.
 #:   2 — `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue a l allocation (tir ET melee).
@@ -154,6 +162,21 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
 LOG_GRAMMAR_VERSION = 17
+
+#: Version la plus ANCIENNE que le lecteur accepte encore (`ai/analyzer.parse_step_log`). En
+#: dessous, le journal est REFUSE a l ouverture : les branches de compatibilite ont ete retirees
+#: le 2026-09-19 (decision utilisateur, ROADMAP_INDEX.md), et un lecteur qui ne porte plus ces
+#: branches compterait des fautes INVENTEES au lieu de s abstenir — mesure du jour : une ligne de
+#: degats sans `[FNP:]` contre une escouade a Dok's Toolz comptait 1 faute en grammaire 7 comme
+#: en 17, sans un mot.
+#:
+#: DISTINCTE de `LOG_GRAMMAR_VERSION`, et jamais adossee a elle. Cette constante-ci s incremente
+#: des qu une garantie s ajoute ; refuser sur elle rendrait illisible, du jour au lendemain, le
+#: step.log d un run de la veille ou d un run EN COURS, alors que ce journal n a rien de
+#: defectueux. Un journal doit rester analysable apres coup, exactement comme
+#: `parse_run_rules_from_log` fige les regles du run plutot que de relire la config du jour.
+#: On ne l avance donc QUE par decision explicite d abandonner une fenetre de versions.
+MIN_SUPPORTED_LOG_GRAMMAR = 17
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :

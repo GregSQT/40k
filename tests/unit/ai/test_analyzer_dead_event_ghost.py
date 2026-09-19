@@ -50,10 +50,10 @@ _DEPLOY = (
 )
 
 # Tir avec Dmg:1HP → unit_hp["1"] = 5 (Warboss toujours vivant côté analyzer)
-# ALLOC_MODEL présent mais n'entre pas dans pending_model_removals (grammar < 6)
+# ALLOC_MODEL nomme le socle touché ; la ligne DEAD qui suit est le sujet du test.
 _SHOOT = (
-    f"[10:00:02] E1 T1 P1 SHOOT : Unit 102{I} SHOT Unit 1{W} with [Bolt Rifle]"
-    " - Hit 5(3+) - Wound 4(4+) - Save 1(4+) - Dmg:1HP [R:+0.0]"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 102{I} SHOT [DESIGNATED:1] Unit 1{W} with [Bolt Rifle]"
+    " - Hit 5(3+) - Wound 4(4+) - Save 1(4+) - Dmg:1HP [ALLOC_MODEL: 1#0] [R:+0.0]"
     f" [MODELS: 102#0@({INTERCESSOR[0]},{INTERCESSOR[1]},z0)]"
     " [SHOOTER_MODELS: 102#0] [SUCCESS]\n"
 )

@@ -41,7 +41,7 @@ _UNITS = (
 def _shot(alloc: str, *, save: str = "Save 2(3+)", tags: str = "") -> str:
     """Une ligne SHOT de l'unité 1 sur l'unité 102, allouée à `alloc`."""
     return (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT{tags} Unit 102{T} with [Bolt Rifle]"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT{tags} [DESIGNATED:102] Unit 102{T} with [Bolt Rifle]"
         f" - Hit 4(3+) - Wound 5(4+) - {save} - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)]"
         f" [ALLOC_MODEL: {alloc}] [SUCCESS]\n"
     )

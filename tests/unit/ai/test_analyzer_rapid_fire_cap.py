@@ -58,9 +58,9 @@ def _shot(i: int, *, with_rf_token: bool) -> str:
     ts = f"[10:00:{2 + i:02d}]"
     rf_tag = f" [RAPID FIRE:{RF}]" if with_rf_token else ""
     return (
-        f"{ts} E1 T1 P1 SHOOT : Unit 1{S} SHOT{rf_tag} Unit 101{T} with [{WEAPON}]"
+        f"{ts} E1 T1 P1 SHOOT : Unit 1{S} SHOT{rf_tag} [DESIGNATED:101] Unit 101{T} with [{WEAPON}]"
         f" - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP {_MODELS} {_SHOOTERS}"
-        " [R:+0.0] [SUCCESS]\n"
+        " [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
     )
 
 

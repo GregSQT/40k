@@ -38,9 +38,6 @@ SUPPRESSES_LINE_RE = re.compile(
 #: Token de malus posé par le moteur sur les lignes d'attaque de l'unité supprimée (Primitive A).
 _SUPPRESSED_TOKEN = f"[{SUPPRESSED_MALUS_DISPLAY_NAME.upper()}]"
 
-#: Version de grammaire à partir de laquelle la ligne SUPPRESSES est GARANTIE.
-SUPPRESSION_GRAMMAR = 12
-
 COUNTER = "suppression_without_hit"
 
 
@@ -81,15 +78,14 @@ def handle_suppresses_line(
         return False
     suppressor_id, suppressed_id, token_id = m.group(1), m.group(4), m.group(7)
     player = int(player)
-    if state.log_grammar >= SUPPRESSION_GRAMMAR:
-        note_rule_usage(stats, "PROJ.1.2.suppression", player)
-        if token_id != suppressed_id:
-            _error(state, stats, player, line,
-                   f"[SUPPRESSED→{token_id}] ne nomme pas l'escouade supprimée {suppressed_id}")
-        elif (suppressor_id, suppressed_id) not in state.shoot_hits_since_command.get(player, set()):
-            _error(state, stats, player, line,
-                   f"Unit {suppressor_id} supprime Unit {suppressed_id} sans l'avoir TOUCHÉE "
-                   f"depuis sa dernière phase de commandement")
+    note_rule_usage(stats, "PROJ.1.2.suppression", player)
+    if token_id != suppressed_id:
+        _error(state, stats, player, line,
+               f"[SUPPRESSED→{token_id}] ne nomme pas l'escouade supprimée {suppressed_id}")
+    elif (suppressor_id, suppressed_id) not in state.shoot_hits_since_command.get(player, set()):
+        _error(state, stats, player, line,
+               f"Unit {suppressor_id} supprime Unit {suppressed_id} sans l'avoir TOUCHÉE "
+               f"depuis sa dernière phase de commandement")
     state.suppressions_in_force[suppressed_id] = (suppressor_id, player)
     return True
 
@@ -100,8 +96,6 @@ def check_attack_malus(
 ) -> None:
     """Faces 2 et 3 : le malus `[SUPPRESSED]` d'une ligne d'attaque (tir OU mêlée) doit
     correspondre exactement à une suppression en vigueur sur l'attaquant."""
-    if state.log_grammar < SUPPRESSION_GRAMMAR:
-        return
     has_token = _SUPPRESSED_TOKEN in action_desc.upper()
     in_force: Optional[tuple] = state.suppressions_in_force.get(str(attacker_id))
     if has_token and in_force is None:

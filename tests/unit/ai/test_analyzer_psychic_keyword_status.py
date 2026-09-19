@@ -32,11 +32,11 @@ def _step_log() -> str:
     s = f"({SHOOTER[0]},{SHOOTER[1]})"
     t = f"({TARGET[0]},{TARGET[1]})"
     body = (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{s} SHOT Unit 101{t} with [{WEAPON}]"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{s} SHOT [DESIGNATED:101] Unit 101{t} with [{WEAPON}]"
         " - Hit 4(3+) - Wound 6(3+) - Save [DEVASTATING WOUNDS] - Dmg:2HP"
         f" [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0) 1#1@({SHOOTER[0]},{SHOOTER[1] + 1},z0)]"
         f" [TARGET_MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)]"
-        " [SHOOTER_MODELS: 1#1] [R:+0.0] [SUCCESS]\n"
+        " [SHOOTER_MODELS: 1#1] [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
         "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
     )

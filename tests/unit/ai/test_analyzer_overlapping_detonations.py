@@ -88,12 +88,12 @@ def _tir(seconde: int, coup: int, target_decl: int) -> str:
     # compteur seq_key s'accumule sans reset (clé = groupe, pas figurine individuelle).
     return (
         f"[10:00:{seconde:02d}] E1 T1 P1 SHOOT : Unit 1{S}"
-        f" SHOT [TARGET_DECL:{target_decl}] Unit 101{T} with [Heavy Bolter]"
+        f" SHOT [TARGET_DECL:{target_decl}] [DESIGNATED:101] Unit 101{T} with [Heavy Bolter]"
         f" - Hit {coup}(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0]"
         f" [MODELS: 1#0@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
         f" 1#1@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
         f" 1#2@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)]"
-        f" [SHOOTER_MODELS: 1#0 1#1 1#2] [SUCCESS]\n"
+        f" [SHOOTER_MODELS: 1#0 1#1 1#2] [ALLOC_MODEL: 101#0] [SUCCESS]\n"
     )
 
 
@@ -179,7 +179,7 @@ def _tir_vers(seconde: int, coup: int, target: str, pos: str, designated: str) -
     return (
         f"[10:00:{seconde:02d}] E1 T1 P1 SHOOT : Unit 1{S}"
         f" SHOT [TARGET_DECL:6] [DESIGNATED:{designated}] Unit {target}{pos} with [Heavy Bolter]"
-        f" - Hit {coup}(3+) - Wound 5(4+) - → {target}#0 - Save 2(3+) - Dmg:1HP [R:+0.0]"
+        f" - Hit {coup}(3+) - Wound 5(4+) - → {target}#0 - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: {target}#0] [R:+0.0]"
         f" [MODELS: 1#0@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
         f" 1#1@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)"
         f" 1#2@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)]"
@@ -199,7 +199,7 @@ def _stats_deux_cibles(tmp_path, n_shots_hors_designee: int) -> dict:
     shots = "".join(_tir_vers(i + 2, i + 1, "102", T2, "101") for i in range(n_shots_hors_designee))
     log = tmp_path / "step.log"
     log.write_text(
-        entete_step_log(setup + shots, units=_UNITS_DEUX_CIBLES, ez_vertical_inches=None, log_grammar=11)
+        entete_step_log(setup + shots, units=_UNITS_DEUX_CIBLES, ez_vertical_inches=None)
     )
     return an.parse_step_log(str(log))
 

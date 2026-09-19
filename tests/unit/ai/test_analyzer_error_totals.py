@@ -248,11 +248,11 @@ def test_le_producteur_ecrit_toujours_sans_sa_creation_paresseuse(tmp_path):
     log.write_text(
         _EMPTY_LOG.replace(
             "[10:00:00] === ACTIONS START ===\n",
-            "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (50,50), HP_MAX=2 base=round/6\n"
-            "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (50,56), HP_MAX=2 base=round/6\n"
+            "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)] [MODEL_TYPES: 1#0=AssaultIntercessor]\n"
+            "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (50,56), HP_MAX=2 base=round/6 [MODELS: 101#0@(50,56)] [MODEL_TYPES: 101#0=AssaultIntercessor]\n"
             "[10:00:00] === ACTIONS START ===\n"
-            "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 101(50,56) with [Deathspitter]"
-            " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+            "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT [DESIGNATED:101] Unit 101(50,56) with [Deathspitter]"
+            " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [ALLOC_MODEL: 101#0] [R:+0.0] [SUCCESS]\n"
         )
     )
     stats = an.parse_step_log(str(log))

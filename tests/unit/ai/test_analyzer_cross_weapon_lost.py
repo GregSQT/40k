@@ -43,8 +43,12 @@ B = "Bolt Pistol"             # arme du slot 1
 def _shot(weapon: str, target: str, target_pos: str, save: str, hit: str = "3+") -> str:
     """Une ligne SHOT de l'unité 1 ; `save` est le segment de sauvegarde complet."""
     return (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit {target}{target_pos} with [{weapon}]"
-        f" - Hit 4({hit}) - Wound 5(4+) - {save} [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:{target}] Unit {target}{target_pos} with [{weapon}]"
+        f" - Hit 4({hit}) - Wound 5(4+) - {save}"
+        # 06.02 / grammaire 2 : la figurine allouee n est nommee que si des degats sont
+        # appliques — `Save [NOT ALLOCATED]` n en alloue aucune.
+        + (f" [ALLOC_MODEL: {target}#0]" if "Dmg:" in save else "")
+        + f" [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
     )
 
 
@@ -56,7 +60,7 @@ def _lost(weapon: str, target: str = "102", target_pos: str = T) -> str:
     return _shot(weapon, target, target_pos, "Save [NOT ALLOCATED]")
 
 
-_DEAD_102 = "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
+_DEAD_102 = "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [ALLOC_MODEL: {target}#0] [SUCCESS]\n"
 
 
 def _stats(tmp_path, body: str, end: str = EPISODE_TAIL):
@@ -138,7 +142,7 @@ def test_une_ligne_a_sauvegarde_sans_nom_d_arme_leve(tmp_path):
     """T1 : un groupe anonyme ne peut être ni distingué du tueur ni compté — on lève, on ne
     laisse pas le compteur dépendre de ce que le journal veut bien nommer."""
     anonymous = (
-        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 102{T}"
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT [DESIGNATED:102] Unit 102{T}"
         " - Hit 4(3+) - Wound 5(4+) - Save [NOT ALLOCATED] [R:+0.0] [SUCCESS]\n"
     )
     with pytest.raises(ValueError, match="sans ` with \\[arme\\]`"):

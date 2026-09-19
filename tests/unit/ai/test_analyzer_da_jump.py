@@ -74,7 +74,7 @@ def _move(sec: int) -> str:
     )
 
 
-def _stats(tmp_path, monkeypatch, body: str, *, log_grammar: int = 13) -> dict:
+def _stats(tmp_path, monkeypatch, body: str) -> dict:
     import ai.analyzer as an
     import ai.analyzer_config as ac_mod
 
@@ -86,7 +86,7 @@ def _stats(tmp_path, monkeypatch, body: str, *, log_grammar: int = 13) -> dict:
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         _SETUP + body, inches_to_subhex=1, board="cols=100 rows=100", objectives=_OBJECTIVES,
-        units=_UNITS, log_grammar=log_grammar, ez_vertical_inches=None,
+        units=_UNITS, ez_vertical_inches=None,
     ))
     return an.parse_step_log(str(log))
 
@@ -141,10 +141,6 @@ def test_les_des_du_failed_sont_controles(tmp_path, monkeypatch):
     bad = _stats(tmp_path, monkeypatch, _jump(2, 1, "MISCAST") + _suffers(3, 5, mw=3) + _shoot_phase(4))
     assert bad["mw_ability_dice_mismatch"] == {1: 1, 2: 0}
 
-
-def test_journal_anterieur_abstention(tmp_path, monkeypatch):
-    stats = _stats(tmp_path, monkeypatch, _jump(2, 1, "MISCAST") + _shoot_phase(3), log_grammar=12)
-    assert stats["da_jump_invalid"] == {1: 0, 2: 0}
 
 
 def test_le_wait_d_une_escouade_en_reserves_est_le_refus_de_l_ingress_pas_une_faute(tmp_path, monkeypatch):
