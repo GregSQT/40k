@@ -243,3 +243,127 @@ def test_dead_avant_shoot_n_est_pas_out_of_range(tmp_path):
         "le contrôle doit avoir jugé — 0 non-vérifiable prouve qu'aucune distance n'a été "
         "renoncée, donc l'assertion ci-dessus n'est pas un silence"
     )
+
+
+# ── Cinquième journal : tir sur CADAVRE ────────────────────────────────────────────────────────
+# L'autre porte d'entrée de l'abstention, et la seule que les quatre journaux ci-dessus ne
+# franchissent jamais : la cible n'a pas perdu des socles, elle est DÉTRUITE depuis un tour
+# antérieur. `freeze_select_targets` lit alors `hp=None` (l'unité n'est plus dans `unit_hp`) et
+# `engagement_maps` sort par son retour anticipé `if hp is None` APRÈS avoir retiré la cible des
+# trois cartes : aucun socle n'est rendu, `edge_dist` vaut None, le contrôle renonce.
+# Ce renoncement est légitime — une unité détruite n'a plus de géométrie figée à mesurer — mais
+# il doit se COMPTER. Sans ce verrou, remplacer l'incrément par un `pass` ne fait rougir personne
+# et le contrôle redevient silencieux sur ce chemin, exactement le « vert vacant » que les
+# journaux précédents interdisent sur le leur.
+CADAVRE = (22, 20)          # cible détruite au tour 1 — 12 hex du tireur qui la tue
+TIREUR_LOIN = (54, 20)      # 32 hex du cadavre : HORS des 24" de l'arme
+
+# Déploiements + le tir du tour 1 qui DÉTRUIT la cible, à portée (12 hex) donc parfaitement légal.
+# PAS de ligne DEAD, et c'est MESURÉ, pas un oubli : flushée avant le tir qui la cause, elle
+# retirerait la cible — une seule figurine ici — de `unit_hp` avant même le gel de ce tir, qui
+# renoncerait alors lui aussi. Le compteur monterait à 2 et ne dirait plus laquelle des deux
+# lignes ce test verrouille. Cet ordonnancement a son propre journal ci-dessus,
+# `STEP_LOG_DEAD_BEFORE_SHOOT`, sur une cible de deux figurines.
+_CADAVRE_PREAMBULE = (
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) "
+    f"to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2({TIREUR_LOIN[0]},{TIREUR_LOIN[1]}) DEPLOYED from (-1,-1) "
+    f"to ({TIREUR_LOIN[0]},{TIREUR_LOIN[1]}) [R:+0.0] "
+    f"[MODELS: 2#0@({TIREUR_LOIN[0]},{TIREUR_LOIN[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 104({CADAVRE[0]},{CADAVRE[1]}) DEPLOYED from (-1,-1) "
+    f"to ({CADAVRE[0]},{CADAVRE[1]}) [R:+0.0] [MODELS: 104#0@({CADAVRE[0]},{CADAVRE[1]},z0)] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) "
+    f"SHOT [DESIGNATED:104] Unit 104({CADAVRE[0]},{CADAVRE[1]}) with [Sternguard Bolt Rifle] "
+    f"- Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] "
+    f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 104#0] [SUCCESS]\n"
+)
+
+# Tour 3, une AUTRE unité vise le cadavre depuis 32 hex : hors portée SI la géométrie était
+# mesurable. Elle ne l'est pas — c'est cette ligne, et elle seule, qui doit faire renoncer.
+_CADAVRE_TIR_SUR_CORPS = (
+    f"[10:00:03] E1 T3 P1 SHOOT : Unit 2({TIREUR_LOIN[0]},{TIREUR_LOIN[1]}) "
+    f"SHOT [DESIGNATED:104] Unit 104({CADAVRE[0]},{CADAVRE[1]}) with [Sternguard Bolt Rifle] "
+    f"- Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] "
+    f"[MODELS: 2#0@({TIREUR_LOIN[0]},{TIREUR_LOIN[1]},z0)] [SHOOTER_MODELS: 2#0] "
+    f"[ALLOC_MODEL: 104#0] [SUCCESS]\n"
+)
+
+_CADAVRE_ENTETE: dict[str, Any] = dict(
+    board="cols=60 rows=60",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 2 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 104 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    **{k: v for k, v in _COMMON.items() if k != "units"},
+)
+
+STEP_LOG_CADAVRE = entete_step_log(
+    _CADAVRE_PREAMBULE + _CADAVRE_TIR_SUR_CORPS, **_CADAVRE_ENTETE
+)
+# Le MÊME journal amputé de sa dernière ligne : c'est la seule façon d'attribuer l'abstention.
+# Le compteur est global à la partie ; sans ce témoin, « 1 » pourrait venir du tir du tour 1.
+STEP_LOG_CADAVRE_SANS_TIR_SUR_CORPS = entete_step_log(_CADAVRE_PREAMBULE, **_CADAVRE_ENTETE)
+
+
+def test_premisse_le_tireur_du_cadavre_est_hors_portee():
+    """Sans cet écart, renoncer et mesurer rendraient le même verdict (0 hors portée)."""
+    assert _d(SHOOTER, CADAVRE) <= 24, "le tir qui tue doit être À PORTÉE, sinon il est illégal"
+    assert _d(TIREUR_LOIN, CADAVRE) > 24, (
+        "le tir sur le cadavre doit être HORS portée : c'est ce qui distingue une abstention "
+        "d'une mesure"
+    )
+
+
+def test_le_tir_qui_detruit_la_cible_est_bien_juge(tmp_path):
+    """Témoin d'attribution : sans la ligne du tour 3, le compteur d'abstention reste à 0.
+
+    C'est lui qui donne son sens au test suivant : `shoot_range_unverifiable` compte la partie
+    entière, donc un « 1 » ne prouve rien tant qu'on n'a pas établi que le reste du journal en
+    produit zéro.
+    """
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(STEP_LOG_CADAVRE_SANS_TIR_SUR_CORPS)
+    stats = an.parse_step_log(str(log))
+
+    assert stats["shoot_range_unverifiable"][1] == 0, (
+        "la cible est vivante au gel de ce tir : le contrôle a de quoi mesurer, il ne renonce pas"
+    )
+    assert stats["shoot_invalid"][1]["out_of_range"] == 0, "12 hex pour une arme de 24\""
+
+
+def test_un_tir_sur_cadavre_compte_son_abstention(tmp_path):
+    """VERROU — l'abstention sur cible DÉTRUITE se compte au lieu de se taire.
+
+    Le tour 3 vise depuis 32 hex, avec une arme de 24", une unité détruite au tour 1. La cible
+    n'a plus ni PV ni socles figés : le contrôle de portée n'a rien à mesurer. Il doit donc
+    renoncer — d'où 0 `out_of_range`, la distance à un état d'après-mort ne prouvant rien — et
+    inscrire ce renoncement dans `shoot_range_unverifiable`.
+
+    Verrou prouvé par mutation : remplacer l'incrément de la branche `if edge_dist is None`
+    (`shoot_handler`) par un `pass` → ROUGE ici. Mesuré aussi sous la même mutation :
+    `test_analyzer_target_decl_portee` et `test_analyzer_dead_unit_false_positive`, les deux
+    fichiers qui touchent ce compteur et ce chemin, restent VERTS — ce test est le seul à tenir
+    cette branche.
+    """
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(STEP_LOG_CADAVRE)
+    stats = an.parse_step_log(str(log))
+
+    assert stats["shoot_range_unverifiable"][1] == 1, (
+        "cible détruite : aucun socle figé à mesurer, le contrôle renonce et doit le compter"
+    )
+    assert stats["shoot_invalid"][1]["out_of_range"] == 0, (
+        "renoncer interdit de condamner : la distance aux positions d'après-mort ne prouve rien"
+    )
+    # Anti-vacant : la ligne du tour 3 a bien été lue, et la cible qu'elle vise est bien un
+    # cadavre — c'est ce qui rend la géométrie non mesurable. Sans cette assertion, une cible
+    # simplement dépourvue de socles donnerait le même compte pour une autre raison.
+    assert stats["shoot_at_dead_unit"][1] == 1, (
+        "le tir du tour 3 vise un cadavre — c'est la ligne dont l'abstention est comptée"
+    )
+    assert stats["shoot_invalid"][1]["total"] == 2, "les deux lignes de tir ont été traitées"
