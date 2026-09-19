@@ -693,11 +693,12 @@ class ObservationBuilder:
             _hex_radius_upper_for_engagement_prune,
             _move_preview_footprint_span,
         )
-        from engine.phase_handlers.shared_utils import get_max_base_size_hex
 
         units_cache = require_key(game_state, "units_cache")
-        max_bs = get_max_base_size_hex(game_state)
-        ref_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(reference_entry))
+        ref_r = _hex_radius_upper_for_engagement_prune(
+            require_key(reference_entry, "BASE_SHAPE"),
+            _move_preview_footprint_span(reference_entry),
+        )
         ref_positions = list(
             require_key(reference_entry, "occupied_hexes_by_model").values()
         ) or [(int(reference_entry["col"]), int(reference_entry["row"]))]
@@ -708,8 +709,17 @@ class ObservationBuilder:
         for _sid, entry in entries_on_battlefield(units_cache):
             if int(entry["player"]) == enemy_of_player:
                 continue
+            # SPAN RÉEL, sans plafond — jumeau exact de
+            # `movement_handlers._enemy_items_within_move_engagement_horizon`, qui a retiré ce
+            # `min(span, max_base_size_hex)` pour la même raison : un plafond par le HAUT
+            # RÉTRÉCIT l'horizon, donc élague un ennemi encore pertinent, alors que cette prune
+            # ne doit se tromper que dans le sens SUR-approximé — ce que la docstring ci-dessus
+            # promet. MESURÉ à x10 sur un WarTrakk (`oval` [41, 27], span 41, plafond 35) :
+            # horizon 44 pour une distance engageante de 45, donc une paire élaguée et une
+            # observation qui annonce « pas en zone d'engagement » sur une paire qui l'est.
             e_r = _hex_radius_upper_for_engagement_prune(
-                min(_move_preview_footprint_span(entry), max_bs)
+                require_key(entry, "BASE_SHAPE"),
+                _move_preview_footprint_span(entry),
             )
             horizon = int(engagement_zone) + ref_r + e_r + 1
             by_model = entry.get("occupied_hexes_by_model")  # get allowed (mono-fig)

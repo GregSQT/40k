@@ -17,12 +17,14 @@ mur — `fp_other` est le SEUL rempart contre un socle pose sur une escouade ami
 exactement celui que le predicat desactivait.
 """
 
+import math
 from typing import Any, Dict, List, Tuple
 
 import pytest
 
 from engine.hex_utils import precompute_footprint_offsets, socle_is_single_hex
 from engine.phase_handlers.movement_handlers import (
+    _hex_radius_upper_for_engagement_prune,
     _move_preview_footprint_span,
     movement_preview_move_plan,
 )
@@ -158,3 +160,34 @@ def test_move_preview_footprint_span_invalid_base_size_raises() -> None:
 
     assert _move_preview_footprint_span({"id": "u1", "BASE_SIZE": [60, 35]}) == 60
     assert _move_preview_footprint_span({"id": "u1", "BASE_SIZE": 32}) == 32
+
+
+def test_engagement_prune_radius_follows_the_shape_of_the_socle() -> None:
+    """La borne de pruning du move majorait un socle par son demi-diametre.
+
+    Exact pour un disque et pour un ovale (son extreme EST le demi-grand-axe), faux pour un
+    `square`, dont le point le plus eloigne du centre est un COIN a demi-cote x racine(2) — ce
+    que `bounding_radius_norm` documente et ce que `_socle_edge_primitives` construit. La borne
+    lit desormais `hex_utils.socle_reach_radius_subhex`, partagee avec les seuils de proximite du
+    pool de charge (jumeau move/charge, CLAUDE.md).
+
+    Le verrou porte les DEUX moities : aucune valeur ne bouge sur les socles du depot (sinon la
+    correction ne serait qu'un elargissement silencieux du pruning), et le carre est couvert.
+    """
+    for size in (1, 5, 6, 8, 10, 12, 16, 18, 24, [20, 14], [24, 18]):
+        span = max(size) if isinstance(size, list) else size
+        demi_diametre = max(1, (span + 1) // 2)
+        for shape in ("round", "oval"):
+            if shape == "oval" and not isinstance(size, list):
+                continue
+            if shape == "round" and isinstance(size, list):
+                continue
+            assert _hex_radius_upper_for_engagement_prune(shape, span) == demi_diametre, (
+                f"{shape}/{size} : le pruning du move ne doit pas changer"
+            )
+
+    for side in (12, 20, 28):
+        demi_diametre = max(1, (side + 1) // 2)
+        rayon = _hex_radius_upper_for_engagement_prune("square", side)
+        assert rayon > demi_diametre
+        assert rayon >= math.ceil(side / 2 * math.sqrt(2))

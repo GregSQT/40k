@@ -141,10 +141,17 @@ def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
         raise ValueError(f"BASE_SIZE scalaire invalide : {bs!r}") from exc
 
 
-def _hex_radius_upper_for_engagement_prune(base_span: int) -> int:
-    """Majorant (grille hex) du rayon empreinte depuis l’ancre — borne conservatrice pour la prune."""
-    s = max(1, int(base_span))
-    return max(1, (s + 1) // 2)
+def _hex_radius_upper_for_engagement_prune(base_shape: str, base_span: int) -> int:
+    """Majorant (grille hex) du rayon empreinte depuis l’ancre — borne conservatrice pour la prune.
+
+    La FORME entre dans la signature : le demi-diamètre qui tenait lieu de rayon ne majore pas un
+    socle `square`, dont le point le plus éloigné du centre est un coin. Source unique partagée
+    avec les seuils de proximité de la charge — cf. `hex_utils.socle_reach_radius_subhex`, qui
+    porte la mesure. Aucune valeur ne change sur les socles `round` / `oval` du dépôt.
+    """
+    from engine.hex_utils import socle_reach_radius_subhex
+
+    return socle_reach_radius_subhex(base_shape, max(1, int(base_span)))
 
 
 # ── PIERRE TOMBALE — heuristique de destination de l'ancien espace d'actions (2026-07-29) ─────
@@ -185,7 +192,9 @@ def _enemy_items_within_move_engagement_horizon(
     ennemi encore pertinent → liste sur-approximée, résultat identique à un scan complet.
     """
     ez = get_engagement_zone(game_state)
-    mover_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(unit))
+    mover_r = _hex_radius_upper_for_engagement_prune(
+        require_key(unit, "BASE_SHAPE"), _move_preview_footprint_span(unit)
+    )
     m = int(move_range)
     horizon_without_enemy_r = m + mover_r + int(ez) + 1
 
@@ -199,7 +208,7 @@ def _enemy_items_within_move_engagement_horizon(
         # contredit. Le plafond garde son rôle ailleurs (fenêtres d'observation), pas ici : une
         # donnée aberrante coûterait une fenêtre plus large, jamais un verdict faux.
         e_span = _move_preview_footprint_span(ce)
-        e_r = _hex_radius_upper_for_engagement_prune(e_span)
+        e_r = _hex_radius_upper_for_engagement_prune(require_key(ce, "BASE_SHAPE"), e_span)
         h = horizon_without_enemy_r + e_r
         # Distance à la figurine la PLUS PROCHE du squad (pas seulement l'ancre) : une escouade
         # multi-fig s'étend bien au-delà de son ancre (ex. 20 Termagants sur ~24 hex), donc un

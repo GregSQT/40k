@@ -577,6 +577,14 @@ def _charge_bfs_max_distance(
     return rid + extra
 
 
+def _charge_socle_reach_radius(base_shape: str, base_size: Any) -> int:
+    """Rayon englobant d'un socle en subhex — cf. ``hex_utils.socle_reach_radius_subhex``, source
+    unique partagée avec la prune d'engagement du move."""
+    from engine.hex_utils import socle_reach_radius_subhex
+
+    return socle_reach_radius_subhex(base_shape, base_size)
+
+
 def _charge_enemy_reference_positions(enemy_entry: Dict[str, Any]) -> List[Tuple[int, int]]:
     """Positions de figurines qu'une entrée-cache ennemie oppose au prédicat d'engagement.
 
@@ -772,30 +780,33 @@ def _charge_reverse_goal_bfs_for_eligibility(
         _er_c = int(sum(r for _, r in enemy_occupied) / len(enemy_occupied))
         goal_zone = sorted(goal_zone, key=lambda h: hex_distance(h[0], h[1], _ec_c, _er_c))[:_TRAINING_GOAL_CAP]
         goal_candidates_n = _TRAINING_GOAL_CAP
+    # Pre-filtre par ennemi : évite `unit_entries_within_engagement_zone` sur les ancres-buts
+    # clairement hors de portée d'un ennemi donné. Empreinte ennemie ENTIÈRE dilatée du seuil de
+    # proximité, testée sur l'ANCRE — le même ensemble pour toutes les formes.
+    #
+    # Deux branches vivaient ici et chacune portait un défaut. La branche rond↔rond mesurait
+    # `hex_distance(ancre, ANCRE ennemie)` contre un seuil qui ne contient aucun terme
+    # d'étalement : une escouade ennemie étalée voyait ses ancres-buts éliminées dès que la
+    # figurine engagée n'était pas celle de l'ancre. MESURÉ à x1, escouade ennemie étalée de 6 à
+    # 9 subhex (toutes les valeurs légales 03.03) : le BFS complet trouve 11 destinations de
+    # charge valides, le chemin rapide d'éligibilité en trouve ZÉRO — la charge n'était pas
+    # proposée. La branche non-ronde, elle, dilatait de `engagement_zone` seul, soit le prédicat
+    # hexagonal posé en préfiltre du prédicat d'engagement : sans effet ici, où
+    # `inches_to_subhex <= 1` impose la métrique `hex`, mais c'est le défaut fermé dans le BFS
+    # sol du pool, et le laisser debout le laissait revenir.
+    _mover_r = _charge_socle_reach_radius(unit["BASE_SHAPE"], unit["BASE_SIZE"])
     enemy_engagement_zones: Dict[Any, Set[Tuple[int, int]]] = {}
     for eid, enemy_entry in indexed_enemy_engagement:
-        ec = int(enemy_entry["col"])
-        er = int(enemy_entry["row"])
         enemy_fp = entry_footprint(enemy_entry)
+        _e_r = _charge_socle_reach_radius(
+            require_key(enemy_entry, "BASE_SHAPE"), require_key(enemy_entry, "BASE_SIZE")
+        )
         enemy_engagement_zones[eid] = dilate_hex_set(
             {(int(fc), int(fr)) for fc, fr in enemy_fp},
-            engagement_zone,
+            engagement_zone + _mover_r + _e_r + 1,
             board_cols,
             board_rows,
         )
-    # Pre-filtre hex-distance pour round-vs-round : évite d'appeler unit_entries_within_engagement_zone
-    # sur des candidates clairement hors portée euclidienne. Seuil conservatif par ennemi.
-    _mover_bs = unit["BASE_SIZE"]
-    _mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else int(_mover_bs)
-    _mover_r = max(1, (_mover_bs_int + 1) // 2)
-    _rr_proximity: Dict[Any, int] = {}
-    if unit["BASE_SHAPE"] == "round":
-        for _eid, _ee in indexed_enemy_engagement:
-            if _ee["BASE_SHAPE"] == "round":
-                _e_bs = _ee["BASE_SIZE"]
-                _e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) else int(_e_bs)
-                _e_r = max(1, (_e_bs_int + 1) // 2)
-                _rr_proximity[_eid] = engagement_zone + _mover_r + _e_r + 1
 
     goals: List[Tuple[int, int]] = []
     seen_goals: Set[Tuple[int, int]] = set()
@@ -840,19 +851,9 @@ def _charge_reverse_goal_bfs_for_eligibility(
             if candidate_fp & enemy_fp:
                 hex_overlaps_enemy = True
                 break
-            is_round_round_engagement = (
-                unit["BASE_SHAPE"] == "round"
-                and enemy_entry["BASE_SHAPE"] == "round"
-            )
-            if is_round_round_engagement and eid in _rr_proximity:
-                if hex_distance(anchor[0], anchor[1], ec, er) > _rr_proximity[eid]:
-                    rejected_engagement_prefilter_n += 1
-                    continue
-            if not is_round_round_engagement:
-                enemy_engagement_zone = enemy_engagement_zones[eid]
-                if not (candidate_fp & enemy_engagement_zone):
-                    rejected_engagement_prefilter_n += 1
-                    continue
+            if anchor not in enemy_engagement_zones[eid]:
+                rejected_engagement_prefilter_n += 1
+                continue
             # `memoise=False` : ancre-but candidate du BFS inverse.
             if unit_entries_within_engagement_zone(
                 synth, enemy_entry, engagement_zone, metric=_metric, memoise=False
@@ -3940,16 +3941,12 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     # Precompute per-enemy proximity thresholds: if the BFS anchor is beyond this distance
     # from all enemies, neither overlap nor engagement is possible — skip the expensive checks.
-    _mover_bs = unit["BASE_SIZE"]
-    _mover_bs_int = max(_mover_bs) if isinstance(_mover_bs, (list, tuple)) else int(_mover_bs)
-    _mover_r = max(1, (_mover_bs_int + 1) // 2)
+    _mover_r = _charge_socle_reach_radius(unit["BASE_SHAPE"], unit["BASE_SIZE"])
     _charge_enemy_prox: List[Tuple[int, int, int]] = []
     for _, _ce in indexed_enemy_engagement:
         _ec = int(require_key(_ce, "col"))
         _er = int(require_key(_ce, "row"))
-        _e_bs = _ce["BASE_SIZE"]
-        _e_bs_int = max(_e_bs) if isinstance(_e_bs, (list, tuple)) else int(_e_bs)
-        _e_r = max(1, (_e_bs_int + 1) // 2)
+        _e_r = _charge_socle_reach_radius(_ce["BASE_SHAPE"], _ce["BASE_SIZE"])
         _charge_enemy_prox.append((_ec, _er, engagement_zone + _mover_r + _e_r + 1))
 
     def _min_dist_to_enemy(start_c: int, start_r: int, ce: Dict[str, Any], pec: int, per: int) -> int:
@@ -4246,7 +4243,9 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # engageante du budget est écartée ici, le pool rendu vide, et la charge légale perdue —
     # exactement le défaut fermé un cran plus haut dans `_charge_impossible_by_primary_to_enemy_
     # hex_lower_bound`, rejoué sur le préfiltre. `_peth` majore l'engagement euclidien : il vaut
-    # `ez + demi-diamètres arrondis au-dessus + 1`, quand la portée vaut `ez + demi-diamètres`.
+    # `_peth` majore l'engagement euclidien : c'est `ez` plus les deux rayons ENGLOBANTS de
+    # socle arrondis au-dessus (`socle_reach_radius_subhex`) plus 1, quand la portée vaut `ez`
+    # plus ces deux mêmes rayons.
     #
     # Le filtre GLOBAL du BFS (`_near_enemy_set`, qui décide si une ancre mérite le calcul complet
     # d'empreinte) n'est que l'union de ces ensembles : il se dérive ici au lieu d'être dilaté une
