@@ -7872,6 +7872,9 @@ class W40KEngine(gym.Env):
     # `coherency_removal` y figure pour la meme raison que `reactive_move` : ce n'est pas une
     # action d'agent mais un effet de fin de tour. L'incrementer decalerait `episode_steps` de la
     # suite d'actions reellement decidees (contrat tour_de_jeu.md, en-tete de step.log).
+    # Cle par type BRUT d'action_log (celui de `_STEP_LOG_TYPE_MAP`, PAS sa valeur) : le
+    # consommateur l'interroge avec `raw_type`. Ajouter ici un nom de type MAPPE serait un
+    # membre mort.
     _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({
         "reactive_move", "coherency_removal",
         # 20.04 — destruction en fin de 3e round : même statut que coherency_removal, pas une
@@ -8550,7 +8553,11 @@ class W40KEngine(gym.Env):
                 phase=phase,
                 player=player,
                 success=True,
-                step_increment=action_type not in self._STEP_LOG_NON_INCREMENTING_TYPES,
+                # Le set est cle par type BRUT d'action_log, pas par type mappe : les deux
+                # coincident pour 14 des 15 entrees, et `return_destroyed_models` ->
+                # `returned_models` est la seule ou ils different. Interroger le set avec
+                # `action_type` y rendait donc True, et chaque Grot Orderly comptait un step.
+                step_increment=raw_type not in self._STEP_LOG_NON_INCREMENTING_TYPES,
                 action_details=self._build_step_log_details(raw_log, pre_action_turn),
             )
 

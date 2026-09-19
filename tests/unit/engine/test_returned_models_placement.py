@@ -1239,3 +1239,38 @@ def test_bot_policy_is_declared_on_dead_bodyguards_and_round() -> None:
     character_and_boy = _state(n_alive=3, n_destroyed=2, enemy_at=None,
                                destroyed_profiles=[("Warboss", 85, "leader"), ("Boyz", 8)])
     assert _bot_grot_orderly_policy(character_and_boy, _SQUAD) is False
+
+
+def test_la_restitution_ne_consomme_aucun_step_gym(tmp_path) -> None:
+    """La ligne `RETURNED` passe par le VRAI drainage et n'incrémente pas `Steps=`.
+
+    ROUGE avant le fix : `_flush_squad_action_logs_to_step_logger` comparait le type MAPPÉ
+    (`returned_models`) au set `_STEP_LOG_NON_INCREMENTING_TYPES`, clé par type BRUT. Comme
+    `return_destroyed_models` est le seul type non-incrémentant dont le nom mappé diffère de la
+    clé, chaque restitution comptait un step — `Steps=` de la ligne `EPISODE END` gonflait d'un
+    Grot Orderly par phase de commandement, à l'inverse de ce que le set déclare.
+
+    Le test ne recopie PAS l'expression du moteur : il draine et lit le compteur du StepLogger.
+    """
+    from ai.step_logger import StepLogger
+    from engine.w40k_core import W40KEngine
+
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None)
+    apply_returned_models_placement(gs, _SQUAD, [(6, 7), (6, 8)], [0, 1], d3=2, destroyed=2)
+
+    eng = W40KEngine.__new__(W40KEngine)
+    eng.game_state = gs
+    log = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(log), enabled=True, buffer_size=50)
+    logger.episode_number = 1
+    eng.step_logger = logger
+
+    eng._flush_squad_action_logs_to_step_logger(pre_action_turn=1)
+    logger._flush_buffer()
+
+    lignes = [l for l in log.read_text(encoding="utf-8").splitlines() if " RETURNED " in l]
+    assert len(lignes) == 1, log.read_text(encoding="utf-8")
+    assert logger.episode_step_count == 0, (
+        f"la restitution a consommé {logger.episode_step_count} step(s) gym : {lignes[0]}"
+    )
+    assert logger.step_count == 0
