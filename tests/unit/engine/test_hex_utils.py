@@ -701,3 +701,81 @@ class TestObjectiveLineHexes:
         result = _objective_line_hexes([0, 0], [4, 4], 3, 3)
         for hx in result:
             assert 0 <= hx[0] < 3 and 0 <= hx[1] < 3
+
+
+# ---------------------------------------------------------------------------
+# battlefield_center_norm — centre GÉOMÉTRIQUE du plateau
+# ---------------------------------------------------------------------------
+
+class TestBattlefieldCenterNorm:
+    """Le centre du champ de bataille est un POINT, pas une case.
+
+    Il porte la clause « within 6" of the centre of the battlefield » (Unbreakable Resolve,
+    24.12), jugée par le moteur et par l'analyzer via
+    `engine.combat_utils.ranged_edge_distance_to_battlefield_center`.
+    """
+
+    def test_le_centre_est_equidistant_des_bords_du_plateau_jouable(self):
+        """Définition, dérivée des cases RÉELLEMENT jouables et non de l'implémentation : le point
+        est à égale distance de la première et de la dernière case de chaque axe, les demi-cases
+        fantômes du bord bas (`is_phantom_bottom_hex`) exclues. Les hexagones de bord débordant
+        de la même demi-largeur des deux côtés, le centre des CENTRES de case est aussi celui de
+        l'enveloppe physique.
+
+        Recalculer ici les bornes avec l'expression de l'implémentation ne prouverait rien : ce
+        test les ÉNUMÈRE, seule forme qui détecte un bord lu sur une case qui n'existe pas."""
+        from engine.hex_utils import battlefield_center_norm, _hex_center, is_phantom_bottom_hex
+
+        for cols, rows in ((44, 60), (220, 300), (100, 100), (221, 301), (7, 5), (1, 7)):
+            cx, cy = battlefield_center_norm(cols, rows)
+            centres = [
+                _hex_center(c, r)
+                for c in range(cols) for r in range(rows)
+                if not is_phantom_bottom_hex(c, r, rows)
+            ]
+            xs = [x for x, _ in centres]
+            ys = [y for _, y in centres]
+            assert cx - min(xs) == pytest.approx(max(xs) - cx), f"{cols}x{rows} : horizontal"
+            assert cy - min(ys) == pytest.approx(max(ys) - cy), f"{cols}x{rows} : vertical"
+
+    def test_sur_dimensions_paires_le_centre_n_est_aucune_case(self):
+        """Les deux plateaux du projet (44x60 à x1, 220x300 à x5) ont des dimensions paires :
+        le point tombe ENTRE les cases, et `(cols // 2, rows // 2)` en est décalée de 0,764
+        subhex — 0,764" à x1, 0,153" à x5. C'est le pas que la mesure prenait pour le centre,
+        vers l'est et vers le sud."""
+        from engine.hex_utils import (
+            battlefield_center_norm, _hex_center, ENGAGEMENT_NORM_HEX_WIDTH,
+        )
+
+        for cols, rows in ((44, 60), (220, 300)):
+            cx, cy = battlefield_center_norm(cols, rows)
+            mx, my = _hex_center(cols // 2, rows // 2)
+            ecart = math.hypot(mx - cx, my - cy) / ENGAGEMENT_NORM_HEX_WIDTH
+            assert ecart == pytest.approx(0.764, abs=0.001), f"{cols}x{rows}"
+            assert mx > cx and my > cy, "la case médiane est au sud-est du centre réel"
+
+    def test_le_bord_bas_ne_se_lit_pas_sur_une_demi_case_fantome(self):
+        """La dernière case des colonnes IMPAIRES déborde sous le plateau et N'EXISTE PAS
+        (`is_phantom_bottom_hex`, réunie aux murs du scénario par `phantom_bottom_hexes`). Les
+        deux bords verticaux se lisent donc sur une colonne PAIRE.
+
+        VERROU : prendre `_hex_center(1, rows - 1)` pour bord bas — la demi-case fantôme — pose
+        le centre 0,289 subhex trop au sud, et la zone « 6" du centre » y perd sa symétrie
+        nord/sud → rouge."""
+        from engine.hex_utils import battlefield_center_norm, _hex_center, is_phantom_bottom_hex
+
+        _, cy = battlefield_center_norm(100, 100)
+        _, y_haut = _hex_center(0, 0)
+        _, y_bas = _hex_center(0, 99)
+        assert cy == pytest.approx((y_haut + y_bas) / 2.0)
+        assert is_phantom_bottom_hex(1, 99, 100) and not is_phantom_bottom_hex(0, 99, 100)
+        _, y_fantome = _hex_center(1, 99)
+        assert y_fantome > y_bas, "montage : la case fantôme déborde bien sous la dernière case réelle"
+
+    def test_un_plateau_vide_est_une_erreur(self):
+        """T1 : pas de centre sur un plateau sans case — état corrompu, pas une valeur de repli."""
+        from engine.hex_utils import battlefield_center_norm
+
+        for cols, rows in ((0, 10), (10, 0), (-1, 10)):
+            with pytest.raises(ValueError, match="plateau vide"):
+                battlefield_center_norm(cols, rows)

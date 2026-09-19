@@ -1215,6 +1215,36 @@ def _hex_center(col: int, row: int) -> Tuple[float, float]:
     return x, y
 
 
+def battlefield_center_norm(cols: int, rows: int) -> Tuple[float, float]:
+    """Centre GÉOMÉTRIQUE du champ de bataille, en unités ``_hex_center``.
+
+    Sur un plateau de dimensions paires — les deux plateaux du projet, 44x60 à x1 et 220x300 à
+    x5 — aucune case n'est le centre : le point exact tombe ENTRE les cases. La case d'indice
+    moitié ``(cols // 2, rows // 2)`` en est décalée de 0,764 subhex (mesuré aux deux
+    résolutions), soit 0,153" à x5 : une règle mesurée depuis elle est biaisée vers l'est et le
+    sud, et ce pas a fait basculer 90 des 2967 cases-ancre de la zone « 6" du centre » (socle
+    rond de 6 subhex, x5).
+
+    Le centre est celui de la boîte englobante, calculé par ``_hex_center`` plutôt qu'avec les
+    constantes de pas recopiées : tout hexagone de bord déborde de la même demi-largeur (à
+    gauche comme à droite) et de la même demi-hauteur (en haut comme en bas), donc le centre des
+    CENTRES de case et le centre de l'enveloppe physique sont le même point.
+
+    Les deux bords horizontaux se lisent sur une colonne PAIRE (``offset odd-q``) : les colonnes
+    impaires sont décalées d'une demi-rangée vers le bas, donc leur première case est plus basse
+    que celle des paires, et leur DERNIÈRE case déborde sous le plateau — elle n'existe pas
+    (`is_phantom_bottom_hex`, murée avec les murs du scénario). Lire le bord bas sur une colonne
+    impaire prendrait cette demi-case fantôme pour le bord du plateau et laisserait le centre
+    0,289 subhex trop au sud.
+    """
+    if cols < 1 or rows < 1:
+        raise ValueError(f"battlefield_center_norm: plateau vide (cols={cols}, rows={rows})")
+    x_min, y_min = _hex_center(0, 0)
+    x_max, _ = _hex_center(cols - 1, 0)
+    _, y_max = _hex_center(0, rows - 1)
+    return (x_min + x_max) / 2.0, (y_min + y_max) / 2.0
+
+
 def compute_occupied_hexes(
     center_col: int,
     center_row: int,

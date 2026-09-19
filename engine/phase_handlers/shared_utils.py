@@ -2720,8 +2720,14 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
     seule distance de règle du moteur à y échapper — un Ancient au sud du centre y gagnait le
     FNP au-delà de 6" réels, la grille hex comptant une case par rangée quand un pas vers le sud
     en vaut √3/1,5.
+
+    Le centre lui-même est le POINT géométrique du plateau (`battlefield_center_norm`), pas la
+    case `(cols // 2, rows // 2)` : sur les deux plateaux du projet, tous deux de dimensions
+    paires, aucune case n'est le centre et celle-là en est décalée de 0,764 subhex vers l'est et
+    le sud. Le choix du point et le repli hex de x1 vivent dans
+    `ranged_edge_distance_to_battlefield_center`, appelée aussi par l'analyzer.
     """
-    from engine.combat_utils import ranged_edge_distance_to_cell  # noqa: PLC0415
+    from engine.combat_utils import ranged_edge_distance_to_battlefield_center  # noqa: PLC0415
     from engine.game_state import iter_living_models_with_footprints, objective_hexes_union  # noqa: PLC0415
     from engine.hex_utils import Socle  # noqa: PLC0415
     from engine.phase_handlers.shooting_handlers import _ranged_distance_metric  # noqa: PLC0415
@@ -2740,14 +2746,14 @@ def _model_is_near_objective_or_center(game_state: Dict[str, Any], model_id: str
         return True
     ish = int(require_key(game_state, "inches_to_subhex"))
     center_range = 6 * ish
-    center_col = int(require_key(game_state, "board_cols")) // 2
-    center_row = int(require_key(game_state, "board_rows")) // 2
     col, row = int(require_key(model, "col")), int(require_key(model, "row"))
     socle = Socle(
         require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"), col, row, footprint,
     )
-    distance = ranged_edge_distance_to_cell(
-        socle, col, row, center_col, center_row, _ranged_distance_metric(game_state),
+    distance = ranged_edge_distance_to_battlefield_center(
+        socle, col, row,
+        int(require_key(game_state, "board_cols")), int(require_key(game_state, "board_rows")),
+        _ranged_distance_metric(game_state),
     )
     return distance <= center_range
 

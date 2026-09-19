@@ -196,8 +196,9 @@ def model_near_objective_or_center(state: Any, config: Any, mid: str, target_id:
     centre. None = indéterminable (position de la figurine absente du journal).
 
     Les deux clauses sont mesurées sur l'EMPREINTE du socle, donc exactes à toute résolution.
-    Le 6" du centre passe par la primitive du MOTEUR (`ranged_edge_distance_to_cell`) avec la
-    métrique de portée du RUN (`metric.ranged` de l'entête) : 01.04 mesure « from the closest
+    Le 6" du centre passe par la primitive du MOTEUR
+    (`ranged_edge_distance_to_battlefield_center`, qui porte aussi la définition du centre) avec
+    la métrique de portée du RUN (`metric.ranged` de l'entête) : 01.04 mesure « from the closest
     part of that model's base », et c'est le même bord-à-bord que le moteur applique. L'ancre
     seule ne le donnait pas, d'où une abstention à x5 — le socle y déborde de son ancre — qui
     laissait la clause positionnelle injugée à la résolution où tourne le jeu."""
@@ -205,7 +206,7 @@ def model_near_objective_or_center(state: Any, config: Any, mid: str, target_id:
     from ai.analyzer_config import get_run_board_dims
     from ai.analyzer_perfig import _model_footprint, model_base
     from ai.analyzer_phases.shoot_handler import _analyzer_ranged_metric
-    from engine.combat_utils import ranged_edge_distance_to_cell
+    from engine.combat_utils import ranged_edge_distance_to_battlefield_center
     from engine.hex_utils import Socle
 
     pos = state.positions_by_model.get(target_id, {}).get(mid)  # get allowed
@@ -219,9 +220,9 @@ def model_near_objective_or_center(state: Any, config: Any, mid: str, target_id:
     if not footprint.isdisjoint(state.objective_cells):
         return True
     cols, rows = get_run_board_dims()
-    distance = ranged_edge_distance_to_cell(
+    distance = ranged_edge_distance_to_battlefield_center(
         Socle(shape, size, col, row, set(footprint)),
-        col, row, cols // 2, rows // 2, _analyzer_ranged_metric(config),
+        col, row, cols, rows, _analyzer_ranged_metric(config),
     )
     return distance <= 6 * int(_get_inches_to_subhex_for_analyzer())
 

@@ -170,18 +170,37 @@ def test_unbreakable_resolve_juge_le_centre_a_x5_au_lieu_de_s_abstenir(tmp_path)
 
     VERROU : rétablir l'abstention x5 (`return False if ish <= 1 else None`) fait accepter le
     FNP à (50,80) — l'ambiguïté couvrait les deux réponses → rouge."""
-    assert _stats_x5(tmp_path, _ancient_a(50, 79))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, "29 rangées au sud"
-    trop_loin = _stats_x5(tmp_path, _ancient_a(50, 80))
-    assert trop_loin["fnp_threshold_mismatch"] == {1: 0, 2: 1}, "30 rangées au sud = 34,6 subhex"
+    assert _stats_x5(tmp_path, _ancient_a(50, 78))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, "28,5 rangées au sud"
+    trop_loin = _stats_x5(tmp_path, _ancient_a(50, 79))
+    assert trop_loin["fnp_threshold_mismatch"] == {1: 0, 2: 1}, "29,5 rangées au sud = 34,1 subhex"
     assert "sans aucun Feel No Pain" in _first(trop_loin)
 
 
 def test_unbreakable_resolve_a_x5_est_anisotrope_comme_la_grille(tmp_path):
-    """Même distance en cases, verdicts opposés : 34 colonnes à l'est sont dans les 6", 30
+    """Même distance en cases, verdicts opposés : 33 colonnes à l'est sont dans les 6", 30
     rangées au sud n'y sont pas (√3/1,5 par rangée contre 1 par colonne). Une mesure en cases
     hex — celle que le moteur appliquait à toute résolution — les confondrait."""
-    assert _stats_x5(tmp_path, _ancient_a(84, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, "34 colonnes à l'est"
-    assert _stats_x5(tmp_path, _ancient_a(85, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 1}, "35 colonnes à l'est"
+    assert _stats_x5(tmp_path, _ancient_a(83, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, "33 colonnes à l'est"
+    assert _stats_x5(tmp_path, _ancient_a(84, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 1}, "34 colonnes à l'est"
+
+
+def test_unbreakable_resolve_centre_la_zone_sur_le_plateau_pas_sur_la_case_mediane(tmp_path):
+    """Le centre est le POINT géométrique du plateau, et l'analyzer le lit par la primitive du
+    MOTEUR (`ranged_edge_distance_to_battlefield_center`) : la zone « 6" du centre » est donc
+    centrée sur le PLATEAU. Sur 100 colonnes, cela se vérifie sans connaître la distance — les
+    deux colonnes extrêmes de la zone sont symétriques, `col_ouest + col_est == cols - 1`.
+
+    La case `(cols // 2, rows // 2)` est décalée d'une demi-colonne vers l'est : mesurée depuis
+    elle, la zone s'étendait de 16 à 84, centrée sur la case et non sur le plateau.
+
+    VERROU : reprendre la case médiane comme cible fait accepter (84,50) → la somme vaut 100
+    au lieu de 99 → rouge."""
+    dedans_ouest, dedans_est = 16, 83
+    assert dedans_ouest + dedans_est == 100 - 1, "montage : bornes symétriques sur 100 colonnes"
+    for col in (dedans_ouest, dedans_est):
+        assert _stats_x5(tmp_path, _ancient_a(col, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 0}, col
+    for col in (dedans_ouest - 1, dedans_est + 1):
+        assert _stats_x5(tmp_path, _ancient_a(col, 50))["fnp_threshold_mismatch"] == {1: 0, 2: 1}, col
 
 
 def test_seuil_fnp_faux_et_compte_faux_sont_des_fautes(tmp_path):

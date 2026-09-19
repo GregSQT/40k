@@ -316,10 +316,36 @@ def test_near_objective_exige_le_recouvrement_de_l_aire_pas_une_distance_de_3_po
 
 def test_near_objective_le_centre_reste_une_distance_de_6_pouces():
     """« within 6" of the centre of the battlefield » est une DISTANCE : 30 subhex à ish=5.
-    Plateau 100x100 → centre (50,50)."""
+    Plateau 100x100, dont le centre tombe entre les colonnes 49 et 50."""
     assert su._model_is_near_objective_or_center(_ancient_gs(50, 50), "T1") is True, "sur le centre"
-    assert su._model_is_near_objective_or_center(_ancient_gs(80, 50), "T1") is True, "à 30 subhex = 6\""
-    assert su._model_is_near_objective_or_center(_ancient_gs(81, 50), "T1") is False, "à 31 subhex > 6\""
+    assert su._model_is_near_objective_or_center(_ancient_gs(79, 50), "T1") is True, "à 29,5 colonnes"
+    assert su._model_is_near_objective_or_center(_ancient_gs(80, 50), "T1") is False, "à 30,5 colonnes > 6\""
+
+
+def test_near_objective_le_centre_est_le_point_du_plateau_pas_la_case_mediane():
+    """Sur un plateau de dimensions PAIRES — les deux du projet — aucune case n'est le centre :
+    le point exact tombe ENTRE les cases, et `(cols // 2, rows // 2)` en est décalée de 0,764
+    subhex vers l'est et le sud (0,153" à x5). Mesurée depuis cette case, la zone était
+    asymétrique d'une demi-colonne ; mesurée depuis le point, elle s'étend à égalité de part et
+    d'autre — ici 20..79, soit 29,5 colonnes des deux côtés de la frontière réelle.
+
+    La symétrie se lit sans connaître la distance : les deux cases extrêmes de la zone encadrent
+    le plateau, `première + dernière == taille - 1` sur chaque axe (ici 20+79 et 24+75, sur 100).
+
+    VERROU 1 : reprendre `(cols // 2, rows // 2)` comme cible rend (80,50) vrai — la case médiane
+    l'acceptait — et laisse (19,50) faux → rouge.
+    VERROU 2 : lire le bord bas du plateau sur la demi-case fantôme d'une colonne impaire
+    (`is_phantom_bottom_hex`) descend le centre de 0,289 subhex et rend (50,76) vrai → rouge."""
+    assert su._model_is_near_objective_or_center(_ancient_gs(79, 50), "T1") is True, "dernière à l'est"
+    assert su._model_is_near_objective_or_center(_ancient_gs(80, 50), "T1") is False, "la case médiane l'acceptait"
+    assert su._model_is_near_objective_or_center(_ancient_gs(20, 50), "T1") is True, "dernière à l'ouest"
+    assert su._model_is_near_objective_or_center(_ancient_gs(19, 50), "T1") is False, "au-delà à l'ouest"
+    assert 20 + 79 == 100 - 1, "montage : bornes est/ouest symétriques sur le plateau"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 75), "T1") is True, "dernière au sud"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 76), "T1") is False, "la case fantôme l'acceptait"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 24), "T1") is True, "dernière au nord"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 23), "T1") is False, "au-delà au nord"
+    assert 24 + 75 == 100 - 1, "montage : bornes nord/sud symétriques sur le plateau"
 
 
 def test_near_objective_le_centre_se_mesure_bord_a_bord_avec_la_metrique_du_run():
@@ -332,8 +358,8 @@ def test_near_objective_le_centre_se_mesure_bord_a_bord_avec_la_metrique_du_run(
 
     VERROU : remettre `min_distance_between_sets(footprint, {center})` (mesure en CASES hex à
     toute résolution) rend le cas « 30 rangées au sud » vrai → rouge."""
-    assert su._model_is_near_objective_or_center(_ancient_gs(50, 76), "T1") is True, "26 rangées au sud"
-    assert su._model_is_near_objective_or_center(_ancient_gs(50, 77), "T1") is False, "27 rangées au sud"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 75), "T1") is True, "25,5 rangées au sud"
+    assert su._model_is_near_objective_or_center(_ancient_gs(50, 76), "T1") is False, "26,5 rangées au sud"
     assert su._model_is_near_objective_or_center(_ancient_gs(50, 80), "T1") is False, \
         "30 rangées au sud = 34,6 subhex > 6\" — la mesure en cases hex les comptait à portée"
 

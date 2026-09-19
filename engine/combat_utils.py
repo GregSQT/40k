@@ -724,20 +724,56 @@ def ranged_edge_distance_to_cell(shooter: Any, anchor_col: int, anchor_row: int,
     if metric == "hex":
         return float(calculate_hex_distance(anchor_col, anchor_row, col, row))
     if metric == "euclidean":
-        import math
-        from engine.hex_utils import _hex_center, round_base_radius_norm, ENGAGEMENT_NORM_HEX_WIDTH
-        cxb, cyb = _hex_center(col, row)
-        if shooter.shape == "round":
-            cxa, cya = _hex_center(shooter.col, shooter.row)
-            edge = math.hypot(cxb - cxa, cyb - cya) - round_base_radius_norm(shooter.base_size)
-        else:
-            if shooter.fp is None:
-                raise ValueError("ranged_edge_distance_to_cell(euclidean, non-rond): fp requis")
-            edge = min(
-                math.hypot(cxb - _hex_center(c, r)[0], cyb - _hex_center(c, r)[1])
-                for c, r in shooter.fp
-            )
-        return (edge if edge > 0.0 else 0.0) / ENGAGEMENT_NORM_HEX_WIDTH
+        from engine.hex_utils import _hex_center
+        return _ranged_edge_distance_to_point(shooter, *_hex_center(col, row))
+    raise ValueError(f"Invalid metric {metric!r}, expected one of {VALID_DISTANCE_METRICS}")
+
+
+def _ranged_edge_distance_to_point(shooter: Any, px: float, py: float) -> float:
+    """Distance de portée (subhexes) du BORD du socle `shooter` à un POINT quelconque.
+
+    Euclidienne par construction : un point qui n'est pas un centre de case n'a pas de distance
+    hex. Rond : centre-à-point − rayon. Non-rond : min sur les cellules du socle.
+
+    Cœur commun de ``ranged_edge_distance_to_cell`` (cible = centre d'une case) et de
+    ``ranged_edge_distance_to_battlefield_center`` (cible = point ENTRE les cases).
+    """
+    import math
+    from engine.hex_utils import _hex_center, round_base_radius_norm, ENGAGEMENT_NORM_HEX_WIDTH
+    if shooter.shape == "round":
+        cxa, cya = _hex_center(shooter.col, shooter.row)
+        edge = math.hypot(px - cxa, py - cya) - round_base_radius_norm(shooter.base_size)
+    else:
+        if shooter.fp is None:
+            raise ValueError("ranged_edge_distance_to_cell(euclidean, non-rond): fp requis")
+        edge = min(
+            math.hypot(px - _hex_center(c, r)[0], py - _hex_center(c, r)[1])
+            for c, r in shooter.fp
+        )
+    return (edge if edge > 0.0 else 0.0) / ENGAGEMENT_NORM_HEX_WIDTH
+
+
+def ranged_edge_distance_to_battlefield_center(
+    shooter: Any, anchor_col: int, anchor_row: int, cols: int, rows: int, metric: str,
+) -> float:
+    """Distance de portée du socle au CENTRE du champ de bataille (subhexes) — source UNIQUE.
+
+    Le moteur (`_model_is_near_objective_or_center`, FNP Unbreakable Resolve 24.12) et
+    l'analyzer (`model_near_objective_or_center`) jugent la même clause « within 6" of the
+    centre of the battlefield » : ils passent tous deux par ici, pour que le centre n'ait
+    jamais deux définitions.
+
+    - ``euclidean`` (x5, la résolution où tourne le jeu) : le centre est le POINT exact
+      (`battlefield_center_norm`), et la mesure part du bord du socle (01.04).
+    - ``hex`` (x1) : la géométrie du jeu y est hexagonale et ENTIÈRE, une figurine tenant dans
+      une case ; aucun point fractionnaire n'y est mesurable, donc le centre y reste la case
+      d'indice moitié. L'écart de 0,764 subhex y est assumé, comme toute mesure à x1.
+    """
+    if metric == "hex":
+        return ranged_edge_distance_to_cell(shooter, anchor_col, anchor_row, cols // 2, rows // 2, metric)
+    if metric == "euclidean":
+        from engine.hex_utils import battlefield_center_norm
+        return _ranged_edge_distance_to_point(shooter, *battlefield_center_norm(cols, rows))
     raise ValueError(f"Invalid metric {metric!r}, expected one of {VALID_DISTANCE_METRICS}")
 
 
