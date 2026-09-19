@@ -577,17 +577,22 @@ fields it can actually obtain, which is fewer than `step.log` appears to offer:
 | Rule | Shooting replay | Melee replay | Why |
 |---|---|---|---|
 | `[TWIN-LINKED]` | ✅ | ✅ | token on the `Wound` segment, parsed on both branches |
-| `[DEVASTATING WOUNDS]` | ✅ | ❌ | shooting writes `Save [DEVASTATING WOUNDS]`; **melee writes `Save None(T+)`** (`step_logger.py`, FOUGHT formatter) and the fight branch has no `saveSkipped` match |
+| `[DEVASTATING WOUNDS]` | ✅ | ⚠️ | both branches now write `Save [DEVASTATING WOUNDS]` (`_save_segments` is a single site) and the parser matches it on both, so the damage is no longer lost — but only the shooting mapping fills `devastating`, so a melee line shows its damage with **no save segment** instead of `Svg: aucune [DEVASTATING WOUNDS]` |
+| `[FNP:s/t+ ×n]` | ✅ | ✅ | 24.12, accolé au segment `Dmg:` sur les deux branches depuis la grammaire 16 ; lu dans `assignRollAnnotations` (site commun) et affiché tel quel par `GameLog.tsx`, PvP comme replay |
 | `[SUSTAINED HITS]`, `[TORRENT]` | ❌ | ❌ | both produce `Hit None(T+)`; `hitMatch` (`Hit\s+(\d+)\(`) does not match, so the line yields **no expanded detail at all** — there is no field to fill |
 | `[LETHAL HITS]` | ❌ | ❌ | ⚠️ **written to `step.log` since 2026-08-12** (`Wound None(T+) [LETHAL HITS]`, both branches), but the wound leg has no roll, so `woundMatch` does not fire and the line yields no expanded detail — same mechanism as the row above, not a missing token |
 | `[CRITICAL HIT]`, `[CRITICAL WOUND]` | ❌ | ❌ | never written to `step.log` in any form |
 
-⚠️ The melee row above is not only a display gap: `Save None(T+)` fails `saveMatch`, so
-`wound_result` is inferred as `"FAIL"` and the whole save/damage section vanishes — a melee
-`[DEVASTATING WOUNDS]` hit renders as `Bless: ✗ (6)` in the replay while the target really lost
-its wounds. This defect predates the Game Log work and is **not fixed** by it: closing it means
-reworking how `step.log` writes rollless legs and how the parser reads them, which changes the
-input format the analyzer consumes.
+⚠️ The melee rows above **used to** hide a defect far wider than `[DEVASTATING WOUNDS]`: **no melee
+line ever showed a save, damage or FNP segment at all.** The expanded detail gates that whole
+section on `strengthResult === "SUCCESS"` (`GameLog.tsx`), while the fight mapping copied the
+journal's own vocabulary (`wound_result`, which is `"WOUND"` or `"FAIL"`) straight into that field
+— so a successful wound rendered as `Bless: ✗` and the sequence stopped there. The mapping now
+lives in `frontend/src/utils/replayShotDetails.ts`, typed as `ShootDetail` so the contract is
+enforced at the boundary rather than trusted, and is verrouillé by `replayShotDetails.test.ts`.
+What remains for `[DEVASTATING WOUNDS]` is a display gap alone: the fight branch does not map
+`devastating_wounds_applied` onto `devastating`, so the melee line now carries its damage but no
+save segment.
 
 **Since 2026-08-12 (log grammar 3), six more rules reach `step.log`**, on both the SHOT and
 FOUGHT branches: `[TORRENT]`, `[IGNORES COVER]` and `[PSYCHIC]` on the `Hit` segment,

@@ -22,6 +22,7 @@ import {
 } from "../utils/objectiveControlJournal";
 import { computeHexReachable } from "../utils/replayHexReachable";
 import type { ReplayAction, ReplayObjectiveControl } from "../utils/replayParser";
+import { fightShotDetail, shootShotDetail } from "../utils/replayShotDetails";
 import {
   getDiceAverage,
   getSelectedMeleeWeapon,
@@ -926,13 +927,6 @@ export const BoardReplay: React.FC = () => {
         const targetId = action.target_id!;
 
         const message = requireReplayLogMessage(action, "shoot");
-        const hitRoll = action.hit_roll;
-        const woundRoll = action.wound_roll;
-        const saveRoll = action.save_roll;
-        const saveTarget = action.save_target || 0;
-        const hitTarget = action.hit_target || 3;
-        const woundTarget = action.wound_target || 4;
-        const damage = action.damage || 0;
 
         // Check if THIS shot killed the target by comparing HP before and after
         // Get target's HP from state BEFORE and AFTER this action
@@ -950,44 +944,8 @@ export const BoardReplay: React.FC = () => {
         // Build shootDetails for color coding (must match format expected by getEventTypeClass)
         // Note: Don't include targetDied here - shoot lines should show hit/wound/save results
         // Death is shown as a separate black line below
-        const shootDetails =
-          hitRoll !== undefined
-            ? [
-                {
-                  shotNumber: 1,
-                  attackRoll: hitRoll,
-                  strengthRoll: woundRoll || 0,
-                  hitResult: hitRoll >= hitTarget ? "HIT" : "MISS",
-                  strengthResult: woundRoll && woundRoll >= woundTarget ? "SUCCESS" : "FAILED",
-                  saveRoll: saveRoll,
-                  saveTarget: saveTarget,
-                  saveSuccess:
-                    saveRoll !== undefined && saveTarget > 0 ? saveRoll >= saveTarget : false,
-                  damageDealt: damage,
-                  // Capacités nommées : mêmes champs que le PvP reçoit du moteur, extraits ici
-                  // des tokens de la ligne par le parseur. Sans eux, le détail déplié du replay
-                  // reste muet là où le PvP affiche « [OATH OF MOMENT] ».
-                  hitAbility: action.hit_ability,
-                  woundAbility: action.wound_ability,
-                  woundBonusAbility: action.wound_bonus_ability,
-                  // Règles d'ARME par-dé. Le replay n'en voit que ce que `step.log` écrit ET
-                  // que le parseur atteint : la relance [TWIN-LINKED] et la sauvegarde sautée de
-                  // [DEVASTATING WOUNDS]. [SUSTAINED HITS] et [TORRENT] produisent `Hit None(T+)`,
-                  // que `hitMatch` ne reconnaît pas — la ligne n'a alors AUCUN détail déplié, donc
-                  // aucun champ à remplir. ⚠️ [LETHAL HITS] EST écrit dans step.log depuis le
-                  // 2026-08-12 (`Wound None(T+) [LETHAL HITS]`), mais il bute sur le MÊME
-                  // mécanisme côté blessure : jambe sans dé, donc pas de détail à remplir. Seules
-                  // les CRITIQUES ne sont écrites nulle part. Voir le rapport de parité de
-                  // Documentation/Reference/jeu/armes.md.
-                  woundRerollRule: action.wound_reroll_rule,
-                  devastating: action.devastating_wounds_applied,
-                  // Dé d'origine d'un jet relancé : le détail affiche « 1->3 », comme en PvP.
-                  attackRollInitial: action.hit_roll_initial,
-                  strengthRollInitial: action.wound_roll_initial,
-                  saveRollInitial: action.save_roll_initial,
-                },
-              ]
-            : undefined;
+        const shotDetail = shootShotDetail(action);
+        const shootDetails = shotDetail ? [shotDetail] : undefined;
 
         // Use addEvent directly with custom formatted message to match PvP format
         gameLog.addEvent({
@@ -1094,38 +1052,8 @@ export const BoardReplay: React.FC = () => {
         const attackerPlayer = attackerUnitBefore ? attackerUnitBefore.player : action.player;
 
         // Build shootDetails for color coding
-        const fightDetails =
-          action.hit_roll !== undefined
-            ? [
-                {
-                  shotNumber: 1,
-                  attackRoll: action.hit_roll,
-                  strengthRoll: action.wound_roll || 0,
-                  hitResult: action.hit_result || "MISS",
-                  strengthResult: action.wound_result || "FAILED",
-                  saveRoll: action.save_roll,
-                  saveTarget: action.save_target,
-                  saveSuccess:
-                    action.save_roll !== undefined && action.save_target
-                      ? action.save_roll >= action.save_target
-                      : false,
-                  damageDealt: action.damage || 0,
-                  // JUMEAU du tir ci-dessus : la mêlée nomme les mêmes capacités et les mêmes
-                  // règles d'arme par-dé (le socle de résolution est partagé).
-                  hitAbility: action.hit_ability,
-                  woundAbility: action.wound_ability,
-                  woundBonusAbility: action.wound_bonus_ability,
-                  // [DEVASTATING WOUNDS] n'est PAS repris ici : en mêlée `step.log` écrit
-                  // `Save None(T+)` au lieu du segment `Save [DEVASTATING WOUNDS]` du tir, que le
-                  // parseur cherche — le champ serait mort. C'est aussi la cause d'un défaut
-                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Reference/jeu/armes.md.
-                  woundRerollRule: action.wound_reroll_rule,
-                  attackRollInitial: action.hit_roll_initial,
-                  strengthRollInitial: action.wound_roll_initial,
-                  saveRollInitial: action.save_roll_initial,
-                },
-              ]
-            : undefined;
+        const fightDetail = fightShotDetail(action);
+        const fightDetails = fightDetail ? [fightDetail] : undefined;
 
         gameLog.addEvent({
           type: "combat",

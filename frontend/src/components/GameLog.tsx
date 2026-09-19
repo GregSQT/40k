@@ -32,6 +32,26 @@ const ruleToken = (name?: string): string => {
 const flagToken = (applies: boolean | undefined, ruleName: string): string =>
   applies ? ruleToken(ruleName) : "";
 
+/** `` [FNP:<sauvés>/<seuil>+ ×<tentatives>]`` quand un Feel No Pain (24.12) a été jeté sur les
+ *  dégâts de cette attaque, chaîne vide sinon.
+ *
+ *  MÊME grammaire que `_damage_segment` (`ai/step_logger.py`, grammaire 16), au caractère près :
+ *  une seule forme à lire dans step.log, dans le Game Log PvP et dans le replay. Le token y gagne
+ *  sa bulle d'aide par `resolveRuleDescription`, qui retombe sur le nom `FNP`.
+ *
+ *  Les trois champs voyagent ensemble depuis le moteur : n'en recevoir qu'une partie décrirait un
+ *  jet dont on ignore le seuil ou le nombre de dés — donnée invalide, pas cas limite à afficher. */
+const fnpToken = (saves?: number, threshold?: number, attempts?: number): string => {
+  const present = [saves, threshold, attempts].filter((v) => v !== undefined).length;
+  if (present === 0) return "";
+  if (present !== 3) {
+    throw new Error(
+      `Incomplete Feel No Pain record: saves=${saves}, threshold=${threshold}, attempts=${attempts}`
+    );
+  }
+  return ` [FNP:${saves}/${threshold}+ ×${attempts}]`;
+};
+
 /** Jet de dé : « final » seul, ou « initial->final » quand le dé a été relancé.
  *
  *  `== null` et pas `=== undefined` : une attaque sans jet ([TORRENT], touche [SUSTAINED HITS],
@@ -88,6 +108,19 @@ const resolveRuleDescription = (
     );
     if (parameterizedDescription) {
       return parameterizedDescription;
+    }
+  }
+  // Token paramétré dont le paramètre n'est PAS un simple entier : `[FNP:1/5+ ×3]`, où le
+  // paramètre est un comptage composite. Le motif ci-dessus n'accepte que `NOM:<n>[+]`
+  // ([RAPID FIRE:2], [REROLLED:1], [ANTI-INFANTRY:4+]) et laissait donc ces tokens-là sans
+  // bulle. On retombe sur le NOM, seul porteur de sens pour la description : tout ce qui suit
+  // le premier `:` est un paramètre par construction (`ai/step_logger.py` n'écrit jamais de nom
+  // de règle contenant un deux-points).
+  const prefixMatch = tokenLabel.match(/^([^:]+):/);
+  if (prefixMatch) {
+    const prefixDescription = ruleDescriptionByLookup.get(normalizeRuleLookupKey(prefixMatch[1]));
+    if (prefixDescription) {
+      return prefixDescription;
     }
   }
   if (ruleHintByLabel) {
@@ -296,6 +329,20 @@ export const GameLog: React.FC<GameLogProps> = ({
       false
     );
     setRuleDescription(descriptions, "MW", "Direct damages, no save roll.", false);
+    // 24.12 : le journal abrège Feel No Pain en `FNP` (`[FNP:<sauvés>/<seuil>+ ×<tentatives>]`),
+    // forme partagée par step.log et le détail par attaque ci-dessous. Le registre ne connaît
+    // que le nom complet, donc sans cet alias le token le plus chiffré du log resterait le seul
+    // sans explication. Aucun repli : la règle est jouée par le moteur, son absence du registre
+    // est une erreur de configuration, pas un cas à contourner.
+    setRuleDescription(
+      descriptions,
+      "FNP",
+      requireNonEmptyString(
+        descriptions.get(normalizeRuleLookupKey("feel_no_pain")),
+        "Invalid unit_rules.json: missing 'feel_no_pain' entry (24.12)"
+      ),
+      false
+    );
     setRuleDescription(descriptions, "COVER", "-1 BS for the shooter against this target.", false);
     // 10.06 : règle de PHASE, donc absente de weapon_rules.json — comme COVER juste au-dessus,
     // sa bulle d'aide est écrite ici.
@@ -696,7 +743,20 @@ export const GameLog: React.FC<GameLogProps> = ({
                                     parts.push(`Svg: aucune${ruleToken("DEVASTATING WOUNDS")}`);
                                   }
                                   if (!shot.saveSuccess && shot.damageDealt !== undefined) {
-                                    parts.push(`Dmg: ${shot.damageDealt}`);
+                                    // Le token du FNP est COLLÉ aux dégâts, comme dans step.log :
+                                    // c'est lui qui explique un `Dmg: 0` sur une sauvegarde ratée,
+                                    // et l'écart entre les dés de dégâts et les PV réellement
+                                    // perdus. Les deux branches qui impriment des dégâts
+                                    // (sauvegarde ratée et sauvegarde SAUTÉE par [DEVASTATING
+                                    // WOUNDS] 24.10) passent par cette ligne unique — elles ne
+                                    // peuvent donc pas diverger, comme côté moteur.
+                                    parts.push(
+                                      `Dmg: ${shot.damageDealt}${fnpToken(
+                                        shot.fnpSaves,
+                                        shot.fnpThreshold,
+                                        shot.fnpAttempts
+                                      )}`
+                                    );
                                     if (
                                       shot.targetCol !== undefined &&
                                       shot.targetRow !== undefined

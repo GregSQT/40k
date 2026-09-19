@@ -164,6 +164,19 @@ export interface ShootDetail {
   criticalWound?: boolean;
   /** [DEVASTATING WOUNDS] 24.10 : blessure critique -> mortelle, AUCUNE sauvegarde n'est jetée. */
   devastating?: boolean;
+  /**
+   * Feel No Pain 24.12 : jets effectués sur les dégâts de CETTE attaque. Posés ensemble par le
+   * moteur (`_resolve_one_manual_wound`), pour le tir comme pour la mêlée — site unique de
+   * résolution des blessures —, et seulement quand une source de FNP était portée : leur absence
+   * signifie « aucun dé jeté », pas « zéro sauvé ».
+   *
+   * `fnpSaves` = blessures ignorées, `fnpAttempts` = dés jetés (= dégâts AVANT FNP),
+   * `fnpThreshold` = seuil appliqué (le meilleur, 24.02). MÊME donnée que le token
+   * `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` de step.log (`ai/step_logger.py`, grammaire 16).
+   */
+  fnpSaves?: number;
+  fnpAttempts?: number;
+  fnpThreshold?: number;
 }
 
 /**

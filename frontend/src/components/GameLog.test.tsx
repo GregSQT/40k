@@ -339,3 +339,115 @@ describe("GameLog — token [HALF RANGE]", () => {
     expect(document.body.textContent).toContain("half the weapon's range");
   });
 });
+
+/**
+ * Feel No Pain 24.12 — le moteur jette le dé et pose `fnpSaves` / `fnpThreshold` / `fnpAttempts`
+ * sur chaque record d'attaque, au site unique de résolution des blessures (tir ET mêlée). La
+ * donnée voyageait jusqu'au navigateur sans jamais être affichée : un `Dmg: 0` sur une
+ * sauvegarde RATÉE était indistinguable d'une attaque sans effet.
+ *
+ * Forme verrouillée ici : celle de step.log (`_damage_segment`, grammaire 16), au caractère près.
+ */
+describe("GameLog — jets Feel No Pain", () => {
+  it("affiche le marqueur FNP accolé aux dégâts d'une sauvegarde ratée", () => {
+    render(
+      <GameLog
+        events={[
+          shootEvent({
+            saveRoll: 2,
+            saveTarget: 3,
+            saveSuccess: false,
+            damageDealt: 1,
+            fnpSaves: 2,
+            fnpThreshold: 5,
+            fnpAttempts: 3,
+          }),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("Dmg: 1 [FNP:2/5+ ×3]");
+  });
+
+  it("explique un Dmg: 0 dû à un FNP total sur une sauvegarde SAUTÉE (24.10)", () => {
+    // Les deux branches qui impriment des dégâts passent par la même ligne : la sauvegarde
+    // sautée porte le marqueur exactement comme la sauvegarde ratée.
+    render(
+      <GameLog
+        events={[
+          shootEvent({
+            devastating: true,
+            saveSuccess: false,
+            damageDealt: 0,
+            fnpSaves: 2,
+            fnpThreshold: 4,
+            fnpAttempts: 2,
+          }),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("Svg: aucune [DEVASTATING WOUNDS]");
+    expect(shotRowText()).toContain("Dmg: 0 [FNP:2/4+ ×2]");
+  });
+
+  it("n'affiche aucun marqueur quand aucun Feel No Pain n'a été jeté", () => {
+    render(
+      <GameLog
+        events={[shootEvent({ saveRoll: 2, saveTarget: 3, saveSuccess: false, damageDealt: 1 })]}
+      />
+    );
+    expandFirstEntry();
+    // ANCRE POSITIVE : sans elle, une ligne qui ne rend rien satisferait le `not.toContain`.
+    expect(shotRowText()).toContain("Dmg: 1");
+    expect(shotRowText()).not.toContain("[FNP:");
+  });
+
+  it("accroche la bulle d'aide 24.12 au marqueur, dont le paramètre n'est pas un entier", () => {
+    // Le résolveur ne savait retirer qu'un paramètre ENTIER ([RAPID FIRE:2]) : `1/5+ ×3` le
+    // laissait sans description. Il retombe désormais sur le nom du token, `FNP`.
+    render(
+      <GameLog
+        events={[
+          shootEvent({
+            saveRoll: 2,
+            saveTarget: 3,
+            saveSuccess: false,
+            damageDealt: 1,
+            fnpSaves: 1,
+            fnpThreshold: 5,
+            fnpAttempts: 3,
+          }),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    const tag = screen.getByRole("button", {
+      name: "Afficher la description de la regle FNP:1/5+ ×3",
+    });
+    fireEvent.mouseEnter(tag);
+    expect(document.body.textContent).toContain("24.12");
+  });
+
+  it("lève sur un record de FNP incomplet plutôt que d'inventer un seuil", () => {
+    // Les trois champs voyagent ensemble depuis le moteur : n'en afficher qu'une partie
+    // décrirait un jet dont on ignore le seuil ou le nombre de dés.
+    expect(() =>
+      render(
+        <GameLog
+          events={[
+            shootEvent({
+              saveRoll: 2,
+              saveTarget: 3,
+              saveSuccess: false,
+              damageDealt: 1,
+              fnpSaves: 1,
+              fnpAttempts: 3,
+            }),
+          ]}
+        />
+      )
+    ).not.toThrow();
+    expect(() => expandFirstEntry()).toThrow(/Incomplete Feel No Pain record/);
+  });
+});
