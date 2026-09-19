@@ -220,8 +220,12 @@ def unit_can_occupy_upper_floor(unit_keywords: Any) -> bool:
     return False
 
 
-def _validate_level(level: Any, unit_id: Any) -> int:
+def validate_level(level: Any, unit_id: Any) -> int:
     """Validate a vertical level (étages). 0 = ground (default business case), >= 0 int.
+
+    Publique depuis le 2026-09-19 : `W40KEngine.reset` restaure le niveau d'une unité entre deux
+    épisodes et doit le faire avec EXACTEMENT la sémantique de `create_unit`, qui est la
+    définition de ce champ à la mise en place.
 
     No silent coercion: a non-int or negative level is an explicit config error.
     """
@@ -355,7 +359,7 @@ class GameStateManager:
             "row": _add_row,
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (cas métier par défaut :
             # unité au sol), >=1 = étage d'une ruine. Ancre unité = niveau de models[0].
-            "level": _validate_level(config.get("level", 0), config["id"]),  # get allowed (champ optionnel : scénarios sans étages)
+            "level": validate_level(config.get("level", 0), config["id"]),  # get allowed (champ optionnel : scénarios sans étages)
             
             # UPPERCASE STATS (tour_de_jeu.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
@@ -1284,7 +1288,7 @@ class GameStateManager:
             "col": _norm_col,
             "row": _norm_row,
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (défaut métier).
-            "level": _validate_level(unit_data.get("level", full_unit_data.get("level", 0)), str(unit_data["id"])),  # get allowed (champ optionnel : scénarios sans étages). Source = déclaration scénario (unit_data), comme orientation.
+            "level": validate_level(unit_data.get("level", full_unit_data.get("level", 0)), str(unit_data["id"])),  # get allowed (champ optionnel : scénarios sans étages). Source = déclaration scénario (unit_data), comme orientation.
             "HP_CUR": full_unit_data["HP_MAX"],
             "HP_MAX": full_unit_data["HP_MAX"],
             "MOVE": full_unit_data["MOVE"] * scale,
@@ -1387,7 +1391,7 @@ class GameStateManager:
                 # Niveau vertical par-figurine (§2.5, escouade répartie sur plusieurs étages).
                 # 'level' optionnel = sol (0). Sans recopie ici, build_units_cache retombe sur le
                 # niveau ancre de l'unité et perd le level déclaré par modèle dans le scénario.
-                m_level = _validate_level(spec.get("level", 0), unit_data["id"])  # get allowed (champ optionnel : level absent = sol)
+                m_level = validate_level(spec.get("level", 0), unit_data["id"])  # get allowed (champ optionnel : level absent = sol)
                 m_spec: Dict[str, Any] = {"col": m_norm_col, "row": m_norm_row, "level": m_level}
                 # Provenance 19.04 posée par le fold : conservée jusqu'à models_cache.
                 if "attached_from" in spec:

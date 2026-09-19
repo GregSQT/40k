@@ -951,7 +951,7 @@ def _build_models_for_unit(
     # sauf override explicite spec["level"] (escouade répartie sur plusieurs étages, §2.5).
     # 'level' optionnel = sol (0), aligné sur create_unit (game_state.py, level défaut 0),
     # défaut métier « scénarios sans étages »). Pas un masquage d'erreur : la validation (int >= 0)
-    # est faite en amont par _validate_level dans create_unit ; ici on lit une unité déjà construite.
+    # est faite en amont par validate_level dans create_unit ; ici on lit une unité déjà construite.
     unit_level = int(unit.get("level", 0))  # get allowed (champ optionnel, défaut sol)
 
     explicit_models = unit.get("models")

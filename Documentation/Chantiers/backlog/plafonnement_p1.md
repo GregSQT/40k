@@ -2713,8 +2713,13 @@ production, 1 200 parties par cellule, erreur-type 1,4 point).
 
 | terrain | mission telle que livrée | second joueur marquant en fin de son tour |
 |---|---|---|
-| terrain-mc1 (tout le holdout) | **P1 0,590 · P2 0,395** | **P1 0,457 · P2 0,532** |
-| terrain-mc2 | **P1 0,522 · P2 0,468** | **P1 0,406 · P2 0,591** |
+| terrain-mc1 (tout le holdout) | **P1 0,588 · P2 0,398** | **P1 0,431 · P2 0,561** |
+| terrain-mc2 | **P1 0,540 · P2 0,451** | **P1 0,406 · P2 0,590** |
+
+Contrôle du chemin de décision, cellule par cellule : le bot du siège agent et celui du siège
+adverse passent par deux chemins distincts, et l'avance suit le SIÈGE dans les deux allocations
+(mc1 de référence : 0,578 au siège 1 contre 0,390 au siège 2 ; même cellule au contrefactuel :
+0,426 et 0,553). L'écart ne vient donc pas du chemin de décision.
 
 **Le mécanisme.** Les deux joueurs marquent à leur phase de commandement, sauf le second au
 round 5 (`timing.round5_second_player_phase`, `config/primary_objective/Objectives_Control.json`).
@@ -2725,10 +2730,10 @@ sien.** Le relevé par tour de joueur le montre directement, sur mc1 et par épi
 
 | round | VP du joueur 1 | VP du joueur 2 |
 |---|---|---|
-| 2 | 9,36 | 7,60 |
-| 3 | 10,29 | 8,25 |
-| 4 | 10,52 | 9,10 |
-| 5 (le seul où 20.02 le compense) | 10,43 | **10,86** |
+| 2 | 9,25 | 7,68 |
+| 3 | 10,30 | 8,36 |
+| 4 | 10,57 | 9,04 |
+| 5 (le seul round compensé) | 10,35 | **11,02** |
 
 Le round 5 s'inverse, et c'est exactement le round où la mission fait déjà marquer le second
 joueur en fin de tour. Les missions officielles appliquent cette compensation à **tous** les
@@ -2736,19 +2741,19 @@ rounds (`Documentation/40k_rules/26 Primary_missions.pdf`, verbatim : « The pla
 second turn scores VP as described above, but does so at the end of their turn instead of at the
 end of their Command phase »). `objectives_control` ne l'applique qu'au round 5.
 
-**Ce que l'écart n'est pas.** L'attrition va dans l'AUTRE sens : sur mc1, le joueur 1 perd 131,5
-de valeur d'armée contre 106,2 au joueur 2 — le second joueur gagne l'échange et perd quand même
+**Ce que l'écart n'est pas.** L'attrition va dans l'AUTRE sens : sur mc1, le joueur 1 perd 133,2
+de valeur d'armée contre 105,8 au joueur 2 — le second joueur gagne l'échange et perd quand même
 la partie. Il n'y a donc pas d'« alpha strike » à corriger. L'information du dernier déployeur ne
 joue pas non plus : le déploiement alterne depuis le joueur 1, donc le joueur 2 finit en dernier
 dans les scénarios holdout 01 et 04 (effectifs égaux) et pas dans 02 et 03 (5 unités Space
 Marines contre 6 Orks), et l'avance du joueur 1 y est la même (0,588 / 0,613 / 0,590 / 0,605).
 
 **Le holdout mesure le pire cas.** Ses quatre scénarios tournent tous sur `terrain-mc1`, où
-l'écart vaut 19,5 points, contre 5,4 sur `terrain-mc2`. Le « gap de siège » publié de 12 à 14
+l'écart vaut 19,0 points, contre 8,9 sur `terrain-mc2`. Le « gap de siège » publié de 12 à 14
 points est donc une propriété de ce terrain autant que du modèle.
 
 **Ce que ça ne tranche pas.** Étendre la compensation officielle à tous les rounds ne neutralise
-pas l'écart, elle l'INVERSE : 7,5 points pour le second joueur sur mc1, 18,5 sur mc2. Cohérent
+pas l'écart, elle l'INVERSE : 13,0 points pour le second joueur sur mc1, 18,4 sur mc2. Cohérent
 avec l'attrition ci-dessus, et avec l'expérience de table — mais ce moteur n'a ni overwatch, ni
 intervention héroïque, ni stratagèmes (`engine/macro_intents.py`, verbatim : « PORTE une decision
 joueur reelle que le moteur n'implemente pas encore », « CP existent deja […] il leur manque un
@@ -2763,7 +2768,11 @@ la lignée.
 `no-p1-turn2-score`, `p2-scores-end-of-turn` ; `--terrain`, `--mission`). Les cinq autres
 missions de `config/primary_objective/` ne sont PAS mesurables : elles sont au format
 `scoring_events`, qu'aucun fichier de `engine/` ne lit — la sonde le refuse à l'ouverture plutôt
-qu'au premier tour marquant. Relevés : `probe_base`, `probe_eot`, `probe_mc2`, `probe_mc2_eot`.
+qu'au premier tour marquant. Les quatre cellules viennent du MÊME état de l'instrument (graine de siège
+tirée par tâche, correctif du 2026-09-19 soir) : une première série, dont la graine de siège était
+commune à toutes les tâches, donnait 0,590 / 0,457 / 0,522 / 0,406 — mêmes conclusions, mais sa
+ligne de contrôle ne contrôlait rien, le bot du siège agent n'y changeant jamais de côté à index
+d'épisode donné.
 
 **Réserve de lecture.** La sonde n'est pas reproductible au bit près : deux exécutions identiques
 sur 1 200 parties rendent 0,593 et 0,606 (hachage de chaînes randomisé par processus, dont
