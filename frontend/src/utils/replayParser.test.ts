@@ -866,4 +866,92 @@ describe("replayParser", () => {
     ].join("\n");
     expect(() => parse_log_file_from_text(text)).toThrow(/Malformed OBJECTIVE CONTROL zone/);
   });
+
+  // Feel No Pain 24.12 : depuis la grammaire 16, TOUTE ligne portant des dégâts porte aussi le
+  // marqueur `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` quand un dé a été jeté. Le parseur lisait
+  // `Dmg:NHP` sans jamais regarder le token qui le suit : le replay montrait les dégâts APRÈS
+  // FNP sans rien dire de ce qui avait absorbé le reste.
+  it("lit les jets Feel No Pain d'une ligne de TIR (sauvegarde ratée)", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 4(3+) - Wound 6(3+) - Save 2(3+) - Dmg:1HP [FNP:2/5+ ×3]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as { damage?: number; fnp_saves?: number; fnp_threshold?: number; fnp_attempts?: number };
+    // Les dégâts restent ceux du journal (post-FNP) : le marqueur les EXPLIQUE, il ne les corrige pas.
+    expect(shoot.damage).toBe(1);
+    expect(shoot.fnp_saves).toBe(2);
+    expect(shoot.fnp_threshold).toBe(5);
+    expect(shoot.fnp_attempts).toBe(3);
+  });
+
+  // JUMEAU en MÊLÉE, sur la branche de dégâts SAUTÉE (24.10) : le moteur jette le FNP là aussi,
+  // et le formateur pose le marqueur sur les DEUX branches depuis la grammaire 16. Le parseur
+  // doit donc le lire sans dépendre de la présence d'un jet de sauvegarde.
+  it("lit les jets Feel No Pain d'une ligne de MÊLÉE dont la sauvegarde est sautée", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 FIGHT : Unit 1(0,0) FOUGHT Unit 2(1,0) with [Thunder Hammer]" +
+        " - Hit 4(3+) - Wound 6(4+)" +
+        " - Save [DEVASTATING WOUNDS] - Dmg:0HP [FNP:2/4+ ×2] [FIGHT_SUBPHASE:fight] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const fight = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "fight"
+    ) as { damage?: number; fnp_saves?: number; fnp_threshold?: number; fnp_attempts?: number };
+    // FNP TOTAL : aucun PV perdu, alors que la sauvegarde n'a même pas été jetée. Sans le
+    // marqueur, ce `Dmg:0HP` est indistinguable d'une attaque sans effet.
+    expect(fight.damage).toBe(0);
+    expect(fight.fnp_saves).toBe(2);
+    expect(fight.fnp_threshold).toBe(4);
+    expect(fight.fnp_attempts).toBe(2);
+  });
+
+  // Le marqueur des blessures MORTELLES (`[FNP:<sauvés>]`, lignes SUFFERS) n'a ni seuil ni
+  // tentatives : le lire comme celui d'une attaque inventerait deux chiffres.
+  it("ne prend pas le marqueur FNP des blessures mortelles pour celui d'une attaque", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 4(3+) - Wound 6(3+) - Save 2(3+) - Dmg:1HP [FNP:2]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as { damage?: number; fnp_saves?: number; fnp_threshold?: number; fnp_attempts?: number };
+    expect(shoot.damage).toBe(1);
+    expect(shoot.fnp_saves).toBeUndefined();
+    expect(shoot.fnp_threshold).toBeUndefined();
+    expect(shoot.fnp_attempts).toBeUndefined();
+  });
 });

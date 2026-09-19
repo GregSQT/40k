@@ -62,6 +62,17 @@ export interface ReplayAction {
   hit_roll_initial?: number;
   wound_roll_initial?: number;
   save_roll_initial?: number;
+  /**
+   * Feel No Pain 24.12, lu dans le token `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` accolé au
+   * segment de dégâts (`ai/step_logger.py`, grammaire 16). Absents quand aucun dé n'a été jeté :
+   * `0` sauvé sur `n` tentatives est une information, pas une absence.
+   *
+   * Sans eux le replay affichait le SEUL résultat post-FNP — un `Dmg:0HP` sur une sauvegarde
+   * pourtant ratée — sans jamais dire ce qui avait absorbé les blessures.
+   */
+  fnp_saves?: number;
+  fnp_attempts?: number;
+  fnp_threshold?: number;
   // Weapon info
   weapon_name?: string;
   // Fight phase metadata (tour_de_jeu.md compliance)
@@ -205,6 +216,12 @@ const REROLLED_TOKEN = /^REROLLED:(\d+)$/;
 
 const OATH_ABILITY_TOKEN = "OATH OF MOMENT";
 
+/** `[FNP:<sauvés>/<seuil>+ ×<tentatives>]` — jets Feel No Pain 24.12 accolés au segment de
+ *  dégâts. Forme EXACTE de `_damage_segment` (`ai/step_logger.py`), `×` compris : le marqueur
+ *  `[FNP:<sauvés>]` des blessures mortelles, lui, n'a ni seuil ni tentatives et ne matche donc
+ *  pas — il décrit un autre jeu de dés, sur les lignes `SUFFERS`. */
+const FNP_TOKEN_REGEX = /\[FNP:(\d+)\/(\d+)\+ ×(\d+)\]/;
+
 type RollKeyword = "Hit" | "Wound" | "Save";
 
 /**
@@ -309,6 +326,17 @@ function assignRollAnnotations(action: ReplayAction, line: string): void {
   const saveInitial = rerolledInitial(saveTokens);
   if (saveInitial !== undefined) {
     action.save_roll_initial = saveInitial;
+  }
+  // Feel No Pain 24.12. ICI et pas dans chaque branche : `assignRollAnnotations` est le site
+  // commun au tir (SHOT) et à la mêlée (FOUGHT), exactement comme `_damage_segment` est le site
+  // commun des deux côtés du moteur — le marqueur ne peut donc pas n'exister que sur une des
+  // deux. Le token est accolé au segment de dégâts, jamais à un jet : il est cherché sur la
+  // ligne entière, pas dans `tokensForRoll`.
+  const fnpMatch = line.match(FNP_TOKEN_REGEX);
+  if (fnpMatch) {
+    action.fnp_saves = parseInt(fnpMatch[1], 10);
+    action.fnp_threshold = parseInt(fnpMatch[2], 10);
+    action.fnp_attempts = parseInt(fnpMatch[3], 10);
   }
 }
 

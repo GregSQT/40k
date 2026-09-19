@@ -985,6 +985,12 @@ export const BoardReplay: React.FC = () => {
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,
                   saveRollInitial: action.save_roll_initial,
+                  // Feel No Pain 24.12 : les trois champs que le PvP reçoit du moteur, lus ici
+                  // dans le token du journal. Sans eux, la ligne de replay montrait les dégâts
+                  // APRÈS FNP sans dire qu'un dé avait été jeté.
+                  fnpSaves: action.fnp_saves,
+                  fnpAttempts: action.fnp_attempts,
+                  fnpThreshold: action.fnp_threshold,
                 },
               ]
             : undefined;
@@ -1123,6 +1129,11 @@ export const BoardReplay: React.FC = () => {
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,
                   saveRollInitial: action.save_roll_initial,
+                  // JUMEAU du tir : le parseur pose ces champs depuis le site commun aux deux
+                  // branches, donc la mêlée les a exactement comme le tir.
+                  fnpSaves: action.fnp_saves,
+                  fnpAttempts: action.fnp_attempts,
+                  fnpThreshold: action.fnp_threshold,
                 },
               ]
             : undefined;
