@@ -577,21 +577,19 @@ def _charge_bfs_max_distance(
     return rid + extra
 
 
-def _charge_skip_hex_lb_prune_round_round_engagement(
-    unit: Dict[str, Any],
-    indexed_enemy_engagement: List[Tuple[Any, Dict[str, Any]]],
-) -> bool:
+def _charge_enemy_reference_positions(enemy_entry: Dict[str, Any]) -> List[Tuple[int, int]]:
+    """Positions de figurines qu'une entrée-cache ennemie oppose au prédicat d'engagement.
+
+    MIROIR EXACT de ``combat_utils.socle_from_cache_entry`` : c'est lui qui décide, en euclidien,
+    d'où partent les socles mesurés — ``occupied_hexes_by_model`` quand l'entrée le porte, l'ancre
+    sinon. Ce n'est donc pas un repli anti-erreur mais la DÉFINITION du prédicat, recopiée ici
+    parce que la borne doit majorer ce prédicat-là et aucun autre. En métrique ``hex``,
+    ``_charge_engage_reach`` mesure le rayon d'empreinte ennemie depuis ces mêmes positions.
     """
-    La prune hexagonale ci-dessous suppose une borne via ``hex_distance`` jusqu'aux cases
-    d'empreinte. Les paires socle rond ↔ socle rond utilisent ``euclidean_edge_clearance``
-    dans ``unit_entries_within_engagement_zone`` : ne pas prune dans ce cas (éviter faux négatif).
-    """
-    if unit["BASE_SHAPE"] != "round":
-        return False
-    return any(
-        ee["BASE_SHAPE"] == "round"
-        for _, ee in indexed_enemy_engagement
-    )
+    by_model = enemy_entry.get("occupied_hexes_by_model")  # get allowed — cf. socle_from_cache_entry
+    if isinstance(by_model, dict) and by_model:
+        return [(int(c), int(r)) for (c, r) in by_model.values()]
+    return [(int(require_key(enemy_entry, "col")), int(require_key(enemy_entry, "row")))]
 
 
 def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
@@ -605,24 +603,38 @@ def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
 ) -> bool:
     """
     Retourne True si aucune fin de charge valide n'existe avec au plus ``bfs_max_distance``
-    pas BFS depuis le primaire (borne géométrique sur grille hex, indépendante des obstacles).
+    pas BFS depuis le primaire (borne géométrique, indépendante des obstacles).
 
-    Idée : soit ``m`` la distance hex minimale du primaire à une case d'empreinte ennemie.
-    Pour tout ancre ``h`` avec ``hex_distance(start, h) ≤ D``, par inégalité triangulaire
-    ``hex_distance(h, e) ≥ hex_distance(start, e) − D`` pour toute case ennemie ``e``, donc
-    ``min_e hex_distance(h, e) ≥ m − D``.
+    Soit ``m`` la distance hex minimale du primaire à une POSITION DE FIGURINE ennemie et ``R``
+    le rayon rendu par ``_charge_engage_reach`` : toute ancre où le prédicat d'engagement rend
+    True est à ``R`` hex au plus d'une de ces positions. Pour une ancre ``h`` à ``hex_distance
+    (start, h) <= D``, l'inégalité triangulaire donne ``m <= D + R``. Donc ``m > D + R`` (strict)
+    prouve qu'aucune ancre de la boule n'engage — et les obstacles ne peuvent qu'allonger les
+    chemins, jamais rapprocher.
 
-    Pour l'engagement on a ``min_{f∈F(h), e∈E} d(f,e) ≥ min_e d(h,e) − S_c`` avec ``S_c`` le
-    rayon d'empreinte du chargeur depuis le primaire (max ``hex_distance(primaire, case)``).
+    UNE BORNE PAR GÉOMÉTRIE. ``_charge_engage_reach`` est la source unique de ce rayon dans les
+    deux métriques ; la borne écrite ici à la main (``ez`` + rayon d'empreinte DISCRET du
+    chargeur) ne majorait pas le prédicat euclidien, qui soustrait les rayons CONTINUS des
+    socles. Mesuré le 2026-09-19 à ez = 10 sur les socles réels du dépôt : 126 configurations où
+    l'engagement porte un hex PLUS LOIN que cette borne — chargeur oval (WarTrakk, Land Speeder)
+    aux orientations impaires, et chargeur rond face à des ennemis tous ovales. La prune y vidait
+    ``valid_charge_destinations_pool`` sur une charge légale, verdict ensuite MÉMOÏSÉ pour le
+    step : l'action charge n'était jamais proposée. Le garde-fou qui désactivait la prune pour
+    les paires rond↔rond ne couvrait ni l'un ni l'autre de ces cas, et privait au passage de
+    toute prune le cas le plus fréquent du jeu ; il disparaît avec la borne qui le motivait.
 
-    Si ``m − D > ez + S_c`` (strict), alors ``min_distance(F,E) > ez`` pour tout ``h`` dans la
-    boule hex : impossible d'engager. Les obstacles ne peuvent qu'allonger les chemins, pas rapprocher.
+    ``m`` se mesure aux POSITIONS DE FIGURINES et non aux cases d'empreinte : c'est la référence
+    depuis laquelle ``_charge_engage_reach`` construit son rayon, et mélanger les deux
+    sous-dimensionnerait la borne exactement comme la version précédente.
 
-    Cas round↔round : engagement euclidien — la prune est désactivée par l'appelant.
+    Le chargeur entre par son entrée-cache d'UNITÉ, pas par ses figurines : le pool teste un
+    socle unique à l'ancre (``_candidate_footprint_charge`` puis
+    ``_charge_synthetic_charger_cache_entry``, qui retire ``occupied_hexes_by_model``), donc
+    l'étalement de l'escouade n'entre jamais dans le prédicat qu'on majore.
     """
     from engine.hex_utils import hex_distance
 
-    from .shared_utils import get_engagement_zone
+    from .shared_utils import _charge_engage_reach, get_engagement_zone
 
     if not indexed_enemy_engagement:
         return False
@@ -633,28 +645,30 @@ def _charge_impossible_by_primary_to_enemy_hex_lower_bound(
     own = require_unit_from_cache(
         unit_id_str, game_state, "_charge_impossible_by_primary_to_enemy_hex_lower_bound"
     )
-    own_hexes_raw = entry_footprint(own)
-    s_charger = 0
-    for oc, orow in own_hexes_raw:
-        dhc = hex_distance(int(start_col), int(start_row), int(oc), int(orow))
-        if dhc > s_charger:
-            s_charger = dhc
 
+    enemy_entries: List[Dict[str, Any]] = []
+    enemy_positions: List[Tuple[int, int]] = []
     m: Optional[int] = None
     for _, enemy_entry in indexed_enemy_engagement:
-        ec = int(enemy_entry["col"])
-        er = int(enemy_entry["row"])
-        efp_raw = entry_footprint(enemy_entry)
-        for exc, exr in efp_raw:
-            dse = hex_distance(int(start_col), int(start_row), int(exc), int(exr))
+        enemy_entries.append(enemy_entry)
+        for pos in _charge_enemy_reference_positions(enemy_entry):
+            enemy_positions.append(pos)
+            dse = hex_distance(int(start_col), int(start_row), pos[0], pos[1])
             if m is None or dse < m:
                 m = dse
 
+    # `indexed_enemy_engagement` est non vide (garde ci-dessus) et chaque entrée rend au moins son
+    # ancre : un ensemble vide ici serait une entrée-cache malformée, pas un cas de jeu.
     if m is None:
-        return False
+        raise ValueError(
+            "_charge_impossible_by_primary_to_enemy_hex_lower_bound: aucune position de figurine "
+            f"ennemie pour {len(indexed_enemy_engagement)} entrée(s) indexée(s)"
+        )
 
-    d_limit = int(bfs_max_distance)
-    return m > d_limit + s_charger + ez
+    reach = _charge_engage_reach(
+        game_state, unit_id_str, [own], enemy_entries, enemy_positions, ez
+    )
+    return m > int(bfs_max_distance) + reach
 
 
 def _charge_primary_footprint_radius(
@@ -3965,7 +3979,6 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
     if (
         not _fly
-        and not _charge_skip_hex_lb_prune_round_round_engagement(unit, indexed_enemy_engagement)
         and _charge_impossible_by_primary_to_enemy_hex_lower_bound(
             game_state,
             unit_id_str=unit_id_str,
@@ -4216,35 +4229,41 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 min(dr for dc, dr in off_o), max(dr for dc, dr in off_o),
             )
 
-    # Precompute set of all hexes within proximity threshold of any enemy → O(1) lookup in BFS loop.
-    # Use ALL occupied hexes (not just anchor) so multi-model squads are fully covered.
-    from engine.hex_utils import dilate_hex_set_unbounded as _dilate_unbounded
-    _near_enemy_set: Set[Tuple[int, int]] = set()
-    for (_ene_id_prox, _ce_prox), (_pec, _per, _peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
-        _ce_occ_all: Set[Tuple[int, int]] = entry_footprint(_ce_prox)
-        _near_enemy_set.update(_dilate_unbounded({(int(c), int(r)) for c, r in _ce_occ_all}, _peth))
-
     # Opt 3 — neighbor offsets inlinés : évite get_hex_neighbors (normalize_coordinates + int() redondants).
     _BFS_OFF_EVEN = ((0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1))
     _BFS_OFF_ODD  = ((0, -1), (1, 0),  (1, 1), (0, 1), (-1, 1), (-1, 0))
 
-    # Opt 1 — prefiltre per-enemy : évite unit_entries_within_engagement_zone sur les hexes
-    # clairement hors portée d'un ennemi spécifique. Use all occupied hexes (not just anchor)
-    # so multi-model squads are fully covered (far-side models not missed).
-    _bfs_is_mover_round = (unit["BASE_SHAPE"] == "round")
-    _bfs_enemy_eng_zones: Dict[Any, Set[Tuple[int, int]]] = {}
-    _bfs_rr_near_set: Dict[Any, Set[Tuple[int, int]]] = {}  # replaces _bfs_rr_prox for round-round
+    # Opt 1 — prefiltre per-enemy : évite unit_entries_within_engagement_zone sur les ancres
+    # clairement hors portée d'un ennemi spécifique. Empreinte ennemie ENTIÈRE (pas l'ancre) pour
+    # couvrir les escouades multi-figurines, dilatée du seuil de `_charge_enemy_prox` — le même
+    # rayon pour TOUTES les formes.
+    #
+    # La branche non-ronde dilatait de `engagement_zone` seul, donc exigeait qu'une case
+    # d'empreinte du chargeur tombe à `ez` hex d'une case d'empreinte ennemie : c'est le prédicat
+    # HEXAGONAL, posé en préfiltre du prédicat EUCLIDIEN, qui lui soustrait les rayons CONTINUS
+    # des socles et accepte des paires plus éloignées d'un subhex PAR SOCLE. Mesuré le 2026-09-19
+    # (ez = 10, chargeur oval [20,14] orientation 1 contre un socle rond/6) : la seule ancre
+    # engageante du budget est écartée ici, le pool rendu vide, et la charge légale perdue —
+    # exactement le défaut fermé un cran plus haut dans `_charge_impossible_by_primary_to_enemy_
+    # hex_lower_bound`, rejoué sur le préfiltre. `_peth` majore l'engagement euclidien : il vaut
+    # `ez + demi-diamètres arrondis au-dessus + 1`, quand la portée vaut `ez + demi-diamètres`.
+    #
+    # Le filtre GLOBAL du BFS (`_near_enemy_set`, qui décide si une ancre mérite le calcul complet
+    # d'empreinte) n'est que l'union de ces ensembles : il se dérive ici au lieu d'être dilaté une
+    # seconde fois. Les deux dilatations avaient le même rayon depuis que celle-ci a cessé de
+    # dépendre de la forme — mesuré à x5 sur une escouade de 10 socles round/6, rayon 24 :
+    # 2,0 ms par ennemi, soit ~20 ms de travail strictement dupliqué par appel sur une armée
+    # de dix escouades.
+    from engine.hex_utils import dilate_hex_set_unbounded as _dilate_unbounded
+    _bfs_enemy_near_set: Dict[Any, Set[Tuple[int, int]]] = {}
     for (_bfs_eid, _bfs_ee), (_bfs_pec, _bfs_per, _bfs_peth) in zip(indexed_enemy_engagement, _charge_enemy_prox):
         _bfs_ee_occ_all = entry_footprint(_bfs_ee)
-        if _bfs_is_mover_round and _bfs_ee.get("BASE_SHAPE") == "round":
-            # Round-round: proximity set from all model positions (not just anchor)
-            _bfs_rr_near_set[_bfs_eid] = _dilate_unbounded(
-                {(int(c), int(r)) for c, r in _bfs_ee_occ_all}, _bfs_peth
-            )
-        else:
-            _bfs_enemy_eng_zones[_bfs_eid] = _dilate_unbounded(
-                {(int(fc), int(fr)) for fc, fr in _bfs_ee_occ_all}, engagement_zone
-            )
+        _bfs_enemy_near_set[_bfs_eid] = _dilate_unbounded(
+            {(int(c), int(r)) for c, r in _bfs_ee_occ_all}, _bfs_peth
+        )
+    _near_enemy_set: Set[Tuple[int, int]] = set()
+    for _near_zone in _bfs_enemy_near_set.values():
+        _near_enemy_set |= _near_zone
 
     _t_bfs0 = time.perf_counter() if _perf else None
     bfs_short_circuit = False
@@ -4348,13 +4367,8 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     hex_overlaps_enemy = True
                     break
                 # Opt 1 — prefiltre per-enemy avant l'appel coûteux unit_entries_within_engagement_zone.
-                _bfs_ee_is_rr = (_bfs_is_mover_round and enemy_entry["BASE_SHAPE"] == "round")
-                if _bfs_ee_is_rr:
-                    if _eid in _bfs_rr_near_set and neighbor_pos not in _bfs_rr_near_set[_eid]:
-                        continue
-                elif _eid in _bfs_enemy_eng_zones:
-                    if not (candidate_fp & _bfs_enemy_eng_zones[_eid]):
-                        continue
+                if _eid in _bfs_enemy_near_set and neighbor_pos not in _bfs_enemy_near_set[_eid]:
+                    continue
                 bfs_engagement_checks_n += 1
                 # `memoise=False` : cellule candidate du BFS de charge (branche sol).
                 if unit_entries_within_engagement_zone(
