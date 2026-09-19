@@ -491,3 +491,173 @@ def test_x1_intent_only_breaks_ties_inside_the_tightest_tier():
     assert plan_tight is not None and plan_deep is not None
     assert _d_to_x1_target(plan_tight[0][1:3]) == 1
     assert _d_to_x1_target(plan_deep[0][1:3]) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Le disque de candidats doit COUVRIR l'engagement (`_charge_engage_reach`)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `charge_build_valid_plan` n'énumère ses destinations engageantes QUE dans le disque hexagonal
+# de rayon `_charge_engage_reach` (branche (a)). Le fichier vérifiait déjà l'autre moitié du
+# contrat — le balayage carré de `_hex_cells_within_radius` couvre bien tout le disque — mais
+# jamais que le DISQUE couvre l'engagement. Il ne le couvrait pas : à ez = 10 et deux socles
+# round/6, la borne valait 15 quand les cellules engageantes vont jusqu'à 16, soit 6 cellules
+# retirées de l'énumération sur 691. Cause : la borne additionnait des rayons d'empreinte
+# DISCRÈTE alors que le prédicat euclidien soustrait les rayons CONTINUS des socles, plus grands
+# d'un subhex par socle (round/6 : 3 contre 2), quand la borne n'ajoutait qu'un `+ 1` pour les
+# deux. Une borne trop étroite refuse des charges sans rien signaler.
+
+REACH_EZ_SUBHEX = 10  #: 2" à ISH = 5 — même valeur que le `game_rules` de `_gs`.
+REACH_ROW = 62
+
+
+def _reach_state(self_size: int, target_size: int, target_col: int) -> Dict[str, Any]:
+    """Duel mono-figurine à ISH = 5 : chargeur `round`/`self_size`, cible `round`/`target_size`.
+
+    Les tailles sont paramétrées parce que c'est LA variable du défaut : l'écart entre rayon
+    continu et rayon discret vaut 0 ou 1 subhex selon la taille (round/4 : 2 et 2 ; round/6 : 3
+    et 2), donc une borne fausse ne l'est pas pour tous les socles.
+    """
+    charger = (10, REACH_ROW)
+    target = (target_col, REACH_ROW)
+    unit1 = {**unit_invariants(),
+        "id": 1, "player": 1, "col": charger[0], "row": charger[1], "MOVE": 6, "HP_CUR": 1,
+        "BASE_SIZE": self_size, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
+    }
+    unit2 = {**unit_invariants(),
+        "id": 2, "player": 2, "col": target[0], "row": target[1], "MOVE": 6, "HP_CUR": 1,
+        "BASE_SIZE": target_size, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
+    }
+    return {**turn_state_invariants(),
+        "models_cache": {
+            "1#0": {"col": charger[0], "row": charger[1], "level": 0, "player": 1,
+                    "squad_id": "1", "HP_CUR": 1, "BASE_SHAPE": "round",
+                    "BASE_SIZE": self_size, "orientation": 0},
+            "2#0": {"col": target[0], "row": target[1], "level": 0, "player": 2,
+                    "squad_id": "2", "HP_CUR": 1, "BASE_SHAPE": "round",
+                    "BASE_SIZE": target_size, "orientation": 0},
+        },
+        "squad_models": {"1": ["1#0"], "2": ["2#0"]},
+        "units_cache": {
+            "1": {"col": charger[0], "row": charger[1], "player": 1,
+                  "occupied_hexes": set(
+                      compute_occupied_hexes(charger[0], charger[1], "round", self_size, 0)),
+                  "BASE_SHAPE": "round", "BASE_SIZE": self_size},
+            "2": {"col": target[0], "row": target[1], "player": 2,
+                  "occupied_hexes": set(
+                      compute_occupied_hexes(target[0], target[1], "round", target_size, 0)),
+                  "BASE_SHAPE": "round", "BASE_SIZE": target_size},
+        },
+        "units": [unit1, unit2],
+        "unit_by_id": {"1": unit1, "2": unit2},
+        "board_cols": 200, "board_rows": 160,
+        "wall_hexes": set(),
+        "enemy_adjacent_hexes_player_1": set(),
+        "config": {
+            "game_rules": {"engagement_zone": REACH_EZ_SUBHEX, "unit_model_cohesion_range": 10,
+                           "unit_global_cohesion_range": 45,
+                           "cohesion_distance_mode": "euclidean", "squad_min_neighbors": 1},
+            "move": {"can_move_through_enemy_engagement_zone": True,
+                     "can_move_through_enemy_model": False,
+                     "can_move_through_friendly_model": True},
+        },
+        "phase": "charge",
+        "gym_training_mode": True,
+        "inches_to_subhex": ISH,
+        "current_player": 1,
+        "terrain_areas": [],
+    }
+
+
+def _engaging_cells_around(
+    gs: Dict[str, Any], target: Tuple[int, int], span: int
+) -> Set[Tuple[int, int]]:
+    """Toutes les cellules du carré de demi-côté `span` autour de `target` d'où `1#0` engage `2`.
+
+    Force brute par la primitive d'engagement (03.04), sans aucune borne de trajet : c'est la
+    RÉFÉRENCE que le disque de candidats doit contenir, mesurée indépendamment de lui.
+    """
+    model = gs["models_cache"]["1#0"]
+    target_entry = gs["units_cache"]["2"]
+    ez = get_engagement_zone(gs)
+    return {
+        (col, row)
+        for col in range(target[0] - span, target[0] + span + 1)
+        for row in range(target[1] - span, target[1] + span + 1)
+        if unit_entries_within_engagement_zone(
+            _synth_model_entry(gs, "1", model, col, row), target_entry, ez, game_state=gs
+        )
+    }
+
+
+@pytest.mark.parametrize("target_col", [40, 41])
+@pytest.mark.parametrize(
+    "self_size, target_size", [(1, 1), (4, 4), (5, 5), (6, 6), (6, 18), (18, 18)]
+)
+def test_engage_reach_covers_every_engaging_cell(
+    self_size: int, target_size: int, target_col: int
+) -> None:
+    """Le disque de candidats contient TOUTE cellule d'où la figurine finit engagée.
+
+    ROUGE avec la borne d'avant (`ez + rayons d'empreinte + 1`) sur les socles 6/6, 6/18 et
+    18/18 : distance engageante maximale 16, 22 et 28 pour une borne de 15, 21 et 27.
+
+    Colonnes PAIRE et IMPAIRE : la forme d'une empreinte dépend de la parité de sa colonne, et
+    une borne juste sur l'une peut amputer l'autre.
+    """
+    from engine.phase_handlers.shared_utils import _charge_engage_reach
+
+    gs = _reach_state(self_size, target_size, target_col)
+    target = (target_col, REACH_ROW)
+    reach = _charge_engage_reach(
+        gs, "1", [gs["models_cache"]["1#0"]], [gs["units_cache"]["2"]], [target],
+        get_engagement_zone(gs),
+    )
+    engaging = _engaging_cells_around(gs, target, reach + 6)
+
+    assert engaging, "aucune cellule engageante : le balayage ne prouverait rien"
+    farthest = max(calculate_hex_distance(c, r, *target) for c, r in engaging)
+    assert farthest <= reach, (
+        f"cellules engageantes jusqu'a {farthest} pour une borne de {reach} : "
+        f"{sorted(c for c in engaging if calculate_hex_distance(c[0], c[1], *target) > reach)}"
+    )
+    # Contre-épreuve : une borne élargie « au cas où » (par exemple un facteur 1,155 appliqué à
+    # l'ancienne) passerait l'assertion ci-dessus tout en gonflant le disque — 817 cellules au
+    # lieu de 721 à ez = 10. Le disque est le domaine d'énumération de la branche (a) ET la
+    # borne d'arrêt du BFS d'intention : il se paie à chaque construction de plan.
+    assert reach <= farthest + 1, (
+        f"borne {reach} trop large pour une distance engageante maximale de {farthest}"
+    )
+
+
+def test_engage_reach_follows_the_hex_metric_when_the_metric_is_hex(monkeypatch) -> None:
+    """La borne doit SUIVRE la métrique : épinglée en `hex`, elle repasse aux rayons d'empreinte.
+
+    Le test se joue à ISH = 5 avec des socles `round`/6, pas à x1 : à x1 les socles sont
+    normalisés en `round`/1 et les deux branches rendent la même valeur (3), donc rien n'y
+    distingue la métrique — un vert vacant. Ici les deux branches divergent : empreintes
+    discrètes 10 + 2 + 2 + 1 = 15, rayons continus 10 + 3 + 3 = 16.
+
+    La seconde assertion est celle qui verrouille la bascule : sous métrique `hex` les cellules
+    engageantes ne vont qu'à 14, donc la borne euclidienne (16) y serait trop LARGE de deux.
+    """
+    monkeypatch.setattr(
+        "engine.spatial_relations.engagement_distance_metric", lambda *a, **k: "hex"
+    )
+    from engine.phase_handlers.shared_utils import _charge_engage_reach
+
+    gs = _reach_state(6, 6, 40)
+    target = (40, REACH_ROW)
+    reach = _charge_engage_reach(
+        gs, "1", [gs["models_cache"]["1#0"]], [gs["units_cache"]["2"]], [target],
+        get_engagement_zone(gs),
+    )
+    engaging = _engaging_cells_around(gs, target, reach + 6)
+
+    assert engaging, "aucune cellule engageante : le balayage ne prouverait rien"
+    farthest = max(calculate_hex_distance(c, r, *target) for c, r in engaging)
+    assert farthest <= reach, f"cellules engageantes jusqu'a {farthest} pour une borne de {reach}"
+    assert reach <= farthest + 1, (
+        f"borne {reach} pour une distance engageante maximale de {farthest} : la branche "
+        f"euclidienne a mange la metrique hex"
+    )
