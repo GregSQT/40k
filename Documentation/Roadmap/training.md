@@ -158,6 +158,34 @@ horizon plus long, ni sur un roster où le tir fractionné offrirait plus souven
 
 ---
 
+## 🟡 Écart de siège — cause trouvée dans la MISSION, arbitrage ouvert {#ecart-siege-2026-09-19}
+
+**Mesuré le 2026-09-19, sans aucune politique apprise.** Même bot des deux côtés, seul le siège
+change (`scripts/seat_advantage_probe.py`, 1 200 parties par cellule, erreur-type 1,4 pt) : le
+premier joueur gagne **0,590 contre 0,395** sur `terrain-mc1` et **0,522 contre 0,468** sur
+`terrain-mc2`. L'écart de siège n'est donc pas un défaut du modèle, et `agent_seat_p2_ratio`
+(0,75) compense l'agent sans toucher la cause.
+
+**La cause est l'instant de marquage.** `objectives_control` fait marquer les deux joueurs à leur
+phase de commandement, sauf le second au round 5 : le second joueur compte donc toujours ses
+objectifs après un tour adverse de plus que le sien. Le round 5, seul round compensé, est aussi
+le seul où il marque plus (10,86 contre 10,43). Les missions officielles compensent à tous les
+rounds (`26 Primary_missions.pdf`). L'attrition va dans l'autre sens : le premier joueur perd
+131,5 de valeur contre 106,2 — il gagne en perdant l'échange.
+
+**Arbitrage ouvert, décision utilisateur.** Étendre la compensation officielle à tous les rounds
+INVERSE l'écart (premier joueur 0,457 sur mc1, 0,406 sur mc2) : ce moteur n'a ni overwatch, ni
+intervention héroïque, ni stratagèmes, c'est-à-dire aucun des outils par lesquels la vraie règle
+paie le premier joueur. Conséquence dans les deux cas : changer la mission change les parties
+jouées → Discipline A et `--new` de la lignée. Détail, tableaux et réserves de lecture :
+[plafonnement_p1.md#ecart-siege-2026-09-19](../Chantiers/backlog/plafonnement_p1.md#ecart-siege-2026-09-19).
+
+**À retenir pour toute lecture de holdout** : ses quatre scénarios tournent tous sur `terrain-mc1`,
+le terrain où l'écart structurel est le plus grand (19,5 pts contre 5,4 sur mc2). Le « gap de
+siège » de 12 à 14 points publié depuis août est une propriété de ce terrain autant que du modèle.
+
+---
+
 ## 🔴 Plafonnement P1 contre P0 — dossier de synthèse {#plafonnement-p1}
 
 **Ouvert le 2026-09-13.** `Documentation/Chantiers/backlog/plafonnement_p1.md`
