@@ -315,7 +315,9 @@ def check_fnp_mortal(
 ) -> None:
     """Blessures mortelles : chaque entrée de `[FNP_ROLLS:]` est jugée POUR SA FIGURINE (24.12,
     06.02) — jet manquant alors qu'une source s'applique, jet revendiqué sans aucune source,
-    seuil faux, sauvés supérieurs aux blessures, total attribué supérieur au total déclaré.
+    seuil faux, sauvés supérieurs aux blessures, et total attribué différent du total déclaré
+    dans les deux sens : au-dessus c'est une blessure inventée, en dessous c'est une séquence
+    06.02 interrompue, qui n'est légitime que si l'escouade y est tombée.
 
     La source PSYCHIC est lue sur le tag (`PSYCHIC_MORTAL_TAGS`), comme pour Da Jump.
 
@@ -339,6 +341,25 @@ def check_fnp_mortal(
     if declared is not None and allocated > int(declared.group(1)):
         _error(state, stats, FNP_COUNTER, int(victim_player), line,
                f"[FNP_ROLLS:] attribue {allocated} blessure(s) pour {declared.group(1)} déclarée(s)")
+    elif declared is not None and allocated < int(declared.group(1)):
+        # 06.02 : « until either all of them have been inflicted OR THAT UNIT IS DESTROYED ».
+        # Attribuer moins que le declare n a donc qu une explication legitime, et elle se lit
+        # sur la ligne elle-meme : son `[MODELS:]` est ecrit au FLUSH, donc APRES les morts de
+        # la sequence (`models_segment_for_unit`, `engine/action_log_utils.py` — le payload des
+        # blessures mortelles ne le pre-capture pas, contrairement aux lignes d attaque). Un
+        # survivant qui y figure prouve que l escouade n etait pas detruite, et donc que rien
+        # n autorisait l arret. Aucun calcul de PV : les points de vie deja retires ne sont plus
+        # comparables a ceux qui restent, et le suivi de l analyzer n a pas a entrer dans le
+        # verdict. Ligne sans segment (journal fabrique a la main) : abstention.
+        from ai.analyzer_perfig import parse_models_segment
+
+        _by_unit = parse_models_segment(action_desc)
+        _survivors = (_by_unit or {}).get(str(victim_id))  # get allowed : segment absent
+        if _survivors:
+            _error(state, stats, FNP_COUNTER, int(victim_player), line,
+                   f"[FNP_ROLLS:] attribue {allocated} blessure(s) pour {declared.group(1)} "
+                   f"declaree(s) alors que {len(_survivors)} socle(s) survivent : 06.02 ne "
+                   "s arrete avant la fin que sur la destruction de l escouade")
     source_decidable = SOURCE_DECIDABLE_MORTAL_RE.search(action_desc) is not None
     present = _present_types(state, None, victim_id)
     is_psychic = any(tag in action_desc for tag in PSYCHIC_MORTAL_TAGS)

@@ -217,7 +217,7 @@ source et `Dmg>0` (jugé sans garde de version depuis le 2026-09-19 : la compati
 journaux antérieurs à la garantie est abandonnée, et la garde qui les protégeait est retirée), compte
 `Dmg ≠ n − s` ; sur les lignes SUFFERS, **`[FNP_ROLLS:]` depuis la grammaire 17** rend le même
 jugement PAR FIGURINE (jet manquant alors qu'une source s'applique, jet sans source, seuil faux,
-sauvés > blessures, attribué > déclaré), le verdict de SOURCE étant suspendu sur les tags qui
+sauvés > blessures, attribué > déclaré, et attribué < déclaré avec un socle encore listé dans le `[MODELS:]` de la ligne — 06.02 n'autorise l'arrêt anticipé que sur la destruction), le verdict de SOURCE étant suspendu sur les tags qui
 peuvent tomber dans le sursis 19.04 d'une allocation d'attaque. Corpus : 24.12 → COUVERT
 (la note « jet et seuil absents » était périmée), PROJ.1.9.feel_no_pain/_vs_psychic/_near_objective
 → COUVERT via 24.12, unit.invul_save_override et unit.waaagh → COUVERT, unit.toughness_bonus_while_waaagh

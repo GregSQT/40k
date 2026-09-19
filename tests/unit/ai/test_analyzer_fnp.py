@@ -248,10 +248,15 @@ _MODELS_101 = " [MODELS: 101#0@(30,20,z0) 101#1@(31,20,z0) 101#2@(32,20,z0)]"
 
 
 def _suffers(target: str, pos: str, rolls: str, wounds: int = 1,
-             tag: str = "[DA JUMP] Trigger:1 MW:2", alloc: str = "", models: str = "") -> str:
-    """Une ligne `SUFFERS` fabriquée ; `rolls` est le contenu de `[FNP_ROLLS:]`."""
+             tag: str = "[DA JUMP] Trigger:1 MW:2", alloc: str = "",
+             models: "str | None" = None) -> str:
+    """Une ligne `SUFFERS` fabriquée ; `rolls` est le contenu de `[FNP_ROLLS:]`.
+
+    `models=""` reproduit ce que le moteur écrit pour une escouade DÉTRUITE : pas de segment du
+    tout (`models_segment_for_unit` rend une chaîne vide, et le formateur n'ajoute rien).
+    """
     _alloc = f" [ALLOC_MODEL: {alloc}]" if alloc else ""
-    _models = models or " [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)]"
+    _models = " [MODELS: 103#0@(30,40,z0) 103#1@(31,40,z0)]" if models is None else models
     return (
         f"[10:00:03] E1 T1 P2 MOVE : Unit {target}{pos} SUFFERS {wounds} Mortal Wounds {tag}"
         f" [FROM:{target}] [FNP_ROLLS: {rolls}]{_models}{_alloc} [R:+0.0] [SUCCESS]\n"
@@ -303,6 +308,29 @@ def test_blessures_mortelles_attribuees_au_dela_du_declare_est_une_faute(tmp_pat
                                       alloc="101#0", models=_MODELS_101))
     assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
     assert "attribue 3 blessure(s) pour 1 déclarée(s)" in _first(stats)
+
+
+def test_attribution_interrompue_avec_un_survivant_est_une_faute(tmp_path):
+    """06.02 : « until either all of them have been inflicted OR THAT UNIT IS DESTROYED ».
+    Le `[MODELS:]` d une ligne de blessures mortelles est ecrit au FLUSH, donc apres les morts
+    de la sequence : un socle qui y figure encore prouve que l escouade vivait, et qu aucune
+    des trois blessures declarees n avait le droit de rester non attribuee."""
+    stats = _stats(tmp_path, _suffers("103", "(30,40)", "103#0=none \u00d71", wounds=3,
+                                      alloc="103#0"))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 1}
+    assert "socle(s) survivent" in _first(stats)
+
+
+def test_attribution_interrompue_par_la_destruction_est_correcte(tmp_path):
+    """Meme ecart au total declare, mais l escouade est detruite : le moteur n ecrit alors
+    AUCUN socle dans `[MODELS:]`, et l arret de la sequence est legitime.
+
+    Sans cette seconde moitie, le controle pourrait refuser toute attribution incomplete et le
+    test precedent resterait vert.
+    """
+    stats = _stats(tmp_path, _suffers("103", "(30,40)", "103#0=none \u00d71 103#1=none \u00d71",
+                                      wounds=3, alloc="103#0", models=""))
+    assert stats["fnp_threshold_mismatch"] == {1: 0, 2: 0}, _first(stats)
 
 
 def test_deux_figurines_de_la_meme_ligne_ont_chacune_leur_seuil(tmp_path):
