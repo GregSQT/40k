@@ -84,10 +84,7 @@ _DEAD_POS_SAME_ACTIVATION_THRESHOLD = 20
 
 
 
-#: Token(s) de capacité OPTIONNELS entre un verbe et son complément (`[WAAAGH!]`, `[FLY]`, …).
-#: MÊME fragment pour les verbes de mouvement (`move_line_re`) et d'attaque : c'est la grammaire
-#: du journal, pas celle d'un site.
-ACTION_ABILITY_TOKENS = r'(?:\s+\[[^\]]+\])*'
+from ai.analyzer_grammar import ACTION_ABILITY_TOKENS
 
 
 # Grammaire d'une ligne de mouvement : `Unit N(c,r) VERBE [TOKEN] from (c,r) to (c,r)`.

@@ -47,7 +47,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from engine.phase_handlers.attack_sequence import CRITICAL_HIT_ROLL, NATURAL_FAIL_ROLL
 
-from ai.analyzer_core import ACTION_ABILITY_TOKENS
+from ai.analyzer_grammar import ACTION_ABILITY_TOKENS
 from ai.analyzer_rules import note_rule_usage
 
 #: Extrait le plancher du token `[INDIRECT FIRE:X+]` (10.07).

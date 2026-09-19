@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional, Tuple
 
-from ai.analyzer_core import ACTION_ABILITY_TOKENS
+from ai.analyzer_grammar import ACTION_ABILITY_TOKENS
 from ai.analyzer_rules import note_rule_usage
 from shared.data_validation import require_key
 
