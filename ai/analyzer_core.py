@@ -190,8 +190,8 @@ _STATE_MODEL_RE = re.compile(MODEL_TOKEN_PATTERN + r':(-?\d+)')
 _ALLOC_MODEL_RE = re.compile(r'\[ALLOC_MODEL:\s*(\d+#[^\s\]]+)\s*\]')
 
 
-def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) -> Optional[str]:
-    """Figurine allouée nommée par la ligne, ou None sur un journal de grammaire 1.
+def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) -> str:
+    """Figurine allouée nommée par la ligne. LÈVE si la ligne ne la nomme pas.
 
     EXIGIBLE à partir de la grammaire 2 : le producteur promet alors de nommer la figurine sur
     toute attaque parvenue à l'allocation, donc sur toute ligne qui applique des dégâts. Son
@@ -207,13 +207,12 @@ def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) ->
     if m:
         return m.group(1)
     raise ValueError(
-            f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — une "
-            "attaque applique des dégâts sans segment `[ALLOC_MODEL:]`. Le producteur "
-            "(`ai/step_logger`, via `_resolve_one_manual_wound`) garantit ce segment sur toute "
-            "attaque parvenue à l'allocation ; son absence est une panne de la chaîne "
-            f"moteur→journal, pas un vieux format.\n  {line.strip()}"
-        )
-    return None
+        f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — une "
+        "attaque applique des dégâts sans segment `[ALLOC_MODEL:]`. Le producteur "
+        "(`ai/step_logger`, via `_resolve_one_manual_wound`) garantit ce segment sur toute "
+        "attaque parvenue à l'allocation ; son absence est une panne de la chaîne "
+        f"moteur→journal, pas un vieux format.\n  {line.strip()}"
+    )
 
 
 _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
@@ -2904,21 +2903,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     stats, state, config, _mwa_rule,
                                     _mwa_src, _mwa_src_type, int(_mwa_player),
                                 )
-                            # Grammaire 9 : le compte se CONTRÔLE contre les dés de la ligne
-                            # (`MW:` sommés, `Trigger:` comparé à 4+). Sur un journal antérieur
-                            # les dés ne sont pas garantis : absence = vieux format, pas faute.
-                            # La faute est au camp de la SOURCE, dont c'est la capacité.
-                                _mwa_err = mw_ability_dice_error(
-                                    _mwa_rule, int(_mwa_match.group(1)), action_desc
-                                )
-                                if _mwa_err is not None:
-                                    _mwa_err_pl = int(_mwa_player) if _mwa_player is not None else player
-                                    stats['mw_ability_dice_mismatch'][_mwa_err_pl] += 1
-                                    if stats['first_error_lines']['mw_ability_dice_mismatch'][_mwa_err_pl] is None:
-                                        stats['first_error_lines']['mw_ability_dice_mismatch'][_mwa_err_pl] = {
-                                            'episode': state.current_episode_num,
-                                            'line': f"{line.strip()} — {_mwa_err}",
-                                        }
+                            # Le compte se CONTRÔLE contre les dés de la ligne (`MW:` sommés,
+                            # `Trigger:` comparé à 4+), garantis depuis la grammaire 9. La faute
+                            # est au camp de la SOURCE, dont c'est la capacité — et quand cette
+                            # source est INCONNUE, au camp de la ligne : c'est pourquoi ce bloc
+                            # ne dépend pas du `if` qui note l'usage au-dessus.
+                            _mwa_err = mw_ability_dice_error(
+                                _mwa_rule, int(_mwa_match.group(1)), action_desc
+                            )
+                            if _mwa_err is not None:
+                                _mwa_err_pl = int(_mwa_player) if _mwa_player is not None else player
+                                stats['mw_ability_dice_mismatch'][_mwa_err_pl] += 1
+                                if stats['first_error_lines']['mw_ability_dice_mismatch'][_mwa_err_pl] is None:
+                                    stats['first_error_lines']['mw_ability_dice_mismatch'][_mwa_err_pl] = {
+                                        'episode': state.current_episode_num,
+                                        'line': f"{line.strip()} — {_mwa_err}",
+                                    }
                             if _mwa_mw > 0:
                                 _judge_character_allocation(
                                     state, config, stats, action_desc=action_desc, line=line,

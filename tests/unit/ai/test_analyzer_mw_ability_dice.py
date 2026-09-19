@@ -167,3 +167,17 @@ def test_une_ligne_sans_segment_de_des_est_une_faute(tmp_path, monkeypatch):
     body = _line(2, "[EXHORTATION DE RAGE]", "")
     stats = _parse(tmp_path, monkeypatch, body)
     assert stats["mw_ability_dice_mismatch"][1] == 1, "le segment est exigible"
+
+
+def test_une_source_inconnue_ne_suspend_pas_le_controle_des_des(tmp_path, monkeypatch):
+    """La faute se compte même quand `[FROM:]` nomme une escouade absente de l'entête.
+
+    Le camp de repli (`else player`) n'existe que pour ce cas : sans lui, une ligne dont la
+    source est introuvable échapperait au contrôle. Le verdict est alors porté au camp de la
+    LIGNE, faute de mieux — mais il est porté.
+    """
+    body = _line(2, "[EXHORTATION DE RAGE]", "").replace("[FROM:1]", "[FROM:9]")
+    stats = _parse(tmp_path, monkeypatch, body)
+    assert stats["mw_ability_dice_mismatch"][1] == 1, (
+        "source inconnue : le contrôle des dés doit tourner quand même"
+    )

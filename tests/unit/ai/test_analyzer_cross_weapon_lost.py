@@ -60,7 +60,7 @@ def _lost(weapon: str, target: str = "102", target_pos: str = T) -> str:
     return _shot(weapon, target, target_pos, "Save [NOT ALLOCATED]")
 
 
-_DEAD_102 = "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [ALLOC_MODEL: {target}#0] [SUCCESS]\n"
+_DEAD_102 = "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
 
 
 def _stats(tmp_path, body: str, end: str = EPISODE_TAIL):

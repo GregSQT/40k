@@ -20,18 +20,26 @@ import sys
 
 import pytest
 
-#: Tous les modules `ai/analyzer*.py`, découverts et non listés à la main : un module ajouté
-#: demain entre dans ce verrou sans que personne ait à y penser.
+#: Tous les modules de l'analyzer, HANDLERS de `ai/analyzer_phases/` compris : ils participent
+#: à la même chaîne d'imports, et un glob resté à la racine les aurait laissés hors du verrou —
+#: précisément là où passe le cycle corrigé ici. Découverts et non listés à la main : un module
+#: ajouté demain y entre sans que personne ait à y penser.
+_RACINE = pathlib.Path(__file__).resolve().parents[3]
 _MODULES = sorted(
-    f"ai.{p.stem}"
-    for p in (pathlib.Path(__file__).resolve().parents[3] / "ai").glob("analyzer*.py")
+    {f"ai.{p.stem}" for p in (_RACINE / "ai").glob("analyzer*.py")}
+    | {f"ai.analyzer_phases.{p.stem}"
+       for p in (_RACINE / "ai" / "analyzer_phases").glob("*.py")
+       if p.stem != "__init__"}
 )
 
 
 def test_la_decouverte_trouve_bien_les_modules():
     """VERT VACANT : un glob qui ne trouve rien ferait passer la paramétrisation à vide."""
-    assert len(_MODULES) >= 10, _MODULES
+    assert len(_MODULES) >= 15, _MODULES
     assert "ai.analyzer_hit" in _MODULES
+    assert "ai.analyzer_phases.shoot_handler" in _MODULES, (
+        "les handlers de phase sont dans la même chaîne d'imports et doivent être couverts"
+    )
 
 
 @pytest.mark.parametrize("module", _MODULES)
