@@ -371,3 +371,160 @@ class TestPileInWhileMovingCloserToClosestTarget:
             f"S#0 → ({c},{r}) : dist A = {dist_after} ≥ {dist_before} "
             f"(violation WHILE MOVING 12.03 : figure reculée de sa cible la plus proche)"
         )
+
+
+class TestPlansNeverOverlapFootprintsAtX5:
+    """03 ENDING A MOVE « No models in that unit are on another model » — à la RÉSOLUTION DE
+    PRODUCTION (`config/config.json` pointe `board/44x60x5`), un socle vaut 19 cases (round/6)
+    ou 91 (round/18), pas une.
+
+    Les tests ci-dessus tournent à x1, où le socle d'une figurine EST sa case centrale : la
+    disjonction des centres y suffit et ils restaient verts pendant que les plans posaient des
+    socles l'un sur l'autre à x5. Les trois écrivains par-figurine sont verrouillés ici, chacun
+    sur son propre chemin : pile-in 12.03, consolidation 12.08, charge 11.04.
+
+    ROUGE avant le correctif du 2026-09-19 (occupation suivie par EMPREINTE et non par centre) :
+    pile-in `[('1#0',39,52),('1#1',39,56)]`, union de 37 cases pour 38 attendues ; charge à 5
+    figurines, union de 88 pour 95.
+    """
+
+    @staticmethod
+    def _footprints(gs, plan, base_size):
+        from engine.hex_utils import compute_occupied_hexes
+
+        return [
+            set(compute_occupied_hexes(int(c), int(r), "round", base_size, 0))
+            for _mid, c, r, _lv in plan
+        ]
+
+    def _assert_disjoint(self, gs, plan, base_size, label):
+        assert plan is not None, f"{label} : le plan doit exister"
+        fps = self._footprints(gs, plan, base_size)
+        union = set().union(*fps)
+        assert len(union) == sum(len(f) for f in fps), (
+            f"{label} : empreintes qui se chevauchent — union {len(union)} pour "
+            f"{sum(len(f) for f in fps)} cases attendues, plan {plan}"
+        )
+
+    @staticmethod
+    def _x5_state(squad_cells, enemy_cells, *, base_size=6, phase="fight", **overrides):
+        from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+        units = [synthetic_unit(
+            "1", 1, [{"col": c, "row": r} for c, r in squad_cells], BASE_SIZE=base_size,
+        )]
+        for i, (c, r) in enumerate(enemy_cells):
+            units.append(synthetic_unit(
+                str(2 + i), 2, [{"col": c, "row": r}], BASE_SIZE=base_size,
+            ))
+        return synthetic_state(
+            units, phase=phase, game_rules={}, inches_to_subhex=5,
+            board_cols=140, board_rows=200, **overrides,
+        )
+
+    def test_pile_in_footprints_are_disjoint(self):
+        gs = self._x5_state([(40, 40), (40, 47)], [(40, 62)], fight_subphase="fight")
+        self._assert_disjoint(gs, fight_pile_in_plan(gs, "1"), 6, "pile-in 12.03")
+
+    def test_consolidation_footprints_are_disjoint(self):
+        gs = self._x5_state([(40, 40), (40, 47)], [(40, 62)], fight_subphase="consolidate")
+        self._assert_disjoint(gs, squad_consolidate_plan(gs, "1"), 6, "consolidation 12.08")
+
+    def test_charge_footprints_are_disjoint(self):
+        from engine.phase_handlers.shared_utils import charge_build_valid_plan
+
+        gs = self._x5_state(
+            [(40, 40 + 7 * i) for i in range(5)], [(40, 80)], phase="charge",
+        )
+        plan = charge_build_valid_plan(gs, "1", ["2"], charge_roll=25)
+        self._assert_disjoint(gs, plan, 6, "charge 11.04")
+
+    def test_pile_in_engages_at_x5_where_the_contact_tier_was_dead(self):
+        """12.03 « engaged with it if possible » : au moins une figurine finit ENGAGÉE.
+
+        Le palier contact couplait les figurines aux VOISINS DU CENTRE ennemi ; à x5 ces six
+        cases sont toutes dans l'empreinte de l'ennemi, donc toutes illégales — le couplage ne
+        s'appliquait jamais. La mesure d'engagement, elle, est celle de la règle (03.04,
+        bord à bord).
+        """
+        from engine.phase_handlers.shared_utils import _synth_model_entry, get_engagement_zone
+        from engine.spatial_relations import unit_entries_within_engagement_zone
+
+        gs = self._x5_state([(40, 40), (40, 47)], [(40, 62)], fight_subphase="fight")
+        plan = fight_pile_in_plan(gs, "1")
+        assert plan is not None
+        ez = int(get_engagement_zone(gs))
+        te = gs["units_cache"]["2"]
+        engaged = [
+            mid for mid, c, r, lv in plan
+            if unit_entries_within_engagement_zone(
+                _synth_model_entry(gs, "1", gs["models_cache"][mid], c, r, level=lv),
+                te, ez, game_state=gs,
+            )
+        ]
+        assert engaged, f"aucune figurine engagée après le pile-in : {plan}"
+
+    def test_objective_consolidation_footprints_are_disjoint(self):
+        """12.08 mode Objective : troisième branche d'écriture par-figurine, même règle.
+
+        Elle rejoint la zone de l'objectif par une affectation gloutonne qui lui est propre —
+        pas `_assign_cells_toward_enemies` — et suivait elle aussi les CENTRES.
+        ROUGE avant le correctif : plan `[('1#0',40,48),('1#1',42,48)]`, union de 28 cases
+        pour 38 attendues.
+        """
+        from engine.phase_handlers.shared_utils import squad_consolidate_plan_with_targets
+
+        gs = self._x5_state([(40, 40), (40, 45)], [], fight_subphase="consolidate")
+        gs["objectives"] = [
+            {"id": "O1", "hexes": [[c, r] for c in range(38, 43) for r in range(48, 53)]}
+        ]
+        plan, _targets = squad_consolidate_plan_with_targets(gs, "1", mode="objective")
+        self._assert_disjoint(gs, plan, 6, "consolidation 12.08 objective")
+
+    def test_a_model_blocked_by_a_departing_teammate_is_recovered(self):
+        """Passe de REPRISE : une figurine servie tôt est bloquée par l'empreinte de DÉPART
+        d'une camarade qui, elle, bouge ensuite — la case engageante qu'elle visait n'est libre
+        qu'à la fin du plan.
+
+        Escouade serrée de 4 socles round/6 en colonne (pas de 5 subhex), ennemi à 18 subhex :
+        la reprise fait passer l'escouade de 3 à 4 figurines engagées, sans relâcher une seule
+        contrainte (les cellules viennent du même filtre trajet + WHILE + AFTER + empreinte).
+
+        ROUGE sans la reprise : 3 figurines engagées sur 4.
+        """
+        from engine.phase_handlers.shared_utils import _synth_model_entry, get_engagement_zone
+        from engine.spatial_relations import unit_entries_within_engagement_zone
+
+        gs = self._x5_state(
+            [(40, 40), (40, 45), (40, 50), (40, 55)], [(40, 58)], fight_subphase="fight",
+        )
+        plan = fight_pile_in_plan(gs, "1")
+        assert plan is not None and len(plan) == 4
+        ez = int(get_engagement_zone(gs))
+        te = gs["units_cache"]["2"]
+        engaged = [
+            mid for mid, c, r, lv in plan
+            if unit_entries_within_engagement_zone(
+                _synth_model_entry(gs, "1", gs["models_cache"][mid], c, r, level=lv),
+                te, ez, game_state=gs,
+            )
+        ]
+        assert len(engaged) == 4, (
+            f"12.03 « engaged with it if possible » : 4 figurines pouvaient l'être, "
+            f"{len(engaged)} le sont — plan {plan}"
+        )
+        self._assert_disjoint(gs, plan, 6, "pile-in 12.03 (reprise)")
+
+    def test_the_six_neighbours_of_an_enemy_centre_are_all_inside_its_own_base(self):
+        """La MESURE qui condamne le palier contact, gardée comme fait vérifiable.
+
+        Si un jour un socle de production redevient assez petit pour que ces cases soient
+        libres, ce test rougit et la suppression du palier doit être rediscutée.
+        """
+        from engine.combat_utils import get_hex_neighbors
+
+        gs = self._x5_state([(40, 40)], [(40, 62)], fight_subphase="fight")
+        enemy_fp = set(gs["units_cache"]["2"]["occupied_hexes"])
+        assert all((c, r) in enemy_fp for c, r in get_hex_neighbors(40, 62)), (
+            "les voisins du centre ennemi ne sont plus tous dans son empreinte"
+        )
