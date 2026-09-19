@@ -3284,8 +3284,8 @@ class GameStateManager:
         # sur un chemin qu'un scenario court peut ne jamais atteindre.
         require_key(scoring_cfg, "rules")
         require_key(scoring_cfg, "max_points_per_turn")
-        default_phase = require_key(timing_cfg, "default_phase")
-        round5_second_player_phase = require_key(timing_cfg, "round5_second_player_phase")
+        first_player_phase = require_key(timing_cfg, "first_player_phase")
+        second_player_phase = require_key(timing_cfg, "second_player_phase")
 
         current_turn = require_key(game_state, "turn")
         current_player = require_key(game_state, "current_player")
@@ -3294,10 +3294,23 @@ class GameStateManager:
         if current_turn < start_turn:
             return
 
-        if current_turn == 5 and current_player_int == 2:
-            expected_phase = round5_second_player_phase
-        else:
-            expected_phase = default_phase
+        # LE SIÈGE DÉCIDE DE LA PHASE DE MARQUAGE, PAS LE ROUND. 26 Primary missions, verbatim :
+        # « The player who has the first turn scores VP as described above. The player who has the
+        # second turn scores VP as described above, but does so at the end of their turn instead
+        # of at the end of their Command phase. » Aucune restriction de round dans le texte.
+        #
+        # Marquer à sa phase de commandement n'a pas la même valeur selon le siège : quand le
+        # premier joueur compte au round R, chacun a joué R-1 tours ; quand le second compte au
+        # round R, son adversaire en a joué R. Le second comptait donc TOUJOURS après un tour
+        # adverse de plus que le sien. Jusqu'au 2026-09-19 la compensation n'était appliquée qu'au
+        # round 5 (`current_turn == 5`, clé `round5_second_player_phase`) : mesuré en miroir bot
+        # contre le même bot, sans politique apprise, le premier joueur gagnait 0,588 contre 0,398
+        # sur terrain-mc1 (Documentation/Chantiers/backlog/plafonnement_p1.md §13).
+        #
+        # P1 ouvrant toujours le round (`w40k_core` pose `current_player: 1` à chaque nouveau
+        # round), le numéro de joueur EST le siège — c'est la même égalité que le bit
+        # `i_play_first` de l'observation.
+        expected_phase = first_player_phase if current_player_int == 1 else second_player_phase
 
         if scoring_phase != expected_phase:
             return

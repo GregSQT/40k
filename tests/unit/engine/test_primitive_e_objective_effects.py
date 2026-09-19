@@ -70,7 +70,7 @@ def _state(
     primary_objective = {
         "id": "po",
         "scoring": {"start_turn": 2, "max_points_per_turn": 5, "rules": []},
-        "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
+        "timing": {"first_player_phase": "command", "second_player_phase": "fight"},
         "control": {
             "method": "oc_sum_greater",
             "control_method": control_method,

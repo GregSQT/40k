@@ -54,8 +54,8 @@ interface PrimaryObjectiveRule {
     rules: Array<{ id: string; points: number; condition: string }>;
   };
   timing: {
-    default_phase: string;
-    round5_second_player_phase: string;
+    first_player_phase: string;
+    second_player_phase: string;
   };
   control: {
     method: string;

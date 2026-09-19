@@ -268,7 +268,7 @@ _PRIMARY_OBJECTIVE_CFG: Dict[str, Any] = {
     "id": "obj1",
     "control": {"method": "oc_sum_greater", "control_method": "default", "tie_behavior": "no_control"},
     "scoring": {"start_turn": 1, "max_points_per_turn": 5, "rules": []},
-    "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
+    "timing": {"first_player_phase": "command", "second_player_phase": "fight"},
 }
 
 

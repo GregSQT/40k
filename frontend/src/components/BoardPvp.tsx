@@ -10087,8 +10087,8 @@ export default function Board({
         throw new Error("Replay rules primary_objective.control.control_method is missing");
       }
       if (
-        !primaryObjectiveConfig.timing?.default_phase ||
-        !primaryObjectiveConfig.timing.round5_second_player_phase
+        !primaryObjectiveConfig.timing?.first_player_phase ||
+        !primaryObjectiveConfig.timing.second_player_phase
       ) {
         throw new Error("Replay rules primary_objective.timing is missing required fields");
       }
@@ -10143,8 +10143,8 @@ export default function Board({
         throw new Error("primary_objective.control.control_method is missing");
       }
       if (
-        !primaryObjectiveConfig.timing?.default_phase ||
-        !primaryObjectiveConfig.timing.round5_second_player_phase
+        !primaryObjectiveConfig.timing?.first_player_phase ||
+        !primaryObjectiveConfig.timing.second_player_phase
       ) {
         throw new Error("primary_objective.timing is missing required fields");
       }

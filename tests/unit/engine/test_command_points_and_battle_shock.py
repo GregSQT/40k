@@ -375,7 +375,7 @@ def test_le_battle_shock_fait_basculer_le_controle_dobjectif():
     gs["primary_objective"] = {
         "id": "obj1", "type": "objectives_control", "condition": "control_at_least_one",
         "points_per_scoring": 5, "max_points": 5,
-        "scoring": {"start_turn": 2, "default_phase": "command", "round5_second_player_phase": "command"},
+        "scoring": {"start_turn": 2, "first_player_phase": "command", "second_player_phase": "command"},
         "control": {"method": "oc_sum_greater", "control_method": "default", "tie_behavior": "no_control"},
         "objective_hexes": [[5, 5]],
     }

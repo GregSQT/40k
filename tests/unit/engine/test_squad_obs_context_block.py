@@ -74,7 +74,7 @@ _OBJECTIVE_HEXES = [[30, 20], [31, 20], [32, 20]]
 _PRIMARY_OBJECTIVE = {
     "id": "objectives_control",
     "scoring": {"start_turn": 2, "max_points_per_turn": 15, "rules": []},
-    "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
+    "timing": {"first_player_phase": "command", "second_player_phase": "fight"},
     "control": {
         "method": "oc_sum_greater",
         "control_method": "default",

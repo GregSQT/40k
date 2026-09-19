@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse_log_file_from_text } from "./replayParser";
 
 const VALID_RULES_JSON =
-  '{"primary_objective":{"id":"po","scoring":{"start_turn":1,"max_points_per_turn":5,"rules":[{"id":"r1","points":5,"condition":"control_at_least_one"}]},"timing":{"default_phase":"command","round5_second_player_phase":"command"},"control":{"method":"sticky","control_method":"oc","tie_behavior":"keep"}}}';
+  '{"primary_objective":{"id":"po","scoring":{"start_turn":1,"max_points_per_turn":5,"rules":[{"id":"r1","points":5,"condition":"control_at_least_one"}]},"timing":{"first_player_phase":"command","second_player_phase":"command"},"control":{"method":"sticky","control_method":"oc","tie_behavior":"keep"}}}';
 
 describe("replayParser", () => {
   it("parse un episode minimal avec deployment/move", () => {
@@ -243,7 +243,7 @@ describe("replayParser", () => {
 
   it("leve une erreur si control_method est absent dans Rules", () => {
     const badRules =
-      '{"primary_objective":{"id":"po","scoring":{"start_turn":1,"max_points_per_turn":5,"rules":[{"id":"r1","points":5,"condition":"control_at_least_one"}]},"timing":{"default_phase":"command","round5_second_player_phase":"command"},"control":{"method":"sticky","tie_behavior":"keep"}}}';
+      '{"primary_objective":{"id":"po","scoring":{"start_turn":1,"max_points_per_turn":5,"rules":[{"id":"r1","points":5,"condition":"control_at_least_one"}]},"timing":{"first_player_phase":"command","second_player_phase":"command"},"control":{"method":"sticky","tie_behavior":"keep"}}}';
     const text = [
       "=== EPISODE 1 START ===",
       `Rules: ${badRules}`,

@@ -928,10 +928,19 @@ def _fight_end_progression_v10(game_state: Dict[str, Any]) -> Dict[str, Any]:
         }
     elif game_state["current_player"] == 2:
         from engine.game_utils import get_effective_turn_limit
+        # FIN DU TOUR DU SECOND JOUEUR : c'est ICI qu'il marque le primaire, à CHAQUE round.
+        # 26 Primary missions : « The player who has the second turn scores VP as described
+        # above, but does so at the end of their turn instead of at the end of their Command
+        # phase » — sans restriction de round. Le versement ne vivait que dans la branche de la
+        # limite de rounds ci-dessous, donc le second joueur ne marquait en fin de tour qu'au
+        # round 5 et comptait ses objectifs à sa phase de commandement les autres rounds, soit
+        # toujours après un tour adverse de plus que le sien.
+        # Le filtre de phase attendue reste dans `_apply_primary_objective_scoring_single` :
+        # l'appel est inconditionnel, c'est la mission qui dit si ce siège marque à cette phase.
+        state_manager = GameStateManager(require_key(game_state, "config"))
+        state_manager.apply_primary_objective_scoring(game_state, "fight")
         max_turns = get_effective_turn_limit(game_state)
         if max_turns is not None and (game_state["turn"] + 1) > max_turns:
-            state_manager = GameStateManager(require_key(game_state, "config"))
-            state_manager.apply_primary_objective_scoring(game_state, "fight")
             game_state["turn_limit_reached"] = True
             game_state["game_over"] = True
             return {
@@ -2673,10 +2682,14 @@ def _fight_v11_end_progression(game_state: Dict[str, Any]) -> Dict[str, Any]:
         }
     # current_player == 2
     from engine.game_utils import get_effective_turn_limit
+    # FIN DU TOUR DU SECOND JOUEUR : il marque le primaire ICI, à chaque round. Jumeau exact de
+    # `_fight_end_progression_v10`, même raison (26 Primary missions, sans restriction de round) ;
+    # laisser l'une des deux progressions en arrière ferait dépendre les VP marqués de la version
+    # de phase de combat active.
+    state_manager = GameStateManager(require_key(game_state, "config"))
+    state_manager.apply_primary_objective_scoring(game_state, "fight")
     max_turns = get_effective_turn_limit(game_state)
     if max_turns is not None and (game_state["turn"] + 1) > max_turns:
-        state_manager = GameStateManager(require_key(game_state, "config"))
-        state_manager.apply_primary_objective_scoring(game_state, "fight")
         game_state["turn_limit_reached"] = True
         game_state["game_over"] = True
         return {
