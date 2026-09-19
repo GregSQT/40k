@@ -16,6 +16,7 @@ Ce que ce fichier verrouille :
 """
 from __future__ import annotations
 
+from ai.step_logger import LOG_GRAMMAR_VERSION
 from tests.unit.ai._fabriques import entete_step_log
 from tests.unit.ai._fabriques import analyzer_config as fab_config
 
@@ -30,6 +31,9 @@ class _Registry:
         "PainBoy": {"HP_MAX": 3, "MOVE": 6, "MODEL_HEIGHT": 1.0,
                     "UNIT_RULES": [{"ruleId": "support", "displayName": "Support"}]},
         "Grunt": {"HP_MAX": 5, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+        # Second profil BODYGUARD, distinct de `Boyz` : la ligne que le moteur produit doit
+        # porter la datasheet de CHAQUE socle rendu, pas celle de l'escouade.
+        "Nob": {"HP_MAX": 2, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
     }
 
 
@@ -59,7 +63,7 @@ def _mw_sur_socle(mid: str, n: int) -> str:
     )
 
 
-def _parse(tmp_path, monkeypatch, body: str, *, log_grammar=10):
+def _parse(tmp_path, monkeypatch, body: str, *, log_grammar=10, units: str = _UNITS):
     import ai.analyzer as an
     import ai.analyzer_config as ac_mod
 
@@ -71,7 +75,7 @@ def _parse(tmp_path, monkeypatch, body: str, *, log_grammar=10):
     log = tmp_path / "step.log"
     log.write_text(entete_step_log(
         body, inches_to_subhex=1, board="cols=40 rows=40", objectives=_OBJECTIVES,
-        units=_UNITS, log_grammar=log_grammar,
+        units=units, log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -206,3 +210,183 @@ def test_une_restitution_hors_phase_de_commandement_ou_hors_tour_est_une_faute(t
     assert fight["returned_models_invalid"][1] == 1 and "phase FIGHT" in str(_invalid(fight)[1])
     other = _parse(tmp_path, monkeypatch, _BOY_MORT + _returned_at("1#r0=Boyz", "1#1@(20,21,z0) 1#r0@(20,22,z0)", player=2))
     assert other["returned_models_invalid"][2] == 1 and "tour de 2" in str(_invalid(other)[1])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Le dernier maillon : moteur → step.log → analyzer, sans ligne écrite à la main
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Tout ce qui précède réécrit la ligne `RETURNED` à la main (`_returned_at`) : l'analyzer y est
+# jugé sur une grammaire que le test décide, pas sur celle que le moteur émet. Côté moteur,
+# `tests/unit/engine/test_returned_models_placement.py` remonte la chaîne réelle jusqu'au
+# formateur (`StepLogger._format_replay_style_message`) et s'y arrête. Aucun test ne DONNAIT
+# donc à `parse_step_log` une ligne réellement produite par le moteur : le jour où le formateur
+# change un token (`[MODEL_TYPES:]`, `(D3=n)`, le verbe `RETURNED`), les deux moitiés restent
+# vertes et `check_returned_models` cesse de juger quoi que ce soit, en silence.
+#
+# Ici, rien n'est écrit à la main sur la ligne : l'écrivain de la restitution
+# (`apply_returned_models_placement`), la traduction des clés
+# (`W40KEngine._build_step_log_details`) et le vrai `StepLogger.log_action` la produisent
+# entièrement — donc aussi le préfixe `E1 T1 P1 COMMAND`, que `check_returned_models` lit pour
+# juger la phase et le joueur. Seul le décor (entête d'épisode, lignes `DEAD`) reste fabriqué :
+# ce n'est pas le sujet.
+
+#: Survivantes de l'escouade, puis les deux cases où les socles rendus reviennent — celles-là
+#: mêmes que les figurines détruites occupaient, donc en cohésion avec les survivantes (03.03).
+_CHAINE_VIVANTS = ((6, 4), (6, 5), (6, 6))
+_CHAINE_CASES_RENDUES = ((6, 7), (6, 8))
+_CHAINE_SEG_VIVANTS = "[MODELS: 1#0@(6,4,z0) 1#1@(6,5,z0) 1#2@(6,6,z0)]"
+
+
+def _etat_avec_archive(profils):
+    """Escouade ORK jouable (caches construits par `build_units_cache`) dont l'archive des
+    détruites porte UN PROFIL PAR ENTRÉE de `profils`.
+
+    Deux datasheets distinctes : c'est le seul régime où la ligne peut mentir en déclarant
+    celle de l'escouade pour tous les socles rendus.
+    """
+    import copy
+
+    from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+    escouade = synthetic_unit(
+        "1", 1, [{"col": col, "row": row} for col, row in _CHAINE_VIVANTS],
+        unitType="Boyz",
+        UNIT_RULES=[{"ruleId": "return_destroyed_models", "displayName": "Grot Orderly"}],
+    )
+    ennemi = synthetic_unit("101", 2, [{"col": 18, "row": 5}], unitType="Grunt")
+    gs = synthetic_state(
+        [escouade, ennemi], phase="command", game_rules={},
+        inches_to_subhex=1, board_cols=30, board_rows=30,
+    )
+    archive = []
+    for unit_type in profils:
+        # Une figurine détruite EST une ancienne figurine vivante : on part de son entrée de
+        # `models_cache`, la seule structure que l'écrivain de la restitution sait recopier.
+        model = copy.deepcopy(gs["models_cache"]["1#0"])
+        # `UNIT_RULES` vient de la MÊME datasheet que `unitType` : c'est d'elle que le moteur
+        # (`_derive_model_role`) comme l'analyzer (`_model_is_character`) tirent le rôle. Les
+        # laisser à celles du socle Boyz recopié donnerait un « PainBoy » qui n'est support que
+        # pour l'analyzer, et la moitié moteur du cas ne serait pas exercée.
+        model.update({
+            "unitType": unit_type, "HP_MAX": int(_Registry.units[unit_type]["HP_MAX"]),
+            "UNIT_RULES": copy.deepcopy(_Registry.units[unit_type]["UNIT_RULES"]),
+            "HP_CUR": 0, "col": -1, "row": -1,
+        })
+        archive.append(model)
+    gs["destroyed_models"]["1"] = archive
+    return gs
+
+
+def _ligne_returned_du_moteur(tmp_path, profils):
+    """La ligne `RETURNED` telle que le CHEMIN DE PRODUCTION l'écrit, du premier au dernier
+    maillon : écrivain → `_STEP_LOG_TYPE_MAP` → `_build_step_log_details` → `log_action`."""
+    from ai.step_logger import StepLogger
+    from engine.phase_handlers.command_handlers import apply_returned_models_placement
+    from engine.w40k_core import W40KEngine
+
+    gs = _etat_avec_archive(profils)
+    # Deux profils distincts posent une décision `returned_models_profile` en amont : on appelle
+    # l'ÉCRIVAIN, avec les figurines de l'archive et les cases qu'elles occupaient.
+    apply_returned_models_placement(
+        gs, "1", list(_CHAINE_CASES_RENDUES), list(range(len(profils))),
+        d3=len(profils), destroyed=len(profils),
+    )
+    entrees = [e for e in gs["action_logs"] if e["type"] == "return_destroyed_models"]
+    assert len(entrees) == 1, entrees
+    entree = entrees[0]
+
+    engine = W40KEngine.__new__(W40KEngine)
+    engine.game_state = gs
+    action_type = W40KEngine._STEP_LOG_TYPE_MAP["return_destroyed_models"]
+    sortie = tmp_path / "moteur.log"
+    logger = StepLogger(output_file=str(sortie), enabled=True, buffer_size=1)
+    logger.episode_number = 1
+    logger.log_action(
+        unit_id=entree["unitId"], action_type=action_type, phase=entree["phase"],
+        player=entree["player"], success=True,
+        # Expression du chemin de production, recopiée telle quelle (w40k_core.py:8553) —
+        # y compris son défaut : le set est clé par type BRUT, et `return_destroyed_models` est
+        # le seul type non-incrémentant dont le nom mappé (`returned_models`) n'y figure pas,
+        # donc `step_increment` y vaut True. Rien ici n'en dépend ; la corriger est un sujet
+        # moteur, pas un sujet de ce test.
+        step_increment=action_type not in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES,
+        action_details=engine._build_step_log_details(entree, pre_action_turn=1),
+    )
+    logger._flush_buffer()
+    lignes = [l for l in sortie.read_text().splitlines() if " RETURNED " in l]
+    assert len(lignes) == 1, sortie.read_text()
+    return lignes[0]
+
+
+def _journal_de_la_chaine(tmp_path, monkeypatch, ligne_moteur, morts):
+    """Monte un journal autour de la ligne du moteur et le donne au vrai `parse_step_log`.
+
+    `morts` : datasheet de `1#3` et `1#4`, les deux figurines que l'escouade perd avant la
+    restitution — ce sont ELLES que la ligne est censée rendre. Les faire diverger des
+    datasheets que le moteur a écrites sur la ligne est ce qui falsifie le vert.
+    """
+    vivants_puis_morts = _CHAINE_VIVANTS + _CHAINE_CASES_RENDUES
+    models_seg = " ".join(
+        f"1#{i}@({col},{row},z0)" for i, (col, row) in enumerate(vivants_puis_morts)
+    )
+    types_seg = " ".join(["1#0=Boyz", "1#1=Boyz", "1#2=Boyz"]
+                         + [f"1#{3 + i}={t}" for i, t in enumerate(morts)])
+    units = (
+        f"[10:00:00] Unit 1 (Boyz) P1: Starting position (6,4), HP_MAX=1 base=round/1 "
+        f"[MODELS: {models_seg}] [MODEL_TYPES: {types_seg}]\n"
+        "[10:00:00] Unit 101 (Grunt) P2: Starting position (18,5), HP_MAX=5 base=round/1\n"
+    )
+    morts_lignes = (
+        "[10:00:01] E1 T1 P2 SHOOT : Unit 1 DEAD model=1#3 reason=combat "
+        "[MODELS: 1#0@(6,4,z0) 1#1@(6,5,z0) 1#2@(6,6,z0) 1#4@(6,8,z0)] [SUCCESS]\n"
+        "[10:00:02] E1 T1 P2 SHOOT : Unit 1 DEAD model=1#4 reason=combat "
+        f"{_CHAINE_SEG_VIVANTS} [SUCCESS]\n"
+    )
+    return _parse(
+        tmp_path, monkeypatch, f"{morts_lignes}{ligne_moteur}\n",
+        log_grammar=LOG_GRAMMAR_VERSION, units=units,
+    )
+
+
+def test_la_ligne_du_moteur_est_lue_sans_faute_par_l_analyzer(tmp_path, monkeypatch):
+    """Deux socles rendus, deux datasheets distinctes, en phase de commandement du propriétaire :
+    `check_returned_models` ne relève aucune faute et compte l'exercice de PROJ.2.3.
+
+    Le verdict 19.04 (`special_rule_usage_invalid`) n'est PAS jugé ici : le décor attribue la
+    capacité au seul PainBoy (`rule_to_units` de `_parse`, partagé avec les cas du haut du
+    fichier), donc une escouade sans PainBoy vivant y ressort invalide — c'est le sujet de
+    `test_la_restitution_est_jugee_sur_la_composition_d_avant`, pas celui de la chaîne.
+    """
+    ligne = _ligne_returned_du_moteur(tmp_path, ("Boyz", "Nob"))
+    assert "[MODEL_TYPES: 1#r0=Boyz 1#r1=Nob]" in ligne, ligne
+
+    stats = _journal_de_la_chaine(tmp_path, monkeypatch, ligne, ("Boyz", "Nob"))
+    assert not stats["parse_errors"], stats["parse_errors"]
+    assert stats["returned_models_invalid"] == {1: 0, 2: 0}, _invalid(stats)
+    assert stats["rule_usage"]["PROJ.2.3.returned_models"][1] == 1
+    assert stats["returned_models"][1] == 2
+
+
+def test_la_datasheet_ecrite_par_le_moteur_est_bien_celle_que_l_analyzer_juge(tmp_path, monkeypatch):
+    """VERT NON VACANT : la ligne est la MÊME, seule l'escouade change — aucun `Nob` n'y est
+    jamais mort. Si l'analyzer lisait la datasheet de l'ESCOUADE (Boyz) au lieu de celle que le
+    moteur a écrite par socle, le verdict resterait vert."""
+    ligne = _ligne_returned_du_moteur(tmp_path, ("Boyz", "Nob"))
+
+    stats = _journal_de_la_chaine(tmp_path, monkeypatch, ligne, ("Boyz", "Boyz"))
+    counts, detail = _invalid(stats)
+    assert counts == {1: 1, 2: 0} and "1#r1=Nob" in str(detail), (counts, detail)
+
+
+def test_un_support_rendu_par_le_moteur_est_vu_par_l_analyzer(tmp_path, monkeypatch):
+    """La faute remise en place sur la CHAÎNE ENTIÈRE : l'écrivain accepte l'index d'un profil
+    `support` (le filtre bodyguard vit en amont, dans la sélection), donc le moteur PEUT émettre
+    cette ligne — et c'est l'analyzer qui doit la refuser (« BODYGUARD models »)."""
+    ligne = _ligne_returned_du_moteur(tmp_path, ("Boyz", "PainBoy"))
+    assert "1#r1=PainBoy" in ligne, ligne
+
+    stats = _journal_de_la_chaine(tmp_path, monkeypatch, ligne, ("Boyz", "PainBoy"))
+    assert not stats["parse_errors"], stats["parse_errors"]
+    counts, detail = _invalid(stats)
+    assert counts == {1: 1, 2: 0} and "bodyguard" in str(detail), (counts, detail)

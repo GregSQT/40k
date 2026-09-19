@@ -251,7 +251,8 @@ Au passage : le découpage de `ZONES=` par blancs rangeait l'OC sous le dernier 
 (« rect b NW » → `NW`) — découpé par `|` (`parse_zones`) ; le parseur de replay
 (`frontend/src/utils/replayParser.ts`) rejetait TOUTE zone suivie de `:Mthd=` (donc tout journal
 depuis L18, 2026-08-19) — champs optionnels acceptés, +1 vitest. Verrous : `test_analyzer_objective_control.py`
-(7), `test_analyzer_objective_secured.py` (5), `test_analyzer_returned_models.py` (+6),
+(7), `test_analyzer_objective_secured.py` (5), `test_analyzer_returned_models.py` (+6, puis +3
+le 2026-09-19 : la ligne `RETURNED` produite par le VRAI moteur donnée au vrai `parse_step_log`),
 `test_step_log_objective_secured.py` (producteur), `test_squad_step_logging.py` (+1 dédup).
 
 ---
