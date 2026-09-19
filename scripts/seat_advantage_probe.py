@@ -3,13 +3,15 @@
 
 POURQUOI CET OUTIL EXISTE
     Mesuré le 2026-09-19 : en miroir (même bot des deux côtés, seul le siège change), le joueur
-    qui joue premier gagne 0,599 contre 0,389 sur 2 400 parties du holdout x1. L'écart est donc
-    DANS LE JEU, pas dans l'agent : aucune politique apprise n'intervient, et le réglage
-    `agent_seat_p2_ratio` (0,75) ne fait que compenser l'agent sans toucher à la cause.
+    qui joue premier gagnait 0,588 contre 0,398 sur `terrain-mc1`. L'écart était DANS LE JEU, pas
+    dans l'agent : aucune politique apprise n'intervient, et le réglage `agent_seat_p2_ratio`
+    (0,75) ne faisait que compenser l'agent sans toucher à la cause.
 
-    Cet outil dit LAQUELLE des causes candidates produit l'écart. Sans lui, la décision qui suit
-    — implémenter les outils du second joueur, découpler premier déployeur et premier tour, ou
-    accepter l'écart et ramener le ratio à 0,5 — se prendrait sur une inférence.
+    C'est cet outil qui a désigné la cause — l'instant de marquage de la mission — et la mission
+    a été corrigée le même jour : le second joueur marque désormais à la fin de son tour à chaque
+    round, comme le veut 26 Primary missions. L'outil reste le juge de tout réglage ultérieur du
+    siège, et la variante `p2-scores-at-command` rejoue l'ancien régime pour que les chiffres
+    publiés avant et après restent comparables.
 
     ⚠️ CE QUI EST DÉJÀ RÉFUTÉ, ne pas le remesurer : l'information du DERNIER DÉPLOYEUR. Le
     déploiement alterne depuis le joueur 1 (`_resolve_next_deployer_after_success`), donc le
@@ -48,7 +50,7 @@ CE QU'IL NE FAIT PAS
 
 USAGE
     python3 scripts/seat_advantage_probe.py --episodes 50
-    python3 scripts/seat_advantage_probe.py --episodes 50 --variant no-p1-turn2-score
+    python3 scripts/seat_advantage_probe.py --episodes 50 --variant p2-scores-at-command
     python3 scripts/seat_advantage_probe.py --episodes 50 --terrain terrain-mc2.json
     python3 scripts/seat_advantage_probe.py --episodes 50 --mission objectives_control
 
@@ -83,18 +85,19 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 #: Variantes de contrefactuel. `none` = le jeu tel qu'il est livré.
 #:
-#: `p2-scores-end-of-turn` est celle qui porte l'hypothèse principale. La mission
-#: `objectives_control` fait marquer les DEUX joueurs à leur phase de commandement, sauf le
-#: second joueur au round 5 (`timing.round5_second_player_phase`). Or marquer à sa phase de
-#: commandement n'est pas la même chose selon le siège : quand le joueur 1 marque au round R,
-#: chacun a joué R-1 tours ; quand le joueur 2 marque au round R, son adversaire en a joué R.
-#: Le second joueur compte donc TOUJOURS ses objectifs après un tour adverse de plus que le sien.
-#: Les missions officielles compensent exactement cela (26 Primary_missions : « The player who
-#: has the second turn scores VP as described above, but does so at the end of their turn instead
-#: of at the end of their Command phase »), sans restriction de round. Cette variante étend la
-#: compensation du round 5 à TOUS les rounds, au site d'appel que le moteur utilise déjà pour le
-#: round 5.
-VARIANTS: Tuple[str, ...] = ("none", "no-p1-turn2-score", "p2-scores-end-of-turn")
+#: `p2-scores-at-command` REJOUE L'ANCIENNE RÈGLE, celle d'avant le 2026-09-19 : le second joueur
+#: marquait à sa phase de commandement comme le premier, sauf au round 5. Or marquer à sa phase de
+#: commandement n'a pas la même valeur selon le siège — quand le premier joueur compte au round R,
+#: chacun a joué R-1 tours ; quand le second compte au round R, son adversaire en a joué R. Le
+#: second comptait donc toujours après un tour adverse de plus que le sien.
+#:
+#: La mission applique désormais la règle officielle (26 Primary_missions : « The player who has
+#: the second turn scores VP as described above, but does so at the end of their turn instead of
+#: at the end of their Command phase »), sans restriction de round. Cette variante existe pour que
+#: l'écart reste MESURABLE après coup : elle est le seul moyen de rejouer l'ancien régime sans
+#: revenir en arrière dans le moteur, et c'est elle qui rend comparables les chiffres publiés
+#: avant et après le changement.
+VARIANTS: Tuple[str, ...] = ("none", "no-p1-turn2-score", "p2-scores-at-command")
 
 
 def board_path_for_agent(agent: str) -> str:
@@ -151,48 +154,29 @@ def _install_variant(variant: str) -> None:
     else:
         _scoring = original
 
-        # Le second joueur marque à la FIN DE SON TOUR, tous rounds confondus.
+        # ANCIEN RÉGIME : le second joueur marque à sa phase de commandement, sauf au round 5.
         #
-        # DEUX pièces, et il en faut deux. (1) Le moteur choisit la phase attendue du versement
-        # dans `_apply_primary_objective_scoring_single` : `round5_second_player_phase` si
-        # (round 5, joueur 2), `default_phase` sinon. Un appel en phase de combat au round 3 est
-        # donc REJETÉ — mesuré, le joueur 2 ne marquait plus rien du tout. On bascule le `timing`
-        # du joueur 2 sur la phase de fin de tour au lieu de forcer la phase, ce qui laisse la
-        # règle du moteur décider comme elle le fait déjà au round 5. (2) Le site d'appel de fin
-        # de tour n'existe qu'à la limite de rounds : les deux progressions de fin de phase de
-        # combat sont enveloppées pour l'ouvrir à chaque round. La V11 est celle du gym, la V10
-        # reste atteignable, et n'en traiter qu'une rendrait la variante silencieusement
-        # partielle. Le double versement au round 5 (l'appel du moteur plus le nôtre) est
-        # neutralisé par `once_claim`, qui réclame la clé (objectif, round, joueur) une fois.
+        # Une seule pièce suffit, et c'est l'inverse de ce que demandait le contrefactuel d'avant
+        # le changement : on bascule le `timing` du second joueur sur la phase du PREMIER, sauf
+        # au round 5 où la mission livrée le faisait déjà marquer en fin de tour. Le site d'appel
+        # de fin de tour existe désormais à chaque round, mais il ne verse rien quand la phase
+        # attendue du siège est la phase de commandement — `_apply_primary_objective_scoring_single`
+        # sort sur la comparaison de phase, exactement comme il le faisait aux rounds 2 à 4 avant.
         import copy
-
-        import engine.phase_handlers.fight_handlers as fight_handlers
 
         original_single = GameStateManager._apply_primary_objective_scoring_single
 
         def _single(self, game_state, scoring_phase, primary_objective):  # type: ignore[no-untyped-def]
-            if int(require_key(game_state, "current_player")) == 2:
+            if (
+                int(require_key(game_state, "current_player")) == 2
+                and int(require_key(game_state, "turn")) != 5
+            ):
                 primary_objective = copy.deepcopy(primary_objective)
                 timing = require_key(primary_objective, "timing")
-                timing["default_phase"] = require_key(timing, "round5_second_player_phase")
+                timing["second_player_phase"] = require_key(timing, "first_player_phase")
             return original_single(self, game_state, scoring_phase, primary_objective)
 
         GameStateManager._apply_primary_objective_scoring_single = _single  # type: ignore[method-assign]
-
-        def _wrap_progression(name: str) -> None:
-            progression = getattr(fight_handlers, name)
-
-            def _wrapped(game_state):  # type: ignore[no-untyped-def]
-                if int(require_key(game_state, "current_player")) == 2:
-                    GameStateManager(
-                        require_key(game_state, "config")
-                    ).apply_primary_objective_scoring(game_state, "fight")
-                return progression(game_state)
-
-            setattr(fight_handlers, name, _wrapped)
-
-        for _name in ("_fight_v11_end_progression", "_fight_end_progression_v10"):
-            _wrap_progression(_name)
 
     GameStateManager.apply_primary_objective_scoring = _scoring  # type: ignore[method-assign]
 

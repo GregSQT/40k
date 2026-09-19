@@ -52,7 +52,7 @@ PRIMARY_OBJECTIVE: Dict[str, Any] = {
             {"id": "control_more_than_opponent", "points": 5, "condition": "control_more_than_opponent"},
         ],
     },
-    "timing": {"default_phase": "command", "round5_second_player_phase": "fight"},
+    "timing": {"first_player_phase": "command", "second_player_phase": "fight"},
     "control": {"method": "oc_sum_greater", "control_method": "default", "tie_behavior": "no_control"},
 }
 

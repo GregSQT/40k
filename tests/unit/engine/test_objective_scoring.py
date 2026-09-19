@@ -39,8 +39,8 @@ def _primary_objective(
     obj_id: str = "obj1",
     start_turn: int = 2,
     max_points: int = 5,
-    default_phase: str = "command",
-    round5_phase: str = "fight",
+    first_player_phase: str = "command",
+    second_player_phase: str = "fight",
     conditions: Optional[List[Dict]] = None,
     control_method: str = "secured",
 ) -> Dict[str, Any]:
@@ -57,8 +57,8 @@ def _primary_objective(
             "rules": conditions,
         },
         "timing": {
-            "default_phase": default_phase,
-            "round5_second_player_phase": round5_phase,
+            "first_player_phase": first_player_phase,
+            "second_player_phase": second_player_phase,
         },
         "control": {
             "method": "oc_sum_greater",
@@ -171,7 +171,7 @@ class TestObjectiveScoringGuards:
     def test_wrong_phase_no_scoring(self):
         """obj_wrong_phase : scoring_phase != expected_phase → aucun VP."""
         mgr = _make_manager()
-        obj = _primary_objective(default_phase="command")
+        obj = _primary_objective(first_player_phase="command")
         units = [_unit(1, 1, 5, 5)]
         gs = _make_gs(units, turn=2, primary_objective=obj)
 
@@ -271,20 +271,52 @@ class TestObjectiveScoringConditions:
 
         assert gs["victory_points"][1] == 3  # capped at 3
 
-    def test_round5_player2_uses_special_phase(self):
-        """obj_r5_p2 : tour 5 joueur 2 → expected_phase = round5_second_player_phase."""
+    @pytest.mark.parametrize("battle_round", [2, 3, 4, 5])
+    def test_second_player_scores_at_end_of_turn_in_every_round(self, battle_round):
+        """Le SIÈGE décide de la phase de marquage, pas le round.
+
+        26 Primary missions : « The player who has the second turn scores VP as described above,
+        but does so at the end of their turn instead of at the end of their Command phase »,
+        sans restriction de round. Jusqu'au 2026-09-19 la compensation n'existait qu'au round 5,
+        et le second joueur comptait ses objectifs à sa phase de commandement aux rounds 2 à 4,
+        c'est-à-dire toujours après un tour adverse de plus que le sien.
+
+        Les quatre rounds marquants sont paramétrés : ne vérifier que le round 5 laisserait
+        passer exactement le défaut corrigé ici.
+        """
         mgr = _make_manager()
-        obj = _primary_objective(default_phase="command", round5_phase="fight")
+        obj = _primary_objective(first_player_phase="command", second_player_phase="fight")
         units = [_unit(2, 2, 5, 5)]
-        gs = _make_gs(units, turn=5, current_player=2, primary_objective=obj)
+        gs = _make_gs(units, turn=battle_round, current_player=2, primary_objective=obj)
 
-        # "command" phase → no scoring car expected_phase="fight" au tour 5 joueur 2
         mgr.apply_primary_objective_scoring(gs, "command")
-        assert gs["victory_points"][2] == 0
+        assert gs["victory_points"][2] == 0, (
+            "le second joueur ne marque pas à sa phase de commandement"
+        )
 
-        # "fight" phase → scoring
         mgr.apply_primary_objective_scoring(gs, "fight")
-        assert gs["victory_points"][2] > 0
+        assert gs["victory_points"][2] > 0, "le second joueur marque à la fin de son tour"
+
+    @pytest.mark.parametrize("battle_round", [2, 3, 4, 5])
+    def test_first_player_scores_at_his_command_phase_in_every_round(self, battle_round):
+        """Le premier joueur garde la phase de commandement, round 5 compris.
+
+        Le round 5 est le cas qui distingue la règle du siège d'une règle du round : avant le
+        2026-09-19 la condition portait sur `turn == 5`, et l'y laisser pour le premier joueur
+        l'aurait fait marquer en phase de combat au dernier round.
+        """
+        mgr = _make_manager()
+        obj = _primary_objective(first_player_phase="command", second_player_phase="fight")
+        units = [_unit(1, 1, 5, 5)]
+        gs = _make_gs(units, turn=battle_round, current_player=1, primary_objective=obj)
+
+        mgr.apply_primary_objective_scoring(gs, "fight")
+        assert gs["victory_points"][1] == 0, (
+            "le premier joueur ne marque pas à la fin de son tour"
+        )
+
+        mgr.apply_primary_objective_scoring(gs, "command")
+        assert gs["victory_points"][1] > 0, "le premier joueur marque à sa phase de commandement"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

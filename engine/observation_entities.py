@@ -1249,11 +1249,14 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     # CE QUE LA RÈGLE EN FAIT DÉPENDRE. `turn` est le BATTLE ROUND et non le tour de joueur
     # (`_fight_end_progression_v10` ne l'incrémente qu'après le tour de P2) et P1 ouvre toujours
     # le round (`w40k_core` pose `current_player: 1`). Or le primaire se marque à la command phase
-    # pour le premier joueur et à la FIGHT phase pour le second au round 5
-    # (`round5_second_player_phase`, `config/primary_objective/Objectives_Control.json`) : au
-    # round 5, le premier joueur a DÉJÀ marqué et son dernier tour ne lui rapporte plus de
-    # primaire, le second joue le sien après. Deux états identiques à l'écran n'ont donc pas la
-    # même valeur selon le siège, et l'agent ne pouvait pas les distinguer.
+    # pour le premier joueur et à la FIGHT phase pour le second, À CHAQUE ROUND
+    # (`timing.first_player_phase` / `second_player_phase`,
+    # `config/primary_objective/Objectives_Control.json`) : le premier joueur compte AVANT d'avoir
+    # joué son tour, le second APRÈS avoir joué le sien. Deux états identiques à l'écran n'ont
+    # donc pas la même valeur selon le siège, et l'agent ne pouvait pas les distinguer.
+    # Jusqu'au 2026-09-19 cette asymétrie n'existait qu'au round 5 (clé
+    # `round5_second_player_phase`) ; elle vaut désormais du round 2 au round 5, ce qui ne change
+    # ni la largeur ni la sémantique de ce bit, seulement la portée de sa justification.
     #
     # LE SEUL SIGNAL EXISTANT ÉTAIT UN PROXY, ET IL SE DÉGRADE LÀ OÙ ÇA COMPTE : les zones de
     # déploiement sont attachées au joueur (`dz_p1` / `dz_p2` des mission cards) et

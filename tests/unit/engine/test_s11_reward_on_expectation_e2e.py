@@ -250,7 +250,7 @@ def test_somme_vp_margin_egal_facteur_fois_marge_finale(agent_seat_mode: str, se
     (a) des VP ont été marqués — sans cela l'égalité 0 == 0 ne prouverait rien (vert vacant) ;
     (b) somme des versements == factor × marge finale ;
     (c) en siège p2, le marquage du SECOND joueur au round 5 tombe en fin de phase FIGHT
-        (`config/primary_objective/Objectives_Control.json`, `timing.round5_second_player_phase`)
+        (`config/primary_objective/Objectives_Control.json`, `timing.second_player_phase`)
         et termine la partie : ce versement doit être vu sur le step terminal (turn 5, phase
         fight, game_over), c'est-à-dire par le step de la dernière action de l'agent, dont la
         cascade de phases franchit la frontière. La porte « pool vide → advance_phase » de

@@ -2,7 +2,7 @@
   "id": "objectives_control",
   "name": "Objectives Control",
   "identifier": "objectives_control",
-  "description": "Primary objective scoring: from turn 2, score 5 VP for controlling >=1 objective, 5 VP for controlling >=2 objectives, and 5 VP for controlling more objectives than the opponent (max 15 per turn). Round 5: second player scores at end of fight phase instead of command phase.",
+  "description": "Primary objective scoring: from turn 2, score 5 VP for controlling >=1 objective, 5 VP for controlling >=2 objectives, and 5 VP for controlling more objectives than the opponent (max 15 per turn). The first player scores at the end of their Command phase; the second player scores at the end of their turn instead, in EVERY battle round (26 Primary missions).",
   "scoring": {
     "start_turn": 2,
     "max_points_per_turn": 15,
@@ -25,8 +25,9 @@
     ]
   },
   "timing": {
-    "default_phase": "command",
-    "round5_second_player_phase": "fight"
+    "first_player_phase": "command",
+    "second_player_phase": "fight",
+    "timing_normal": "Phase a laquelle CHAQUE SIEGE marque le primaire. Le siege decide, pas le round. 26 Primary missions, verbatim : « The player who has the first turn scores VP as described above. The player who has the second turn scores VP as described above, but does so at the end of their turn instead of at the end of their Command phase. » RAISON D'ETRE : marquer a sa phase de commandement n'a pas la meme valeur selon le siege, puisque le second joueur y compte toujours apres un tour adverse de plus que le sien. Les deux cles remplacent, le 2026-09-19, `default_phase` et `round5_second_player_phase` : l'ancienne paire n'appliquait la compensation qu'au round 5 (`current_turn == 5` en dur dans `_apply_primary_objective_scoring_single`), et le nom de la cle disait ce que la regle officielle ne dit pas. MESURE du defaut, miroir bot contre le MEME bot, sans politique apprise, 1 200 parties par cellule : le premier joueur gagnait 0,588 contre 0,398 sur terrain-mc1 et 0,540 contre 0,451 sur terrain-mc2 ; avec la compensation a tous les rounds, 0,431 et 0,406. Detail et reserves de lecture : Documentation/Chantiers/backlog/plafonnement_p1.md section 13. RUPTURE ASSUMEE : les parties jouees changent, donc les modeles anterieurs ont appris un autre jeu, et les step.log anterieurs portent l'ancienne paire de cles et ne se relisent plus dans le rejeu du front."
   },
   "control": {
     "method": "oc_sum_greater",

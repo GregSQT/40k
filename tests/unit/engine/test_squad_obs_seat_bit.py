@@ -3,8 +3,8 @@
 Le drapeau vaut 1 pour le joueur qui OUVRE le battle round — P1, `w40k_core` posant
 ``current_player: 1`` à l'init et ``_fight_end_progression_v10`` n'incrémentant ``turn`` qu'après
 le tour de P2. Il répond à « l'adversaire rejoue-t-il APRÈS moi dans ce round ? », question dont
-dépend la valeur du round 5 : le primaire se marque à la command phase pour le premier joueur et
-à la fight phase pour le second (``round5_second_player_phase``).
+dépend la valeur de chaque round : le primaire se marque à la command phase pour le premier joueur et
+à la fight phase pour le second (``second_player_phase``), du round 2 au round 5.
 
 Ce que ces tests verrouillent, et qu'aucune assertion de valeur seule n'attraperait : la
 CONFUSION avec ``is_my_turn``, le drapeau voisin. Les deux valent 1 pour l'observateur P1 pendant

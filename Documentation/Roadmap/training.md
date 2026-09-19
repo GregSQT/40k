@@ -158,31 +158,42 @@ horizon plus long, ni sur un roster où le tir fractionné offrirait plus souven
 
 ---
 
-## 🟡 Écart de siège — cause trouvée dans la MISSION, arbitrage ouvert {#ecart-siege-2026-09-19}
+## ⚠️ Écart de siège — cause trouvée dans la MISSION, corrigée ; rupture de comparabilité {#ecart-siege-2026-09-19}
 
-**Mesuré le 2026-09-19, sans aucune politique apprise.** Même bot des deux côtés, seul le siège
-change (`scripts/seat_advantage_probe.py`, 1 200 parties par cellule, erreur-type 1,4 pt) : le
-premier joueur gagne **0,588 contre 0,398** sur `terrain-mc1` et **0,540 contre 0,451** sur
-`terrain-mc2`. L'écart de siège n'est donc pas un défaut du modèle, et `agent_seat_p2_ratio`
-(0,75) compense l'agent sans toucher la cause.
+**Livré le 2026-09-19 (décision utilisateur).** Le second joueur marque le primaire à la FIN DE
+SON TOUR du round 2 au round 5, là où la mission ne le compensait qu'au round 5. C'est la règle
+officielle, qui ne porte aucune restriction de round (`26 Primary_missions.pdf`, verbatim : « The
+player who has the second turn scores VP as described above, but does so at the end of their turn
+instead of at the end of their Command phase »).
 
-**La cause est l'instant de marquage.** `objectives_control` fait marquer les deux joueurs à leur
-phase de commandement, sauf le second au round 5 : le second joueur compte donc toujours ses
-objectifs après un tour adverse de plus que le sien. Le round 5, seul round compensé, est aussi
-le seul où il marque plus (11,02 contre 10,35). Les missions officielles compensent à tous les
-rounds (`26 Primary_missions.pdf`). L'attrition va dans l'autre sens : le premier joueur perd
-133,2 de valeur contre 105,8 — il gagne en perdant l'échange.
+**Ce que la correction déplace, mesuré en miroir bot sans aucune politique apprise**
+(`scripts/seat_advantage_probe.py`, 1 200 parties par cellule, erreur-type 1,4 pt) :
 
-**Arbitrage ouvert, décision utilisateur.** Étendre la compensation officielle à tous les rounds
-INVERSE l'écart (premier joueur 0,431 sur mc1, 0,406 sur mc2) : ce moteur n'a ni overwatch, ni
-intervention héroïque, ni stratagèmes, c'est-à-dire aucun des outils par lesquels la vraie règle
-paie le premier joueur. Conséquence dans les deux cas : changer la mission change les parties
-jouées → Discipline A et `--new` de la lignée. Détail, tableaux et réserves de lecture :
+| terrain | ancienne règle | règle livrée |
+|---|---|---|
+| terrain-mc1 (tout le holdout) | P1 0,588 · P2 0,398 | **P1 0,431 · P2 0,561** |
+| terrain-mc2 | P1 0,540 · P2 0,451 | **P1 0,406 · P2 0,590** |
+
+**La cause.** Marquer à sa phase de commandement n'a pas la même valeur selon le siège : le
+second joueur comptait toujours ses objectifs après un tour adverse de plus que le sien. Le round
+5, seul round compensé, était aussi le seul où il marquait plus. L'attrition allait déjà dans
+l'autre sens : le premier joueur perd 133,2 de valeur contre 105,8, il gagnait en perdant
+l'échange.
+
+**⚠️ La correction n'égalise pas les sièges, elle inverse l'écart** de 13,0 points sur mc1 et 18,4
+sur mc2, au profit du second joueur. Ce moteur n'a ni overwatch, ni intervention héroïque, ni
+stratagèmes, donc aucun des outils par lesquels la vraie règle paie le premier joueur : la moitié
+livrée de l'équilibrage officiel déplace le déséquilibre au lieu de le supprimer. Rééquilibrer
+vraiment demande ces outils, chantier moteur non ouvert.
+
+**RUPTURE DE COMPARABILITÉ.** Les parties jouées changent, donc Discipline A : un `--new` de la
+lignée est à décider, aucun run n'a été lancé ici. Aucun chiffre de siège antérieur au 2026-09-19
+ne se compare à un chiffre postérieur, et le « gap de siège » de 12 à 14 points publié depuis août
+mesurait pour partie ce défaut de mission — d'autant que le holdout tourne entièrement sur
+`terrain-mc1`, le terrain au plus grand écart structurel. Les `step.log` antérieurs ne se relisent
+plus dans le rejeu du front, leurs clés de `timing` ayant changé de nom. Détail, tableaux et
+réserves de lecture :
 [plafonnement_p1.md#ecart-siege-2026-09-19](../Chantiers/backlog/plafonnement_p1.md#ecart-siege-2026-09-19).
-
-**À retenir pour toute lecture de holdout** : ses quatre scénarios tournent tous sur `terrain-mc1`,
-le terrain où l'écart structurel est le plus grand (19,0 pts contre 8,9 sur mc2). Le « gap de
-siège » de 12 à 14 points publié depuis août est une propriété de ce terrain autant que du modèle.
 
 ---
 

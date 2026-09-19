@@ -152,7 +152,10 @@ def test_le_contrefactuel_de_marquage_est_une_variante_declaree() -> None:
     # `--variant` est contraint par ce tuple : une variante mal orthographiée doit être refusée
     # par argparse, pas silencieusement ignorée par `_install_variant`.
     assert VARIANTS[0] == "none"
-    assert "p2-scores-end-of-turn" in VARIANTS
+    # L'ANCIEN régime, celui d'avant le 2026-09-19 : c'est le seul moyen de rejouer le marquage
+    # du second joueur à sa phase de commandement, donc de comparer les chiffres publiés avant et
+    # après le changement de mission sans revenir en arrière dans le moteur.
+    assert "p2-scores-at-command" in VARIANTS
 
 
 def test_le_plateau_suit_le_suffixe_de_resolution_de_l_agent() -> None:

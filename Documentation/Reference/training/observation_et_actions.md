@@ -901,9 +901,11 @@ qui demande sa cible. Le masque ne le disait pas non plus, une cible déjà pris
 → **18205** (siège de l'observateur, 2026-09-09 : `i_play_first` dans `GLOBAL_BIN_FIELDS` +1.
 `is_my_turn` disait qui a la main, jamais si l'adversaire rejoue APRÈS moi dans ce round. Le
 primaire se marque à la command phase pour le premier joueur et à la **fight** phase pour le
-second au round 5 (`round5_second_player_phase`), donc au round 5 le premier joueur a déjà marqué
-et son dernier tour ne lui rapporte plus de primaire : deux états identiques à l'écran n'ont pas
-la même valeur selon le siège. Aucun des onze registres ne nommait le joueur — tous sont
+second (`second_player_phase`), donc le premier joueur compte avant d'avoir joué son tour et le
+second après avoir joué le sien : deux états identiques à l'écran n'ont pas la même valeur selon
+le siège. ⚠️ Jusqu'au 2026-09-19 cette asymétrie n'existait qu'au round 5
+(`round5_second_player_phase`) ; elle vaut depuis du round 2 au round 5, ce qui ne change ni la
+largeur ni la sémantique du bit, seulement la portée de sa justification. Aucun des onze registres ne nommait le joueur — tous sont
 égocentriques — et le seul signal restant était un PROXY géométrique (zones `dz_p1`/`dz_p2`
 attachées au joueur, `objective_dir_cos/sin` dans le repère absolu du board), qui se dégrade quand
 les unités ont traversé la carte, c'est-à-dire précisément au round 5. Écart de siège mesuré sur

@@ -2704,29 +2704,38 @@ hors famille avant d'entrer dans un pool.
 **Ce qui reste clos** (inchangé) : gate 0,65, λ court / lot ×4 (S23), `vf_coef`, S11 tel que codé,
 entnorm, S14 tête Q, « plateau normal », bissection de config avant le mécanisme.
 
-## 13. Écart de siège — cause trouvée, elle est dans la MISSION (2026-09-19) {#ecart-siege-2026-09-19}
+## 13. Écart de siège — cause trouvée dans la MISSION, corrigée le jour même (2026-09-19) {#ecart-siege-2026-09-19}
 
-**L'écart de siège n'est pas un défaut de l'agent.** Il vient de l'instant où la mission
+**L'écart de siège n'était pas un défaut de l'agent.** Il venait de l'instant où la mission
 `objectives_control` fait marquer chaque joueur. Mesuré sans aucune politique apprise : même bot
 des deux côtés, seul le siège change (`scripts/seat_advantage_probe.py`, chemin de décision de
 production, 1 200 parties par cellule, erreur-type 1,4 point).
 
-| terrain | mission telle que livrée | second joueur marquant en fin de son tour |
+**LIVRÉ le 2026-09-19 (décision utilisateur) : la compensation officielle s'applique désormais à
+TOUS les rounds.** Le second joueur marque à la fin de son tour du round 2 au round 5, là où il ne
+le faisait qu'au round 5.
+
+| terrain | ancienne règle (compensation au seul round 5) | règle livrée (tous les rounds) |
 |---|---|---|
 | terrain-mc1 (tout le holdout) | **P1 0,588 · P2 0,398** | **P1 0,431 · P2 0,561** |
 | terrain-mc2 | **P1 0,540 · P2 0,451** | **P1 0,406 · P2 0,590** |
+
+La colonne de droite a été mesurée DEUX FOIS et les deux mesures coïncident : d'abord en
+contrefactuel, par enveloppe posée dans le processus de mesure, puis sur le moteur réellement
+modifié. Sur mc1, 0,431 / 0,561 et 40,38 contre 42,72 points de victoire cumulés dans les deux
+cas. Le changement livré fait donc exactement ce que la sonde avait prédit.
 
 Contrôle du chemin de décision, cellule par cellule : le bot du siège agent et celui du siège
 adverse passent par deux chemins distincts, et l'avance suit le SIÈGE dans les deux allocations
 (mc1 de référence : 0,578 au siège 1 contre 0,390 au siège 2 ; même cellule au contrefactuel :
 0,426 et 0,553). L'écart ne vient donc pas du chemin de décision.
 
-**Le mécanisme.** Les deux joueurs marquent à leur phase de commandement, sauf le second au
-round 5 (`timing.round5_second_player_phase`, `config/primary_objective/Objectives_Control.json`).
-Or la phase de commandement n'a pas la même valeur selon le siège : quand le joueur 1 marque au
-round R, chacun a joué R−1 tours ; quand le joueur 2 marque au round R, son adversaire en a joué
-R. **Le second joueur compte donc toujours ses objectifs après un tour adverse de plus que le
-sien.** Le relevé par tour de joueur le montre directement, sur mc1 et par épisode :
+**Le mécanisme.** Les deux joueurs marquaient à leur phase de commandement, sauf le second au
+round 5 (ancienne clé `timing.round5_second_player_phase`). Or la phase de commandement n'a pas la
+même valeur selon le siège : quand le joueur 1 marque au round R, chacun a joué R−1 tours ; quand
+le joueur 2 marque au round R, son adversaire en a joué R. **Le second joueur comptait donc
+toujours ses objectifs après un tour adverse de plus que le sien.** Le relevé par tour de joueur
+le montre directement, sur mc1 et par épisode, sous l'ANCIENNE règle :
 
 | round | VP du joueur 1 | VP du joueur 2 |
 |---|---|---|
@@ -2735,11 +2744,13 @@ sien.** Le relevé par tour de joueur le montre directement, sur mc1 et par épi
 | 4 | 10,57 | 9,04 |
 | 5 (le seul round compensé) | 10,35 | **11,02** |
 
-Le round 5 s'inverse, et c'est exactement le round où la mission fait déjà marquer le second
+Le round 5 s'inverse, et c'est exactement le round où la mission faisait déjà marquer le second
 joueur en fin de tour. Les missions officielles appliquent cette compensation à **tous** les
 rounds (`Documentation/40k_rules/26 Primary_missions.pdf`, verbatim : « The player who has the
 second turn scores VP as described above, but does so at the end of their turn instead of at the
-end of their Command phase »). `objectives_control` ne l'applique qu'au round 5.
+end of their Command phase »), et c'est ce que la mission fait depuis. Sous la règle livrée, le
+même relevé donne 9,28 / 10,32 / 10,50 / 10,27 pour le premier joueur contre 10,15 / 10,63 /
+10,91 / 11,03 pour le second : l'ordre s'inverse à chaque round.
 
 **Ce que l'écart n'est pas.** L'attrition va dans l'AUTRE sens : sur mc1, le joueur 1 perd 133,2
 de valeur d'armée contre 105,8 au joueur 2 — le second joueur gagne l'échange et perd quand même
@@ -2748,24 +2759,30 @@ joue pas non plus : le déploiement alterne depuis le joueur 1, donc le joueur 2
 dans les scénarios holdout 01 et 04 (effectifs égaux) et pas dans 02 et 03 (5 unités Space
 Marines contre 6 Orks), et l'avance du joueur 1 y est la même (0,588 / 0,613 / 0,590 / 0,605).
 
-**Le holdout mesure le pire cas.** Ses quatre scénarios tournent tous sur `terrain-mc1`, où
-l'écart vaut 19,0 points, contre 8,9 sur `terrain-mc2`. Le « gap de siège » publié de 12 à 14
-points est donc une propriété de ce terrain autant que du modèle.
+**Le holdout mesurait le pire cas.** Ses quatre scénarios tournent tous sur `terrain-mc1`, où
+l'écart valait 19,0 points sous l'ancienne règle, contre 8,9 sur `terrain-mc2`. Le « gap de
+siège » publié de 12 à 14 points était donc une propriété de ce terrain autant que du modèle, et
+aucun chiffre de siège antérieur au 2026-09-19 ne se compare à un chiffre postérieur.
 
-**Ce que ça ne tranche pas.** Étendre la compensation officielle à tous les rounds ne neutralise
-pas l'écart, elle l'INVERSE : 13,0 points pour le second joueur sur mc1, 18,4 sur mc2. Cohérent
-avec l'attrition ci-dessus, et avec l'expérience de table — mais ce moteur n'a ni overwatch, ni
-intervention héroïque, ni stratagèmes (`engine/macro_intents.py`, verbatim : « PORTE une decision
-joueur reelle que le moteur n'implemente pas encore », « CP existent deja […] il leur manque un
-puits »), c'est-à-dire aucun des outils par lesquels la vraie règle paie le premier joueur.
-Appliquer une moitié de l'équilibrage officiel déplace le déséquilibre sans le supprimer.
-**Arbitrage ouvert, décision utilisateur** — et conséquence lourde dans les deux cas : tout
-changement de la mission change les parties jouées, donc relève de la Discipline A
-([ROADMAP_INDEX.md#direction](../../Roadmap/ROADMAP_INDEX.md#direction)) et impose un `--new` de
-la lignée.
+**⚠️ CE QUE LA CORRECTION NE FAIT PAS : elle n'égalise pas les sièges, elle INVERSE l'écart.**
+13,0 points pour le second joueur sur mc1, 18,4 sur mc2. C'est cohérent avec l'attrition ci-dessus
+et avec l'expérience de table, mais ce moteur n'a ni overwatch, ni intervention héroïque, ni
+stratagèmes (`engine/macro_intents.py`, verbatim : « PORTE une decision joueur reelle que le
+moteur n'implemente pas encore », « CP existent deja […] il leur manque un puits »), c'est-à-dire
+aucun des outils par lesquels la vraie règle paie le premier joueur. La moitié livrée de
+l'équilibrage officiel déplace donc le déséquilibre au lieu de le supprimer, et le rééquilibrer
+vraiment demande les outils du second joueur — chantier moteur non ouvert.
+
+**Conséquences de la livraison.** Les parties jouées changent : Discipline A
+([ROADMAP_INDEX.md#direction](../../Roadmap/ROADMAP_INDEX.md#direction)), donc un `--new` de la
+lignée est à décider (aucun run n'a été lancé ici, c'est une décision utilisateur). Les `step.log`
+antérieurs portent l'ancienne paire de clés `default_phase` / `round5_second_player_phase` et ne
+se relisent plus dans le rejeu du front, qui valide désormais `first_player_phase` /
+`second_player_phase` — rupture assumée, ces replays venant d'un autre jeu.
 
 **Instrument.** `scripts/seat_advantage_probe.py` (lecture seule ; variantes `none`,
-`no-p1-turn2-score`, `p2-scores-end-of-turn` ; `--terrain`, `--mission`). Les cinq autres
+`no-p1-turn2-score`, `p2-scores-at-command` qui rejoue l'ANCIENNE règle ; `--terrain`,
+`--mission`). Les cinq autres
 missions de `config/primary_objective/` ne sont PAS mesurables : elles sont au format
 `scoring_events`, qu'aucun fichier de `engine/` ne lit — la sonde le refuse à l'ouverture plutôt
 qu'au premier tour marquant. Les quatre cellules viennent du MÊME état de l'instrument (graine de siège
