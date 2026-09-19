@@ -305,12 +305,11 @@ def _ligne_returned_du_moteur(tmp_path, profils):
     logger.log_action(
         unit_id=entree["unitId"], action_type=action_type, phase=entree["phase"],
         player=entree["player"], success=True,
-        # Expression du chemin de production, recopiée telle quelle (w40k_core.py:8553) —
-        # y compris son défaut : le set est clé par type BRUT, et `return_destroyed_models` est
-        # le seul type non-incrémentant dont le nom mappé (`returned_models`) n'y figure pas,
-        # donc `step_increment` y vaut True. Rien ici n'en dépend ; la corriger est un sujet
-        # moteur, pas un sujet de ce test.
-        step_increment=action_type not in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES,
+        # Expression du chemin de production, recopiée telle quelle : le set est clé par type
+        # BRUT, jamais par le nom mappé. Rien ici n'en dépend — le sujet du test est la ligne,
+        # pas le compteur, verrouillé par
+        # tests/unit/ai/test_step_logger.py::test_aucun_type_non_incrementant_ne_consomme_de_step_au_drainage.
+        step_increment="return_destroyed_models" not in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES,
         action_details=engine._build_step_log_details(entree, pre_action_turn=1),
     )
     logger._flush_buffer()

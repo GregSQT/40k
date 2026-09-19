@@ -303,3 +303,40 @@ def test_sans_fnp_mw_appliquee_directement(monkeypatch):
 
     assert applied == 1, "MW appliquée directement sans FNP"
     assert rolled == [], "aucun jet lancé sans FNP"
+
+
+def test_record_mw_porte_le_trio_fnp_meme_quand_le_de_rate(monkeypatch):
+    """24.12 sur une MW : le record porte saves/tentatives/seuil, dé sauvé OU raté.
+
+    Le journal affiche ce trio comme sur une attaque (`[FNP:<sauvés>/<seuil>+ ×<tentatives>]`).
+    Sans le poser quand le dé RATE, la ligne confond « aucun FNP porté » et « FNP porté, dé
+    manqué » ; sans le seuil, rien ne permet de vérifier le jet — il varie par figurine.
+    """
+    monkeypatch.setattr(random, "randint", lambda a, b: 5)
+    gs = _mw_game_state([_FNP_5_RULE])
+    saved: list = []
+    allocate_mortal_wounds(gs, "2", 1, auto_resolve=True, details_sink=saved)
+    assert saved[0]["fnpSaves"] == 1 and saved[0]["fnpAttempts"] == 1
+    assert saved[0]["fnpThreshold"] == 5
+
+    # Même unité, même seuil, dé raté : le trio est là, `fnpSaves` tombe à 0 et `fnpSaved`
+    # reste absent — c'est lui, et lui seul, qui dit que la blessure n'a pas été perdue.
+    monkeypatch.setattr(random, "randint", lambda a, b: 4)
+    gs = _mw_game_state([_FNP_5_RULE])
+    failed: list = []
+    allocate_mortal_wounds(gs, "2", 1, auto_resolve=True, details_sink=failed)
+    assert failed[0]["fnpSaves"] == 0 and failed[0]["fnpAttempts"] == 1
+    assert failed[0]["fnpThreshold"] == 5
+    assert "fnpSaved" not in failed[0]
+
+
+def test_record_mw_sans_fnp_ne_porte_aucun_champ_fnp(monkeypatch):
+    """Aucune source de FNP : absence des champs = « aucun dé jeté », pas « zéro sauvé »."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 4)
+    gs = _mw_game_state([])
+    details: list = []
+
+    allocate_mortal_wounds(gs, "2", 1, auto_resolve=True, details_sink=details)
+
+    assert details[0]["died"] is True, "ancre positive : la MW a bien été résolue"
+    assert not {"fnpSaves", "fnpAttempts", "fnpThreshold"} & set(details[0])

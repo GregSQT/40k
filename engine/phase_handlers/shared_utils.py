@@ -6671,7 +6671,8 @@ def allocate_mortal_wounds(
     est détruite avant d'avoir attribué toutes les MW (06.02 : « until … destroyed »).
 
     ``details_sink`` reçoit 1 record ``{modelId, col, row, died}`` par MW traitée
-    (col/row capturés AVANT destroy, ``fnpSaved=True`` si sauvée par FNP) — alimente
+    (col/row capturés AVANT destroy, ``fnpSaved=True`` si sauvée par FNP, et le trio
+    ``fnpSaves``/``fnpAttempts``/``fnpThreshold`` dès qu'un dé a été jeté) — alimente
     ``hazardDetails`` du log, comme le tir.
 
     Retourne le nombre de mortal wounds réellement attribués.
@@ -6718,28 +6719,33 @@ def _inflict_one_mortal_wound(
     RESOLVEUR UNIQUE des deux regimes — AUTO (`allocate_mortal_wounds`) et manuel
     (`_resolve_one_mortal_wound`) : 1 PV, AUCUNE sauvegarde (armure ET invulnerable ignorees,
     10e), FNP « mortal » (24.12, seuils ``fnp_ths`` deja collectes), `destroy_model
-    (reason="hazard")` a 0 PV. Le record
-    ``{modelId, col, row, died[, fnpThreshold][, fnpSaved]}`` est ajoute a ``details_sink`` (la
-    liste ``hazardDetails`` de la ligne `SUFFERS N Mortal Wounds`) ; position capturee AVANT
-    destroy, REQUISE : elle alimente l analyse et le replay.
+    (reason="hazard")` a 0 PV. Le record ``{modelId, col, row, died[, fnpSaved, fnpSaves,
+    fnpAttempts, fnpThreshold]}`` est ajoute a ``details_sink`` (la liste ``hazardDetails`` de la
+    ligne `SUFFERS N Mortal Wounds`) ; position capturee AVANT destroy, REQUISE : elle alimente
+    l analyse et le replay.
 
     ``fnpThreshold`` est present des qu un de a ete jete, sauve ou non. 24.12 attache le jet a
     LA FIGURINE (« each time a model with this ability would lose a wound, roll one D6 ») et
     06.02 change de figurine a chaque blessure (« Select Model … The selected model loses 1
     wound ») : une meme ligne peut donc porter plusieurs seuils, qu un compte agrege ne peut
-    pas dire."""
+    pas dire — c est ce que `[FNP_ROLLS:]` publie (grammaire 17)."""
     models_cache = require_key(game_state, "models_cache")
     m = models_cache[model_id]
     col = int(require_key(m, "col"))
     row = int(require_key(m, "row"))
     rec: Dict[str, Any] = {"modelId": str(model_id), "col": col, "row": row, "died": False}
+    _fnp_saved = False
     if fnp_ths:
-        # 24.02 : les instances ne se cumulent pas, une seule s applique ; `_roll_fnp_sequential`
-        # jette au MEILLEUR seuil, et c est celui-la que le journal doit nommer. Ecrit meme quand
-        # le de echoue : sans lui, une ligne sans sauvegarde ne dit pas si le moteur a jete ou
-        # s il a oublie, et le controle 24.12 ne peut rien en conclure.
-        rec["fnpThreshold"] = min(int(th) for th in fnp_ths)
-    if fnp_ths and _roll_fnp_sequential(1, fnp_ths) == 0:
+        # 24.12 : un de par PV qui serait perdu. Une blessure mortelle (06.02) en fait perdre
+        # exactement 1, donc un seul de et une seule tentative. Les trois champs voyagent
+        # ensemble et portent la MEME grammaire que les attaques (`_resolve_one_manual_wound`) :
+        # un de JETE se dit meme quand il rate, sinon le journal confond « aucun FNP porte »
+        # et « FNP porte, de manque ». Leur absence signifie donc « aucun de jete ».
+        _fnp_saved = _roll_fnp_sequential(1, fnp_ths) == 0
+        rec["fnpSaves"] = 1 if _fnp_saved else 0
+        rec["fnpAttempts"] = 1
+        rec["fnpThreshold"] = min(fnp_ths)  # 24.02 : l instance appliquee, le meilleur seuil
+    if _fnp_saved:
         rec["fnpSaved"] = True  # L12 — FNP mortal wounds : journaliser la sauvegarde.
     else:
         new_hp = int(m["HP_CUR"]) - 1
@@ -12818,9 +12824,11 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     _invul = effective_invul_save(game_state, _def_unit, _invul)
     save_th = save_threshold(int(m["ARMOR_SAVE"]), _invul, ap)
     rec["saveTarget"] = save_th
-    # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
-    # wound. » Le flag est pose au jet (blessure critique = 6 non modifie). On SAUTE la
-    # comparaison de save : la blessure echoue d office, degats appliques comme une save ratee.
+    # DEVASTATING_WOUNDS 24.10 : sur une blessure critique, « the attack sequence for that attack
+    # ends and the target unit suffers a number of mortal wounds equal to the D characteristic ».
+    # Il n y a donc pas de sauvegarde REFUSEE : il n y a plus d etape de sauvegarde du tout. Le
+    # flag est pose au jet (blessure critique = 6 non modifie) ; la comparaison de save est
+    # SAUTEE et les PV partent par le meme chemin qu une save ratee.
     _devastating = bool(pw.get("devastating"))
     if not _devastating:
         # Le de n existe QUE hors DEVASTATING : sur un critique, la sauvegarde n a pas ete
@@ -13916,7 +13924,7 @@ def _count_mortal_details_in_summary(summary: Dict[str, Any], details: List[Dict
 
 #: Lignes d action_log qui portent des blessures mortelles HORS chaine d attaque (06.02), avec
 #: la cle de l unite QUI ENCAISSE et celle de la liste
-#: `{modelId, col, row, died[, fnpThreshold][, fnpSaved]}`
+#: `{modelId, col, row, died[, fnpSaved, fnpSaves, fnpAttempts, fnpThreshold]}`
 #: remplie par `_inflict_one_mortal_wound` — un record par blessure resolue, quel que soit le
 #: regime (AUTO ou allocation manuelle). `player` n y designe PAS toujours la victime : sur
 #: `deadly_demise` et `charge_impact` c est le proprietaire de la SOURCE (24.08, credite par

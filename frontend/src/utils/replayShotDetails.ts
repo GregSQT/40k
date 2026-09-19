@@ -64,16 +64,13 @@ export function shootShotDetail(action: ReplayAction): ShootDetail | undefined {
   };
 }
 
-/** Ligne de MÊLÉE : JUMEAU de `shootShotDetail`, aux deux écarts que la ligne impose.
+/** Ligne de MÊLÉE : JUMEAU de `shootShotDetail`, au seul écart que la ligne impose.
  *
- *  1. Les résultats sont LUS (`hit_result` / `wound_result`) et non recalculés — mais le
- *     vocabulaire du journal (`"WOUND"` / `"FAIL"`) n'est pas celui du contrat d'affichage
- *     (`"SUCCESS"` / `"FAILED"`) : la traduction est faite ici, et son absence rendait
- *     `Bless: ✗` sur une blessure réussie puis sautait la sauvegarde, les dégâts et le marqueur
- *     Feel No Pain de TOUTE ligne de mêlée.
- *  2. `devastating` n'est pas repris : le parseur pose bien `devastating_wounds_applied` en
- *     mêlée, mais le mapping manque — défaut d'affichage suivi dans
- *     Documentation/Reference/jeu/armes.md. */
+ *  Les résultats sont LUS (`hit_result` / `wound_result`) et non recalculés — mais le
+ *  vocabulaire du journal (`"WOUND"` / `"FAIL"`) n'est pas celui du contrat d'affichage
+ *  (`"SUCCESS"` / `"FAILED"`) : la traduction est faite ici, et son absence rendait
+ *  `Bless: ✗` sur une blessure réussie puis sautait la sauvegarde, les dégâts et le marqueur
+ *  Feel No Pain de TOUTE ligne de mêlée. */
 export function fightShotDetail(action: ReplayAction): ShootDetail | undefined {
   if (action.hit_roll === undefined) {
     return undefined;
@@ -97,6 +94,10 @@ export function fightShotDetail(action: ReplayAction): ShootDetail | undefined {
     woundAbility: action.wound_ability,
     woundBonusAbility: action.wound_bonus_ability,
     woundRerollRule: action.wound_reroll_rule,
+    // 24.10 : le parseur pose `devastating_wounds_applied` sur les DEUX branches (`Save
+    // [DEVASTATING WOUNDS]` est écrit par un site unique côté moteur). Sans ce report, la ligne
+    // de mêlée affichait ses dégâts sans jamais nommer la règle qui avait arrêté la séquence.
+    devastating: action.devastating_wounds_applied,
     attackRollInitial: action.hit_roll_initial,
     strengthRollInitial: action.wound_roll_initial,
     saveRollInitial: action.save_roll_initial,

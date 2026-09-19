@@ -53,6 +53,26 @@ describe("fightShotDetail", () => {
   it("ne rend aucun détail quand la ligne ne porte pas de jet de touche", () => {
     expect(fightShotDetail(fightAction({ hit_roll: undefined }))).toBeUndefined();
   });
+
+  // 24.10 : sur une blessure critique, la séquence d'attaque s'arrête et la cible subit des
+  // blessures mortelles — aucun jet de sauvegarde n'existe. Le parseur le signale par
+  // `devastating_wounds_applied` sur les DEUX branches (`Save [DEVASTATING WOUNDS]` dans
+  // step.log) ; sans le report ci-dessous, la ligne de mêlée affichait ses dégâts sans jamais
+  // nommer la règle, là où la ligne de tir la nommait.
+  it("reporte [DEVASTATING WOUNDS] d'une mêlée dont la sauvegarde a été sautée", () => {
+    const detail = fightShotDetail(
+      fightAction({
+        save_roll: undefined,
+        save_target: undefined,
+        devastating_wounds_applied: true,
+        damage: 2,
+      })
+    );
+    expect(detail?.devastating).toBe(true);
+    expect(detail?.strengthResult).toBe("SUCCESS");
+    expect(detail?.saveRoll).toBeUndefined();
+    expect(detail?.damageDealt).toBe(2);
+  });
 });
 
 describe("shootShotDetail", () => {

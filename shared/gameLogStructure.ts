@@ -201,14 +201,21 @@ export interface HazardDetail {
   row: number;
   died: boolean;
   /**
-   * Seuil du Feel No Pain (24.12) réellement jeté pour CETTE blessure, absent si aucun dé n'a
-   * été jeté. 24.12 attache le jet au modèle (« each time a model with this ability would lose
-   * a wound ») et 06.02 sélectionne un modèle par blessure mortelle : deux blessures d'une même
-   * ligne peuvent donc être jetées à deux seuils différents, ou l'une jetée et l'autre pas.
+   * Feel No Pain 24.12 : cette blessure mortelle n'a PAS été perdue. 06.02 dit que la figurine
+   * sélectionnée perd 1 PV ; 24.12 dit que sur un X+ ce PV n'est pas perdu — sans ce champ, une
+   * blessure annulée s'affichait exactement comme une blessure subie.
    */
-  fnpThreshold?: number;
-  /** Le dé a sauvé la blessure : le modèle ne perd pas le point de vie. */
   fnpSaved?: boolean;
+  /**
+   * MÊME trio que `ShootDetail` côté attaques, et même sens : leur absence signifie « aucun dé
+   * jeté », pas « zéro sauvé ». Une blessure mortelle fait perdre 1 PV (06.02), donc
+   * `fnpAttempts` vaut toujours 1 et `fnpSaves` 0 ou 1 ; `fnpThreshold` est le seuil appliqué —
+   * le meilleur (24.02) —, qui varie d'une figurine à l'autre selon sa position et les règles
+   * d'unité en vigueur, et sans lequel le marqueur ne se vérifie pas.
+   */
+  fnpSaves?: number;
+  fnpAttempts?: number;
+  fnpThreshold?: number;
 }
 
 /**

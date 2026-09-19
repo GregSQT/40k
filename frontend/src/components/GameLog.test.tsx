@@ -10,6 +10,7 @@
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { fightShotDetail } from "../utils/replayShotDetails";
 import { GameLog, type GameLogEvent } from "./GameLog";
 
 afterEach(cleanup);
@@ -42,28 +43,6 @@ function shootEvent(shot: Record<string, unknown>): GameLogEvent {
 /** Le détail par tir n'est rendu qu'une fois la ligne dépliée. */
 function expandFirstEntry(): void {
   fireEvent.click(screen.getByRole("button", { name: "Voir le détail" }));
-}
-
-/** Une ligne de blessures mortelles (06.02) et son détail PAR BLESSURE. */
-function hazardEvent(details: Record<string, unknown>[]): GameLogEvent {
-  return {
-    id: "event_1",
-    timestamp: new Date(0),
-    type: "hazardous",
-    message: "Unit 3 SUFFERS 2 Mortal Wounds",
-    turnNumber: 1,
-    phase: "SHOOT",
-    player: 1,
-    unitId: 3,
-    hazardDetails: details,
-  } as unknown as GameLogEvent;
-}
-
-/** Textes de TOUTES les lignes de détail rendues (une par blessure mortelle). */
-function detailRowTexts(): string[] {
-  return Array.from(document.querySelectorAll(".game-log-entry__shot-detail-row")).map(
-    (row) => row.textContent ?? ""
-  );
 }
 
 /** Texte COMPLET de la ligne de détail du premier tir.
@@ -297,9 +276,11 @@ describe("GameLog — règles d'arme par dé", () => {
     expect(shotRowText()).toContain("[TWIN-LINKED]");
   });
 
-  it("explique la sauvegarde absente d'une blessure [DEVASTATING WOUNDS]", () => {
-    // 24.10 : « no saving throw can be made » — le moteur n'écrit AUCUN `saveRoll`. Sans ce
-    // segment, la ligne passait de « Bless: ✓ » à « Dmg: 2 » sans rien dire de la sauvegarde.
+  it("dit qu'une blessure critique [DEVASTATING WOUNDS] devient mortelle", () => {
+    // 24.10 : la séquence d'attaque s'arrête sur la blessure critique et la cible subit des
+    // blessures MORTELLES — le moteur n'écrit donc AUCUN `saveRoll`, et ce que la cible perd
+    // n'est pas un dégât ordinaire. Sans ce segment, la ligne passait de « Bless: ✓ » au
+    // silence.
     render(
       <GameLog
         events={[
@@ -314,8 +295,7 @@ describe("GameLog — règles d'arme par dé", () => {
     );
     expandFirstEntry();
     expect(shotRowText()).toContain("[CRITICAL WOUND]");
-    expect(shotRowText()).toContain("Svg: aucune [DEVASTATING WOUNDS]");
-    expect(shotRowText()).toContain("Dmg: 2");
+    expect(shotRowText()).toContain("MW: 2 [DEVASTATING WOUNDS]");
   });
 
   it("ne nomme aucune règle sur une attaque ordinaire", () => {
@@ -391,9 +371,9 @@ describe("GameLog — jets Feel No Pain", () => {
     expect(shotRowText()).toContain("Dmg: 1 [FNP:2/5+ ×3]");
   });
 
-  it("explique un Dmg: 0 dû à un FNP total sur une sauvegarde SAUTÉE (24.10)", () => {
-    // Les deux branches qui impriment des dégâts passent par la même ligne : la sauvegarde
-    // sautée porte le marqueur exactement comme la sauvegarde ratée.
+  it("explique un MW: 0 dû à un FNP total sur une attaque dévastatrice (24.10)", () => {
+    // 24.12 s'applique aux blessures mortelles comme aux dégâts : le segment `MW:` accole le
+    // marqueur exactement comme le segment `Dmg:` d'une sauvegarde ratée.
     render(
       <GameLog
         events={[
@@ -409,8 +389,7 @@ describe("GameLog — jets Feel No Pain", () => {
       />
     );
     expandFirstEntry();
-    expect(shotRowText()).toContain("Svg: aucune [DEVASTATING WOUNDS]");
-    expect(shotRowText()).toContain("Dmg: 0 [FNP:2/4+ ×2]");
+    expect(shotRowText()).toContain("MW: 0 [DEVASTATING WOUNDS] [FNP:2/4+ ×2]");
   });
 
   it("n'affiche aucun marqueur quand aucun Feel No Pain n'a été jeté", () => {
@@ -451,39 +430,6 @@ describe("GameLog — jets Feel No Pain", () => {
     expect(document.body.textContent).toContain("24.12");
   });
 
-  /**
-   * Blessures MORTELLES. 24.12 : « Each time a model with this ability would lose a wound, roll
-   * one D6 » ; 06.02 sélectionne une figurine par blessure. Le détail portait déjà une ligne par
-   * blessure, mais taisait l'issue du dé : une blessure ANNULÉE par un Feel No Pain s'affichait
-   * exactement comme une blessure encaissée qui n'avait pas tué.
-   */
-  it("distingue une blessure mortelle sauvée d'une blessure encaissée", () => {
-    render(
-      <GameLog
-        events={[
-          hazardEvent([
-            { modelId: "3#0", col: 2, row: 4, died: false, fnpThreshold: 5, fnpSaved: true },
-            { modelId: "3#1", col: 3, row: 4, died: true, fnpThreshold: 5 },
-          ]),
-        ]}
-      />
-    );
-    expandFirstEntry();
-    const rows = detailRowTexts();
-    expect(rows[0]).toContain("[FNP:5+ ✓]");
-    expect(rows[0]).not.toContain("💀");
-    expect(rows[1]).toContain("[FNP:5+ ✗]");
-    expect(rows[1]).toContain("💀");
-  });
-
-  it("n'affiche aucun marqueur sur une blessure mortelle sans dé jeté", () => {
-    render(<GameLog events={[hazardEvent([{ modelId: "3#0", col: 2, row: 4, died: false }])]} />);
-    expandFirstEntry();
-    // ANCRE POSITIVE : sans elle, une ligne non rendue satisferait le `not.toContain`.
-    expect(detailRowTexts()[0]).toContain("1 MW at (2,4)");
-    expect(detailRowTexts()[0]).not.toContain("[FNP:");
-  });
-
   it("lève sur un record de FNP incomplet plutôt que d'inventer un seuil", () => {
     // Les trois champs voyagent ensemble depuis le moteur : n'en afficher qu'une partie
     // décrirait un jet dont on ignore le seuil ou le nombre de dés.
@@ -504,5 +450,148 @@ describe("GameLog — jets Feel No Pain", () => {
       )
     ).not.toThrow();
     expect(() => expandFirstEntry()).toThrow(/Incomplete Feel No Pain record/);
+  });
+});
+
+/**
+ * [DEVASTATING WOUNDS] 24.10 — sur une blessure critique, la séquence d'attaque S'ARRÊTE et la
+ * cible subit des blessures MORTELLES égales à la caractéristique D ; 06.02 les résout en
+ * retirant 1 PV par blessure, sans aucun jet, une figurine au plus par blessure critique.
+ *
+ * Le journal annonçait une sauvegarde « aucune » puis des « dégâts » — deux mots que la règle ne
+ * prononce pas. Un segment unique les remplace, sur le tir comme sur la mêlée, qui partagent ce
+ * rendu et divergeaient : la mêlée ne posait pas `devastating`, donc n'affichait rien du tout.
+ */
+describe("GameLog — blessures mortelles de [DEVASTATING WOUNDS]", () => {
+  it("remplace le couple sauvegarde/dégâts par le nombre de blessures mortelles", () => {
+    render(
+      <GameLog events={[shootEvent({ devastating: true, saveSuccess: false, damageDealt: 2 })]} />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("MW: 2 [DEVASTATING WOUNDS]");
+    expect(shotRowText()).not.toContain("Svg:");
+    expect(shotRowText()).not.toContain("Dmg:");
+  });
+
+  it("nomme la règle sur une ligne de MÊLÉE projetée depuis step.log", () => {
+    // Le vrai chemin du replay : le parseur pose `devastating_wounds_applied` sur la branche
+    // FOUGHT (`Save [DEVASTATING WOUNDS]`), la projection le reporte, le rendu le nomme. Sans
+    // le report, la ligne affichait ses dégâts SANS aucun segment de sauvegarde.
+    const detail = fightShotDetail({
+      type: "fight",
+      timestamp: "12:00:00",
+      turn: "T1",
+      player: 1,
+      hit_roll: 4,
+      hit_result: "HIT",
+      wound_roll: 6,
+      wound_result: "WOUND",
+      devastating_wounds_applied: true,
+      damage: 2,
+    });
+    render(
+      <GameLog
+        events={[
+          {
+            id: "event_fight",
+            timestamp: new Date(0),
+            type: "combat",
+            message: "Unit 1 FOUGHT Unit 2 - Save [DEVASTATING WOUNDS] - Dmg:2HP",
+            turnNumber: 1,
+            phase: "FIGHT",
+            player: 1,
+            shootDetails: [detail],
+          } as unknown as GameLogEvent,
+        ]}
+      />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("MW: 2 [DEVASTATING WOUNDS]");
+  });
+
+  it("lève sur une attaque dévastatrice sans nombre de blessures mortelles", () => {
+    // 24.10 fait de la caractéristique D le nombre de blessures mortelles : une attaque
+    // dévastatrice dont on ignore la quantité est une donnée invalide, pas un cas d'affichage.
+    render(<GameLog events={[shootEvent({ devastating: true, saveSuccess: false })]} />);
+    expect(() => expandFirstEntry()).toThrow(/without damageDealt/);
+  });
+});
+
+/**
+ * Feel No Pain 24.12 sur les blessures MORTELLES — miroir du marqueur des attaques.
+ *
+ * 06.02 dit que la figurine sélectionnée perd 1 PV ; 24.12 dit que sur un X+ ce PV n'est pas
+ * perdu. Le moteur jetait bien le dé et marquait le record, mais le détail par-figurine ne lisait
+ * que la position et la mort : une blessure ANNULÉE s'affichait exactement comme une blessure
+ * subie. Le seuil varie d'une figurine à l'autre (position, règles d'unité), donc il fait partie
+ * du marqueur — sans lui, rien ne permet de vérifier que le dé a sauvé à bon droit.
+ */
+describe("GameLog — Feel No Pain sur blessures mortelles", () => {
+  function mortalWoundEvent(details: Array<Record<string, unknown>>): GameLogEvent {
+    return {
+      id: "event_mw",
+      timestamp: new Date(0),
+      type: "hazardous",
+      message: "Unit 3 SUFFERS 2 Mortal Wounds [HAZARDOUS]",
+      turnNumber: 1,
+      phase: "SHOOT",
+      player: 1,
+      unitId: 3,
+      hazardDetails: details,
+    } as unknown as GameLogEvent;
+  }
+
+  /** Texte de CHAQUE ligne du détail déplié, dans l'ordre. */
+  function detailRowTexts(): string[] {
+    const rows = document.querySelectorAll(".game-log-entry__shot-detail-row");
+    if (rows.length === 0) {
+      throw new Error("aucune ligne de détail rendue");
+    }
+    return Array.from(rows).map((r) => r.textContent ?? "");
+  }
+
+  it("dit qu'une blessure mortelle sauvée n'a pas été perdue, et laisse l'autre intacte", () => {
+    render(
+      <GameLog
+        events={[
+          mortalWoundEvent([
+            {
+              modelId: "3#1",
+              col: 5,
+              row: 7,
+              died: false,
+              fnpSaved: true,
+              fnpSaves: 1,
+              fnpThreshold: 5,
+              fnpAttempts: 1,
+            },
+            {
+              modelId: "3#1",
+              col: 5,
+              row: 7,
+              died: false,
+              fnpSaves: 0,
+              fnpThreshold: 5,
+              fnpAttempts: 1,
+            },
+          ]),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    const rows = detailRowTexts();
+    expect(rows[0]).toContain("1 MW not lost at (5,7) [FNP:1/5+ ×1]");
+    expect(rows[1]).toContain("1 MW at (5,7) [FNP:0/5+ ×1]");
+    expect(rows[1]).not.toContain("not lost");
+  });
+
+  it("n'affiche aucun marqueur quand aucun Feel No Pain n'a été jeté", () => {
+    render(
+      <GameLog events={[mortalWoundEvent([{ modelId: "3#1", col: 2, row: 2, died: true }])]} />
+    );
+    expandFirstEntry();
+    // ANCRE POSITIVE : sans elle, une ligne qui ne rend rien satisferait le `not.toContain`.
+    expect(detailRowTexts()[0]).toContain("1 MW at (2,2) 💀");
+    expect(detailRowTexts()[0]).not.toContain("[FNP:");
   });
 });

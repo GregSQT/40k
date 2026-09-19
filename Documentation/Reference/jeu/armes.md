@@ -520,7 +520,7 @@ Two levels, because a rule either describes the whole weapon group (04.03) or on
 | Level | Source | Placement | Tokens |
 |---|---|---|---|
 | Group (summary line) | `shared_utils.weapon_rule_log_tokens`, one socle for shooting **and** melee, called once per group at log emission | the segment the rule modifies | `Shots:` → `[RAPID FIRE:n]` `[BLAST:n]` `[CLEAVE:n]` `[EXTRA ATTACKS]` · `Hit:` → `[HEAVY]` `[COVER]` `[POINT-BLANK]` `[TORRENT]` `[SUSTAINED HITS:X]` `[IGNORES COVER]` `[PSYCHIC]` · `Wound:` → `[ANTI-<KEYWORD>:Y+]` `[LETHAL HITS]` `[TWIN-LINKED]` · `Save:` → `[DEVASTATING WOUNDS]` · `HP lost:` → `[MELTA:X]` `[PRECISION]` |
-| Per shot (expanded detail) | flags set by `attack_sequence.roll_attack_pool` on each shot record | the leg of that die | `Tir:` → `[TORRENT]` `[SUSTAINED HITS]` `[CRITICAL HIT]` · `Bless:` → `[TWIN-LINKED]` `[LETHAL HITS]` `[CRITICAL WOUND]` · `Svg:` → `[DEVASTATING WOUNDS]` (no save roll is made, 24.10) |
+| Per shot (expanded detail) | flags set by `attack_sequence.roll_attack_pool` on each shot record | the leg of that die | `Tir:` → `[TORRENT]` `[SUSTAINED HITS]` `[CRITICAL HIT]` · `Bless:` → `[TWIN-LINKED]` `[LETHAL HITS]` `[CRITICAL WOUND]` · `MW:` → `[DEVASTATING WOUNDS]` (24.10 ends the attack sequence and inflicts mortal wounds; this segment replaces the `Svg:`/`Dmg:` pair, on both branches) |
 
 Since 2026-08-11 `[BLAST:n]` and `[CLEAVE:n]` also reach **`step.log`**, on every attack line of
 the group (same bridge as `[RAPID FIRE:n]`: `additive_rules_applied` → `blastApplied` /
@@ -577,7 +577,7 @@ fields it can actually obtain, which is fewer than `step.log` appears to offer:
 | Rule | Shooting replay | Melee replay | Why |
 |---|---|---|---|
 | `[TWIN-LINKED]` | ✅ | ✅ | token on the `Wound` segment, parsed on both branches |
-| `[DEVASTATING WOUNDS]` | ✅ | ⚠️ | both branches now write `Save [DEVASTATING WOUNDS]` (`_save_segments` is a single site) and the parser matches it on both, so the damage is no longer lost — but only the shooting mapping fills `devastating`, so a melee line shows its damage with **no save segment** instead of `Svg: aucune [DEVASTATING WOUNDS]` |
+| `[DEVASTATING WOUNDS]` | ✅ | ✅ | both branches write `Save [DEVASTATING WOUNDS]` (`_save_segments` is a single site), the parser matches it on both, and `replayShotDetails.ts` now maps `devastating_wounds_applied` onto `devastating` on the fight branch too — both lines render the same `MW: n [DEVASTATING WOUNDS]` segment |
 | `[FNP:s/t+ ×n]` | ✅ | ✅ | 24.12, accolé au segment `Dmg:` sur les deux branches depuis la grammaire 16 ; lu dans `assignRollAnnotations` (site commun) et affiché tel quel par `GameLog.tsx`, PvP comme replay |
 | `[SUSTAINED HITS]`, `[TORRENT]` | ❌ | ❌ | both produce `Hit None(T+)`; `hitMatch` (`Hit\s+(\d+)\(`) does not match, so the line yields **no expanded detail at all** — there is no field to fill |
 | `[LETHAL HITS]` | ❌ | ❌ | ⚠️ **written to `step.log` since 2026-08-12** (`Wound None(T+) [LETHAL HITS]`, both branches), but the wound leg has no roll, so `woundMatch` does not fire and the line yields no expanded detail — same mechanism as the row above, not a missing token |
@@ -590,9 +590,9 @@ journal's own vocabulary (`wound_result`, which is `"WOUND"` or `"FAIL"`) straig
 — so a successful wound rendered as `Bless: ✗` and the sequence stopped there. The mapping now
 lives in `frontend/src/utils/replayShotDetails.ts`, typed as `ShootDetail` so the contract is
 enforced at the boundary rather than trusted, and is verrouillé by `replayShotDetails.test.ts`.
-What remains for `[DEVASTATING WOUNDS]` is a display gap alone: the fight branch does not map
-`devastating_wounds_applied` onto `devastating`, so the melee line now carries its damage but no
-save segment.
+`[DEVASTATING WOUNDS]` was the last melee gap and is closed: the fight branch maps
+`devastating_wounds_applied` onto `devastating`, so the melee line names the rule exactly as the
+shooting line does.
 
 **Since 2026-08-12 (log grammar 3), six more rules reach `step.log`**, on both the SHOT and
 FOUGHT branches: `[TORRENT]`, `[IGNORES COVER]` and `[PSYCHIC]` on the `Hit` segment,
