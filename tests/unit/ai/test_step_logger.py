@@ -834,3 +834,72 @@ def test_step_timing_duration_not_unix_timestamp(tmp_path: Path, monkeypatch: py
             f"STEP_TIMING[{i}] duration_s={d:.3f} ressemble à un timestamp Unix "
             f"(attendu < 60 s ; régression perf_counter vs time.time)"
         )
+
+
+# --- Le set des non-incrementants est interroge avec le BON espace de noms -----------------------
+#
+# `_STEP_LOG_NON_INCREMENTING_TYPES` est cle par type BRUT d'action_log ; le drainage
+# (`_flush_squad_action_logs_to_step_logger`) l'interrogeait avec le type MAPPE. Les deux
+# coincident pour 14 des 15 entrees, si bien que le defaut ne se voyait que sur la seule ou ils
+# different (`return_destroyed_models` vers `returned_models`). Ce verrou est GENERIQUE : il
+# rougit pour n'importe quelle future entree dont le nom mappe differe de la cle.
+
+
+class _LoggerEspion:
+    """StepLogger minimal : ne retient que la decision d'increment, par type d'action."""
+
+    enabled = True
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bool]] = []
+
+    def log_action(self, unit_id, action_type, phase, player, success, step_increment,
+                   action_details=None) -> None:
+        self.calls.append((action_type, bool(step_increment)))
+
+
+def _drain_types(raw_types: list[str]) -> dict[str, bool]:
+    """Fait passer UNE entree d'action_log par type dans le VRAI drainage et rend, par type brut,
+    la valeur de `step_increment` que le moteur a decidee."""
+    from engine.w40k_core import W40KEngine
+
+    eng = W40KEngine.__new__(W40KEngine)
+    espion = _LoggerEspion()
+    eng.step_logger = espion  # type: ignore[assignment]
+    eng.game_state = {
+        "action_logs": [
+            {"type": t, "unitId": "1", "phase": "command", "player": 1} for t in raw_types
+        ],
+        "phase": "command",
+        # Verrou de comptage du drainage : autant d'entrees `agent_decision` transferees que de
+        # decisions reellement resolues.
+        W40KEngine.AGENT_DECISION_RESOLVED_KEY: sum(
+            1 for t in raw_types if t == "agent_decision"
+        ),
+    }
+    # Le contenu de la ligne n'est pas le sujet : chaque formateur a ses propres cles exigees, et
+    # ils sont deja verrouilles un par un ailleurs dans ce fichier.
+    eng._build_step_log_details = lambda raw_log, pre_action_turn: {}  # type: ignore[assignment]
+
+    eng._flush_squad_action_logs_to_step_logger(pre_action_turn=1)
+
+    mappes = [W40KEngine._STEP_LOG_TYPE_MAP[t] for t in raw_types]
+    assert [c[0] for c in espion.calls] == mappes, espion.calls
+    return {t: inc for t, (_at, inc) in zip(raw_types, espion.calls)}
+
+
+def test_aucun_type_non_incrementant_ne_consomme_de_step_au_drainage() -> None:
+    """Les 15 types declares non-incrementants le sont REELLEMENT sur le chemin du drainage."""
+    from engine.w40k_core import W40KEngine
+
+    types = sorted(W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES)
+    manquants = [t for t in types if t not in W40KEngine._STEP_LOG_TYPE_MAP]
+    assert not manquants, f"membres morts (aucun mapping, donc jamais journalises) : {manquants}"
+
+    increments = _drain_types(types)
+    assert [t for t, inc in increments.items() if inc] == [], increments
+
+
+def test_un_type_incrementant_consomme_bien_un_step_au_drainage() -> None:
+    """VERT NON VACANT : le meme drainage rend True pour un type hors du set."""
+    assert _drain_types(["wait", "charge"]) == {"wait": True, "charge": True}
