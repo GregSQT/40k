@@ -50,7 +50,12 @@ USAGE
     python3 scripts/seat_advantage_probe.py --episodes 50
     python3 scripts/seat_advantage_probe.py --episodes 50 --variant no-p1-turn2-score
     python3 scripts/seat_advantage_probe.py --episodes 50 --terrain terrain-mc2.json
-    python3 scripts/seat_advantage_probe.py --episodes 50 --mission battlefield_dominance
+    python3 scripts/seat_advantage_probe.py --episodes 50 --mission objectives_control
+
+`--mission` n'a AUJOURD'HUI qu'une valeur acceptable, et c'est déjà celle de tous les scénarios :
+les cinq autres missions de `config/primary_objective/` sont au format `scoring_events`, qu'aucun
+fichier de `engine/` ne lit. L'option existe pour le jour où une seconde mission sera scorable ;
+`_require_supported_mission` refuse les autres à l'ouverture plutôt qu'au premier tour marquant.
 
 PLATEAU : `W40K_BOARD_PATH` est posé AVANT tout import du moteur, depuis le suffixe `_x<N>` de
 l'agent — sans lui `config/config.json` impose le plateau x5 et la mesure ne se compare à rien
@@ -486,12 +491,19 @@ def _play(
     from shared.data_validation import require_key
 
     agent_bot = build_bot(bot, randomness)
+    # SIÈGE TIRÉ PAR TÂCHE, et c'est ce qui rend le contrôle de chemin de décision lisible.
+    # `BotControlledEnv._resolve_controlled_player_for_episode` tire le siège d'un hachage de
+    # (graine, rang d'env, index d'épisode) — et rien d'autre. Toutes les tâches partagent le rang
+    # 0 et l'index de départ 0, donc une graine commune leur donnait à toutes LA MÊME suite de
+    # sièges : l'épisode i jouait le même siège dans les 24 tâches, et le bot du siège agent ne
+    # changeait jamais de côté à index donné. Mélanger la graine avec (bot, scénario) décorrèle le
+    # siège du chemin de décision, ce que la ligne de contrôle prétend mesurer.
     env = _create_eval_env(
         bot_name=bot,
         bot_type=bot,
         randomness_config=randomness,
         scenario_file=scenario_file,
-        **env_kwargs,
+        **{**env_kwargs, "agent_seat_seed": _episode_seed(base_seed, bot, scenario_index, 0)},
     )
     tally: "Counter[str]" = Counter()
     # `segments["<round>:<joueur>"]` = ce qui a changé PENDANT ce tour de joueur, cumulé.
@@ -572,7 +584,8 @@ def main() -> int:
     parser.add_argument("--terrain", default=None,
                         help="Remplace terrain_ref des scénarios (ex. terrain-mc2.json).")
     parser.add_argument("--mission", default=None,
-                        help="Remplace primary_objectives (ex. battlefield_dominance).")
+                        help="Remplace primary_objectives. Seule mission scorable par le moteur "
+                             "aujourd'hui : objectives_control (cf. _require_supported_mission).")
     parser.add_argument("--bots", default=None, help="Liste séparée par des virgules.")
     parser.add_argument("--seed", type=int, default=4242)
     parser.add_argument("--workers", type=int, default=None)
@@ -689,10 +702,21 @@ def main() -> int:
         f"   {'TOTAL':30s} P1 {p1_rate:.3f}  P2 {total['p2_wins'] / played:.3f}  "
         f"nuls {total['draws']:3d}  n={played}  erreur-type {stderr * 100:.2f} pt"
     )
+    # CONTRÔLE : le bot du siège agent et celui du siège adverse passent par deux chemins de
+    # décision distincts. Si l'avance suit le SIÈGE dans les deux allocations, elle ne vient pas
+    # du chemin. Une allocation vide ne contrôle rien, et l'afficher « 0/0 » le laisserait croire.
+    if not total["seat1_episodes"] or not total["seat2_episodes"]:
+        raise RuntimeError(
+            f"le bot du siège agent n'a occupé qu'un seul siège "
+            f"({total['seat1_episodes']} au siège 1, {total['seat2_episodes']} au siège 2) : "
+            "le contrôle de chemin de décision est impossible, augmenter --episodes"
+        )
     print(
         f"   contrôle chemin de décision : siège 1 "
-        f"{total['seat1_wins']}/{total['seat1_episodes']} · siège 2 "
-        f"{total['seat2_wins']}/{total['seat2_episodes']}"
+        f"{total['seat1_wins']}/{total['seat1_episodes']} "
+        f"({total['seat1_wins'] / total['seat1_episodes']:.3f}) · siège 2 "
+        f"{total['seat2_wins']}/{total['seat2_episodes']} "
+        f"({total['seat2_wins'] / total['seat2_episodes']:.3f})"
     )
     print(f"   troncatures : {total['truncated']}")
 

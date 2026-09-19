@@ -21,11 +21,29 @@ import pytest
 from scripts.seat_advantage_probe import (
     VARIANTS,
     _canonical_index,
+    _episode_seed,
     _opens_new_turn,
     _require_supported_mission,
     _segments,
     board_path_for_agent,
 )
+
+
+def test_chaque_tache_tire_ses_propres_sieges() -> None:
+    """La graine de siège doit dépendre du bot ET du scénario, pas seulement du run.
+
+    `BotControlledEnv._resolve_controlled_player_for_episode` tire le siège d'un hachage de
+    (graine, rang d'env, index d'épisode). Toutes les tâches partagent le rang 0 et l'index de
+    départ 0 : avec une graine commune, l'épisode i jouait le MÊME siège dans toutes les tâches,
+    et le bot du siège agent ne changeait jamais de côté à index donné — le contrôle de chemin de
+    décision ne contrôlait alors rien (mesuré : 0 épisode au siège 1 sur un lot de 24).
+    """
+    graines = {
+        _episode_seed(4242, bot, scenario_index, 0)
+        for bot in ("alpha", "attrition", "racer")
+        for scenario_index in range(4)
+    }
+    assert len(graines) == 12, "deux tâches ne doivent pas partager leur suite de sièges"
 
 
 def test_le_deploiement_n_ouvre_aucun_tour_de_joueur() -> None:
