@@ -464,6 +464,23 @@ class TestPlansNeverOverlapFootprintsAtX5:
         ]
         assert engaged, f"aucune figurine engagée après le pile-in : {plan}"
 
+    def test_objective_consolidation_footprints_are_disjoint(self):
+        """12.08 mode Objective : troisième branche d'écriture par-figurine, même règle.
+
+        Elle rejoint la zone de l'objectif par une affectation gloutonne qui lui est propre —
+        pas `_assign_cells_toward_enemies` — et suivait elle aussi les CENTRES.
+        ROUGE avant le correctif : plan `[('1#0',40,48),('1#1',42,48)]`, union de 28 cases
+        pour 38 attendues.
+        """
+        from engine.phase_handlers.shared_utils import squad_consolidate_plan_with_targets
+
+        gs = self._x5_state([(40, 40), (40, 45)], [], fight_subphase="consolidate")
+        gs["objectives"] = [
+            {"id": "O1", "hexes": [[c, r] for c in range(38, 43) for r in range(48, 53)]}
+        ]
+        plan, _targets = squad_consolidate_plan_with_targets(gs, "1", mode="objective")
+        self._assert_disjoint(gs, plan, 6, "consolidation 12.08 objective")
+
     def test_a_model_blocked_by_a_departing_teammate_is_recovered(self):
         """Passe de REPRISE : une figurine servie tôt est bloquée par l'empreinte de DÉPART
         d'une camarade qui, elle, bouge ensuite — la case engageante qu'elle visait n'est libre

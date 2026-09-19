@@ -8170,11 +8170,11 @@ def charge_build_valid_plan(
                             _occupied_by_others,
                         ):
                             continue
-                        if _charge_candidate_footprint(m, nc, nr) is None:
-                            continue
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
                             continue  # doit etre strictement plus proche
+                        if _charge_candidate_footprint(m, nc, nr) is None:
+                            continue
                         cand = (cand_d, _formation_gap(m, nc, nr), nc, nr)
                         if best_cand is None or cand < best_cand:
                             best_cand = cand
@@ -14848,7 +14848,16 @@ def _assign_cells_toward_enemies(
         tc, tr = _model_closest_ep[mid]
         orig_dist = _model_orig_dist[mid]
         _closest_entry = _entry_by_pos.get(_model_closest_ep[mid])  # get allowed : None = palier saute
-        ring: List[Tuple[int, int, int, int]] = []
+        # `_formation_gap` : distance a la camarade la plus proche, mesuree sur les positions de
+        # DEPART. A distance egale de la cible, la cellule qui garde l'escouade groupee gagne —
+        # sans quoi chaque figurine fonce vers la cible independamment et le plan entier tombe
+        # sur la coherency 03.03 (« within 2" horizontally of at least one other model »), que
+        # `fight_pile_in_plan` valide en bloc : le pile-in est alors ANNULE, pas degrade.
+        # Mesure sur l'escouade (40,49)/(45,50)/(45,55) face a (40,62) : plan disperse
+        # (39,56)/(46,60)/(45,65), coherency fausse, plan None. Le palier contact assurait ce
+        # groupement par accident — toutes ses cellules etant collees a l'ennemi.
+        _others = [origins[o] for o in mids if o != mid]
+        ring: List[Tuple[int, int, int, int, int]] = []
         for d_col in range(-pile_in_budget, pile_in_budget + 1):
             for d_row in range(-pile_in_budget, pile_in_budget + 1):
                 if d_col == 0 and d_row == 0:
@@ -14861,11 +14870,15 @@ def _assign_cells_toward_enemies(
                 cand_d = calculate_hex_distance(nc, nr, tc, tr)
                 if cand_d >= orig_dist:
                     continue
-                ring.append((cand_d, max(abs(d_col), abs(d_row)), nc, nr))
+                gap = min(
+                    (calculate_hex_distance(nc, nr, ocol, orow2) for ocol, orow2 in _others),
+                    default=0,
+                )
+                ring.append((cand_d, gap, max(abs(d_col), abs(d_row)), nc, nr))
         ring.sort()
         legal: List[Tuple[Tuple[int, int], Set[Tuple[int, int]]]] = []
         engaged_here: List[Tuple[Tuple[int, int], Set[Tuple[int, int]]]] = []
-        for _cand_d, _ring_d, nc, nr in ring:
+        for _cand_d, _gap, _ring_d, nc, nr in ring:
             fp = _legal_footprint(mid, nc, nr)
             if fp is None or not _keeps_start_engagements(mid, nc, nr):
                 continue
@@ -14893,8 +14906,15 @@ def _assign_cells_toward_enemies(
     #    raison d'etre de l'ILP du chemin PvP, `pile_in_autoplace_plan`, dont le cout mesure —
     #    335 ms par plan a x5 — l'exclut du chemin gym). L'ordre glouton par contrainte
     #    croissante n'est pas l'optimum exact, il en est la meilleure approximation a cout nul.
+    #    Les figurines qui n'ont AUCUNE cellule engageante passent en DERNIER : elles ne
+    #    peuvent rien gagner a choisir tot, et servies en premier elles prenaient les cellules
+    #    des autres (cle 0 = la plus petite). Mesure : escouade (37,44)/(43,41)/(36,54) face a
+    #    (40,62), 1 figurine engagee dans cet ordre contre 2 dans l'ordre inverse.
     ordered_movers = sorted(
-        movers, key=lambda mid: (len(_engaged_cells[mid]), movers.index(mid))
+        movers,
+        key=lambda mid: (
+            not _engaged_cells[mid], len(_engaged_cells[mid]), movers.index(mid)
+        ),
     )
 
     # 6. Affectation. Les figurines non deplacees restent sur place : le pile-in est optionnel
@@ -15678,8 +15698,39 @@ def squad_consolidate_plan_with_targets(
         origins: Dict[str, Tuple[int, int]] = {
             mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
         }
-        taken_obj: Set[Tuple[int, int]] = set(origins.values())
+        # OCCUPATION PAR EMPREINTE, comme les modes Ongoing/Engaging (03 ENDING A MOVE « No
+        # models in that unit are on another model ») : suivre les CENTRES laissait deux socles
+        # de 19 cases se recouvrir. Mesure : escouade (40,40)/(40,45), zone col 38-42 x row
+        # 48-52 -> plan (40,48)/(42,48), union de 28 cases pour 38.
+        def _obj_footprint(mid: str, col: int, row: int) -> Set[Tuple[int, int]]:
+            m = models_cache[mid]
+            return set(compute_occupied_hexes(
+                int(col), int(row), require_key(m, "BASE_SHAPE"), require_key(m, "BASE_SIZE"),
+                int(m.get("orientation", 0)),  # get allowed
+            ))
+
+        def _obj_cell_free(col: int, row: int) -> bool:
+            if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
+                return False
+            if wall_hexes and (col, row) in wall_hexes:
+                return False
+            return (col, row) not in occupied_by_others
+
+        _obj_origin_fp: Dict[str, Set[Tuple[int, int]]] = {
+            mid: _obj_footprint(mid, origins[mid][0], origins[mid][1]) for mid in mids
+        }
+        taken_obj: Set[Tuple[int, int]] = set()
+        for _ofp in _obj_origin_fp.values():
+            taken_obj |= _ofp
         chosen_obj: Dict[str, Tuple[int, int]] = {}
+
+        def _obj_placement(
+            mid: str, col: int, row: int, reserved: Set[Tuple[int, int]]
+        ) -> Optional[Set[Tuple[int, int]]]:
+            fp = _obj_footprint(mid, col, row)
+            if not all(_obj_cell_free(fc, fr) for fc, fr in fp):
+                return None
+            return None if fp & reserved else fp
 
         def _zone_dist(col: int, row: int) -> int:
             return min(calculate_hex_distance(col, row, h[0], h[1]) for h in obj_zone)
@@ -15693,12 +15744,15 @@ def squad_consolidate_plan_with_targets(
                 game_state, str(squad_id), our_player, models_cache[mid], budget,
                 int(require_key(models_cache[mid], "level")),
             )
+            _reserved_obj = taken_obj - _obj_origin_fp[mid]
             best_zh: Optional[Tuple[int, int]] = None
+            best_fp: Optional[Set[Tuple[int, int]]] = None
             for zh in sorted(obj_zone, key=lambda h: calculate_hex_distance(oc, or_, h[0], h[1])):
-                if (zh in taken_obj and zh != (oc, or_)) or zh in occupied_by_others:
+                if not reach(zh[0], zh[1]):
                     continue
-                if reach(zh[0], zh[1]):
-                    best_zh = zh
+                _fp = _obj_placement(mid, zh[0], zh[1], _reserved_obj)
+                if _fp is not None:
+                    best_zh, best_fp = zh, _fp
                     break
             if best_zh is None:
                 # « or closer to it if not » : la case atteignable STRICTEMENT plus proche de la
@@ -15710,23 +15764,25 @@ def squad_consolidate_plan_with_targets(
                         if d_col == 0 and d_row == 0:
                             continue
                         nc, nr = oc + d_col, or_ + d_row
-                        if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-                            continue
-                        if (nc, nr) in taken_obj or (nc, nr) in occupied_by_others:
-                            continue
-                        if wall_hexes and (nc, nr) in wall_hexes:
+                        if not _obj_cell_free(nc, nr):
                             continue
                         zd = _zone_dist(nc, nr)
                         if zd >= orig_zd:
                             continue
                         key = (zd, max(abs(d_col), abs(d_row)), nc, nr)
-                        if (closer is None or key < closer) and reach(nc, nr):
-                            closer = key
+                        if closer is not None and key >= closer:
+                            continue
+                        if not reach(nc, nr):
+                            continue
+                        if _obj_placement(mid, nc, nr, _reserved_obj) is None:
+                            continue
+                        closer = key
                 if closer is not None:
                     best_zh = (closer[2], closer[3])
-            if best_zh is not None:
-                taken_obj.discard((oc, or_))
-                taken_obj.add(best_zh)
+                    best_fp = _obj_placement(mid, best_zh[0], best_zh[1], _reserved_obj)
+            if best_zh is not None and best_fp is not None:
+                taken_obj = _reserved_obj | best_fp
+                _obj_origin_fp[mid] = best_fp
                 chosen_obj[mid] = best_zh
             else:
                 chosen_obj[mid] = (oc, or_)  # ni zone ni case plus proche atteignable → sur place
