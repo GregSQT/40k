@@ -1262,6 +1262,67 @@ def test_repositioning_an_already_moved_unit_is_allowed():
     assert _unit(gs, squad_id)["deployed_on_turn"] is None
 
 
+def _climb_first_model_to_level_1(gs: Dict[str, Any], squad_id: str) -> str:
+    """Monte la première figurine de l'escouade sur un plancher de niveau 1. Rend son id.
+
+    Parcourt les cases de plancher jusqu'à en trouver une où l'EMPREINTE tient : le niveau écrit
+    doit être un niveau résolu (§13.06), et `place_model_at_effective_level` rend 0 sur une case
+    trop étroite. Échoue si le terrain n'en offre aucune — un test qui se contenterait du sol ne
+    prouverait rien (vert vacant).
+    """
+    from engine.phase_handlers.shared_utils import place_model_at_effective_level
+    from shared.data_validation import require_key
+
+    model_id = str(require_key(gs, "squad_models")[str(squad_id)][0])
+    for area in require_key(gs, "terrain_areas"):
+        for floor in area.get("floors", []):  # get allowed (pièce sans étage)
+            if int(floor["level"]) != 1:
+                continue
+            for cell in sorted(floor.get("hexes", [])):  # get allowed
+                if int(place_model_at_effective_level(
+                    gs, model_id, int(cell[0]), int(cell[1]), 1
+                )) == 1:
+                    assert int(gs["models_cache"][model_id]["level"]) == 1
+                    return model_id
+    raise AssertionError(
+        "aucune case de plancher de niveau 1 n'accueille l'empreinte de la figurine — "
+        "le test ne peut pas mettre en scène le retrait depuis l'étage sur ce terrain"
+    )
+
+
+def test_repositioning_from_a_floor_clears_the_level():
+    """Retrait 20.02 d'une figurine À L'ÉTAGE : la sentinelle hors table impose le niveau 0.
+
+    La sentinelle `(-1,-1)` n'appartient à aucun plancher. Une figurine retirée en gardant
+    `level >= 1` produit un état que `_recompute_squad_occupied_hexes` ne sait pas relire : il
+    prend le niveau STOCKÉ pour argent comptant et appelle `floor_height_at(-1, -1, level)`, qui
+    lève « no floor at level 1 contains cell (-1, -1) ». Chemin réel : Da Jump (`apply_da_jump`)
+    sur un WeirdBoy monté dans une ruine, qui est dans TOUS les rosters Orks du dépôt.
+
+    ROUGE vérifié en retirant la remise à zéro de `reposition_unit_to_strategic_reserves`.
+    """
+    from engine.phase_handlers.movement_handlers import reposition_unit_to_strategic_reserves
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    squad_id = next(sid for sid, e in gs["units_cache"].items() if int(e["player"]) == 1)
+    model_id = _climb_first_model_to_level_1(gs, squad_id)
+
+    reposition_unit_to_strategic_reserves(gs, squad_id)
+
+    model = gs["models_cache"][model_id]
+    assert int(model["level"]) == 0, (
+        "une figurine hors table est au sol : la sentinelle n'a pas d'étage"
+    )
+    assert (int(model["col"]), int(model["row"])) == UNDEPLOYED
+    assert int(gs["units_cache"][squad_id]["level"]) == 0, (
+        "le niveau de l'entrée de cache doit suivre celui des figurines"
+    )
+    assert int(_unit(gs, squad_id)["level"]) == 0
+    assert _unit(gs, squad_id)["in_strategic_reserves"] is True
+
+
 # ---------------------------------------------------------------------------
 # 20.01 — la phase de TIR ignore les unités hors table (chantier 04c)
 # ---------------------------------------------------------------------------

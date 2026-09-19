@@ -7593,6 +7593,100 @@ def _model_footprint_radius(
     return max(calculate_hex_distance(col, row, fc, fr) for fc, fr in fp)
 
 
+def _charge_engage_reach(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    model_entries: Sequence[Dict[str, Any]],
+    target_entries: Sequence[Dict[str, Any]],
+    target_positions: Sequence[Tuple[int, int]],
+    ez: int,
+) -> int:
+    """Rayon hexagonal, autour d'une position de figurine cible, du SURENSEMBLE des cellules d'ou
+    une figurine de ``squad_id`` peut finir engagee avec l'une de ``target_entries``.
+
+    CONTRAT : toute cellule ou `unit_entries_within_engagement_zone` rend True est a distance
+    hexagonale <= ce rayon d'au moins une position de ``target_positions``. La reciproque est
+    fausse et c'est voulu — l'appelant revalide chaque cellule par la primitive. Une borne trop
+    ETROITE, elle, retire des destinations engageantes legales de l'enumeration sans que rien ne
+    le signale : la charge se rabat sur une destination moins bonne, ou echoue.
+
+    UNE BORNE PAR GEOMETRIE : elle doit s'ecrire dans la meme geometrie que le predicat qu'elle
+    majore (`engagement_distance_metric`), sans quoi elle ne majore rien.
+
+    REGLE : 01.04 MEASURING DISTANCES — « measure to or from the closest part of that model's
+    base » — et 03.04 ENGAGEMENT — « a model's engagement range is the area of the battlefield
+    within 2" horizontally and 5" vertically of it ». La mesure exacte est donc CONTINUE, de bord
+    a bord : c'est ce que fait la metrique `euclidean`, et c'est pourquoi la borne s'y ecrit avec
+    les rayons de socle et non avec ceux de l'empreinte discrete, qui n'est qu'une approximation
+    de grille.
+
+    - ``hex`` : le predicat compare des EMPREINTES DISCRETES (`min_distance_between_sets`), donc
+      la borne s'ecrit avec les rayons de ces memes empreintes (inegalite triangulaire
+      hexagonale). Le ``+ 1`` est la parite de colonne : la forme d'une empreinte en depend, et
+      le rayon mesure a la position d'origine peut valoir un subhex de moins qu'a la destination.
+
+    - ``euclidean`` : le predicat soustrait les rayons CONTINUS des socles
+      (`euclidean_edge_distance`), qui depassent le rayon de l'empreinte discrete jusqu'a un
+      subhex PAR SOCLE — round/6 : 3 contre 2 ; round/18 : 9 contre 8. Reutiliser la borne hex
+      ici la sous-dimensionnait donc de un, le ``+ 1`` de parite n'absorbant qu'un socle sur les
+      deux : mesure du 2026-09-19 a ez = 10 avec deux socles round/6, borne 15 quand les cellules
+      engageantes vont jusqu'a 16 — 6 cellules perdues sur 691. Ce n'etait PAS un effet de la
+      difference d'axe hex/euclidien : sur l'axe des colonnes, ou tombent precisement ces
+      cellules, un pas vaut 1,5 unite `_hex_center` et le seuil vaut ez x 1,5, donc les deux
+      geometries y coincident. La borne juste se prend en unites `_hex_center` — seuil
+      d'engagement plus les deux rayons ENGLOBANTS — puis se convertit par le cout MINIMAL d'un
+      pas hexagonal en ligne droite, 1,5 : c'est l'axe des colonnes, l'axe des lignes coutant
+      sqrt(3) (verifie par balayage sur les deux parites). Elle est plus PETITE que la borne hex
+      une fois sur deux (socles 8/8 : 18 contre 19, soit 114 cellules de moins par cible).
+      Ce n'est pas un cas de coin : passes par `_scale_socle` a ISH = 5, les socles du roster
+      donnent `round`/6 (32 mm, le socle d'infanterie standard), `round`/8, `round`/10,
+      `round`/18 et `oval`/[20, 10] — et trois des cinq ont un ecart non nul.
+
+    Le ``1e-9`` est une garde de TRONCATURE, pas une marge metier : les rayons sont des multiples
+    de 0,75, le quotient tombe donc pile sur un entier des que les deux socles sont ronds, et une
+    cellule pile au seuil engage (le predicat compare par ``<=``).
+    """
+    from engine.hex_utils import bounding_radius_norm, engagement_minimum_clearance_norm
+    from engine.spatial_relations import engagement_distance_metric
+
+    metric = engagement_distance_metric(game_state)
+    if metric == "euclidean":
+        # Rayons lus sur la MEME donnee que `socle_from_cache_entry`, qui est ce que le predicat
+        # mesure : le socle de la FIGURINE cote chargeur (l'entree synthetique de
+        # `_synth_model_entry` porte celui du modele), celui de l'ENTREE-cache cote cible (une
+        # entree multi-figurines ne porte qu'un socle, partage par toutes ses figurines).
+        self_norm = max(
+            bounding_radius_norm(require_key(m, "BASE_SHAPE"), require_key(m, "BASE_SIZE"))
+            for m in model_entries
+        )
+        target_norm = max(
+            bounding_radius_norm(require_key(te, "BASE_SHAPE"), require_key(te, "BASE_SIZE"))
+            for te in target_entries
+        )
+        reach_norm = engagement_minimum_clearance_norm(ez) + self_norm + target_norm
+        return int(reach_norm / ENGAGEMENT_NORM_HEX_WIDTH + 1e-9)
+    if metric != "hex":
+        raise ValueError(f"Invalid engagement metric {metric!r}, expected 'hex' or 'euclidean'")
+    self_radius = max(
+        _model_footprint_radius(
+            game_state, squad_id, m, int(require_key(m, "col")), int(require_key(m, "row")),
+        )
+        for m in model_entries
+    )
+    target_radius = 0
+    for te in target_entries:
+        # `require_key` et non un defaut vide : une entree-cache sans empreinte donnerait un
+        # rayon nul, donc un surensemble de cellules trop etroit, donc des charges refusees
+        # sans que rien ne le signale.
+        for fc, fr in require_key(te, "occupied_hexes"):
+            d_to_model = min(
+                calculate_hex_distance(fc, fr, tc, tr) for tc, tr in target_positions
+            )
+            if d_to_model > target_radius:
+                target_radius = d_to_model
+    return ez + self_radius + target_radius + 1
+
+
 def charge_target_within_max_distance(
     charger_entry: Dict[str, Any],
     target_entry: Dict[str, Any],
@@ -7923,30 +8017,13 @@ def charge_build_valid_plan(
             for _fc, _fr in _nte.get("occupied_hexes", []):  # get allowed
                 _intent_nontgt_positions.append((int(_fc), int(_fr)))
 
-    # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
-    # triangulaire hexagonale (ez borde-a-bord + les deux demi-socles). Surensemble : chaque
-    # cellule retenue est ensuite validee par `unit_entries_within_engagement_zone`.
-    self_radius = max(
-        _model_footprint_radius(
-            game_state, str(squad_id), models_cache[mid],
-            int(models_cache[mid]["col"]), int(models_cache[mid]["row"]),
-        )
-        for mid in mids
+    # Portee d'engagement en distance CENTRE-A-CENTRE : surensemble des cellules d'ou une
+    # figurine peut finir engagee. Chaque cellule retenue est ensuite revalidee par
+    # `unit_entries_within_engagement_zone` — cf. `_charge_engage_reach` pour les deux geometries.
+    engage_reach = _charge_engage_reach(
+        game_state, str(squad_id), [models_cache[mid] for mid in mids],
+        target_entries, target_positions, ez,
     )
-    target_radius = 0
-    for _tid, te in target_entries_by_id:
-        # `require_key` et non un defaut vide : une entree-cache sans empreinte donnerait un
-        # rayon nul, donc un surensemble de cellules trop etroit, donc des charges refusees
-        # sans que rien ne le signale — exactement le mode de panne qu'on vient de fermer.
-        for fc, fr in require_key(te, "occupied_hexes"):
-            d_to_model = min(
-                calculate_hex_distance(fc, fr, tc, tr) for tc, tr in target_positions
-            )
-            if d_to_model > target_radius:
-                target_radius = d_to_model
-    # +1 : la forme d'une empreinte depend de la parite de sa colonne, le rayon mesure a la
-    # position d'origine peut valoir un subhex de moins a la destination.
-    engage_reach = ez + self_radius + target_radius + 1
 
     # Sortie O(1) : si meme la figurine la plus proche ne peut pas approcher a portee
     # d'engagement avec tout son budget, aucune fig n'engagera et la validation finale
@@ -14850,10 +14927,11 @@ def _assign_cells_toward_enemies(
     #
     #    Candidats par figurine : TOUT le budget, legalite hors-plan + trajet + strictement plus
     #    proche — surensemble trivialement prouve des cellules engagees atteignables, aucune
-    #    borne geometrique ne le retrecit (le disque `ez + rayon + rayon` du chemin charge N'EST
-    #    PAS un surensemble en metrique euclidienne : mesure sur un socle round/6 a x5, cellules
-    #    engagees jusqu'a 8 subhex du centre ennemi pour une borne de 7). Tries par distance a la
-    #    cible puis par anneau (deplacement minimal a distance egale).
+    #    borne geometrique ne le retrecit. Le disque du chemin charge (`_charge_engage_reach`) en
+    #    EST un depuis le 2026-09-19 — il l'ecrit desormais dans la metrique d'engagement — mais
+    #    il reste inutile ici : ce balayage est deja borne par le budget de pile-in, bien plus
+    #    serre que le disque d'engagement. Tries par distance a la cible puis par anneau
+    #    (deplacement minimal a distance egale).
     #
     #    Entree-cache de la cible la plus proche de chaque figurine, par position de figurine
     #    cible. Sans `target_ids` (appel de test), la mesure d'engagement est sautee.

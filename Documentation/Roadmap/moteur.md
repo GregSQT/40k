@@ -408,6 +408,8 @@ Suite 141 (2026-09-18) : fin de tir d'escouade par la fin d'activation de DATASH
 
 Suite 142 (2026-09-18) : descente 13.06 facturée au sol en métrique HEX sur le chemin par-figurine PvP (branche `_floor_start` hex : BFS amputé de la hauteur du plancher, étage vu par `ascent_field_for_model`, cases d'étage = celles que le commit résout) ; verrou FLY 21.03 (M − 2, sans descente). Détail suite 142.
 
+Suite 168 (2026-09-19) : le disque de cellules candidates du plan de charge (`def _charge_engage_reach`, `engine/phase_handlers/shared_utils.py`) s'ecrit desormais dans la metrique d'engagement — en `euclidean` il additionnait des rayons d'empreinte DISCRETE quand le predicat soustrait les rayons CONTINUS, et perdait les destinations engageantes les plus eloignees de la cible (borne 15 pour des cellules a 16, socles round/6 a ez = 10). Aucune charge perdue n'a pu etre produite : la borne de declaration 11.04 laisse ~9 subhex de marge sur terrain degage. Detail `ROADMAP_INDEX.md` suite 168.
+
 Suite 148 (2026-09-18) : attrition de fin d'épisode alimentée par les blessures mortelles hors chaîne d'attaque (`def mortal_wound_log_hp_lost`) ; départage des destinations de charge dans la métrique du verdict de coherency (`def coherency_euclidean_gap`) ; distance de charge journalisée non arrondie. Détail suite 148 (le split-fire 24.07 est la suite 146).
 
 ---
