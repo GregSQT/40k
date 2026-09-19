@@ -26,11 +26,13 @@ Les tests de refus vérifient l'autre moitié du contrat : une borne qui ne prun
 verte ici sans rien prouver.
 """
 
+import math
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from engine.hex_utils import compute_occupied_hexes, hex_distance
 from engine.phase_handlers.charge_handlers import (
     _charge_impossible_by_primary_to_enemy_hex_lower_bound,
+    _charge_socle_reach_radius,
     charge_build_valid_destinations_pool,
 )
 from engine.phase_handlers.shared_utils import (
@@ -330,3 +332,126 @@ def test_x1_bound_still_lets_a_reachable_charge_through():
 
     assert _engaging_anchors(gs, "1", "2", roll), "prémisse cassée : charge hors d'atteinte"
     assert not _prune(gs, "1", ["2"], roll)
+
+
+# ── Seuil de proximité par-ennemi : il doit majorer l'engagement POUR TOUTE FORME ─────────────
+
+def _half_diameter_radius(base_size: Any) -> int:
+    """Formule qui portait les deux seuils de proximité avant `_charge_socle_reach_radius` : le
+    demi-diamètre arrondi au-dessus. Recopiée ici — et non importée — pour que ces tests restent
+    la description de ce qui a changé le jour où elle disparaît du moteur."""
+    value = max(base_size) if isinstance(base_size, (list, tuple)) else int(base_size)
+    return max(1, (int(value) + 1) // 2)
+
+
+#: Socles du roster en unités datasheet (×10), tels que `_scale_socle` les convertit.
+ROSTER_BASES = [
+    ("round", 10), ("round", 11), ("round", 13), ("round", 16), ("round", 20),
+    ("round", 24), ("round", 32), ("round", 35), ("oval", [41, 27]), ("oval", [47, 36]),
+]
+
+
+def test_the_reach_radius_is_unchanged_on_every_base_of_the_roster():
+    """Le seuil passe du demi-diamètre au rayon ENGLOBANT : sur `round` et `oval` les deux
+    coïncident, donc aucune valeur du jeu ne bouge. Sans ce verrou, un élargissement silencieux
+    du seuil passerait pour une correction alors qu'il ne ferait que ralentir le BFS."""
+    from engine.game_state import _scale_socle
+
+    for ish in (1, 5, 10):
+        for shape, size in ROSTER_BASES:
+            scaled_shape, scaled_size = _scale_socle(shape, size, ish, "test")
+            assert _charge_socle_reach_radius(scaled_shape, scaled_size) == (
+                _half_diameter_radius(scaled_size)
+            ), f"ISH={ish} {scaled_shape}/{scaled_size}"
+
+
+def test_the_reach_radius_covers_the_corner_of_a_square_base():
+    """Le point le plus éloigné du centre d'un carré est un COIN, à demi-côté × racine(2) —
+    c'est ce que `_socle_edge_primitives` construit et ce que le prédicat euclidien mesure."""
+    for side in (12, 20, 28):
+        assert _charge_socle_reach_radius("square", side) > _half_diameter_radius(side)
+        assert _charge_socle_reach_radius("square", side) >= math.ceil(side / 2 * math.sqrt(2))
+
+
+def test_the_proximity_threshold_majors_the_engagement_of_a_square_charger():
+    """Le contrat que les deux seuils de proximité du pool exigent : une ancre engageante est
+    toujours a `ez + rayon chargeur + rayon cible + 1` au plus de l'empreinte ennemie.
+
+    Côté 28 subhex : c'est la PREMIÈRE taille où le demi-diamètre cesse de suffire (mesuré à
+    ez = 10 contre un socle rond/6 ; 26 passe encore). Le plus grand socle du dépôt vaut 24, le
+    seuil tenait donc — par la taille du catalogue, pas par sa formule. Orientation 1 : le carré
+    y présente son coin vers l'axe des colonnes, l'axe où un pas hexagonal coûte le moins
+    (1,5 unité `_hex_center`) et où la distance hex d'engagement est donc maximale.
+    """
+    side, orientation = 28, 1
+    enemy_entry = {
+        "id": "e", "player": 2, "col": ENEMY[0], "row": ENEMY[1],
+        "occupied_hexes": set(compute_occupied_hexes(ENEMY[0], ENEMY[1], "round", 6, 0)),
+        "BASE_SHAPE": "round", "BASE_SIZE": 6, "orientation": 0,
+    }
+    enemy_fp = enemy_entry["occupied_hexes"]
+    old_threshold = EZ_SUBHEX + _half_diameter_radius(side) + _half_diameter_radius(6) + 1
+    new_threshold = (
+        EZ_SUBHEX
+        + _charge_socle_reach_radius("square", side)
+        + _charge_socle_reach_radius("round", 6)
+        + 1
+    )
+
+    farthest = None
+    for col in range(ENEMY[0] - 80, ENEMY[0] + 1):
+        charger = {
+            "id": "c", "player": 1, "col": col, "row": ENEMY[1],
+            "occupied_hexes": set(
+                compute_occupied_hexes(col, ENEMY[1], "square", side, orientation)
+            ),
+            "BASE_SHAPE": "square", "BASE_SIZE": side, "orientation": orientation,
+        }
+        if unit_entries_within_engagement_zone(charger, enemy_entry, EZ_SUBHEX):
+            farthest = min(hex_distance(col, ENEMY[1], fc, fr) for fc, fr in enemy_fp)
+            break
+
+    assert farthest is not None, "prémisse cassée : aucune ancre engageante sur l'axe"
+    assert farthest > old_threshold, (
+        "prémisse cassée : le demi-diamètre suffisait encore, ce test ne distingue plus les "
+        "deux formules"
+    )
+    assert farthest <= new_threshold
+
+
+# ── Chemin rapide d'éligibilité (BFS inversé, x1) : son préfiltre doit voir l'ÉTALEMENT ───────
+
+def test_the_eligibility_fast_path_sees_a_spread_out_enemy_squad():
+    """Le BFS inversé d'éligibilité préfiltrait ses ancres-buts contre l'ANCRE de l'escouade
+    ennemie, avec un seuil qui ne contient aucun terme d'étalement.
+
+    Une escouade ennemie étalée (03.03 autorise jusqu'à 2" entre figurines voisines) engage donc
+    par une figurine qui n'est PAS son ancre, et l'ancre-but correspondante était éliminée avant
+    d'être mesurée : le chemin rapide rendait « aucune charge possible » là où le BFS complet
+    trouve des destinations. Ce test confronte les deux chemins du MÊME état — c'est la seule
+    forme qui prouve quelque chose, un seuil arbitraire ne dirait rien.
+
+    Le BFS inversé n'est emprunté qu'à `inches_to_subhex <= 1` avec `early_exit_if_valid` et sans
+    cible déclarée (cf. son garde dans `charge_build_valid_destinations_pool`) : la fixture est
+    donc posée à x1, la résolution d'entraînement.
+    """
+    ez_x1 = 2
+    for spread in (6, 7, 8, 9):
+        enemy_models = [(40, 40), (40, 40 + spread), (40, 40 + 2 * spread)]
+        units = [
+            _unit(1, 1, 28, 40 + 2 * spread, "round", 1),
+            _unit(2, 2, enemy_models[0][0], enemy_models[0][1], "round", 1, models=enemy_models),
+        ]
+        gs_full = _gs(units, 1, ez_x1)
+        full = charge_build_valid_destinations_pool(gs_full, "1", 12)
+
+        gs_fast = _gs(
+            [dict(u) for u in units], 1, ez_x1
+        )
+        fast = charge_build_valid_destinations_pool(gs_fast, "1", 12, early_exit_if_valid=True)
+
+        assert full, f"prémisse cassée (étalement {spread}) : le BFS complet ne trouve rien"
+        assert fast, (
+            f"étalement {spread} : le BFS complet trouve {len(full)} destinations et le chemin "
+            f"rapide d'éligibilité aucune — la charge ne serait pas proposée"
+        )

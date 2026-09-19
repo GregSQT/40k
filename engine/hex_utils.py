@@ -2297,6 +2297,38 @@ def bounding_radius_norm(shape: str, base_size: "int | list[int]") -> float:
     return radius
 
 
+def socle_reach_radius_subhex(shape: str, base_size: "int | list[int]") -> int:
+    """Rayon englobant d'un socle, en SUBHEX arrondi au-dessus — demi-portée d'un socle pour les
+    prunes d'engagement (charge et move).
+
+    SOURCE UNIQUE. Les prunes l'écrivaient chacune `(plus grande dimension + 1) // 2`, soit le
+    demi-diamètre : exact pour un disque, exact pour un ovale (son extrême EST le demi-grand-axe),
+    FAUX pour un `square`, dont le point le plus éloigné du centre est un COIN à demi-côté × √2 —
+    c'est ce que `bounding_radius_norm` documente et ce que `_socle_edge_primitives` construit.
+    Dériver le rayon de la fonction qui le définit supprime la dépendance à la forme sans changer
+    une seule valeur sur les socles du dépôt : pour `round` et `oval`, `bounding_radius_norm` vaut
+    la demi-dimension × `_FOOTPRINT_SIZE_SCALE`, donc les deux arrondis coïncident.
+
+    MESURE, contre une lecture trop rapide : le demi-diamètre n'était PAS insuffisant du seul fait
+    qu'un carré existe. La distance hex maximale par unité euclidienne s'atteint sur l'axe des
+    COLONNES (1,5 unité `_hex_center` par pas), où compte le rayon de SUPPORT dans la direction
+    inter-centres et non le rayon englobant ; les orientations étant discrétisées à 30°
+    (`ORIENTATION_STEP_COUNT` = 12), le coin à 45° n'est jamais aligné sur cet axe et le facteur y
+    plafonne à 1,1547. Balayage du 2026-09-19 à ez = 10 contre un socle `round`/6 : le
+    demi-diamètre suffit jusqu'à un côté de 26 subhex et cesse de suffire à 28 — une ancre
+    engageante y tombe à 29 de l'empreinte ennemie pour un seuil de 28. Le plus grand socle du
+    dépôt mesure 24 subhex à x5 (`oval` [24, 18]) : le seuil tenait, avec DEUX subhex de marge.
+    Ce n'était pas une panne en attente mais un invariant suspendu à la taille des socles
+    déclarés — ce que ni le code ni un test ne disaient.
+
+    ⚠️ Le `1e-9` est une garde de TRONCATURE flottante, pas une marge métier : pour un socle rond
+    ou oval le quotient tombe pile sur un demi-entier, et `ceil` doit rendre le même entier que
+    l'arithmétique entière qu'il remplace.
+    """
+    radius_norm = bounding_radius_norm(shape, base_size)
+    return max(1, int(math.ceil(radius_norm / ENGAGEMENT_NORM_HEX_WIDTH - 1e-9)))
+
+
 def footprints_overlap(a: Socle, b: Socle) -> bool:
     """True si les deux socles se chevauchent (superposition interdite ; contact toléré).
 

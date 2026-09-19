@@ -2090,12 +2090,15 @@ def get_engagement_zone(game_state: Dict[str, Any]) -> int:
 def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:
     """Plafond (diamètre hex) pour borner les empreintes ennemies dans les filtres spatiaux.
 
-    Utilisé par la prune conservatrice des ennemis : au-delà de ce diamètre, on tronque la
-    contribution « rayon d'empreinte » pour rester sûr sans exploser la fenêtre si des données
-    unité sont aberrantes. DEUX lecteurs, de portées différentes :
-    ``observation_builder._engagement_relevant_entries`` à chaque construction d'observation,
-    sans aucune garde, et ``movement_handlers._enemy_items_within_move_engagement_horizon``
-    seulement sous ``ez > 1``. Ne pas réduire ce seuil au seul chemin du déplacement.
+    Plafond de FENÊTRE : au-delà de ce diamètre, on tronque la contribution « rayon d'empreinte »
+    pour ne pas exploser une fenêtre si des données unité sont aberrantes.
+
+    ⚠️ PLUS AUCUN LECTEUR DANS LES PRUNES D'ENGAGEMENT. Les deux qui le lisaient — la prune du
+    déplacement, puis celle de l'observation — l'ont retiré pour la même raison : un plafond par
+    le HAUT RÉTRÉCIT l'horizon, donc élimine un ennemi encore pertinent, alors que ces prunes ne
+    doivent se tromper que dans le sens SUR-approximé. Mesuré à x10 sur un WarTrakk (span 41,
+    plafond 35) : horizon 44 pour une distance engageante de 45. Tout nouveau lecteur doit donc
+    vérifier que RÉTRÉCIR est sûr chez lui, ce qui n'est jamais le cas d'un filtre conservateur.
 
     Aucun défaut caché, exactement comme ``get_engagement_zone`` (même section ``game_rules``,
     même fichier) : un état sans ``config``/``game_rules``/``max_base_size_hex`` est malformé,
