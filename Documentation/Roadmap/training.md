@@ -186,8 +186,20 @@ stratagèmes, donc aucun des outils par lesquels la vraie règle paie le premier
 livrée de l'équilibrage officiel déplace le déséquilibre au lieu de le supprimer. Rééquilibrer
 vraiment demande ces outils, chantier moteur non ouvert.
 
-**RUPTURE DE COMPARABILITÉ.** Les parties jouées changent, donc Discipline A : un `--new` de la
-lignée est à décider, aucun run n'a été lancé ici. Aucun chiffre de siège antérieur au 2026-09-19
+**LIGNÉE RELANCÉE À FROID le 2026-09-19 (décision utilisateur, option A).** Run P0 neuf lancé à
+16:27, `bash scripts/train.sh --agent ArmageddonAgent_x1 --training-config x1_long --scenario bot
+--resolution 1 --etape P0 --total-episodes 50000` (l'étape pose `--new` elle-même), log
+`training_x1_09-p00-marquage.log`. `--new` a archivé les 8 artefacts du run précédent sous
+l'horodatage `20260919-162703` ; P0′ du 18/09 reste par ailleurs sous
+`ArmageddonAgent_x1_27182_robust_0.8922.zip`, byte à byte identique à l'ancien
+`model_ArmageddonAgent_x1_P0.zip` (md5 `f4894bbf61e9cdfd28435022fa41930a`), donc la clôture
+d'étape ne détruira rien. Durée attendue ~6 h (référence : 6 h 03 pour le P0′ du 18/09). **Règle de
+lecture reprise telle quelle du P0′** : holdout bots et trois sondes de référence à 300 parties
+argmax sièges 50/50 ; robuste **< 0,85** contre les bots = relance avec une autre graine, UNE seule
+fois. ⚠️ Aucun chiffre de ce run ne se compare à un chiffre d'avant le changement de mission.
+
+**RUPTURE DE COMPARABILITÉ.** Les parties jouées changent, donc Discipline A : pendant ce run,
+aucun merge `engine/` ou `ai/` dans `main` et aucun JSON de `config/` touché. Aucun chiffre de siège antérieur au 2026-09-19
 ne se compare à un chiffre postérieur, et le « gap de siège » de 12 à 14 points publié depuis août
 mesurait pour partie ce défaut de mission — d'autant que le holdout tourne entièrement sur
 `terrain-mc1`, le terrain au plus grand écart structurel. Les `step.log` antérieurs ne se relisent
